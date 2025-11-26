@@ -81,12 +81,12 @@ public:
         m_slangCompiler.addOption({ slang::CompilerOptionName::DebugInformation,
             {slang::CompilerOptionValueKind::Int, SLANG_DEBUG_INFO_LEVEL_MAXIMAL} });
 
-//#if defined(AFTERMATH_AVAILABLE)
-//        m_slangCompiler.setCompileCallback([&](const std::filesystem::path& sourceFile, const uint32_t* spirvCode, size_t spirvSize) {
-//            std::span<const uint32_t> data(spirvCode, spirvSize / sizeof(uint32_t));
-//            AftermathCrashTracker::getInstance().addShaderBinary(data);
-//        }
-//#endif
+#if defined(AFTERMATH_AVAILABLE)
+        m_slangCompiler.setCompileCallback([&](const std::filesystem::path& sourceFile, const uint32_t* spirvCode, size_t spirvSize) {
+            std::span<const uint32_t> data(spirvCode, spirvSize / sizeof(uint32_t));
+            AftermathCrashTracker::getInstance().addShaderBinary(data);
+            });
+#endif
 
             m_samplerPool.init(app->getDevice());
             VkSampler linearSampler{};

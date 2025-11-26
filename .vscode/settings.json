@@ -1,6 +1,8 @@
 {
   "cmake.configureArgs": [
     "-DENABLE_AFTERMATH=ON",
-    "-DNsightAftermath_SDK=C:/Users/fangzanbo/Desktop/render/third_party/Nsight_Aftermath_SDK"
+    "-DNsightAftermath_SDK=C:/Users/fangzanbo/Desktop/render/third_party/Nsight_Aftermath_SDK",
+    "-DSlang_ROOT=C:/Users/fangzanbo/Desktop/render/third_party/Slang-windows-x86_64-2025.13.1",
+    "-DSlang_VERSION=2025.13.1"
   ]
 }
