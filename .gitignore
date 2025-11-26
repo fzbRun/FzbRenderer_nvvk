@@ -55,4 +55,4 @@ conanbuildinfo.cmake
 .DS_Store
 
 _downloaded_resources/
-third_party/
+#third_party/

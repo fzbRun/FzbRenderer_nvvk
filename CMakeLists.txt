@@ -5,7 +5,7 @@ project(
     ${PROJECT_NAME}
     VERSION 1.0.0
 )
-
+#--------------------------------------------------------------------------------------
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 find_package(NvproCore2 REQUIRED)
 
@@ -23,7 +23,6 @@ file(GLOB_RECURSE SOURCES
     *.slang
 )
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} PREFIX "FzbRenderer" FILES ${SOURCES})
-
 #------------------------------------------------------------------------------------------------------
 add_subdirectory(common_nvvk)
 #------------------------------------------------------------------------------------------------------
@@ -58,7 +57,6 @@ add_project_definitions(${PROJECT_NAME})
 target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/shaders_nvvk")
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR} ${ROOT_DIR})
-
 #------------------------------------------------------------------------------------------------------
 set(COPY_FILES ${NsightAftermath_DLLS})
 list(APPEND COPY_FILES ${EXTRA_COPY_FILES})
