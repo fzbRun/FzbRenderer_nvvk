@@ -31,8 +31,8 @@ cmake-build-*/
 # Debug and Release folders (if built in source tree)
 Debug/
 Release/
-x64/
-x86/
+#x64/
+#x86/
 
 # CMake cache and generated files (if not using out-of-source build exclusively)
 CMakeCache.txt
