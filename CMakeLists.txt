@@ -12,33 +12,19 @@ find_package(NvproCore2 REQUIRED)
 set(ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(TUTO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/common_nvvk")
-
-file(GLOB_RECURSE SOURCES 
-    CONFIGURE_DEPENDS
-    *.h
-    *.hpp
-    *.cpp
-    *.cuh
-    *.cu
-    *.slang
-)
-source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} PREFIX "FzbRenderer" FILES ${SOURCES})
-#------------------------------------------------------------------------------------------------------
-add_subdirectory(common_nvvk)
-#------------------------------------------------------------------------------------------------------
-add_subdirectory(shaders_nvvk)
 #------------------------------------------------------------------------------------------------------
 file(GLOB_RECURSE EXECUTABLE_SOURCES 
     CONFIGURE_DEPENDS
-    src/*.h
-    src/*.hpp
-    src/*.cpp
-    src/*.cuh
-    src/*.cu
+    src/*.*
+    # src/*.h
+    # src/*.hpp
+    # src/*.cpp
+    # src/*.cuh
+    # src/*.cu
 )
 
 add_executable(${PROJECT_NAME} ${EXECUTABLE_SOURCES})
-#set_property(TARGET ${PROJECT_NAME} PROPERTY FOLDER "FzbRenderer_nvvk")
+source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/src" PREFIX "src" FILES ${EXECUTABLE_SOURCES})
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
     nvpro2::nvapp
@@ -50,14 +36,19 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     nvpro2::nvaftermath
     nvpro2::nvvkgltf
     nvpro2::nvvkglsl
-    common_nvvk
 )
 
 add_project_definitions(${PROJECT_NAME})
 target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/shaders_nvvk")
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR} ${ROOT_DIR})
 #------------------------------------------------------------------------------------------------------
+#add_subdirectory(common_nvvk)
+#------------------------------------------------------------------------------------------------------
+#add_subdirectory(shaders_nvvk)
+#------------------------------------------------------------------------------------------------------
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/pugixml_setup.cmake")
+target_link_libraries(${PROJECT_NAME} PRIVATE pugixml)
+#--------------------------------------------------------------------------------------
 set(COPY_FILES ${NsightAftermath_DLLS})
 list(APPEND COPY_FILES ${EXTRA_COPY_FILES})
 
@@ -69,3 +60,24 @@ copy_to_runtime_and_install(${PROJECT_NAME}
     DIRECTORIES ${COPY_DIRECTORIES}
     AUTO
 )
+#------------------------------------------------------------------------------------------------------
+file(GLOB_RECURSE RESOURCES_XML_FILES
+    CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/resources/*.xml
+)
+
+file(GLOB_RECURSE RENDERERINFO_XML_FILES
+    CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/rendererInfo/*.xml
+)
+
+target_sources(${PROJECT_NAME} PRIVATE
+    ${RESOURCES_XML_FILES}
+    ${RENDERERINFO_XML_FILES}
+)
+source_group("resources" FILES ${RESOURCES_XML_FILES})
+source_group("rendererInfo" FILES ${RENDERERINFO_XML_FILES})
+set_source_files_properties(${RESOURCES_XML_FILES} PROPERTIES HEADER_FILE_ONLY ON)
+set_source_files_properties(${RENDERERINFO_XML_FILES} PROPERTIES HEADER_FILE_ONLY ON)
+
+#--------------------------------------------------------------------------------------
