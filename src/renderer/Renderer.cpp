@@ -1,9 +1,11 @@
 #include "Renderer.h"
 #include "DeferredRenderer/DeferredRenderer.h"
+#include "PathTracing/hard/PathTracingRenderer.h"
 
 enum FzbRendererType {
 	FZB_RENDERER_FORWARD,
 	FZB_RENDERER_DEFERRED,
+	FZB_RENDERER_PATH_TRACING,
 	FZB_RENDERER_PATH_TRACING_SOFT,
 	FZB_RENDERER_SVO_PATH_GUIDING,
 	FZB_FEATURE_COMPONENT_BVH_DEBUG,
@@ -13,6 +15,7 @@ enum FzbRendererType {
 std::map<std::string, FzbRendererType> RendererTypeMap{
 	{ "Forward", FZB_RENDERER_FORWARD },
 	{ "Deferred", FZB_RENDERER_DEFERRED},
+	{ "PathTracing", FZB_RENDERER_PATH_TRACING },
 	{ "PathTracing_soft", FZB_RENDERER_PATH_TRACING_SOFT },
 	{ "SVOPathGuiding_soft", FZB_RENDERER_SVO_PATH_GUIDING },
 	{ "BVH_Debug", FZB_FEATURE_COMPONENT_BVH_DEBUG },
@@ -26,6 +29,7 @@ std::shared_ptr<FzbRenderer::Renderer> FzbRenderer::createRenderer(RendererCreat
 		rendererType = RendererTypeMap[createInfo.rendererTypeStr];
 		switch (rendererType) {
 			case FZB_RENDERER_DEFERRED: return std::make_shared<DeferredRenderer>(createInfo);
+			case FZB_RENDERER_PATH_TRACING: return std::make_shared<PathTracingRenderer>(createInfo);
 		}
 		return nullptr;
 	}
