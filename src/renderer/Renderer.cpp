@@ -10,7 +10,6 @@ enum FzbRendererType {
 	FZB_FEATURE_COMPONENT_SVO_DEBUG,
 	FZB_FEATURE_COMPONENT_SVO_PG_DEBUG,
 };
-
 std::map<std::string, FzbRendererType> RendererTypeMap{
 	{ "Forward", FZB_RENDERER_FORWARD },
 	{ "Deferred", FZB_RENDERER_DEFERRED},

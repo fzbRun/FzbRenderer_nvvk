@@ -19,11 +19,11 @@ void FzbRenderer::DeferredRenderer::createImage() {
     NVVK_DBG_NAME(linearSampler);
 
     nvvk::GBufferInitInfo gBufferInit{
-    .allocator = &Application::allocator,
-    .colorFormats = {VK_FORMAT_R32G32B32A32_SFLOAT, VK_FORMAT_R8G8B8A8_UNORM},
-    .depthFormat = nvvk::findDepthFormat(Application::app->getPhysicalDevice()),
-    .imageSampler = linearSampler,
-    .descriptorPool = Application::app->getTextureDescriptorPool(),
+        .allocator = &Application::allocator,
+        .colorFormats = {VK_FORMAT_R32G32B32A32_SFLOAT, VK_FORMAT_R8G8B8A8_UNORM},
+        .depthFormat = nvvk::findDepthFormat(Application::app->getPhysicalDevice()),
+        .imageSampler = linearSampler,
+        .descriptorPool = Application::app->getTextureDescriptorPool(),
     };
     gBuffers.init(gBufferInit);
 }

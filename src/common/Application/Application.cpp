@@ -105,27 +105,35 @@ void FzbRenderer::Application::onAttach(nvapp::Application* app) {
 		.vulkanApiVersion = VK_API_VERSION_1_4,
 	};
 	allocator.init(allocatorInfo);
-
 	stagingUploader.init(&allocator, true);   //所有的CPU、GPU只一方可见的缓冲的交互都要经过暂存缓冲区
+	initSlangCompiler();
+	samplerPool.init(app->getDevice());
+	renderer->init();
+	createScene();
 
+	skySimple.init(&allocator, std::span(sky_simple_slang));
+	tonemapper.init(&allocator, std::span(tonemapper_slang));
+}
+void FzbRenderer::Application::initSlangCompiler() {
 	//必须要有一个，否则在查询shader的for循环不会进入（数量为0），那么直接找不到;
-	//后面给绝对地址也没关系 commonShaderPath/xxx。会会删去commonShaderPath的，直接得到xxx
-	std::filesystem::path commonShaderPath = std::filesystem::path(__FILE__).parent_path() / "../Shader";	
+//后面给绝对地址也没关系 commonShaderPath/xxx。会会删去commonShaderPath的，直接得到xxx
+	std::filesystem::path commonShaderPath = FzbRenderer::getCommonDir() / "Shader";
 	slangCompiler.addSearchPaths({ commonShaderPath });
-	slangCompiler.defaultTarget();
 
+	slangCompiler.defaultTarget();
 	slangCompiler.defaultOptions();
+
 	slangIncludes.resize(0);
 	slangIncludes.push_back(commonShaderPath.string());
 	slangCompiler.addOption({ .name = slang::CompilerOptionName::Include,
 		.value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = slangIncludes[0].c_str()}
 		});
-	std::filesystem::path exePath = nvutils::getExecutablePath().parent_path();
-	std::filesystem::path nvpro_core2Path = std::filesystem::absolute(exePath / TARGET_EXE_TO_SOURCE_DIRECTORY / "third_party/nvpro_core2");
+	std::filesystem::path nvpro_core2Path = FzbRenderer::getProjectRootDir() / "third_party/nvpro_core2";
 	slangIncludes.push_back(nvpro_core2Path.string());
 	slangCompiler.addOption({ .name = slang::CompilerOptionName::Include,
 		.value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = slangIncludes[1].c_str()}
 		});
+
 	slangCompiler.addOption({ slang::CompilerOptionName::DebugInformation,
 		{slang::CompilerOptionValueKind::Int, SLANG_DEBUG_INFO_LEVEL_MAXIMAL} });
 
@@ -135,15 +143,6 @@ void FzbRenderer::Application::onAttach(nvapp::Application* app) {
 		AftermathCrashTracker::getInstance().addShaderBinary(data);
 		});
 #endif
-
-	samplerPool.init(app->getDevice());
-	
-	renderer->init();
-
-	createScene();
-
-	skySimple.init(&allocator, std::span(sky_simple_slang));
-	tonemapper.init(&allocator, std::span(tonemapper_slang));
 }
 void FzbRenderer::Application::createScene() {
 	SCOPED_TIMER(__FUNCTION__);

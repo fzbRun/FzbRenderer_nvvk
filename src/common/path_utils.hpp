@@ -59,3 +59,16 @@ inline static std::vector<std::filesystem::path> getShaderDirs()
 }
 
 }  // namespace nvsamples
+
+namespace FzbRenderer {
+    inline static std::filesystem::path getCommonDir()
+    {
+        return std::filesystem::path(__FILE__).parent_path();
+    }
+
+    inline static std::filesystem::path getProjectRootDir()
+    {
+        std::filesystem::path exePath = nvutils::getExecutablePath().parent_path();
+        return std::filesystem::absolute(exePath / TARGET_EXE_TO_SOURCE_DIRECTORY);
+    }
+}

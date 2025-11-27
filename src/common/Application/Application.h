@@ -69,12 +69,12 @@ private:
 		3. 渲染器的类型，如前向渲染、路径追踪，并初始化相应的渲染器
 	*/
 	void getAppInfoFromXML(nvapp::ApplicationCreateInfo& appInfo, nvvk::ContextInitInfo& vkContextInitInfo, std::filesystem::path& scenePath);
+	void initSlangCompiler();
 
 	void createScene();
 	void updateSceneBuffer(VkCommandBuffer cmd);
 
-	//slang的include地址
-	std::vector<std::string> slangIncludes;
+	std::vector<std::string> slangIncludes;	//slang的include地址
 
 	std::shared_ptr<FzbRenderer::Renderer> renderer;
 };
