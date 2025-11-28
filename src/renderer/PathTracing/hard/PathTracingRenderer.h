@@ -6,6 +6,7 @@
 
 #include "renderer/Renderer.h"
 #include <glm/ext/vector_float2.hpp>
+#include "common/Shader/shaderio.h"
 
 #ifndef FZB_PATH_TRACING_RENDERER_H
 #define FZB_PATH_TRACING_RENDERER_H
@@ -34,6 +35,14 @@ public:
 private:
 	void primitiveToGeometry(const shaderio::GltfMesh& gltfMesh,
 		VkAccelerationStructureGeometryKHR& geometry, VkAccelerationStructureBuildRangeInfoKHR& rangeInfo);
+	void createAccelerationStructure(VkAccelerationStructureTypeKHR asType, nvvk::AccelerationStructure& accelStruct,
+		VkAccelerationStructureGeometryKHR& asGeometry, VkAccelerationStructureBuildRangeInfoKHR& asBuildRangeInfo,
+		VkBuildAccelerationStructureFlagsKHR flags);
+	void createBottomLevelAS();
+	void createToLevelAS();
+	void createRayTracingDescriptorLayout();
+	void createShaderBindingTable(const VkRayTracingPipelineCreateInfoKHR& rtPipelineInfo);
+	void createRayTracingPipeline();
 
 	void createImage();
 	void createGraphicsDescriptorSetLayout();
@@ -50,6 +59,10 @@ private:
 	VkShaderEXT fragmentShader{};
 
 	glm::vec2 metallicRoughnessOverride{ -0.01f, -0.01f };
+
+	nvvk::DescriptorPack rtDescPack;
+	VkPipeline rtPipeline{};
+	VkPipelineLayout rtPipelineLayout{};
 
 	std::vector<nvvk::AccelerationStructure> blasAccel;
 	nvvk::AccelerationStructure tlasAccel;

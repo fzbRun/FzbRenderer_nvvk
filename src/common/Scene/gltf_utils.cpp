@@ -211,7 +211,7 @@ void nvsamples::importGltfData(GltfSceneResource&     sceneResource,
     mesh.indexType = accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
 
     // Set the buffer address
-    mesh.gltfBuffer = (uint8_t*)bGltfData.address;
+    mesh.gltfBuffer = (uint8_t*)bGltfData.address;  //这样address+1只移动1字节，可以按字节偏移寻址
 
     // Extract attributes
     extractAttribute("POSITION", mesh.triMesh.positions, primitive);

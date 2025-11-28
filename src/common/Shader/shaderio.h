@@ -28,6 +28,8 @@ NAMESPACE_SHADERIO_BEGIN()
 enum BindingPoints
 {
   eTextures = 0,  // Binding point for textures
+  eOutImage,	  //Binding point for output image
+  eTlas,		  //Top-level acceleration structure
 };
 
 
@@ -38,6 +40,7 @@ struct TutoPushConstant
   GltfSceneInfo* sceneInfoAddress;           // Address of the scene information buffer
   float2         metallicRoughnessOverride;  // Metallic and roughness override values
 };
+
 
 NAMESPACE_SHADERIO_END()
 #endif  // SHADERIO_H

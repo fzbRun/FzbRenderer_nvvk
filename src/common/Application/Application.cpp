@@ -108,8 +108,8 @@ void FzbRenderer::Application::onAttach(nvapp::Application* app) {
 	stagingUploader.init(&allocator, true);   //所有的CPU、GPU只一方可见的缓冲的交互都要经过暂存缓冲区
 	initSlangCompiler();
 	samplerPool.init(app->getDevice());
-	renderer->init();
 	createScene();
+	renderer->init();
 
 	skySimple.init(&allocator, std::span(sky_simple_slang));
 	tonemapper.init(&allocator, std::span(tonemapper_slang));
