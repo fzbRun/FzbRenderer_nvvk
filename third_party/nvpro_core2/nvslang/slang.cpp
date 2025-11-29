@@ -124,7 +124,9 @@ void nvslang::SlangCompiler::logAndAppendDiagnostics(slang::IBlob* diagnostics)
   {
     const char* message = reinterpret_cast<const char*>(diagnostics->getBufferPointer());
     // Since these are often multi-line, we want to print them with extra spaces:
+    printf(message);
     LOGW("\n%s\n", message);
+
     // Append onto m_lastDiagnosticMessage, separated by a newline:
     if(m_lastDiagnosticMessage.empty())
     {

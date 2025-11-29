@@ -24,11 +24,13 @@ public:
 	virtual void clean() = 0;
 	virtual void uiRender() = 0;
 	virtual void resize(VkCommandBuffer cmd, const VkExtent2D& size) = 0;
+	virtual void updateSceneBuffer(VkCommandBuffer cmd);
 	virtual void render(VkCommandBuffer cmd) = 0;
 	virtual void onLastHeadlessFrame();
 private:
 	virtual void addExtensions();
 	virtual void postProcess(VkCommandBuffer cmd) = 0;
+
 };
 
 std::shared_ptr<Renderer> createRenderer(RendererCreateInfo& createInfo);

@@ -108,8 +108,8 @@ void FzbRenderer::Application::onAttach(nvapp::Application* app) {
 	stagingUploader.init(&allocator, true);   //所有的CPU、GPU只一方可见的缓冲的交互都要经过暂存缓冲区
 	initSlangCompiler();
 	samplerPool.init(app->getDevice());
-	renderer->init();
 	createScene();
+	renderer->init();
 
 	skySimple.init(&allocator, std::span(sky_simple_slang));
 	tonemapper.init(&allocator, std::span(tonemapper_slang));
@@ -232,6 +232,7 @@ void FzbRenderer::Application::onUIRender() {
 	renderer->uiRender();
 	if (ImGui::Begin("Settings"))
 	{
+		//ImGui::Checkbox("Use Ray Tracing", &m_useRayTracing);
 		if (ImGui::CollapsingHeader("Camera"))
 			nvgui::CameraWidget(cameraManip);
 		if (ImGui::CollapsingHeader("Environment"))
@@ -287,10 +288,15 @@ void FzbRenderer::Application::onRender(VkCommandBuffer cmd) {
 }
 void FzbRenderer::Application::updateSceneBuffer(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
+
+	renderer->updateSceneBuffer(cmd);
+
 	const glm::mat4& viewMatrix = cameraManip->getViewMatrix();
 	const glm::mat4& projMatrix = cameraManip->getPerspectiveMatrix();
 
 	sceneResource.sceneInfo.viewProjMatrix = projMatrix * viewMatrix;
+	sceneResource.sceneInfo.projInvMatrix = glm::inverse(projMatrix);
+	sceneResource.sceneInfo.viewInvMatrix = glm::inverse(viewMatrix);
 	sceneResource.sceneInfo.cameraPosition = cameraManip->getEye();
 	sceneResource.sceneInfo.instances = (shaderio::GltfInstance*)sceneResource.bInstances.address;
 	sceneResource.sceneInfo.meshes = (shaderio::GltfMesh*)sceneResource.bMeshes.address;
