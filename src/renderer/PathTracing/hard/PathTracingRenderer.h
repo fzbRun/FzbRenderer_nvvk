@@ -26,7 +26,7 @@ public:
 
 	PathTracingRenderer(RendererCreateInfo& createInfo);
 	void init() override;
-	void compileAndCreateGraphicsShaders();
+	void compileAndCreateShaders() override;
 	void clean() override;
 	void uiRender() override;
 	void resize(VkCommandBuffer cmd, const VkExtent2D& size) override;
@@ -49,7 +49,6 @@ private:
 	void createImage();
 	void createGraphicsDescriptorSetLayout();
 	void createGraphicsPipelineLayout();
-	VkShaderModuleCreateInfo compileSlangShader(const std::filesystem::path& filename, const std::span<const uint32_t>& spirv);
 	void updateTextures();
 	void postProcess(VkCommandBuffer cmd) override;
 

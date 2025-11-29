@@ -24,7 +24,7 @@ public:
 
 	DeferredRenderer(RendererCreateInfo& createInfo);
 	void init() override;
-	void compileAndCreateGraphicsShaders();
+	void compileAndCreateShaders() override;
 	void clean() override;
 	void uiRender() override;
 	void resize(VkCommandBuffer cmd, const VkExtent2D& size) override;

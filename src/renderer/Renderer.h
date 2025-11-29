@@ -20,7 +20,9 @@ public:
 	Renderer() = default;
 	virtual ~Renderer() = default;
 	virtual void init() = 0;
-	virtual void compileAndCreateGraphicsShaders();
+
+	virtual void compileAndCreateShaders();
+
 	virtual void clean() = 0;
 	virtual void uiRender() = 0;
 	virtual void resize(VkCommandBuffer cmd, const VkExtent2D& size) = 0;
