@@ -30,6 +30,7 @@ public:
 	void clean() override;
 	void uiRender() override;
 	void resize(VkCommandBuffer cmd, const VkExtent2D& size) override;
+	void updateSceneBuffer(VkCommandBuffer cmd) override;
 	void render(VkCommandBuffer cmd) override;
 	void onLastHeadlessFrame() override;
 private:
@@ -43,6 +44,7 @@ private:
 	void createRayTracingDescriptorLayout();
 	void createShaderBindingTable(const VkRayTracingPipelineCreateInfoKHR& rtPipelineInfo);
 	void createRayTracingPipeline();
+	void rayTraceScene(VkCommandBuffer cmd);
 
 	void createImage();
 	void createGraphicsDescriptorSetLayout();
@@ -51,12 +53,10 @@ private:
 	void updateTextures();
 	void postProcess(VkCommandBuffer cmd) override;
 
+	nvvk::GBuffer            gBuffers{};
 	nvvk::GraphicsPipelineState dynamicPipeline;
 	nvvk::DescriptorPack        descPack;
 	VkPipelineLayout            graphicPipelineLayout{};
-
-	VkShaderEXT vertexShader{};
-	VkShaderEXT fragmentShader{};
 
 	glm::vec2 metallicRoughnessOverride{ -0.01f, -0.01f };
 

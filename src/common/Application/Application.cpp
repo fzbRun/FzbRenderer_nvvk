@@ -232,6 +232,7 @@ void FzbRenderer::Application::onUIRender() {
 	renderer->uiRender();
 	if (ImGui::Begin("Settings"))
 	{
+		//ImGui::Checkbox("Use Ray Tracing", &m_useRayTracing);
 		if (ImGui::CollapsingHeader("Camera"))
 			nvgui::CameraWidget(cameraManip);
 		if (ImGui::CollapsingHeader("Environment"))
@@ -287,10 +288,15 @@ void FzbRenderer::Application::onRender(VkCommandBuffer cmd) {
 }
 void FzbRenderer::Application::updateSceneBuffer(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
+
+	renderer->updateSceneBuffer(cmd);
+
 	const glm::mat4& viewMatrix = cameraManip->getViewMatrix();
 	const glm::mat4& projMatrix = cameraManip->getPerspectiveMatrix();
 
 	sceneResource.sceneInfo.viewProjMatrix = projMatrix * viewMatrix;
+	sceneResource.sceneInfo.projInvMatrix = glm::inverse(projMatrix);
+	sceneResource.sceneInfo.viewInvMatrix = glm::inverse(viewMatrix);
 	sceneResource.sceneInfo.cameraPosition = cameraManip->getEye();
 	sceneResource.sceneInfo.instances = (shaderio::GltfInstance*)sceneResource.bInstances.address;
 	sceneResource.sceneInfo.meshes = (shaderio::GltfMesh*)sceneResource.bMeshes.address;
