@@ -1,16 +1,5 @@
 #pragma once
 
-//#define TINYGLTF_IMPLEMENTATION         // Implementation of the GLTF loader library
-//#define STB_IMAGE_IMPLEMENTATION        // Implementation of the image loading library
-//#define STB_IMAGE_WRITE_IMPLEMENTATION  // Implementation of the image writing library
-//#define VMA_DYNAMIC_VULKAN_FUNCTIONS 1  // Use dynamic Vulkan functions for VMA (Vulkan Memory Allocator)
-//#define VMA_IMPLEMENTATION              // Implementation of the Vulkan Memory Allocator
-//#define VMA_LEAK_LOG_FORMAT(format, ...)                                                                               \
-//  {                                                                                                                    \
-//    printf((format), __VA_ARGS__);                                                                                     \
-//    printf("\n");                                                                                                      \
-//  }
-
 #include <nvapp/application.hpp>
 #include <nvvk/resource_allocator.hpp>
 #include <nvvk/staging.hpp>

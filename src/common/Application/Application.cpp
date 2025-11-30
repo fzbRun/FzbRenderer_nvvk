@@ -320,7 +320,7 @@ void FzbRenderer::Application::onUIMenu() {
 	if (reload)
 	{
 		vkQueueWaitIdle(app->getQueue(0).queue);
-		renderer->compileAndCreateGraphicsShaders();
+		renderer->compileAndCreateShaders();
 	}
 }
 void FzbRenderer::Application::onLastHeadlessFrame() {

@@ -2,12 +2,11 @@
 #include <common/Application/Application.h>
 #include <nvvk/formats.hpp>
 #include "common/Shader/shaderio.h"
-#include <common/utils.hpp>
 #include "./shaders/spv/deferredShaders.h"
 #include <nvgui/sky.hpp>
 #include <nvvk/default_structs.hpp>
 #include <glm/gtc/type_ptr.hpp>
-
+#include "common/Shader/Shader.h"
 
 FzbRenderer::DeferredRenderer::DeferredRenderer(RendererCreateInfo& createInfo) {
 
@@ -59,30 +58,13 @@ void FzbRenderer::DeferredRenderer::createGraphicsPipelineLayout() {
     NVVK_CHECK(vkCreatePipelineLayout(Application::app->getDevice(), &pipelineLayoutInfo, nullptr, &graphicPipelineLayout));
     NVVK_DBG_NAME(graphicPipelineLayout);
 }
-VkShaderModuleCreateInfo FzbRenderer::DeferredRenderer::compileSlangShader(const std::filesystem::path& filename, const std::span<const uint32_t>& spirv) {
-    SCOPED_TIMER(__FUNCTION__);
-
-    VkShaderModuleCreateInfo shaderCode = nvsamples::getShaderModuleCreateInfo(spirv);
-
-    std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path()/"shaders";
-    std::filesystem::path shaderSource = shaderPath / filename;
-    if (Application::slangCompiler.compileFile(shaderSource))
-    {
-        shaderCode.codeSize = Application::slangCompiler.getSpirvSize();
-        shaderCode.pCode = Application::slangCompiler.getSpirv();
-    }
-    else
-    {
-        LOGE("Error compiling shers: %s\n%s\n", shaderSource.string().c_str(),
-            Application::slangCompiler.getLastDiagnosticMessage().c_str());
-    }
-    return shaderCode;
-}
-void FzbRenderer::DeferredRenderer::compileAndCreateGraphicsShaders() {
+void FzbRenderer::DeferredRenderer::compileAndCreateShaders() {
     SCOPED_TIMER(__FUNCTION__);
 
     //编译后的数据放在了slangCompiler中
-    VkShaderModuleCreateInfo shaderCode = compileSlangShader("deferredShaders.slang", deferredShaders_slang);
+    std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
+    std::filesystem::path shaderSource = shaderPath / "deferredShaders.slang";
+    VkShaderModuleCreateInfo shaderCode = FzbRenderer::compileSlangShader(shaderSource, deferredShaders_slang);
 
     vkDestroyShaderEXT(Application::app->getDevice(), vertexShader, nullptr);
     vkDestroyShaderEXT(Application::app->getDevice(), fragmentShader, nullptr);
@@ -134,7 +116,7 @@ void FzbRenderer::DeferredRenderer::init() {
     createImage();
     createGraphicsDescriptorSetLayout();
     createGraphicsPipelineLayout();
-    compileAndCreateGraphicsShaders();
+    compileAndCreateShaders();
     updateTextures();
 }
 
@@ -214,11 +196,11 @@ void FzbRenderer::DeferredRenderer::render(VkCommandBuffer cmd) {
 
     vkCmdBeginRendering(cmd, &renderingInfo);
 
+    //使用VK_EXT_SHADER_OBJECT_EXTENSION_NAME后可以不需要pipeline，直接通过命令设置渲染设置和着色器
     dynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;
     dynamicPipeline.cmdApplyAllStates(cmd);
     dynamicPipeline.cmdSetViewportAndScissor(cmd, Application::app->getViewportSize());
     vkCmdSetDepthTestEnable(cmd, VK_TRUE);
-
     dynamicPipeline.cmdBindShaders(cmd, { .vertex = vertexShader, .fragment = fragmentShader });
 
     VkVertexInputBindingDescription2EXT bindingDescription{};

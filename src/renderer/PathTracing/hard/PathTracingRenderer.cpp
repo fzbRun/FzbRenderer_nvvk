@@ -2,20 +2,21 @@
 #include <common/Application/Application.h>
 #include <nvvk/formats.hpp>
 #include "common/Shader/shaderio.h"
-#include <common/utils.hpp>
 #include <nvgui/sky.hpp>
 #include <nvvk/default_structs.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include "common/Shader/Shader.h"
 
 FzbRenderer::PathTracingRenderer::PathTracingRenderer(RendererCreateInfo& createInfo) {
 	createInfo.vkContextInfo.deviceExtensions.push_back( { VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, &accelFeature });
 	createInfo.vkContextInfo.deviceExtensions.push_back({ VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, &rtPipelineFeature });
 	createInfo.vkContextInfo.deviceExtensions.push_back({ VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME });
 }
-
-//这个函数就和我之前cuda实现BVH的思路一摸一样啊
+//-----------------------------------------创建加速结构----------------------------------------------------------
 void FzbRenderer::PathTracingRenderer::primitiveToGeometry(const shaderio::GltfMesh& gltfMesh,
 	VkAccelerationStructureGeometryKHR& geometry, VkAccelerationStructureBuildRangeInfoKHR& rangeInfo) {
+	//这个函数就和我之前cuda实现BVH的思路一摸一样啊
+
 	const shaderio::TriangleMesh triMesh = gltfMesh.triMesh;
 	const auto triangleCount = static_cast<uint32_t>(triMesh.indices.count / 3U);
 
@@ -174,6 +175,7 @@ void FzbRenderer::PathTracingRenderer::createToLevelAS() {
 	LOGI("Top-level accleration structures built successfully\n");
 	Application::allocator.destroyBuffer(tlasInstancesBuffer);
 }
+//-----------------------------------------创造光追管线----------------------------------------------------------
 void FzbRenderer::PathTracingRenderer::createRayTracingDescriptorLayout() {
 	SCOPED_TIMER(__FUNCTION__);
 	nvvk::DescriptorBindings bindings;
@@ -194,13 +196,13 @@ void FzbRenderer::PathTracingRenderer::createRayTracingDescriptorLayout() {
 
 	LOGI("Ray tracing descriptor layout created\n");
 }
-/*
-STB，顾名思义，就是shader大的绑定表；
-其将pipeline各个阶段的shader组进行绑定
-每个实例只能用每个阶段的shader组中的一个条目
-每个组和条目都需要对齐
-*/
 void FzbRenderer::PathTracingRenderer::createShaderBindingTable(const VkRayTracingPipelineCreateInfoKHR& rtPipelineInfo) {
+	/*
+	STB，顾名思义，就是shader大的绑定表；
+	其将pipeline各个阶段的shader组进行绑定
+	每个实例只能用每个阶段的shader组中的一个条目
+	每个组和条目都需要对齐
+	*/
 	SCOPED_TIMER(__FUNCTION__);
 	Application::allocator.destroyBuffer(sbtBuffer);
 
@@ -274,7 +276,11 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 	for(auto& s : stages)
 		s.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 
-	VkShaderModuleCreateInfo shaderCode = compileSlangShader("pathTracingShaders.slang", {});
+	//VkShaderModuleCreateInfo shaderCode = compileSlangShader("pathTracingShaders.slang", {});
+	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
+	std::filesystem::path shaderSource = shaderPath / "pathTracingShaders.slang";
+	VkShaderModuleCreateInfo shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
+
 	stages[eRaygen].pNext = &shaderCode;
 	stages[eRaygen].pName = "raygenMain";
 	stages[eRaygen].stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
@@ -334,6 +340,7 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 
 	createShaderBindingTable(rtPipelineInfo);
 }
+//-----------------------------------------光追函数----------------------------------------------------------
 void FzbRenderer::PathTracingRenderer::rayTraceScene(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
 
@@ -374,7 +381,7 @@ void FzbRenderer::PathTracingRenderer::rayTraceScene(VkCommandBuffer cmd) {
 void FzbRenderer::PathTracingRenderer::updateSceneBuffer(VkCommandBuffer cmd) {
 
 }
-
+//-----------------------------------------基础输入----------------------------------------------------------
 void FzbRenderer::PathTracingRenderer::createImage() {
 	VkSampler linearSampler{};
 	NVVK_CHECK(Application::samplerPool.acquireSampler(linearSampler));
@@ -421,28 +428,6 @@ void FzbRenderer::PathTracingRenderer::createGraphicsPipelineLayout() {
 	NVVK_CHECK(vkCreatePipelineLayout(Application::app->getDevice(), &pipelineLayoutInfo, nullptr, &graphicPipelineLayout));
 	NVVK_DBG_NAME(graphicPipelineLayout);
 };
-VkShaderModuleCreateInfo FzbRenderer::PathTracingRenderer::compileSlangShader(const std::filesystem::path& filename, const std::span<const uint32_t>& spirv) {
-	SCOPED_TIMER(__FUNCTION__);
-
-	VkShaderModuleCreateInfo shaderCode = nvsamples::getShaderModuleCreateInfo(spirv);
-
-	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
-	std::filesystem::path shaderSource = shaderPath / filename;
-	if (Application::slangCompiler.compileFile(shaderSource))
-	{
-		shaderCode.codeSize = Application::slangCompiler.getSpirvSize();
-		shaderCode.pCode = Application::slangCompiler.getSpirv();
-	}
-	else
-	{
-		LOGE("Error compiling shers: %s\n%s\n", shaderSource.string().c_str(),
-			Application::slangCompiler.getLastDiagnosticMessage().c_str());
-	}
-	return shaderCode;
-};
-void FzbRenderer::PathTracingRenderer::compileAndCreateGraphicsShaders() {
-	createRayTracingPipeline();
-};
 void FzbRenderer::PathTracingRenderer::updateTextures() {
 	if (Application::textures.empty())
 		return;
@@ -454,6 +439,7 @@ void FzbRenderer::PathTracingRenderer::updateTextures() {
 	write.append(allTextures, allImages);
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 };
+//-----------------------------------------渲染器行为----------------------------------------------------------
 void FzbRenderer::PathTracingRenderer::init() {
 	createImage();
 	createGraphicsDescriptorSetLayout();
@@ -472,7 +458,6 @@ void FzbRenderer::PathTracingRenderer::init() {
 	createRayTracingDescriptorLayout();
 	createRayTracingPipeline();
 }
-
 void FzbRenderer::PathTracingRenderer::clean() {
 	VkDevice device = Application::app->getDevice();
 
@@ -509,4 +494,8 @@ void FzbRenderer::PathTracingRenderer::postProcess(VkCommandBuffer cmd) {
 void FzbRenderer::PathTracingRenderer::onLastHeadlessFrame() {
 	Application::app->saveImageToFile(gBuffers.getColorImage(eImgTonemapped), gBuffers.getSize(),
 		nvutils::getExecutablePath().replace_extension(".jpg").string());
+};
+
+void FzbRenderer::PathTracingRenderer::compileAndCreateShaders() {
+	createRayTracingPipeline();
 };
