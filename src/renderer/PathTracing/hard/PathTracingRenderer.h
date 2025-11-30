@@ -7,6 +7,8 @@
 #include "renderer/Renderer.h"
 #include <glm/ext/vector_float2.hpp>
 #include "common/Shader/shaderio.h"
+#include <nvvk/acceleration_structures.hpp>
+#include <nvvk/sbt_generator.hpp>
 
 #ifndef FZB_PATH_TRACING_RENDERER_H
 #define FZB_PATH_TRACING_RENDERER_H
@@ -34,11 +36,7 @@ public:
 	void render(VkCommandBuffer cmd) override;
 	void onLastHeadlessFrame() override;
 private:
-	void primitiveToGeometry(const shaderio::GltfMesh& gltfMesh,
-		VkAccelerationStructureGeometryKHR& geometry, VkAccelerationStructureBuildRangeInfoKHR& rangeInfo);
-	void createAccelerationStructure(VkAccelerationStructureTypeKHR asType, nvvk::AccelerationStructure& accelStruct,
-		VkAccelerationStructureGeometryKHR& asGeometry, VkAccelerationStructureBuildRangeInfoKHR& asBuildRangeInfo,
-		VkBuildAccelerationStructureFlagsKHR flags);
+	nvvk::AccelerationStructureGeometryInfo primitiveToGeometry(const shaderio::GltfMesh& gltfMesh);
 	void createBottomLevelAS();
 	void createToLevelAS();
 	void createRayTracingDescriptorLayout();
@@ -63,22 +61,14 @@ private:
 	VkPipeline rtPipeline{};
 	VkPipelineLayout rtPipelineLayout{};
 
-	std::vector<nvvk::AccelerationStructure> blasAccel;
-	nvvk::AccelerationStructure tlasAccel;
-
+	nvvk::AccelerationStructureHelper asBuilder{};
+	nvvk::SBTGenerator sbtGenerator;
 	nvvk::Buffer sbtBuffer;
-	std::vector<uint8_t> shaderHandles;
-	VkStridedDeviceAddressRegionKHR raygenRegion{};
-	VkStridedDeviceAddressRegionKHR missRegion{};
-	VkStridedDeviceAddressRegionKHR hitRegion{};
-	VkStridedDeviceAddressRegionKHR callableRegion{};
 
 	VkPhysicalDeviceAccelerationStructureFeaturesKHR accelFeature{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR };
 	VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeature{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR };
 
 	VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProperties{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR };
-	VkPhysicalDeviceAccelerationStructurePropertiesKHR asProperties{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR };
-
 };
 
 }
