@@ -1,6 +1,8 @@
 #include "shaderio.h"
 #include "nvshaders/constants.h.slang"
 #include "Slang/pbr.h.slang"
+#include "nvshaders/sky_functions.h.slang"
+#define MISS_DEPTH 1000
 
 [[vk::push_constant]] ConstantBuffer<TutoPushConstant> pushConst;
 [[vk::binding(BindingPoints::eTextures, 0)]] Sampler2D textures[];
@@ -75,41 +77,97 @@ __generic<T : IFloat> T getTriangleAttribute(uint8_t* dataBufferAddress, BufferV
 	T attr2 = getAttribute<T>(dataBufferAddress, bufferView, attributeIndex.z);
 	return T(barycentrics.x) * attr0 + T(barycentrics.y) * attr1 + T(barycentrics.z) * attr2;
 }
+float testShadow(float3 worldPos, float3 worldNormal, float3 lightDirection, GltfPunctual light){
+RayDesc shadowRay;
+	shadowRay.Origin    = worldPos + worldNormal * 0.001;  // Offset to avoid self-intersection
+	shadowRay.Direction = normalize(lightDirection);
+	shadowRay.TMin      = 0.001;
+	shadowRay.TMax      = light.type == GltfLightType::eDirectional ? INFINITE : length(lightDirection);
+  
+	HitPayload shadowPayload;
+	shadowPayload.depth = 0;
+
+	TraceRay(topLevelAS, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, 0xff, 0, 0, 0,
+           shadowRay, shadowPayload);
+	 return shadowPayload.depth != MISS_DEPTH ? 0.0 : 1.0;
+}
+GltfPunctual processLight(GltfSceneInfo sceneInfo, float3 worldPos){
+	GltfPunctual light = sceneInfo.punctualLights[0];
+
+	if(sceneInfo.useSky == 1)
+	{
+		light.direction = sceneInfo.skySimpleParam.sunDirection;
+		light.color     = sceneInfo.skySimpleParam.sunColor;
+		light.intensity = sceneInfo.skySimpleParam.sunIntensity;
+		light.type      = GltfLightType::eDirectional;
+	}
+
+	if(light.type == GltfLightType::ePoint)
+	{
+		light.direction = light.position - worldPos;
+		float d         = length(light.direction);
+		light.intensity /= (d * d);  // Inverse square law
+	}
+	else if(light.type == GltfLightType::eSpot){
+		float3 lightDir = light.position - worldPos;
+		float  d        = length(lightDir);
+		light.intensity /= (d * d);  // Distance attenuation
+
+		float theta         = dot(normalize(lightDir), normalize(light.direction));
+		float spotIntensity = clamp((theta - cos(light.coneAngle)) / (1.0 - cos(light.coneAngle)), 0.0, 1.0);
+		light.intensity *= spotIntensity;
+		light.direction = lightDir;
+	}
+
+	return light;
+}
 [shader("closesthit")]
 void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionAttributes attr){
 	//这里好奇怪，既然得到了重心坐标，那么不就知道了三角形的信息吗，为什么还要我再去访存呢？
-	float3 barycentrics = float3(1.0f - attr.barycentrics.x - attr.barycentrics.y, attr.barycentrics.x, attr.barycentrics.y);
+	float3 barycentrics = float3(1 - attr.barycentrics.x - attr.barycentrics.y, attr.barycentrics.x, attr.barycentrics.y);
 
 	uint instanceID = InstanceIndex();
-	uint meshID = InstanceID();
-	uint triID = PrimitiveIndex();
+    uint meshID = InstanceID();
+    uint triID = PrimitiveIndex();
 
-	GltfSceneInfo sceneInfo = pushCount.sceneInfoAddress[0];
-	GltfInstance instance = sceneInfo.instances[instanceID];
-	GltfMesh mesh = sceneInfo.meshes[instance.meshIndex];
-	GltfMetallicRoughness material = sceneInfo.materials[instance.materialIndex];
+    GltfSceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+    GltfInstance instance = sceneInfo.instances[instanceID];
+    GltfMesh mesh = sceneInfo.meshes[instance.meshIndex];
+    GltfMetallicRoughness material = sceneInfo.materials[instance.materialIndex];
 
-	int3 indices = getTriangleIndices(mesh.gltfBuffer, mesh.triMesh, triID);
-	float3 pos = getTriangleAttribute<float3>(mesh.gltfBuffer, mesh.triMesh.positions, indices, barycentrics);	//pos和normal是分开的buffer，不是交错的
-	float3 normal = getTriangleAttribute<float3>(mesh.gltfBuffer, mesh.triMesh.normals, indices, barycentrics);
-	float3 worldPos = float3(mul(float4(pos, 1.0f), ObjectToWorld4x3()));
-	float3 worldNormal = normalize(mul(WorldToObject4x3(), normal).xyz);
+    int3 indices = getTriangleIndices(mesh.gltfBuffer, mesh.triMesh, triID);
+    float3 pos = getTriangleAttribute<float3>(mesh.gltfBuffer, mesh.triMesh.positions, indices, barycentrics);
+    float3 normal = getTriangleAttribute<float3>(mesh.gltfBuffer, mesh.triMesh.normals, indices, barycentrics);
+    float3 worldPos = float3(mul(float4(pos, 1.0), ObjectToWorld4x3()));
+    float3 worldNormal = normalize(mul(WorldToObject4x3(), normal).xyz);
 
-	float3 albedo = material.baseColorFactor.xyz;
-	float metallic = material.metallicFactor;
-	float roughness = material.roughnessFactor;
+    float3 albedo = material.baseColorFactor.xyz;
+    float metallic = material.metallicFactor;
+    float roughness = material.roughnessFactor;
 
-	float3 N = normal;
-	float3 V = -WorldRayDirection();
-	float3 L = normalize(sceneInfo.punctualLights[0].direction);
+	GltfPunctual light = processLight(sceneInfo, worldPos);
 
-	float color = pbrMetallicRoughness(albedo, metallic, roughness, N, V, L);
-	color *= sceneInfo.punctualLights[0].color * sceneInfo.punctualLights[0].intensity;
+    float3 N = worldNormal;
+    float3 V = -WorldRayDirection();
+    float3 L = normalize(light.direction);
 
-	payload.color = color;
+	float shadowFactor = testShadow(worldPos, N, light.direction, light);
+
+    float3 color = pbrMetallicRoughness(albedo, metallic, roughness, N, V, L);
+    color *= light.color * light.intensity * shadowFactor;
+    
+    payload.color = color;
 }
 
 [shader("miss")]
 void rayMissMain(inout HitPayload payload){
-	payload.color = float3(0.5f);
+	GltfSceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+
+	if(sceneInfo.useSky == 1)
+    {
+        float3 skyColor = evalSimpleSky(sceneInfo.skySimpleParam, WorldRayDirection());
+        payload.color += skyColor * payload.weight;
+    }else payload.color += sceneInfo.backgroundColor * payload.weight;
+
+	payload.depth = MISS_DEPTH;
 }
