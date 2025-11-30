@@ -23,10 +23,14 @@ void raygenMain(){
 
 	GltfSceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
 
+	uint seed = xxhash32(uint3(uint2(launchID.xy), pushConst.frame));
+	float r1 = rand(seed);
+	float r2 = rand(seed);
+	float2 subpixel_jitter = pushConst.frame == 0 ? float2(0.5f) : float2(r1, r2);
+
 	const uint rayFlags = 0;
-
-	const float2 clipCoords = launchID / launchSize * 2.0f - 1.0f;
-
+	const float2 pixelCenter = launchID + subpixel_jitter;
+	const float2 clipCoords = pixelCenter / launchSize * 2.0f - 1.0f;
 	const float4 viewCoords = mul(float4(clipCoords, 1.0f, 1.0f), sceneInfo.projInvMatrix);	//这里不除以w的原因是归一化后没有影响
 
 	RayDesc ray;
@@ -128,7 +132,7 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
 	float3 barycentrics = float3(1 - attr.barycentrics.x - attr.barycentrics.y, attr.barycentrics.x, attr.barycentrics.y);
 
 	uint instanceID = InstanceIndex();
-    uint meshID = InstanceID();
+    uint meshID = InstanceID();		//instanceCustomIndex
     uint triID = PrimitiveIndex();
 
     GltfSceneInfo sceneInfo = pushConst.sceneInfoAddress[0];

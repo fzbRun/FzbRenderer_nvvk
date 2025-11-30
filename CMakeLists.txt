@@ -75,7 +75,7 @@ target_sources(${PROJECT_NAME} PRIVATE
     ${RESOURCES_XML_FILES}
     ${RENDERERINFO_XML_FILES}
 )
-source_group("resources" FILES ${RESOURCES_XML_FILES})
+source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/resources" PREFIX "resources" FILES ${RESOURCES_XML_FILES})
 source_group("rendererInfo" FILES ${RENDERERINFO_XML_FILES})
 set_source_files_properties(${RESOURCES_XML_FILES} PROPERTIES HEADER_FILE_ONLY ON)
 set_source_files_properties(${RENDERERINFO_XML_FILES} PROPERTIES HEADER_FILE_ONLY ON)

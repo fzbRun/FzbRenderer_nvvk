@@ -279,10 +279,10 @@ void FzbRenderer::Application::onResize(VkCommandBuffer cmd, const VkExtent2D& s
 	renderer->resize(cmd, size);
 }
 void FzbRenderer::Application::onRender(VkCommandBuffer cmd) {
-	updateSceneBuffer(cmd);
+	updateDataPerFrame(cmd);
 	renderer->render(cmd);
 }
-void FzbRenderer::Application::updateSceneBuffer(VkCommandBuffer cmd) {
+void FzbRenderer::Application::updateDataPerFrame(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
 
 	++frameIndex;

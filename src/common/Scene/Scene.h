@@ -13,19 +13,35 @@ sceneManager主要有三个功能
 #include <vector>
 
 #include <nvutils/camera_manipulator.hpp>
-#include <gltf_utils.hpp>
+#include <common/Scene/gltf_utils.hpp>
 
 
 namespace FzbRenderer {
 
-class SceneSourceManager {
+class Scene {
 public:
+	void createSceneFromXML();
+	void createSceneInfBuffer();
+	void clean();
 
+	std::filesystem::path scenePath;
+	std::shared_ptr<nvutils::CameraManipulator> cameraManip{ std::make_shared<nvutils::CameraManipulator>() };
+	std::vector<nvvk::Image>     textures{};
+
+	std::vector<shaderio::GltfMesh> meshes;
+	std::vector<shaderio::GltfInstance> instances;
+	std::vector<shaderio::GltfMetallicRoughness> materials;
+	shaderio::GltfSceneInfo sceneInfo;
+
+	std::vector<nvvk::Buffer> bGltfDatas;	//每个gltf的二进制数据，包含索引和顶点数据
+	nvvk::Buffer bMeshes;
+	nvvk::Buffer bInstances;
+	nvvk::Buffer bMaterials;
+	nvvk::Buffer bSceneInfo;
+
+	std::vector<uint32_t> meshToBufferIndex;	//meshToBufferIndex[meshIndex] = bufferIndex
 private:
-	std::shared_ptr<nvutils::CameraManipulator> m_cameraManip{ std::make_shared<nvutils::CameraManipulator>() };
-
-	nvsamples::GltfSceneResource m_sceneResource{};
-	std::vector<nvvk::Image>     m_textures{};
+	void loadGltfData(const tinygltf::Model& mode, bool importInstance = false);
 };
 
 }

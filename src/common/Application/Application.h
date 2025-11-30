@@ -63,7 +63,7 @@ private:
 	void initSlangCompiler();
 
 	void createScene();
-	void updateSceneBuffer(VkCommandBuffer cmd);
+	void updateDataPerFrame(VkCommandBuffer cmd);
 
 	std::vector<std::string> slangIncludes;	//slangµÄincludeµØÖ·
 
