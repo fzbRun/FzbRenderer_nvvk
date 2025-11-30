@@ -50,6 +50,8 @@ public:
 	inline static nvshaders::SkySimple skySimple{};
 	inline static nvshaders::Tonemapper tonemapper{};
 	inline static shaderio::TonemapperData tonemapperData{};
+
+	inline static uint32_t frameIndex = 0;
 private:
 	/*
 		这个函数会从项目根目录/rendererInfo/rendererInfo.xml中读取信息，包括

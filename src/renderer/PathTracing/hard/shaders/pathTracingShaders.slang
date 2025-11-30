@@ -2,6 +2,7 @@
 #include "nvshaders/constants.h.slang"
 #include "Slang/pbr.h.slang"
 #include "nvshaders/sky_functions.h.slang"
+#include "nvshaders/random.h.slang"
 #define MISS_DEPTH 1000
 
 [[vk::push_constant]] ConstantBuffer<TutoPushConstant> pushConst;
@@ -175,8 +176,39 @@ void rayMissMain(inout HitPayload payload){
 [shader("anyhit")]
 void rayAnyHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionAttributes attr){
 	float3 hitPos = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();		//RayTCurrent返回命中点到起点的长度
-	if(length(hitPos) > pushConst.radius){
-		IgnoreHit();
-		return;
+
+	uint instanceID = InstanceIndex();
+	GltfSceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+	GltfInstance instance = sceneInfo.instances[instanceID];
+	GltfMetallicRoughness material = sceneInfo.materials[instance.materialIndex];
+
+	float opacity = material.baseColorFactor.a == 1 ? 1 : material.baseColorFactor.a * pushConst.opacity;
+
+	if(pushConst.transparencyMode == 0){
+		float3 uv = hitPos * 10.1f;
+		if((frac(uv.x) >= 0.5f != frac(uv.y) >= 0.5f) && hitPos.y > 0.01f) return;
+
+		if(length(hitPos) > pushConst.radius){
+			IgnoreHit();
+			return;
+		}
 	}
+	else if(pushConst.transparencyMode == 1){
+		if(opacity == 1) return;
+
+		float2 launchID = (float2)DispatchRaysIndex().xy;
+		uint3 seedInput = uint3(uint2(launchID.xy), pushConst.frameNumber);
+		uint seed = xxhash32(seedInput);
+		float randValue = rand(seed);
+		if(randValue > opacity) IgnoreHit();
+	}
+	else if(pushConst.transparencyMode == 2){
+		if(opacity < 1.0f){
+			float3 tintColor = material.baseColorFactor.rgb;
+			payload.color += tintColor * payload.weight * opacity;
+			payload.weight *= (1.0f - opacity);
+			IgnoreHit();
+		}
+	}
+
 }

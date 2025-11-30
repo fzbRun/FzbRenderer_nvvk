@@ -285,6 +285,7 @@ void FzbRenderer::Application::onRender(VkCommandBuffer cmd) {
 void FzbRenderer::Application::updateSceneBuffer(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
 
+	++frameIndex;
 	renderer->updateSceneBuffer(cmd);
 
 	const glm::mat4& viewMatrix = cameraManip->getViewMatrix();
