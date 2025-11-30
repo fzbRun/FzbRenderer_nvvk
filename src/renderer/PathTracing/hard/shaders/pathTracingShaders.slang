@@ -171,3 +171,12 @@ void rayMissMain(inout HitPayload payload){
 
 	payload.depth = MISS_DEPTH;
 }
+
+[shader("anyhit")]
+void rayAnyHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionAttributes attr){
+	float3 hitPos = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();		//RayTCurrent返回命中点到起点的长度
+	if(length(hitPos) > pushConst.radius){
+		IgnoreHit();
+		return;
+	}
+}

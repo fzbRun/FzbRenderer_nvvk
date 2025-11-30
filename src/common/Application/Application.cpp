@@ -150,7 +150,7 @@ void FzbRenderer::Application::createScene() {
 	VkCommandBuffer cmd = app->createTempCmdBuffer();
 	{
 		tinygltf::Model teapotModel =
-			nvsamples::loadGltfResources(nvutils::findFile("nvvk/teapot.gltf", nvsamples::getResourcesDirs()));
+			nvsamples::loadGltfResources(nvutils::findFile("nvvk/wuson.glb", nvsamples::getResourcesDirs()));
 		tinygltf::Model planeModel =
 			nvsamples::loadGltfResources(nvutils::findFile("nvvk/plane.gltf", nvsamples::getResourcesDirs()));
 
@@ -169,17 +169,13 @@ void FzbRenderer::Application::createScene() {
 	}
 
 	sceneResource.materials = {
-		{.baseColorFactor = glm::vec4(0.8f, 1.0f, 0.6f, 1.0f), .metallicFactor = 0.5f, .roughnessFactor = 0.5f},
-		{.baseColorFactor = glm::vec4(1.0f), .metallicFactor = 0.1f, .roughnessFactor = 0.8f, .baseColorTextureIndex = 0},
+		{.baseColorFactor = glm::vec4(0.8f, 1.0f, 0.6f, 0.99f), .metallicFactor = 0.5f, .roughnessFactor = 0.5f},
+		{.baseColorFactor = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f), .metallicFactor = 0.1f, .roughnessFactor = 0.8f}
 	};
 
 	sceneResource.instances = {
-		{.transform = glm::translate(glm::mat4(1.0f), glm::vec3(0)) * glm::scale(glm::mat4(1.0f), glm::vec3(0.5f)),
-		 .materialIndex = 0,
-		 .meshIndex = 0},
-		{.transform = glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -0.9f, 0.0f)), glm::vec3(2.0f)),
-		 .materialIndex = 1,
-		 .meshIndex = 1},
+		{.transform = glm::mat4(1.f), .materialIndex = 0, .meshIndex = 0},
+		{.transform = glm::scale(glm::translate(glm::mat4(1), glm::vec3(0, 0, 0)), glm::vec3(2.f)), .materialIndex = 1, .meshIndex = 1},
 	};
 
 	nvsamples::createGltfSceneInfoBuffer(sceneResource, stagingUploader);
@@ -202,7 +198,7 @@ void FzbRenderer::Application::createScene() {
 	app->submitAndWaitTempCmdBuffer(cmd);
 
 	cameraManip->setClipPlanes({ 0.01f, 100.0f });
-	cameraManip->setLookat({ 0.0f, 0.5f, 5.0f }, { 0.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f });
+	cameraManip->setLookat({ 2.39388, 1.49850, -1.67974 }, { -0.40258, 0.55174, 0.00354 }, { 0.00000, 1.00000, 0.00000 });
 }
 
 void FzbRenderer::Application::onDetach() {

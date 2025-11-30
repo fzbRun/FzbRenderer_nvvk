@@ -237,88 +237,6 @@ callableRegion.size = 0;
 
 LOGI(" Shader binding table created and populated\n");
 }
-void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
-	SCOPED_TIMER(__FUNCTION__);
-	LOGI(" Creating ray tracing pipeline Structure\n");
-
-	Application::allocator.destroyBuffer(sbtBuffer);
-	vkDestroyPipeline(Application::app->getDevice(), rtPipeline, nullptr);
-	vkDestroyPipelineLayout(Application::app->getDevice(), rtPipelineLayout, nullptr);
-
-	enum StageIndices {
-		eRaygen,
-		eMiss,
-		eClosestHit,
-		eShaderGroupCount
-	};
-	std::vector<VkPipelineShaderStageCreateInfo> stages(eShaderGroupCount);
-	for (auto& s : stages)
-		s.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-
-	//VkShaderModuleCreateInfo shaderCode = compileSlangShader("pathTracingShaders.slang", {});
-	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
-	std::filesystem::path shaderSource = shaderPath / "pathTracingShaders.slang";
-	VkShaderModuleCreateInfo shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
-
-	stages[eRaygen].pNext = &shaderCode;
-	stages[eRaygen].pName = "raygenMain";
-	stages[eRaygen].stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
-	stages[eMiss].pNext = &shaderCode;
-	stages[eMiss].pName = "rayMissMain";
-	stages[eMiss].stage = VK_SHADER_STAGE_MISS_BIT_KHR;
-	stages[eClosestHit].pNext = &shaderCode;
-	stages[eClosestHit].pName = "rayClosestHitMain";
-	stages[eClosestHit].stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
-
-	std::vector<VkRayTracingShaderGroupCreateInfoKHR> shader_groups;	//表示光线追踪pipeline有几个阶段，光纤生成->打中/没打中
-	VkRayTracingShaderGroupCreateInfoKHR group{ VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR };
-	group.anyHitShader = VK_SHADER_UNUSED_KHR;
-	group.closestHitShader = VK_SHADER_UNUSED_KHR;
-	group.generalShader = VK_SHADER_UNUSED_KHR;
-	group.intersectionShader = VK_SHADER_UNUSED_KHR;
-
-	//光线生成shader组，此时只有一个条目（shader）
-	group.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
-	group.generalShader = eRaygen;
-	shader_groups.push_back(group);
-
-	//光线没打中shader组，此时只有一个条目（shader）
-	group.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
-	group.generalShader = eMiss;
-	shader_groups.push_back(group);
-
-	//光线打中shader组，此时只有一个条目（shader）
-	group.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
-	group.generalShader = VK_SHADER_UNUSED_KHR;
-	group.closestHitShader = eClosestHit;
-	shader_groups.push_back(group);
-
-	const VkPushConstantRange push_constant{ VK_SHADER_STAGE_ALL, 0, sizeof(shaderio::TutoPushConstant) };
-
-	VkPipelineLayoutCreateInfo pipeline_layout_create_info{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-	pipeline_layout_create_info.pushConstantRangeCount = 1;
-	pipeline_layout_create_info.pPushConstantRanges = &push_constant;
-
-	std::vector<VkDescriptorSetLayout> layouts = { { descPack.getLayout(), rtDescPack.getLayout()} };	//二合一
-	pipeline_layout_create_info.setLayoutCount = uint32_t(layouts.size());
-	pipeline_layout_create_info.pSetLayouts = layouts.data();
-	vkCreatePipelineLayout(Application::app->getDevice(), &pipeline_layout_create_info, nullptr, &rtPipelineLayout);
-	NVVK_DBG_NAME(rtPipelineLayout);
-
-	VkRayTracingPipelineCreateInfoKHR rtPipelineInfo{ VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR };
-	rtPipelineInfo.stageCount = static_cast<uint32_t>(stages.size());
-	rtPipelineInfo.pStages = stages.data();
-	rtPipelineInfo.groupCount = static_cast<uint32_t>(shader_groups.size());
-	rtPipelineInfo.pGroups = shader_groups.data();
-	rtPipelineInfo.maxPipelineRayRecursionDepth = std::max(3U, rtProperties.maxRayRecursionDepth);		//最大bounce数
-	rtPipelineInfo.layout = rtPipelineLayout;
-	vkCreateRayTracingPipelinesKHR(Application::app->getDevice(), {}, {}, 1, &rtPipelineInfo, nullptr, &rtPipeline);
-	NVVK_DBG_NAME(rtPipeline);
-
-	LOGI("Ray tracing pipeline layout created successfully\n");
-
-	createShaderBindingTable(rtPipelineInfo);
-}
 */
 nvvk::AccelerationStructureGeometryInfo FzbRenderer::PathTracingRenderer::primitiveToGeometry(const shaderio::GltfMesh& gltfMesh) {
 	//这个函数就和我之前cuda实现BVH的思路一摸一样啊
@@ -344,7 +262,7 @@ nvvk::AccelerationStructureGeometryInfo FzbRenderer::PathTracingRenderer::primit
 		.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
 		.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
 		.geometry = {.triangles = triangles},
-		.flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR | VK_GEOMETRY_OPAQUE_BIT_KHR,
+		.flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR | VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR,
 	};
 
 	result.rangeInfo = VkAccelerationStructureBuildRangeInfoKHR{ .primitiveCount = triangleCount };
@@ -375,7 +293,7 @@ void FzbRenderer::PathTracingRenderer::createToLevelAS() {
 		asInstance.transform = nvvk::toTransformMatrixKHR(instance.transform);
 		asInstance.instanceCustomIndex = instance.meshIndex;
 		asInstance.accelerationStructureReference = asBuilder.blasSet[instance.meshIndex].address;
-		asInstance.instanceShaderBindingTableRecordOffset = 0;		//所有的实例都用相同的(索引为0)的(rayGen、miss等)shader
+		asInstance.instanceShaderBindingTableRecordOffset = 0;		//所有的实例都用SBT中每个group中第1个条目（shader）
 		asInstance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV;	//没有背面剔除
 		asInstance.mask = 0xFF;
 		tlasInstances.emplace_back(asInstance);
@@ -387,6 +305,13 @@ void FzbRenderer::PathTracingRenderer::createToLevelAS() {
 	LOGI("Top-level accleration structures built successfully\n");
 }
 //-----------------------------------------创造光追管线----------------------------------------------------------
+/*
+整个rtPipeline的逻辑应该是：
+1. 确定rtPipelien有哪些阶段stages：raygen->miss/(anyhit->hit)
+2. 为每个阶段创建group，表示这个阶段可能有多个不同的shader，如hit有两个，一个处理导体，一个处理电介质
+3. 创建SBT，将每个阶段的shader（条目）绑定到SBT中（有严格的对齐要求）
+4. 再创建tlas时可以指定instanceShaderBindingTableRecordOffset，表面其使用每个组中的那个shader（条目），如电介质可以使用专门处理电介质的hit
+*/
 void FzbRenderer::PathTracingRenderer::createRayTracingDescriptorLayout() {
 	SCOPED_TIMER(__FUNCTION__);
 	nvvk::DescriptorBindings bindings;
@@ -438,6 +363,7 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 		eRaygen,
 		eMiss,
 		eClosestHit,
+		eAnyHit,
 		eShaderGroupCount
 	};
 	std::vector<VkPipelineShaderStageCreateInfo> stages(eShaderGroupCount);
@@ -458,6 +384,9 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 	stages[eClosestHit].pNext = &shaderCode;
 	stages[eClosestHit].pName = "rayClosestHitMain";
 	stages[eClosestHit].stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+	stages[eAnyHit].pNext = &shaderCode;
+	stages[eAnyHit].pName = "rayAnyHitMain";
+	stages[eAnyHit].stage = VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
 
 	std::vector<VkRayTracingShaderGroupCreateInfoKHR> shader_groups;	//表示光线追踪pipeline有几个阶段，光纤生成->打中/没打中
 	VkRayTracingShaderGroupCreateInfoKHR group{ VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR };
@@ -480,6 +409,7 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 	group.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
 	group.generalShader = VK_SHADER_UNUSED_KHR;
 	group.closestHitShader = eClosestHit;
+	group.anyHitShader = eAnyHit;
 	shader_groups.push_back(group);
 
 	const VkPushConstantRange push_constant{ VK_SHADER_STAGE_ALL, 0, sizeof(shaderio::TutoPushConstant) };
@@ -529,9 +459,7 @@ void FzbRenderer::PathTracingRenderer::rayTraceScene(VkCommandBuffer cmd) {
 	write.append(rtDescPack.makeWrite(shaderio::BindingPoints::eOutImage), gBuffers.getColorImageView(eImgRendered), VK_IMAGE_LAYOUT_GENERAL);
 	vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipelineLayout, 1, write.size(), write.data());
 
-	shaderio::TutoPushConstant pushValues{
-		.sceneInfoAddress = (shaderio::GltfSceneInfo*)Application::sceneResource.bSceneInfo.address
-	};
+	pushValues.sceneInfoAddress = (shaderio::GltfSceneInfo*)Application::sceneResource.bSceneInfo.address;
 	const VkPushConstantsInfo pushInfo{
 		.sType = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
 		.layout = rtPipelineLayout,
@@ -648,6 +576,28 @@ void FzbRenderer::PathTracingRenderer::uiRender() {
 	namespace PE = nvgui::PropertyEditor;
 	if (ImGui::Begin("Viewport"))
 		ImGui::Image(ImTextureID(gBuffers.getDescriptorSet(eImgTonemapped)), ImGui::GetContentRegionAvail());
+	ImGui::End();
+
+	if (ImGui::Begin("PathTracingSettings"))
+	{
+		ImGui::SeparatorText("AnyHit");
+		ImGui::SliderFloat("Radius", &pushValues.radius, 0.01f, 5.0f);
+
+		ImGui::SeparatorText("Transparency");
+		ImGui::SliderFloat("Opacity", &pushValues.opacity, 0.0f, 1.0f);
+		const char* transparencyModes[] = { "Cutout Only", "Stochastic", "Accumulative" };
+		ImGui::Combo("Mode", &pushValues.transparencyMode, transparencyModes, 3);
+
+		// Add helpful tooltips
+		if (ImGui::IsItemHovered())
+		{
+			ImGui::BeginTooltip();
+			ImGui::Text("Cutout Only: Binary transparency (original behavior)");
+			ImGui::Text("Stochastic: Random sampling based on opacity");
+			ImGui::Text("Accumulative: Proper handling of mixed transparent/opaque surfaces");
+			ImGui::EndTooltip();
+		}
+	}
 	ImGui::End();
 };
 void FzbRenderer::PathTracingRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size) { NVVK_CHECK(gBuffers.update(cmd, size)); };
