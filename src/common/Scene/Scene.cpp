@@ -144,26 +144,42 @@ void FzbRenderer::Scene::loadGltfData(const tinygltf::Model& model, bool importI
 	}
 };
 void FzbRenderer::Scene::createSceneFromXML() {
-	if(scenePath.empty()) LOGW("\nsceneInfo路径为空\n");
 	scenePath = FzbRenderer::getProjectRootDir() / "resources" / scenePath;
+	std::filesystem::path sceneInfoXMLPath = scenePath / "sceneInfo.xml";
+	if(sceneInfoXMLPath.empty()) LOGW("\nsceneInfo路径为空\n");
+	
 	pugi::xml_document doc;
-	auto result = doc.load_file(scenePath.c_str());
+	auto result = doc.load_file(sceneInfoXMLPath.c_str());
 	if (!result) LOGW("\nsceneInfoXML不存在\n");
 	pugi::xml_node sceneInfoNode = doc.document_element();
 	//----------------------------------------------相机参数-------------------------------------------------------------
 	for (pugi::xml_node cameraNode : sceneInfoNode.children("sensor")) {
-		float fov = glm::radians(std::stof(cameraNode.select_node(".//float[@name='fov']").node().attribute("value").value()));
-		bool isPerspective = std::string(cameraNode.attribute("type").value()) == "perspective" ? true : false;
-		pugi::xml_node tranform = cameraNode.select_node(".//transform[@name='to_world']").node();
-		glm::mat4 inverseViewMatrix = FzbRenderer::getMat4FromString(tranform.child("matrix").attribute("value").value());
-		VkExtent2D resolution = Application::app->getWindowSize();
-		float aspect = (float)resolution.width / resolution.height;
-		fov = 2.0f * atanf(tanf(fov * 0.5f) / aspect);	//三叶草中给的fov是水平方向的，而glm中要的是垂直方向的
-
+		//float fov = glm::radians(std::stof(cameraNode.select_node(".//float[@name='fov']").node().attribute("value").value()));
+		//float aspect = (float)resolution.width / resolution.height;
+		//fov = 2.0f * atanf(tanf(fov * 0.5f) / aspect);	//三叶草中给的fov是水平方向的，而glm中要的是垂直方向的
+		float fov = std::stof(cameraNode.child("fov").attribute("value").value());
 		cameraManip->setFov(fov);
+
+		bool isPerspective = std::string(cameraNode.attribute("type").value()) == "perspective" ? true : false;
+		pugi::xml_node tranformNode = cameraNode.child("transform");
+		std::string transformNodeType = tranformNode.attribute("type").value();
+		if (transformNodeType == "to_world") {
+			pugi::xml_node matrixNode = tranformNode.child("matrix");
+			glm::mat4 inverseViewMatrix = FzbRenderer::getMat4FromString(matrixNode.attribute("value").value());
+			glm::mat4 viewMatrix = glm::inverse(inverseViewMatrix);
+			cameraManip->setMatrix(viewMatrix, true);
+		}
+		else if (transformNodeType == "lookAt") {
+			glm::vec3 eye = FzbRenderer::getRGBFromString(tranformNode.child("eye").attribute("value").value());
+			glm::vec3 center = FzbRenderer::getRGBFromString(tranformNode.child("center").attribute("value").value());
+			glm::vec3 up = FzbRenderer::getRGBFromString(tranformNode.child("up").attribute("value").value());
+			cameraManip->setLookat(eye, center, up, true);
+		}
+		
+		VkExtent2D resolution = Application::app->getWindowSize();
 		cameraManip->setWindowSize(glm::uvec2(resolution.width, resolution.height));
-		cameraManip->setClipPlanes(glm::vec2(0.1f, 100.0f));
-		cameraManip->setMatrix(inverseViewMatrix);
+
+		cameraManip->setClipPlanes(glm::vec2(0.1f, 100.0f));		
 	}
 	//------------------------------------------------材质---------------------------------------------------------------
 	std::unordered_map<std::string, uint32_t> uniqueMaterials;
@@ -173,7 +189,8 @@ void FzbRenderer::Scene::createSceneFromXML() {
 	shaderio::GltfMetallicRoughness defaultMaterial = {
 		.baseColorFactor = glm::vec4(1.0f),
 		.metallicFactor = 0.1f,
-		.roughnessFactor = 0.8f
+		.roughnessFactor = 0.8f,
+		.baseColorTextureIndex = -1
 	};
 	materials.push_back(defaultMaterial);
 	uniqueMaterials.insert({ "defaultMaterial", 0 });
@@ -208,6 +225,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 		if (pugi::xml_node backgroudColorNode = lightsNode.child("backgroundColor"))
 			sceneInfo.backgroundColor = FzbRenderer::getRGBFromString(backgroudColorNode.attribute("value").value());
 
+		sceneInfo.numLights = 0;
 		for (pugi::xml_node lightNode : lightsNode.children("light")) {
 			shaderio::GltfPunctual light;
 
@@ -260,7 +278,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 		if (meshType == "gltf") {
 			std::filesystem::path meshPath = FzbRenderer::getProjectRootDir() / "resources";
 			meshPath = meshPath / (meshNode.child("filename").attribute("value").value());
-			tinygltf::Model gltfModel = nvsamples::loadGltfResources(nvutils::findFile(meshPath, {}));
+			tinygltf::Model gltfModel = nvsamples::loadGltfResources(nvutils::findFile(meshPath, { meshPath }));
 			loadGltfData(gltfModel);
 		}
 	}
@@ -293,6 +311,11 @@ void FzbRenderer::Scene::createSceneFromXML() {
 	}
 
 	doc.reset();
+
+	createSceneInfBuffer();
+	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
+	Application::stagingUploader.cmdUploadAppended(cmd);
+	Application::app->submitAndWaitTempCmdBuffer(cmd);
 }
 /*
 在shader中获取顶点数据的流程是
@@ -342,5 +365,14 @@ void FzbRenderer::Scene::createSceneInfBuffer() {
 }
 
 void FzbRenderer::Scene::clean() {
+	nvvk::ResourceAllocator& allocator = Application::allocator;
 
+	allocator.destroyBuffer(bSceneInfo);
+	allocator.destroyBuffer(bMeshes);
+	allocator.destroyBuffer(bMaterials);
+	allocator.destroyBuffer(bInstances);
+	for (auto& gltfData : bGltfDatas)
+		allocator.destroyBuffer(gltfData);
+	for (auto& texture : textures)
+		allocator.destroyImage(texture);
 }

@@ -43,7 +43,7 @@ struct TutoPushConstant
   float radius = 1.0f;
   float opacity = 0.5f;
   int transparencyMode = 0;
-  uint frameNumber = 0;
+  int frameIndex = 0;
 };
 
 

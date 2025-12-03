@@ -1,3 +1,4 @@
+#pragma once
 /*
 sceneManager主要有三个功能
 1. 从sceneXML中读取信息，主要包括
@@ -20,6 +21,9 @@ namespace FzbRenderer {
 
 class Scene {
 public:
+	Scene() = default;
+	~Scene() = default;
+
 	void createSceneFromXML();
 	void createSceneInfBuffer();
 	void clean();

@@ -459,7 +459,7 @@ void FzbRenderer::PathTracingRenderer::rayTraceScene(VkCommandBuffer cmd) {
 	write.append(rtDescPack.makeWrite(shaderio::BindingPoints::eOutImage), gBuffers.getColorImageView(eImgRendered), VK_IMAGE_LAYOUT_GENERAL);
 	vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipelineLayout, 1, write.size(), write.data());
 
-	pushValues.frameNumber = Application::frameIndex;
+	pushValues.frameIndex = Application::frameIndex;
 	pushValues.sceneInfoAddress = (shaderio::GltfSceneInfo*)Application::sceneResource.bSceneInfo.address;
 	const VkPushConstantsInfo pushInfo{
 		.sType = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
@@ -476,8 +476,25 @@ void FzbRenderer::PathTracingRenderer::rayTraceScene(VkCommandBuffer cmd) {
 
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 }
-void FzbRenderer::PathTracingRenderer::updateSceneBuffer(VkCommandBuffer cmd) {
 
+void FzbRenderer::PathTracingRenderer::resetFrame() {
+	Application::frameIndex = -1;
+}
+void FzbRenderer::PathTracingRenderer::updateDataPerFrame(VkCommandBuffer cmd) {
+	std::shared_ptr<nvutils::CameraManipulator> cameraManip = Application::sceneResource.cameraManip;
+
+	static glm::mat4 refCamMatrix;
+	static float refFov{ cameraManip->getFov() };
+
+	const auto& m = cameraManip->getViewMatrix();
+	const auto& fov = cameraManip->getFov();
+
+	if (refCamMatrix != m || refFov != fov) {	//如果相机参数变化，则从新累计帧
+		resetFrame();
+		refCamMatrix = m;
+		refFov = fov;
+	}
+	Application::frameIndex = std::min(++Application::frameIndex, maxFrames);
 }
 //-----------------------------------------基础输入----------------------------------------------------------
 void FzbRenderer::PathTracingRenderer::createImage() {
@@ -527,13 +544,13 @@ void FzbRenderer::PathTracingRenderer::createGraphicsPipelineLayout() {
 	NVVK_DBG_NAME(graphicPipelineLayout);
 };
 void FzbRenderer::PathTracingRenderer::updateTextures() {
-	if (Application::textures.empty())
+	if (Application::sceneResource.textures.empty())
 		return;
 
 	nvvk::WriteSetContainer write{};
 	VkWriteDescriptorSet    allTextures =
-		descPack.makeWrite(shaderio::BindingPoints::eTextures, 0, 1, uint32_t(Application::textures.size()));
-	nvvk::Image* allImages = Application::textures.data();
+		descPack.makeWrite(shaderio::BindingPoints::eTextures, 0, 1, uint32_t(Application::sceneResource.textures.size()));
+	nvvk::Image* allImages = Application::sceneResource.textures.data();
 	write.append(allTextures, allImages);
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 };
@@ -556,6 +573,8 @@ void FzbRenderer::PathTracingRenderer::init() {
 
 	createRayTracingDescriptorLayout();
 	createRayTracingPipeline();
+
+	pushValues.metallicRoughnessOverride = glm::vec2(-1.0f);
 }
 void FzbRenderer::PathTracingRenderer::clean() {
 	VkDevice device = Application::app->getDevice();
@@ -574,6 +593,8 @@ void FzbRenderer::PathTracingRenderer::clean() {
 	Application::allocator.destroyBuffer(sbtBuffer);
 };
 void FzbRenderer::PathTracingRenderer::uiRender() {
+	bool UIModified = Application::UIModified;
+
 	namespace PE = nvgui::PropertyEditor;
 	if (ImGui::Begin("Viewport"))
 		ImGui::Image(ImTextureID(gBuffers.getDescriptorSet(eImgTonemapped)), ImGui::GetContentRegionAvail());
@@ -582,12 +603,12 @@ void FzbRenderer::PathTracingRenderer::uiRender() {
 	if (ImGui::Begin("PathTracingSettings"))
 	{
 		ImGui::SeparatorText("AnyHit");
-		ImGui::SliderFloat("Radius", &pushValues.radius, 0.01f, 5.0f);
+		UIModified |= ImGui::SliderFloat("Radius", &pushValues.radius, 0.01f, 5.0f);
 
 		ImGui::SeparatorText("Transparency");
-		ImGui::SliderFloat("Opacity", &pushValues.opacity, 0.0f, 1.0f);
+		UIModified |= ImGui::SliderFloat("Opacity", &pushValues.opacity, 0.0f, 1.0f);
 		const char* transparencyModes[] = { "Cutout Only", "Stochastic", "Accumulative" };
-		ImGui::Combo("Mode", &pushValues.transparencyMode, transparencyModes, 3);
+		UIModified |= ImGui::Combo("Mode", &pushValues.transparencyMode, transparencyModes, 3);
 
 		// Add helpful tooltips
 		if (ImGui::IsItemHovered())
@@ -598,10 +619,18 @@ void FzbRenderer::PathTracingRenderer::uiRender() {
 			ImGui::Text("Accumulative: Proper handling of mixed transparent/opaque surfaces");
 			ImGui::EndTooltip();
 		}
+
+		ImGui::SeparatorText("Jitter");
+		if (ImGui::SliderInt("Max Frames", &maxFrames, 1, 2 << 10) || UIModified)
+			resetFrame();
+		ImGui::TextDisabled("Frame: %d", pushValues.frameIndex);
 	}
 	ImGui::End();
 };
-void FzbRenderer::PathTracingRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size) { NVVK_CHECK(gBuffers.update(cmd, size)); };
+void FzbRenderer::PathTracingRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
+	resetFrame();
+	NVVK_CHECK(gBuffers.update(cmd, size));
+};
 void FzbRenderer::PathTracingRenderer::render(VkCommandBuffer cmd) {
 	rayTraceScene(cmd);
 	postProcess(cmd);

@@ -23,10 +23,10 @@ void raygenMain(){
 
 	GltfSceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
 
-	uint seed = xxhash32(uint3(uint2(launchID.xy), pushConst.frame));
+	uint seed = xxhash32(uint3(uint2(launchID.xy), pushConst.frameIndex));
 	float r1 = rand(seed);
 	float r2 = rand(seed);
-	float2 subpixel_jitter = pushConst.frame == 0 ? float2(0.5f) : float2(r1, r2);
+	float2 subpixel_jitter = pushConst.frameIndex == 0 ? float2(0.5f) : float2(r1, r2);
 
 	const uint rayFlags = 0;
 	const float2 pixelCenter = launchID + subpixel_jitter;
@@ -47,7 +47,13 @@ void raygenMain(){
 	TraceRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, payload);
 
 	float3 color = payload.color;
-	outImage[int2(launchID)] = float4(color, 1.0f);
+	if(pushConst.frameIndex > 0){
+		float a = 1.0f / float(pushConst.frameIndex + 1);
+		float3 old_color = outImage[int2(launchID)].xyz;
+		outImage[int2(launchID)] = float4(lerp(old_color, color, a), 1.0f);
+	}else{
+		outImage[int2(launchID)] = float4(color, 1.0f);
+	}
 }
 
 __generic<T : IFloat> T getAttribute(uint8_t* dataBufferAddress, BufferView bufferView, uint attributeIndex)
@@ -145,10 +151,14 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
     float3 normal = getTriangleAttribute<float3>(mesh.gltfBuffer, mesh.triMesh.normals, indices, barycentrics);
     float3 worldPos = float3(mul(float4(pos, 1.0), ObjectToWorld4x3()));
     float3 worldNormal = normalize(mul(WorldToObject4x3(), normal).xyz);
+	float2 worldTexCoord = getTriangleAttribute<float2>(mesh.gltfBuffer, mesh.triMesh.texCoords, indices, barycentrics);
 
     float3 albedo = material.baseColorFactor.xyz;
+	if(material.baseColorTextureIndex > 0) albedo *= textures[material.baseColorTextureIndex].SampleLevel(worldTexCoord, 0).xyz;
     float metallic = material.metallicFactor;
+	if(pushConst.metallicRoughnessOverride.x >= 0.0f) metallic = pushConst.metallicRoughnessOverride.x;
     float roughness = material.roughnessFactor;
+	if(pushConst.metallicRoughnessOverride.y >= 0.0f) roughness = pushConst.metallicRoughnessOverride.y;
 
 	GltfPunctual light = processLight(sceneInfo, worldPos);
 
@@ -160,8 +170,18 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
 
     float3 color = pbrMetallicRoughness(albedo, metallic, roughness, N, V, L);
     color *= light.color * light.intensity * shadowFactor;
+
+	float3 ambient = sceneInfo.backgroundColor;
+	if(sceneInfo.useSky == 1){
+		float3 skyUpDir = float3(0.0f, 1.0f, 0.0f);
+		float3 groundColor = sceneInfo.skySimpleParam.groundColor;
+		float3 skyColor = sceneInfo.skySimpleParam.skyColor;
+		float3 ambient = lerp(groundColor, skyColor, dot(N, skyUpDir) * 0.5f + 0.5f);
+	}
+	color += ambient * albedo * 0.025f;
     
-    payload.color = color;
+    if(pushConst.transparencyMode == 2) payload.color += color * payload.weight;
+	else payload.color = color;
 }
 
 [shader("miss")]
@@ -201,7 +221,7 @@ void rayAnyHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionAttri
 		if(opacity == 1) return;
 
 		float2 launchID = (float2)DispatchRaysIndex().xy;
-		uint3 seedInput = uint3(uint2(launchID.xy), pushConst.frameNumber);
+		uint3 seedInput = uint3(uint2(launchID.xy), pushConst.frameIndex);
 		uint seed = xxhash32(seedInput);
 		float randValue = rand(seed);
 		if(randValue > opacity) IgnoreHit();
