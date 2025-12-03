@@ -56,3 +56,45 @@ nvvk::Image loadAndCreateImage(VkCommandBuffer cmd, nvvk::StagingUploader& stagi
 }
 
 }  // namespace nvsamples
+
+namespace FzbRenderer {
+	glm::vec3 getRGBFromString(std::string str) {
+		std::vector<float> float3_array;
+		std::stringstream ss(str);
+		std::string token;
+		while (std::getline(ss, token, ',')) {
+			float3_array.push_back(std::stof(token));
+		}
+		return glm::vec3(float3_array[0], float3_array[1], float3_array[2]);
+	}
+	glm::mat4 getMat4FromString(std::string str) {
+		std::vector<float> mat4_array;
+		std::stringstream ss(str);
+		std::string token;
+		while (std::getline(ss, token, ' ')) {
+			mat4_array.push_back(std::stof(token));
+		}
+		return glm::mat4(mat4_array[0], mat4_array[4], mat4_array[8], mat4_array[12],
+			mat4_array[1], mat4_array[5], mat4_array[9], mat4_array[13],
+			mat4_array[2], mat4_array[6], mat4_array[10], mat4_array[14],
+			mat4_array[3], mat4_array[7], mat4_array[11], mat4_array[15]);
+	}
+	glm::vec2 getfloat2FromString(std::string str) {
+		std::vector<float> float2_array;
+		std::stringstream ss(str);
+		std::string token;
+		while (std::getline(ss, token, ' ')) {
+			float2_array.push_back(std::stof(token));
+		}
+		return glm::vec2(float2_array[0], float2_array[1]);
+	}
+	glm::vec4 getRGBAFromString(std::string str) {
+		std::vector<float> float4_array;
+		std::stringstream ss(str);
+		std::string token;
+		while (std::getline(ss, token, ',')) {
+			float4_array.push_back(std::stof(token));
+		}
+		return glm::vec4(float4_array[0], float4_array[1], float4_array[2], float4_array[3]);
+	}
+}

@@ -10,6 +10,7 @@
 #include <common/path_utils.hpp>
 #include <nvaftermath/aftermath.hpp>
 #include <renderer/Renderer.h>
+#include <common/Scene/Scene.h>
 
 #include <nvutils/camera_manipulator.hpp>
 #include <common/Scene/gltf_utils.hpp>
@@ -34,7 +35,7 @@ public:
 
 	void onUIMenu() override;
 	void onLastHeadlessFrame() override;
-	std::shared_ptr<nvutils::CameraManipulator> getCameraManipulator() const { return cameraManip; };
+	std::shared_ptr<nvutils::CameraManipulator> getCameraManipulator() const { return sceneResource.cameraManip; };
 
 	//所有的全局共用资源
 	inline static nvapp::Application* app{};
@@ -43,13 +44,14 @@ public:
 	inline static nvvk::SamplerPool       samplerPool{};
 	inline static nvslang::SlangCompiler     slangCompiler{};
 
-	inline static std::shared_ptr<nvutils::CameraManipulator> cameraManip{ std::make_shared<nvutils::CameraManipulator>() };
-	inline static nvsamples::GltfSceneResource sceneResource{};
-	inline static std::vector<nvvk::Image>     textures{};
+	inline static FzbRenderer::Scene sceneResource;
 
 	inline static nvshaders::SkySimple skySimple{};
 	inline static nvshaders::Tonemapper tonemapper{};
 	inline static shaderio::TonemapperData tonemapperData{};
+
+	inline static int frameIndex = 0;
+	inline static bool UIModified = false;
 private:
 	/*
 		这个函数会从项目根目录/rendererInfo/rendererInfo.xml中读取信息，包括
@@ -57,11 +59,10 @@ private:
 		2. 渲染sceneInfo.xml的地址
 		3. 渲染器的类型，如前向渲染、路径追踪，并初始化相应的渲染器
 	*/
-	void getAppInfoFromXML(nvapp::ApplicationCreateInfo& appInfo, nvvk::ContextInitInfo& vkContextInitInfo, std::filesystem::path& scenePath);
+	void getAppInfoFromXML(nvapp::ApplicationCreateInfo& appInfo, nvvk::ContextInitInfo& vkContextInitInfo);
 	void initSlangCompiler();
 
-	void createScene();
-	void updateSceneBuffer(VkCommandBuffer cmd);
+	void updateDataPerFrame(VkCommandBuffer cmd);
 
 	std::vector<std::string> slangIncludes;	//slang的include地址
 

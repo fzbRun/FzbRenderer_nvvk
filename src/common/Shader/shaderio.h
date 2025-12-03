@@ -39,6 +39,11 @@ struct TutoPushConstant
   int            instanceIndex;              // Instance index for the current draw call
   GltfSceneInfo* sceneInfoAddress;           // Address of the scene information buffer
   float2         metallicRoughnessOverride;  // Metallic and roughness override values
+
+  float radius = 1.0f;
+  float opacity = 0.5f;
+  int transparencyMode = 0;
+  int frameIndex = 0;
 };
 
 

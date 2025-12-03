@@ -86,7 +86,8 @@ enum GltfLightType
 {
   ePoint       = 0,  // Point light type
   eSpot        = 1,  // Spot light type
-  eDirectional = 2   // Directional light type
+  eDirectional = 2,   // Directional light type
+  eArea        = 3
 };
 
 struct GltfPunctual

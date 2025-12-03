@@ -22,7 +22,7 @@
 #include "common/Shader/spv/sky_simple.slang.h"
 #include "common/Shader/spv/tonemapper.slang.h"
 
-void FzbRenderer::Application::getAppInfoFromXML(nvapp::ApplicationCreateInfo& appInfo, nvvk::ContextInitInfo& vkContextInitInfo, std::filesystem::path& scenePath) {
+void FzbRenderer::Application::getAppInfoFromXML(nvapp::ApplicationCreateInfo& appInfo, nvvk::ContextInitInfo& vkContextInitInfo) {
 	std::filesystem::path exePath = nvutils::getExecutablePath().parent_path();
 	std::filesystem::path rendererInfoXMLPath = std::filesystem::absolute(exePath / TARGET_EXE_TO_SOURCE_DIRECTORY / "rendererInfo") / "rendererInfo.xml";
 	pugi::xml_document doc;
@@ -36,8 +36,8 @@ void FzbRenderer::Application::getAppInfoFromXML(nvapp::ApplicationCreateInfo& a
 	appInfo.windowSize.x = std::stoi(rendererInfo.child("resolution").attribute("width").value());
 	appInfo.windowSize.y = std::stoi(rendererInfo.child("resolution").attribute("height").value());
 
-	scenePath = rendererInfo.child("sceneXML").attribute("path").value();
-	scenePath = std::filesystem::absolute(exePath / TARGET_EXE_TO_SOURCE_DIRECTORY / "resources") / scenePath;
+	sceneResource.scenePath = rendererInfo.child("sceneXML").attribute("path").value();
+	sceneResource.scenePath = std::filesystem::absolute(exePath / TARGET_EXE_TO_SOURCE_DIRECTORY / "resources") / sceneResource.scenePath;
 
 	if (pugi::xml_node rendererNode = rendererInfo.child("renderer")) {
 		std::string rendererType = rendererNode.attribute("type").value();
@@ -63,8 +63,7 @@ FzbRenderer::Application::Application(nvapp::ApplicationCreateInfo& appInfo, nvv
 			},
 	};
 
-	std::filesystem::path scenePath;
-	getAppInfoFromXML(appInfo, vkSetup, scenePath);
+	getAppInfoFromXML(appInfo, vkSetup);
 
 	if (!appInfo.headless)
 		nvvk::addSurfaceExtensions(vkSetup.instanceExtensions, &vkSetup.deviceExtensions);
@@ -108,7 +107,8 @@ void FzbRenderer::Application::onAttach(nvapp::Application* app) {
 	stagingUploader.init(&allocator, true);   //所有的CPU、GPU只一方可见的缓冲的交互都要经过暂存缓冲区
 	initSlangCompiler();
 	samplerPool.init(app->getDevice());
-	createScene();
+	
+	sceneResource.createSceneFromXML();
 	renderer->init();
 
 	skySimple.init(&allocator, std::span(sky_simple_slang));
@@ -144,66 +144,6 @@ void FzbRenderer::Application::initSlangCompiler() {
 		});
 #endif
 }
-void FzbRenderer::Application::createScene() {
-	SCOPED_TIMER(__FUNCTION__);
-
-	VkCommandBuffer cmd = app->createTempCmdBuffer();
-	{
-		tinygltf::Model teapotModel =
-			nvsamples::loadGltfResources(nvutils::findFile("nvvk/teapot.gltf", nvsamples::getResourcesDirs()));
-		tinygltf::Model planeModel =
-			nvsamples::loadGltfResources(nvutils::findFile("nvvk/plane.gltf", nvsamples::getResourcesDirs()));
-
-		{
-			std::filesystem::path imageFilename = nvutils::findFile("nvvk/tiled_floor.png", nvsamples::getResourcesDirs());
-			nvvk::Image texture = nvsamples::loadAndCreateImage(cmd, stagingUploader, app->getDevice(), imageFilename);
-			NVVK_DBG_NAME(texture.image);
-			samplerPool.acquireSampler(texture.descriptor.sampler);
-			textures.emplace_back(texture);
-		}
-
-		{
-			nvsamples::importGltfData(sceneResource, teapotModel, stagingUploader);
-			nvsamples::importGltfData(sceneResource, planeModel, stagingUploader);
-		}
-	}
-
-	sceneResource.materials = {
-		{.baseColorFactor = glm::vec4(0.8f, 1.0f, 0.6f, 1.0f), .metallicFactor = 0.5f, .roughnessFactor = 0.5f},
-		{.baseColorFactor = glm::vec4(1.0f), .metallicFactor = 0.1f, .roughnessFactor = 0.8f, .baseColorTextureIndex = 0},
-	};
-
-	sceneResource.instances = {
-		{.transform = glm::translate(glm::mat4(1.0f), glm::vec3(0)) * glm::scale(glm::mat4(1.0f), glm::vec3(0.5f)),
-		 .materialIndex = 0,
-		 .meshIndex = 0},
-		{.transform = glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -0.9f, 0.0f)), glm::vec3(2.0f)),
-		 .materialIndex = 1,
-		 .meshIndex = 1},
-	};
-
-	nvsamples::createGltfSceneInfoBuffer(sceneResource, stagingUploader);
-	stagingUploader.cmdUploadAppended(cmd);
-
-	shaderio::GltfSceneInfo& sceneInfo = sceneResource.sceneInfo;
-	sceneInfo.useSky = false;
-	sceneInfo.instances = (shaderio::GltfInstance*)sceneResource.bInstances.address;
-	sceneInfo.meshes = (shaderio::GltfMesh*)sceneResource.bMeshes.address;
-	sceneInfo.materials = (shaderio::GltfMetallicRoughness*)sceneResource.bMaterials.address;
-	sceneInfo.backgroundColor = { 0.85f, 0.85f, 0.85f };
-	sceneInfo.numLights = 1;
-	sceneInfo.punctualLights[0].color = glm::vec3(1.0f);
-	sceneInfo.punctualLights[0].intensity = 4.0f;
-	sceneInfo.punctualLights[0].position = glm::vec3(1.0f);
-	sceneInfo.punctualLights[0].direction = glm::vec3(1.0f);
-	sceneInfo.punctualLights[0].type = shaderio::GltfLightType::ePoint;
-	sceneInfo.punctualLights[0].coneAngle = 0.9f;
-
-	app->submitAndWaitTempCmdBuffer(cmd);
-
-	cameraManip->setClipPlanes({ 0.01f, 100.0f });
-	cameraManip->setLookat({ 0.0f, 0.5f, 5.0f }, { 0.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f });
-}
 
 void FzbRenderer::Application::onDetach() {
 	NVVK_CHECK(vkQueueWaitIdle(app->getQueue(0).queue));
@@ -211,15 +151,7 @@ void FzbRenderer::Application::onDetach() {
 	VkDevice device = app->getDevice();
 	
 	renderer->clean();
-
-	allocator.destroyBuffer(sceneResource.bSceneInfo);
-	allocator.destroyBuffer(sceneResource.bMeshes);
-	allocator.destroyBuffer(sceneResource.bMaterials);
-	allocator.destroyBuffer(sceneResource.bInstances);
-	for (auto& gltfData : sceneResource.bGltfDatas)
-		allocator.destroyBuffer(gltfData);
-	for (auto& texture : textures)
-		allocator.destroyImage(texture);
+	sceneResource.clean();
 
 	stagingUploader.deinit();
 	skySimple.deinit();
@@ -229,41 +161,41 @@ void FzbRenderer::Application::onDetach() {
 }
 void FzbRenderer::Application::onUIRender() {
 	namespace PE = nvgui::PropertyEditor;
-	renderer->uiRender();
+	UIModified = false;
 	if (ImGui::Begin("Settings"))
 	{
 		//ImGui::Checkbox("Use Ray Tracing", &m_useRayTracing);
 		if (ImGui::CollapsingHeader("Camera"))
-			nvgui::CameraWidget(cameraManip);
+			nvgui::CameraWidget(sceneResource.cameraManip);
 		if (ImGui::CollapsingHeader("Environment"))
 		{
-			ImGui::Checkbox("USE Sky", (bool*)&sceneResource.sceneInfo.useSky);
+			UIModified |= ImGui::Checkbox("USE Sky", (bool*)&sceneResource.sceneInfo.useSky);
 			if (sceneResource.sceneInfo.useSky)
-				nvgui::skySimpleParametersUI(sceneResource.sceneInfo.skySimpleParam);
+				UIModified |= nvgui::skySimpleParametersUI(sceneResource.sceneInfo.skySimpleParam);
 			else
 			{
 				PE::begin();
-				PE::ColorEdit3("Background", (float*)&sceneResource.sceneInfo.backgroundColor);
+				UIModified |= PE::ColorEdit3("Background", (float*)&sceneResource.sceneInfo.backgroundColor);
 				PE::end();
 				// Light
 				PE::begin();
 				if (sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::ePoint
 					|| sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::eSpot)
-					PE::DragFloat3("Light Position", glm::value_ptr(sceneResource.sceneInfo.punctualLights[0].position),
+					UIModified |= PE::DragFloat3("Light Position", glm::value_ptr(sceneResource.sceneInfo.punctualLights[0].position),
 						1.0f, -20.0f, 20.0f, "%.2f", ImGuiSliderFlags_None, "Position of the light");
 				if (sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::eDirectional
 					|| sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::eSpot)
-					PE::SliderFloat3("Light Direction", glm::value_ptr(sceneResource.sceneInfo.punctualLights[0].direction),
+					UIModified |= PE::SliderFloat3("Light Direction", glm::value_ptr(sceneResource.sceneInfo.punctualLights[0].direction),
 						-1.0f, 1.0f, "%.2f", ImGuiSliderFlags_None, "Direction of the light");
 
-				PE::SliderFloat("Light Intensity", &sceneResource.sceneInfo.punctualLights[0].intensity, 0.0f, 1000.0f,
+				UIModified |= PE::SliderFloat("Light Intensity", &sceneResource.sceneInfo.punctualLights[0].intensity, 0.0f, 1000.0f,
 					"%.2f", ImGuiSliderFlags_Logarithmic, "Intensity of the light");
-				PE::ColorEdit3("Light Color", glm::value_ptr(sceneResource.sceneInfo.punctualLights[0].color),
+				UIModified |= PE::ColorEdit3("Light Color", glm::value_ptr(sceneResource.sceneInfo.punctualLights[0].color),
 					ImGuiColorEditFlags_NoInputs, "Color of the light");
-				PE::Combo("Light Type", (int*)&sceneResource.sceneInfo.punctualLights[0].type,
+				UIModified |= PE::Combo("Light Type", (int*)&sceneResource.sceneInfo.punctualLights[0].type,
 					"Point\0Spot\0Directional\0", 3, "Type of the light (Point, Spot, Directional)");
 				if (sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::eSpot)
-					PE::SliderAngle("Cone Angle", &sceneResource.sceneInfo.punctualLights[0].coneAngle, 0.f, 90.f, "%.2f",
+					UIModified |= PE::SliderAngle("Cone Angle", &sceneResource.sceneInfo.punctualLights[0].coneAngle, 0.f, 90.f, "%.2f",
 						ImGuiSliderFlags_AlwaysClamp, "Cone angle of the spot light");
 				PE::end();
 			}
@@ -278,26 +210,28 @@ void FzbRenderer::Application::onUIRender() {
 		//PE::end();
 	}
 	ImGui::End();
+	renderer->uiRender();
 }
 void FzbRenderer::Application::onResize(VkCommandBuffer cmd, const VkExtent2D& size) {
 	renderer->resize(cmd, size);
 }
 void FzbRenderer::Application::onRender(VkCommandBuffer cmd) {
-	updateSceneBuffer(cmd);
+	updateDataPerFrame(cmd);
 	renderer->render(cmd);
 }
-void FzbRenderer::Application::updateSceneBuffer(VkCommandBuffer cmd) {
+void FzbRenderer::Application::updateDataPerFrame(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
 
-	renderer->updateSceneBuffer(cmd);
+	++frameIndex;
+	renderer->updateDataPerFrame(cmd);
 
-	const glm::mat4& viewMatrix = cameraManip->getViewMatrix();
-	const glm::mat4& projMatrix = cameraManip->getPerspectiveMatrix();
+	const glm::mat4& viewMatrix = sceneResource.cameraManip->getViewMatrix();
+	const glm::mat4& projMatrix = sceneResource.cameraManip->getPerspectiveMatrix();
 
 	sceneResource.sceneInfo.viewProjMatrix = projMatrix * viewMatrix;
 	sceneResource.sceneInfo.projInvMatrix = glm::inverse(projMatrix);
 	sceneResource.sceneInfo.viewInvMatrix = glm::inverse(viewMatrix);
-	sceneResource.sceneInfo.cameraPosition = cameraManip->getEye();
+	sceneResource.sceneInfo.cameraPosition = sceneResource.cameraManip->getEye();
 	sceneResource.sceneInfo.instances = (shaderio::GltfInstance*)sceneResource.bInstances.address;
 	sceneResource.sceneInfo.meshes = (shaderio::GltfMesh*)sceneResource.bMeshes.address;
 	sceneResource.sceneInfo.materials = (shaderio::GltfMetallicRoughness*)sceneResource.bMaterials.address;

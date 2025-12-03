@@ -1,0 +1,42 @@
+<sceneInfo>
+	<sensor type="perspective">
+		<fov value="60"/>
+		<transform type= "lookAt">
+			<eye value = "0.40429, 1.09030, -1.63537" />
+			<center value = "-1.02078, 0.90831, 0.15507" />
+			<up value = "0.00000, 1.00000, 0.00000" />
+		</transform>
+	</sensor>
+	<bsdfs>
+		<bsdf id = "wusonMaterial">
+			<baseColorFactor value = "0.8, 1.0, 0.6, 0.99" />
+			<metallicFactor value = "0.5" />
+			<roughnessFactor value = "0.5" />
+		</bsdf>
+	</bsdfs>
+	<lights>
+		<backgroundColor value = "0.85, 0.85, 0.85" />
+		<light type = "point" id = "light0">
+			<emissive value = "1.0, 1.0, 1.0" />
+			<intensity value = "4.0" />
+		</light>
+	</lights>
+	<meshes>
+		<mesh type = "gltf" id = "wuson">
+			<filename value = "nvvk/wuson.glb" />
+		</mesh>
+		<mesh type = "gltf" id = "plane">
+			<filename value = "nvvk/plane.gltf" />
+		</mesh>
+	</meshes>
+	<instances>
+		<instance>
+			<meshRef id = "wuson" />
+			<materialRef id = "wusonMaterial" />
+		</instance>
+		<instance>
+			<meshRef id = "plane" />
+			<materialRef id = "defaultMaterial" />
+		</instance>
+	</instances>
+</sceneInfo>

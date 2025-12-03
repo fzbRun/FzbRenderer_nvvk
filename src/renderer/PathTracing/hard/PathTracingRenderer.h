@@ -32,7 +32,7 @@ public:
 	void clean() override;
 	void uiRender() override;
 	void resize(VkCommandBuffer cmd, const VkExtent2D& size) override;
-	void updateSceneBuffer(VkCommandBuffer cmd) override;
+	void updateDataPerFrame(VkCommandBuffer cmd) override;
 	void render(VkCommandBuffer cmd) override;
 	void onLastHeadlessFrame() override;
 private:
@@ -43,6 +43,8 @@ private:
 	void createShaderBindingTable(const VkRayTracingPipelineCreateInfoKHR& rtPipelineInfo);
 	void createRayTracingPipeline();
 	void rayTraceScene(VkCommandBuffer cmd);
+
+	void resetFrame();
 
 	void createImage();
 	void createGraphicsDescriptorSetLayout();
@@ -69,6 +71,9 @@ private:
 	VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeature{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR };
 
 	VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProperties{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR };
+
+	shaderio::TutoPushConstant pushValues{};
+	int maxFrames = 2 << 9;
 };
 
 }

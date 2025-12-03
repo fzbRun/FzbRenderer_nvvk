@@ -27,6 +27,7 @@
 
 #include <nvutils/file_operations.hpp>
 #include <vulkan/vulkan_core.h>
+#include <glm/glm.hpp>
 
 namespace nvsamples {
 
@@ -46,3 +47,10 @@ nvvk::Image loadAndCreateImage(VkCommandBuffer              cmd,
                                bool                         sRgb = true);
 
 }  // namespace nvsamples
+
+namespace FzbRenderer {
+    glm::vec3 getRGBFromString(std::string str);
+    glm::mat4 getMat4FromString(std::string str);
+    glm::vec2 getfloat2FromString(std::string str);
+    glm::vec4 getRGBAFromString(std::string str);
+}

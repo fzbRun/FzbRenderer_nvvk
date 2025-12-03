@@ -102,13 +102,13 @@ void FzbRenderer::DeferredRenderer::compileAndCreateShaders() {
     NVVK_DBG_NAME(fragmentShader);
 }
 void FzbRenderer::DeferredRenderer::updateTextures() {
-    if (Application::textures.empty())
+    if (Application::sceneResource.textures.empty())
         return;
 
     nvvk::WriteSetContainer write{};
     VkWriteDescriptorSet    allTextures =
-        descPack.makeWrite(shaderio::BindingPoints::eTextures, 0, 1, uint32_t(Application::textures.size()));
-    nvvk::Image* allImages = Application::textures.data();
+        descPack.makeWrite(shaderio::BindingPoints::eTextures, 0, 1, uint32_t(Application::sceneResource.textures.size()));
+    nvvk::Image* allImages = Application::sceneResource.textures.data();
     write.append(allTextures, allImages);
     vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }
@@ -160,8 +160,8 @@ void FzbRenderer::DeferredRenderer::render(VkCommandBuffer cmd) {
 
     if (Application::sceneResource.sceneInfo.useSky)
     {
-        const glm::mat4& viewMatrix = Application::cameraManip->getViewMatrix();
-        const glm::mat4& projMatrix = Application::cameraManip->getPerspectiveMatrix();
+        const glm::mat4& viewMatrix = Application::sceneResource.cameraManip->getViewMatrix();
+        const glm::mat4& projMatrix = Application::sceneResource.cameraManip->getPerspectiveMatrix();
         Application::skySimple.runCompute(cmd, Application::app->getViewportSize(), viewMatrix, projMatrix,
             Application::sceneResource.sceneInfo.skySimpleParam, gBuffers.getDescriptorImageInfo(eImgRendered));
     }

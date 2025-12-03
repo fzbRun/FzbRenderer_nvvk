@@ -40,4 +40,4 @@ std::shared_ptr<FzbRenderer::Renderer> FzbRenderer::createRenderer(RendererCreat
 void FzbRenderer::Renderer::addExtensions() {};
 void FzbRenderer::Renderer::compileAndCreateShaders() {};
 void FzbRenderer::Renderer::onLastHeadlessFrame() {};
-void FzbRenderer::Renderer::updateSceneBuffer(VkCommandBuffer cmd) {};
+void FzbRenderer::Renderer::updateDataPerFrame(VkCommandBuffer cmd) {};

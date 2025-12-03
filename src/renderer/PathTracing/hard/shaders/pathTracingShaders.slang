@@ -2,6 +2,7 @@
 #include "nvshaders/constants.h.slang"
 #include "Slang/pbr.h.slang"
 #include "nvshaders/sky_functions.h.slang"
+#include "nvshaders/random.h.slang"
 #define MISS_DEPTH 1000
 
 [[vk::push_constant]] ConstantBuffer<TutoPushConstant> pushConst;
@@ -22,10 +23,14 @@ void raygenMain(){
 
 	GltfSceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
 
+	uint seed = xxhash32(uint3(uint2(launchID.xy), pushConst.frameIndex));
+	float r1 = rand(seed);
+	float r2 = rand(seed);
+	float2 subpixel_jitter = pushConst.frameIndex == 0 ? float2(0.5f) : float2(r1, r2);
+
 	const uint rayFlags = 0;
-
-	const float2 clipCoords = launchID / launchSize * 2.0f - 1.0f;
-
+	const float2 pixelCenter = launchID + subpixel_jitter;
+	const float2 clipCoords = pixelCenter / launchSize * 2.0f - 1.0f;
 	const float4 viewCoords = mul(float4(clipCoords, 1.0f, 1.0f), sceneInfo.projInvMatrix);	//这里不除以w的原因是归一化后没有影响
 
 	RayDesc ray;
@@ -42,7 +47,13 @@ void raygenMain(){
 	TraceRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, payload);
 
 	float3 color = payload.color;
-	outImage[int2(launchID)] = float4(color, 1.0f);
+	if(pushConst.frameIndex > 0){
+		float a = 1.0f / float(pushConst.frameIndex + 1);
+		float3 old_color = outImage[int2(launchID)].xyz;
+		outImage[int2(launchID)] = float4(lerp(old_color, color, a), 1.0f);
+	}else{
+		outImage[int2(launchID)] = float4(color, 1.0f);
+	}
 }
 
 __generic<T : IFloat> T getAttribute(uint8_t* dataBufferAddress, BufferView bufferView, uint attributeIndex)
@@ -127,7 +138,7 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
 	float3 barycentrics = float3(1 - attr.barycentrics.x - attr.barycentrics.y, attr.barycentrics.x, attr.barycentrics.y);
 
 	uint instanceID = InstanceIndex();
-    uint meshID = InstanceID();
+    uint meshID = InstanceID();		//instanceCustomIndex
     uint triID = PrimitiveIndex();
 
     GltfSceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
@@ -140,10 +151,14 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
     float3 normal = getTriangleAttribute<float3>(mesh.gltfBuffer, mesh.triMesh.normals, indices, barycentrics);
     float3 worldPos = float3(mul(float4(pos, 1.0), ObjectToWorld4x3()));
     float3 worldNormal = normalize(mul(WorldToObject4x3(), normal).xyz);
+	float2 worldTexCoord = getTriangleAttribute<float2>(mesh.gltfBuffer, mesh.triMesh.texCoords, indices, barycentrics);
 
     float3 albedo = material.baseColorFactor.xyz;
+	if(material.baseColorTextureIndex > 0) albedo *= textures[material.baseColorTextureIndex].SampleLevel(worldTexCoord, 0).xyz;
     float metallic = material.metallicFactor;
+	if(pushConst.metallicRoughnessOverride.x >= 0.0f) metallic = pushConst.metallicRoughnessOverride.x;
     float roughness = material.roughnessFactor;
+	if(pushConst.metallicRoughnessOverride.y >= 0.0f) roughness = pushConst.metallicRoughnessOverride.y;
 
 	GltfPunctual light = processLight(sceneInfo, worldPos);
 
@@ -155,8 +170,18 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
 
     float3 color = pbrMetallicRoughness(albedo, metallic, roughness, N, V, L);
     color *= light.color * light.intensity * shadowFactor;
+
+	float3 ambient = sceneInfo.backgroundColor;
+	if(sceneInfo.useSky == 1){
+		float3 skyUpDir = float3(0.0f, 1.0f, 0.0f);
+		float3 groundColor = sceneInfo.skySimpleParam.groundColor;
+		float3 skyColor = sceneInfo.skySimpleParam.skyColor;
+		float3 ambient = lerp(groundColor, skyColor, dot(N, skyUpDir) * 0.5f + 0.5f);
+	}
+	color += ambient * albedo * 0.025f;
     
-    payload.color = color;
+    if(pushConst.transparencyMode == 2) payload.color += color * payload.weight;
+	else payload.color = color;
 }
 
 [shader("miss")]
@@ -170,4 +195,44 @@ void rayMissMain(inout HitPayload payload){
     }else payload.color += sceneInfo.backgroundColor * payload.weight;
 
 	payload.depth = MISS_DEPTH;
+}
+
+[shader("anyhit")]
+void rayAnyHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionAttributes attr){
+	float3 hitPos = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();		//RayTCurrent返回命中点到起点的长度
+
+	uint instanceID = InstanceIndex();
+	GltfSceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+	GltfInstance instance = sceneInfo.instances[instanceID];
+	GltfMetallicRoughness material = sceneInfo.materials[instance.materialIndex];
+
+	float opacity = material.baseColorFactor.a == 1 ? 1 : material.baseColorFactor.a * pushConst.opacity;
+
+	if(pushConst.transparencyMode == 0){
+		float3 uv = hitPos * 10.1f;
+		if((frac(uv.x) >= 0.5f != frac(uv.y) >= 0.5f) && hitPos.y > 0.01f) return;
+
+		if(length(hitPos) > pushConst.radius){
+			IgnoreHit();
+			return;
+		}
+	}
+	else if(pushConst.transparencyMode == 1){
+		if(opacity == 1) return;
+
+		float2 launchID = (float2)DispatchRaysIndex().xy;
+		uint3 seedInput = uint3(uint2(launchID.xy), pushConst.frameIndex);
+		uint seed = xxhash32(seedInput);
+		float randValue = rand(seed);
+		if(randValue > opacity) IgnoreHit();
+	}
+	else if(pushConst.transparencyMode == 2){
+		if(opacity < 1.0f){
+			float3 tintColor = material.baseColorFactor.rgb;
+			payload.color += tintColor * payload.weight * opacity;
+			payload.weight *= (1.0f - opacity);
+			IgnoreHit();
+		}
+	}
+
 }
