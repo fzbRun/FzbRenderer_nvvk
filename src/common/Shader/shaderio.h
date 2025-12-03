@@ -44,6 +44,8 @@ struct TutoPushConstant
   float opacity = 0.5f;
   int transparencyMode = 0;
   int frameIndex = 0;
+
+  int maxDepth = 3;
 };
 
 

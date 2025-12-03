@@ -74,6 +74,15 @@ private:
 
 	shaderio::TutoPushConstant pushValues{};
 	int maxFrames = 2 << 9;
+
+	std::vector<int> shaderGroupIndices;
+	struct HitRecordBuffer {
+		glm::vec3 color;
+	};
+	std::vector<HitRecordBuffer> hitShaderRecord = {
+		{ .color = glm::vec3(0.8f, 1.0f, 0.6f) },
+		{ .color = glm::vec3(0.6f, 0.8f, 1.0f) }
+	};
 };
 
 }

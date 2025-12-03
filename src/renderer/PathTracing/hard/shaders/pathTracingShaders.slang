@@ -3,17 +3,31 @@
 #include "Slang/pbr.h.slang"
 #include "nvshaders/sky_functions.h.slang"
 #include "nvshaders/random.h.slang"
-#define MISS_DEPTH 1000
 
 [[vk::push_constant]] ConstantBuffer<TutoPushConstant> pushConst;
 [[vk::binding(BindingPoints::eTextures, 0)]] Sampler2D textures[];
 [[vk::binding(BindingPoints::eTlas, 1)]] RaytracingAccelerationStructure topLevelAS;
 [[vk::binding(BindingPoints::eOutImage, 1)]] RWTexture2D<float4> outImage;
+[vk::shader_record] ConstantBuffer<float3> shaderRec;
+
+#define MISS_DEPTH 1000
+//迭代比递归好
+//1. 递归会受到rtPipeline的maxPipelineRayRecursionDepth的限制；而迭代不会
+//2. 迭代所需的空间恒定，而递归需要保存之前的数据
+//#define REFLECTION_RECURSIVE
+#define REFLECTION_ITERATIVE
 
 struct HitPayload{
 	float3 color;
 	float weight;
 	int depth;		//这个不是光线的hitDepth，而是boucne的深度
+
+	float3 rayOrigin;
+	float3 rayDirection;
+};
+
+struct ShadowPayload{
+	int depth;
 };
 
 [shader("raygeneration")]
@@ -43,17 +57,30 @@ void raygenMain(){
 	payload.color = float3(0.0f);
 	payload.weight = 1.0f;
 	payload.depth = 0;
+	#ifdef REFLECTION_ITERATIVE
+		float3 accumulatedColor = float3(0.0f);
+		while(payload.depth < pushConst.maxDepth && payload.weight > 0.01f){
+			float prevWeight = payload.weight;
+			TraceRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, payload);
+			accumulatedColor += payload.color * prevWeight;
 
-	TraceRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, payload);
+			ray.Origin = payload.rayOrigin;
+			ray.Direction = payload.rayDirection;
+		}
 
-	float3 color = payload.color;
-	if(pushConst.frameIndex > 0){
-		float a = 1.0f / float(pushConst.frameIndex + 1);
-		float3 old_color = outImage[int2(launchID)].xyz;
-		outImage[int2(launchID)] = float4(lerp(old_color, color, a), 1.0f);
-	}else{
-		outImage[int2(launchID)] = float4(color, 1.0f);
-	}
+		float3 color = accumulatedColor;
+	#else
+		TraceRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, payload);
+		float3 color = payload.color;
+	#endif
+
+		if(pushConst.frameIndex > 0){
+			float a = 1.0f / float(pushConst.frameIndex + 1);
+			float3 old_color = outImage[int2(launchID)].xyz;
+			outImage[int2(launchID)] = float4(lerp(old_color, color, a), 1.0f);
+		}else{
+			outImage[int2(launchID)] = float4(color, 1.0f);
+		}
 }
 
 __generic<T : IFloat> T getAttribute(uint8_t* dataBufferAddress, BufferView bufferView, uint attributeIndex)
@@ -89,16 +116,16 @@ __generic<T : IFloat> T getTriangleAttribute(uint8_t* dataBufferAddress, BufferV
 	return T(barycentrics.x) * attr0 + T(barycentrics.y) * attr1 + T(barycentrics.z) * attr2;
 }
 float testShadow(float3 worldPos, float3 worldNormal, float3 lightDirection, GltfPunctual light){
-RayDesc shadowRay;
+	RayDesc shadowRay;
 	shadowRay.Origin    = worldPos + worldNormal * 0.001;  // Offset to avoid self-intersection
 	shadowRay.Direction = normalize(lightDirection);
 	shadowRay.TMin      = 0.001;
 	shadowRay.TMax      = light.type == GltfLightType::eDirectional ? INFINITE : length(lightDirection);
   
-	HitPayload shadowPayload;
+	ShadowPayload shadowPayload;
 	shadowPayload.depth = 0;
 
-	TraceRay(topLevelAS, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, 0xff, 0, 0, 0,
+	TraceRay(topLevelAS, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, 0xff, 0, 0, 1,
            shadowRay, shadowPayload);
 	 return shadowPayload.depth != MISS_DEPTH ? 0.0 : 1.0;
 }
@@ -179,9 +206,47 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
 		float3 ambient = lerp(groundColor, skyColor, dot(N, skyUpDir) * 0.5f + 0.5f);
 	}
 	color += ambient * albedo * 0.025f;
+
+	#ifdef REFLECTION_RECURSIVE
+		if(payload.depth < pushConst.maxDepth && metallic > 0.01f){
+			float3 reflectionDir = reflect(-V, N);
+
+			RayDesc reflectionRay;
+			reflectionRay.Origin = worldPos + N * 0.001f;
+			reflectionRay.Direction = reflectionDir;
+			reflectionRay.TMin = 0.001f;
+			reflectionRay.TMax = INFINITE;
+
+			HitPayload reflectionPayload;
+			reflectionPayload.color = float(0.0f);
+			relfectionPayload.weight = payload.weight * metallic;	//这里直接将金属制当作菲涅尔项用了
+			reflectionPayload.depth = payload.detph + 1;
+
+			TraceRay(topLevelAS, 0, 0xff, 0, 0, 0, reflectionRay, reflectionPayload);
+
+			reflectionColor = reflectionPayload.color * metallic;
+		}
+		color += reflectionColor;
+	#else
+		payload.rayOrigin = worldPos;
+		payload.rayDirection = reflect(-V, N);
+		payload.weight *= metallic;
+		payload.depth++;
+	#endif
     
     if(pushConst.transparencyMode == 2) payload.color += color * payload.weight;
 	else payload.color = color;
+}
+
+[shader("closesthit")]
+void rayClosestHitMain2(inout HitPayload payload, in BuiltInTriangleIntersectionAttributes attr){
+	payload.depth++;
+	payload.color = shaderRec.xyz;
+}
+[shader("closesthit")]
+void rayClosestHitMain3(inout HitPayload payload, in BuiltInTriangleIntersectionAttributes attr){
+	payload.depth++;
+	payload.color = float3(0.6f, 0.8f, 1.0f);
 }
 
 [shader("miss")]
@@ -197,6 +262,14 @@ void rayMissMain(inout HitPayload payload){
 	payload.depth = MISS_DEPTH;
 }
 
+[shader("miss")]
+void rayMissShadowMain(inout ShadowPayload payload){
+	payload.depth = MISS_DEPTH;
+}
+
+/*
+只有primitive的flag不是VK_GEOMETRY_OPAQUE_BIT_KHR，即是透明的，才能出发anyhitShader
+*/
 [shader("anyhit")]
 void rayAnyHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionAttributes attr){
 	float3 hitPos = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();		//RayTCurrent返回命中点到起点的长度
@@ -234,5 +307,4 @@ void rayAnyHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionAttri
 			IgnoreHit();
 		}
 	}
-
 }

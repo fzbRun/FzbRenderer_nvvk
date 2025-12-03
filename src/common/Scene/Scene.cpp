@@ -297,7 +297,12 @@ void FzbRenderer::Scene::createSceneFromXML() {
 
 		glm::mat4 transformMatrix(1.0f);
 		if (pugi::xml_node transformNode = instanceNode.select_node("transform").node()) {
-			transformMatrix = FzbRenderer::getMat4FromString(transformNode.child("matrix").attribute("value").value());
+			if(pugi::xml_node matrixNode = transformNode.child("matrix"))
+				transformMatrix = FzbRenderer::getMat4FromString(matrixNode.attribute("value").value());
+			if (pugi::xml_node translateNode = transformNode.select_node("translate").node()) {
+				glm::vec3 translateValue = FzbRenderer::getRGBFromString(translateNode.attribute("value").value());
+				transformMatrix = glm::translate(transformMatrix, translateValue);
+			}
 			if (pugi::xml_node rotateNode = transformNode.select_node("rotate").node()) {
 				glm::vec3 rotateAngle = glm::radians(FzbRenderer::getRGBFromString(rotateNode.attribute("value").value()));
 				if (rotateAngle.x > 0.01f) transformMatrix = glm::rotate(transformMatrix, rotateAngle.x, glm::vec3(1, 0, 0));
@@ -375,4 +380,11 @@ void FzbRenderer::Scene::clean() {
 		allocator.destroyBuffer(gltfData);
 	for (auto& texture : textures)
 		allocator.destroyImage(texture);
+}
+
+void FzbRenderer::Scene::UIRender() {
+	if (ImGui::Begin("Scene Resources")) {
+
+	}
+	ImGui::End();
 }
