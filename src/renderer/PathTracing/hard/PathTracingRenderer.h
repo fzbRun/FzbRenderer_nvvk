@@ -74,6 +74,7 @@ private:
 
 	shaderio::TutoPushConstant pushValues{};
 	int maxFrames = 2 << 9;
+	uint32_t maxDepth = 10;
 };
 
 }
