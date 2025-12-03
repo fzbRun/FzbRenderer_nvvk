@@ -28,6 +28,8 @@ public:
 	void createSceneInfBuffer();
 	void clean();
 
+	void UIRender();
+
 	std::filesystem::path scenePath;
 	std::shared_ptr<nvutils::CameraManipulator> cameraManip{ std::make_shared<nvutils::CameraManipulator>() };
 	std::vector<nvvk::Image>     textures{};

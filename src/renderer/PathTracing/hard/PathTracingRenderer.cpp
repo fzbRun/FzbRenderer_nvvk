@@ -7,6 +7,8 @@
 #include <glm/gtc/type_ptr.hpp>
 #include "common/Shader/Shader.h"
 
+#define MAX_DEPTH 64U
+
 FzbRenderer::PathTracingRenderer::PathTracingRenderer(RendererCreateInfo& createInfo) {
 	createInfo.vkContextInfo.deviceExtensions.push_back( { VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, &accelFeature });
 	createInfo.vkContextInfo.deviceExtensions.push_back({ VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, &rtPipelineFeature });
@@ -14,7 +16,7 @@ FzbRenderer::PathTracingRenderer::PathTracingRenderer(RendererCreateInfo& create
 
 	pugi::xml_node& rendererNode = createInfo.rendererNode;
 	if (pugi::xml_node maxDepthNode = rendererNode.child("maxDepth")) {
-		maxDepth = std::stoi(maxDepthNode.attribute("value").value());
+		pushValues.maxDepth = std::stoi(maxDepthNode.attribute("value").value());
 	}
 }
 //-----------------------------------------创建加速结构----------------------------------------------------------
@@ -298,7 +300,7 @@ void FzbRenderer::PathTracingRenderer::createToLevelAS() {
 		asInstance.transform = nvvk::toTransformMatrixKHR(instance.transform);
 		asInstance.instanceCustomIndex = instance.meshIndex;
 		asInstance.accelerationStructureReference = asBuilder.blasSet[instance.meshIndex].address;
-		asInstance.instanceShaderBindingTableRecordOffset = 0;		//所有的实例都用SBT中每个group中第1个条目（shader）
+		asInstance.instanceShaderBindingTableRecordOffset = tlasInstances.size();		//实例用SBT中hitGroup中第i个条目（shader）
 		asInstance.flags = flgas;
 		asInstance.mask = 0xFF;
 		tlasInstances.emplace_back(asInstance);
@@ -371,6 +373,8 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 		eMiss,
 		eMissShadow,
 		eClosestHit,
+		eClosestHit2,
+		eClosestHit3,
 		eAnyHit,
 		eShaderGroupCount
 	};
@@ -392,9 +396,19 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 	stages[eMissShadow].pNext = &shaderCode;
 	stages[eMissShadow].pName = "rayMissShadowMain";
 	stages[eMissShadow].stage = VK_SHADER_STAGE_MISS_BIT_KHR;
+
 	stages[eClosestHit].pNext = &shaderCode;
 	stages[eClosestHit].pName = "rayClosestHitMain";
 	stages[eClosestHit].stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+
+	stages[eClosestHit2].pNext = &shaderCode;
+	stages[eClosestHit2].pName = "rayClosestHitMain2";
+	stages[eClosestHit2].stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+	//
+	stages[eClosestHit3].pNext = &shaderCode;
+	stages[eClosestHit3].pName = "rayClosestHitMain3";
+	stages[eClosestHit3].stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+
 	stages[eAnyHit].pNext = &shaderCode;
 	stages[eAnyHit].pName = "rayAnyHitMain";
 	stages[eAnyHit].stage = VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
@@ -427,6 +441,11 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 	group.anyHitShader = eAnyHit;
 	shader_groups.push_back(group);
 
+	group.closestHitShader = eClosestHit2;
+	shader_groups.push_back(group);
+	group.closestHitShader = eClosestHit3;
+	shader_groups.push_back(group);
+
 	const VkPushConstantRange push_constant{ VK_SHADER_STAGE_ALL, 0, sizeof(shaderio::TutoPushConstant) };
 
 	VkPipelineLayoutCreateInfo pipeline_layout_create_info{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
@@ -444,13 +463,15 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 	rtPipelineInfo.pStages = stages.data();
 	rtPipelineInfo.groupCount = static_cast<uint32_t>(shader_groups.size());
 	rtPipelineInfo.pGroups = shader_groups.data();
-	rtPipelineInfo.maxPipelineRayRecursionDepth = std::max(maxDepth, rtProperties.maxRayRecursionDepth);		//最大bounce数
+	rtPipelineInfo.maxPipelineRayRecursionDepth = std::min(MAX_DEPTH, rtProperties.maxRayRecursionDepth);		//最大bounce数
 	rtPipelineInfo.layout = rtPipelineLayout;
 	vkCreateRayTracingPipelinesKHR(Application::app->getDevice(), {}, {}, 1, & rtPipelineInfo, nullptr, & rtPipeline);
 	NVVK_DBG_NAME(rtPipeline);
 
 	LOGI("Ray tracing pipeline layout created successfully\n");
 
+	sbtGenerator.addData(nvvk::SBTGenerator::eHit, 1, hitShaderRecord[0]);		//data会与group中的条目（shader描述符）放在一起，需要一起对齐
+	sbtGenerator.addData(nvvk::SBTGenerator::eHit, 2, hitShaderRecord[1]);
 	createShaderBindingTable(rtPipelineInfo);
 }
 //-----------------------------------------光追函数----------------------------------------------------------
@@ -643,7 +664,7 @@ void FzbRenderer::PathTracingRenderer::uiRender() {
 		ImGui::SeparatorText("Reflection");
 		{
 			PE::begin();
-			PE::SliderInt("Reflection Depth", &pushValues.maxDepth, 1, maxDepth, "%d", ImGuiSliderFlags_AlwaysClamp,
+			PE::SliderInt("Reflection Depth", &pushValues.maxDepth, 1, std::min(MAX_DEPTH, rtProperties.maxRayRecursionDepth), "%d", ImGuiSliderFlags_AlwaysClamp,
 				"Maximum reflection depth");
 			PE::end();
 		}

@@ -31,6 +31,16 @@
 	</meshes>
 	<instances>
 		<instance>
+			<transform>
+				<translate value = "-1.0, 0.0, 0.0" />
+			</transform>
+			<meshRef id = "wuson" />
+			<materialRef id = "wusonMaterial" />
+		</instance>
+		<instance>
+			<transform>
+				<translate value = "1.0, 0.0, 0.0" />
+			</transform>
 			<meshRef id = "wuson" />
 			<materialRef id = "wusonMaterial" />
 		</instance>

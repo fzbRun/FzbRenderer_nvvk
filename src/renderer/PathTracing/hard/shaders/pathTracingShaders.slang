@@ -8,6 +8,7 @@
 [[vk::binding(BindingPoints::eTextures, 0)]] Sampler2D textures[];
 [[vk::binding(BindingPoints::eTlas, 1)]] RaytracingAccelerationStructure topLevelAS;
 [[vk::binding(BindingPoints::eOutImage, 1)]] RWTexture2D<float4> outImage;
+[vk::shader_record] ConstantBuffer<float3> shaderRec;
 
 #define MISS_DEPTH 1000
 //µü´ú±ÈµÝ¹éºÃ
@@ -235,6 +236,17 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
     
     if(pushConst.transparencyMode == 2) payload.color += color * payload.weight;
 	else payload.color = color;
+}
+
+[shader("closesthit")]
+void rayClosestHitMain2(inout HitPayload payload, in BuiltInTriangleIntersectionAttributes attr){
+	payload.depth++;
+	payload.color = shaderRec.xyz;
+}
+[shader("closesthit")]
+void rayClosestHitMain3(inout HitPayload payload, in BuiltInTriangleIntersectionAttributes attr){
+	payload.depth++;
+	payload.color = float3(0.6f, 0.8f, 1.0f);
 }
 
 [shader("miss")]
