@@ -30,8 +30,20 @@ enum BindingPoints
   eTextures = 0,  // Binding point for textures
   eOutImage,	  //Binding point for output image
   eTlas,		  //Top-level acceleration structure
+  eImplicit,
 };
-
+enum ImplicitObjectKind {
+	eSphere = 0,
+	eCube = 1
+};
+struct Sphere {
+	float3 center;
+	float radius;
+};
+struct AABB {
+	float3 minimum;
+	float3 maximum;
+};
 
 struct TutoPushConstant
 {
