@@ -26,6 +26,12 @@ struct HitPayload{
 	float3 rayDirection;
 };
 
+struct HitState{
+	float3 pos;
+	float3 normal;
+	float3 geoNormal;
+}
+
 struct ShadowPayload{
 	int depth;
 };
@@ -83,7 +89,8 @@ void raygenMain(){
 		}
 }
 
-__generic<T : IFloat> T getAttribute(uint8_t* dataBufferAddress, BufferView bufferView, uint attributeIndex)
+/*
+_generic<T : IFloat> T getAttribute(uint8_t* dataBufferAddress, BufferView bufferView, uint attributeIndex)
 {
 	if(bufferView.count > 0)
 	{
@@ -114,6 +121,26 @@ __generic<T : IFloat> T getTriangleAttribute(uint8_t* dataBufferAddress, BufferV
 	T attr1 = getAttribute<T>(dataBufferAddress, bufferView, attributeIndex.y);
 	T attr2 = getAttribute<T>(dataBufferAddress, bufferView, attributeIndex.z);
 	return T(barycentrics.x) * attr0 + T(barycentrics.y) * attr1 + T(barycentrics.z) * attr2;
+}
+*/
+HitState getHitStateWithPositionFetch(float3 barycentrics){
+	HitState hit;
+	const float3 pos0 = HitTriangleVertexPosition(0);
+	const float3 pos1 = HitTriangleVertexPosition(1);
+	const float3 pos2 = HitTriangleVertexPosition(2);
+
+	const float3 localPosition = pos0 * barycentrics.x + pos1 * barycentrics.y + pos2 * barycentrics.z;
+
+	hit.pos = float3(mul(float4(localPosition, 1.0f), ObjectToWorld4x3()));
+	const float3 edge1 = pos1 - pos0;
+	const float3 edge2 = pos2 - pos0;
+	const float3 geoNormal = normalize(cross(edge1, edge2));
+
+	float3 worldGeoNormal = normalize(mul(WorldToObject4x3(), geoNormal).xyz);
+	hit.geoNormal = worldGeoNormal;
+	hit.normal = worldGeoNormal;
+
+	return hit;
 }
 float testShadow(float3 worldPos, float3 worldNormal, float3 lightDirection, GltfPunctual light){
 	RayDesc shadowRay;
@@ -170,30 +197,31 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
 
     GltfSceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
     GltfInstance instance = sceneInfo.instances[instanceID];
-    GltfMesh mesh = sceneInfo.meshes[instance.meshIndex];
+    //GltfMesh mesh = sceneInfo.meshes[instance.meshIndex];
     GltfMetallicRoughness material = sceneInfo.materials[instance.materialIndex];
 
-    int3 indices = getTriangleIndices(mesh.gltfBuffer, mesh.triMesh, triID);
-    float3 pos = getTriangleAttribute<float3>(mesh.gltfBuffer, mesh.triMesh.positions, indices, barycentrics);
-    float3 normal = getTriangleAttribute<float3>(mesh.gltfBuffer, mesh.triMesh.normals, indices, barycentrics);
-    float3 worldPos = float3(mul(float4(pos, 1.0), ObjectToWorld4x3()));
-    float3 worldNormal = normalize(mul(WorldToObject4x3(), normal).xyz);
-	float2 worldTexCoord = getTriangleAttribute<float2>(mesh.gltfBuffer, mesh.triMesh.texCoords, indices, barycentrics);
+    //int3 indices = getTriangleIndices(mesh.gltfBuffer, mesh.triMesh, triID);
+    //float3 pos = getTriangleAttribute<float3>(mesh.gltfBuffer, mesh.triMesh.positions, indices, barycentrics);
+    //float3 normal = getTriangleAttribute<float3>(mesh.gltfBuffer, mesh.triMesh.normals, indices, barycentrics);
+    //float3 worldPos = float3(mul(float4(pos, 1.0), ObjectToWorld4x3()));
+    //float3 worldNormal = normalize(mul(WorldToObject4x3(), normal).xyz);
+	//float2 worldTexCoord = getTriangleAttribute<float2>(mesh.gltfBuffer, mesh.triMesh.texCoords, indices, barycentrics);
+	HitState hitState = getHitStateWithPositionFetch(barycentrics);
 
     float3 albedo = material.baseColorFactor.xyz;
-	if(material.baseColorTextureIndex > 0) albedo *= textures[material.baseColorTextureIndex].SampleLevel(worldTexCoord, 0).xyz;
+	//if(material.baseColorTextureIndex > 0) albedo *= textures[material.baseColorTextureIndex].SampleLevel(worldTexCoord, 0).xyz;
     float metallic = material.metallicFactor;
 	if(pushConst.metallicRoughnessOverride.x >= 0.0f) metallic = pushConst.metallicRoughnessOverride.x;
     float roughness = material.roughnessFactor;
 	if(pushConst.metallicRoughnessOverride.y >= 0.0f) roughness = pushConst.metallicRoughnessOverride.y;
 
-	GltfPunctual light = processLight(sceneInfo, worldPos);
+	GltfPunctual light = processLight(sceneInfo, hitState.pos);
 
-    float3 N = worldNormal;
+    float3 N = normalize(hitState.normal);
     float3 V = -WorldRayDirection();
     float3 L = normalize(light.direction);
 
-	float shadowFactor = testShadow(worldPos, N, light.direction, light);
+	float shadowFactor = testShadow(hitState.pos, N, light.direction, light);
 
     float3 color = pbrMetallicRoughness(albedo, metallic, roughness, N, V, L);
     color *= light.color * light.intensity * shadowFactor;
@@ -212,7 +240,7 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
 			float3 reflectionDir = reflect(-V, N);
 
 			RayDesc reflectionRay;
-			reflectionRay.Origin = worldPos + N * 0.001f;
+			reflectionRay.Origin = hitState.pos + N * 0.001f;
 			reflectionRay.Direction = reflectionDir;
 			reflectionRay.TMin = 0.001f;
 			reflectionRay.TMax = INFINITE;
@@ -228,7 +256,7 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
 		}
 		color += reflectionColor;
 	#else
-		payload.rayOrigin = worldPos;
+		payload.rayOrigin = hitState.pos;
 		payload.rayDirection = reflect(-V, N);
 		payload.weight *= metallic;
 		payload.depth++;
@@ -237,18 +265,158 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
     if(pushConst.transparencyMode == 2) payload.color += color * payload.weight;
 	else payload.color = color;
 }
+/*
+float hitSphere(Sphere sphere, float3 rayOrigin, float3 rayDirection){
+	float3 oc           = rayOrigin - sphere.center;
+	float  a            = dot(rayDirection, rayDirection);
+	float  b            = 2.0 * dot(oc, rayDirection);
+	float  c            = dot(oc, oc) - sphere.radius * sphere.radius;
+	float  discriminant = b * b - 4 * a * c;
+	if(discriminant < 0)
+	{
+	  return -1.0;
+	}
+	else
+	{
+	  return (-b - sqrt(discriminant)) / (2.0 * a);
+	}
+}
+float hitAABB(AABB aabb, float3 rayOrigin, float3 rayDirection){
+	float3 invDir = 1.0 / rayDirection;
+	float3 tbot   = invDir * (aabb.minimum - rayOrigin);
+	float3 ttop   = invDir * (aabb.maximum - rayOrigin);
+	float3 tmin   = min(ttop, tbot);
+	float3 tmax   = max(ttop, tbot);
+	float  t0     = max(tmin.x, max(tmin.y, tmin.z));
+	float  t1     = min(tmax.x, min(tmax.y, tmax.z));
+	return t1 > max(t0, 0.0) ? t0 : -1.0;
+}
+[shader("intersection")]
+void rayIntersectionMain(){
+	float3 rayOrigin = WorldRayOrigin();
+	float3 rayDirection = WorldRayDirection();
 
+	Sphere sphere = allSphere(PrimitiveIndex());
+	flaot tHit = -1;
+	int hitKind = PrimitiveIndex() % 2 == 0 ? ImplicitObjectKind::eSphere : ImplicitObjectKind::eCube;
+
+	if(hitKind == ImplicitObjectKind::eSphere){
+		tHit = hitSphere(sphere, rayOrigin, rayDirection);
+	}else{
+		AABB aabb;
+		aabb.minimum = sphere.center - float3(sphere.radius);
+		aabb.maximum = sphere.center + flaot3(sphere.radius);
+		tHit = hitAABB(aabb, rayOrigin, rayDirection);
+	}
+
+	if(tHit > 0){
+		BuiltInTriangleIntersectionAttributes attr;
+		attr.barycentrics = float2(0.0f);
+		ReportHit(tHit, hitKind, attr);
+	}
+}
+
+float3 calculateLighting(float3 worldPos, float3 worldNormal, float3 albedo, float metallic, float roughness, GltfSceneInfo* sceneInfo)
+{
+	GltfPunctual light = sceneInfo.punctualLights[0];  // Assuming we only use the first light for simplicity
+	
+	if(sceneInfo.useSky == 1)
+	{
+	  light.direction = sceneInfo.skySimpleParam.sunDirection;
+	  light.color     = sceneInfo.skySimpleParam.sunColor;
+	  light.intensity = sceneInfo.skySimpleParam.sunIntensity;
+	  light.type      = GltfLightType::eDirectional;
+	}
+	
+	if(light.type == GltfLightType::ePoint)
+	{
+	  light.direction = light.position - worldPos;
+	  float d         = length(light.direction);
+	  light.intensity /= (d * d);
+	}
+	else if(light.type == GltfLightType::eSpot)
+	{
+	  // For spot lights, we need to calculate the direction and apply attenuation
+	  float3 lightDir = light.position - worldPos;
+	  float  d        = length(lightDir);
+	  light.intensity /= (d * d);
+	  // Cone attenuation can be applied here if needed
+	  float theta         = (dot(normalize(lightDir), normalize(light.direction)));
+	  float spotIntensity = clamp((theta - cos(light.coneAngle)) / (1.0 - cos(light.coneAngle)), 0.0, 1.0);
+	  light.intensity *= spotIntensity;
+	  light.direction = lightDir;
+	}
+	
+	float3 V = -WorldRayDirection();
+	float3 N = normalize(worldNormal);
+	float3 L = normalize(light.direction);
+	
+	// Test for shadows
+	float shadowFactor = testShadow(worldPos, N, light.direction, light);
+	
+	// Calculate PBR lighting with sun's color and intensity
+	float3 color = pbrMetallicRoughness(albedo, metallic, roughness, N, V, L);
+	// Apply light color and intensity, but only if not in shadow
+	color *= light.color * light.intensity * shadowFactor;
+	
+	// Apply ambient
+	float3 ambient = sceneInfo.backgroundColor;
+	if(sceneInfo.useSky == 1)
+	{
+	  // Add ambient lighting (sky effect)
+	  float3 skyUpDir    = float3(0, 1, 0);
+	  float3 groundColor = sceneInfo.skySimpleParam.groundColor;
+	  float3 skyColor    = sceneInfo.skySimpleParam.skyColor;
+	  float3 ambient     = lerp(groundColor, skyColor, dot(N, skyUpDir) * 0.5 + 0.5);
+	}
+	// Add ambient to final color
+	color += ambient * albedo * 0.025;
+	
+	return color;
+}
 [shader("closesthit")]
 void rayClosestHitMain2(inout HitPayload payload, in BuiltInTriangleIntersectionAttributes attr){
 	payload.depth++;
-	payload.color = shaderRec.xyz;
+	
+	uint instanceID  = InstanceIndex();
+	uint primitiveID = PrimitiveIndex();
+	int  hitKind     = HitKind();
+
+	GltfSceneInfo* sceneInfo = pushConst.sceneInfoAddress;
+	Sphere sphere = allSpheres[primitiveID];
+	float3 worldPos = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
+	float3 normal = normalize(worldPos - sphere.center);
+
+	if(hitKind == ImplicitObjectKind::eCube){
+		float3 absN = abs(normal);
+		float maxC = max(max(absN.x, absN.y), absN.z);
+		normal = (maxC == absN.x) ? float3(sign(normal.x), 0, 0) :
+                 (maxC == absN.y) ? float3(0, sign(normal.y), 0) :
+                                    float3(0, 0, sign(normal.z));
+	}
+
+	GltfMatallicRoughness material;
+	material.baseColorFactor = (primitiveID % 2 == 0) ? float4(0.0f, 1.0f, 1.0f, 1.0f) : float4(1.0f, 1.0f, 0.0f, 1.0f);
+	material.metallicFactor = 0.5f;
+	material.roughnessFactor = 0.5f;
+
+	float3 albedo = material.baseColorFactor.xyz;
+
+	float metallic = material.metallicFactor;
+	float roughness = material.roughnessFactor;
+	if(pushConst.metallicRoughnessOverride.x >= 0.0)
+		metallic = pushConst.metallicRoughnessOverride.x;
+	if(pushConst.metallicRoughnessOverride.y >= 0.0)
+		roughness = pushConst.metallicRoughnessOverride.y;
+
+	payload.color = calculateLighting(worldPos, normal, albedo, metallic, roughness, sceneInfo);
 }
 [shader("closesthit")]
 void rayClosestHitMain3(inout HitPayload payload, in BuiltInTriangleIntersectionAttributes attr){
 	payload.depth++;
 	payload.color = float3(0.6f, 0.8f, 1.0f);
 }
-
+*/
 [shader("miss")]
 void rayMissMain(inout HitPayload payload){
 	GltfSceneInfo sceneInfo = pushConst.sceneInfoAddress[0];

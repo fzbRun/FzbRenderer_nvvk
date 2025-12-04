@@ -21,6 +21,7 @@
 #include <nvgui/tonemapper.hpp>
 #include "common/Shader/spv/sky_simple.slang.h"
 #include "common/Shader/spv/tonemapper.slang.h"
+#include "common/Shader/Shader.h"
 
 void FzbRenderer::Application::getAppInfoFromXML(nvapp::ApplicationCreateInfo& appInfo, nvvk::ContextInitInfo& vkContextInitInfo) {
 	std::filesystem::path exePath = nvutils::getExecutablePath().parent_path();
@@ -107,7 +108,7 @@ void FzbRenderer::Application::onAttach(nvapp::Application* app) {
 	stagingUploader.init(&allocator, true);   //所有的CPU、GPU只一方可见的缓冲的交互都要经过暂存缓冲区
 	initSlangCompiler();
 	samplerPool.init(app->getDevice());
-	
+
 	sceneResource.createSceneFromXML();
 	renderer->init();
 

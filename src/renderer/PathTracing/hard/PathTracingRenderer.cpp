@@ -5,7 +5,7 @@
 #include <nvgui/sky.hpp>
 #include <nvvk/default_structs.hpp>
 #include <glm/gtc/type_ptr.hpp>
-#include "common/Shader/Shader.h"
+#include <common/Shader/Shader.h>
 
 #define MAX_DEPTH 64U
 
@@ -13,6 +13,9 @@ FzbRenderer::PathTracingRenderer::PathTracingRenderer(RendererCreateInfo& create
 	createInfo.vkContextInfo.deviceExtensions.push_back( { VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, &accelFeature });
 	createInfo.vkContextInfo.deviceExtensions.push_back({ VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, &rtPipelineFeature });
 	createInfo.vkContextInfo.deviceExtensions.push_back({ VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME });
+
+	rtPosFetchFeature.rayTracingPositionFetch = VK_TRUE;
+	createInfo.vkContextInfo.deviceExtensions.push_back({ VK_KHR_RAY_TRACING_POSITION_FETCH_EXTENSION_NAME, &rtPosFetchFeature });
 
 	pugi::xml_node& rendererNode = createInfo.rendererNode;
 	if (pugi::xml_node maxDepthNode = rendererNode.child("maxDepth")) {
@@ -284,7 +287,8 @@ void FzbRenderer::PathTracingRenderer::createBottomLevelAS() {
 	for (uint32_t blasId = 0; blasId < Application::sceneResource.meshes.size(); ++blasId)
 		geoInfos[blasId] = primitiveToGeometry(Application::sceneResource.meshes[blasId]);
 
-	asBuilder.blasSubmitBuildAndWait(geoInfos, VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR);
+	asBuilder.blasSubmitBuildAndWait(geoInfos, VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+												VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DATA_ACCESS_KHR);
 
 	LOGI("Bottom-level acceleration structures built successfully\n");
 }
@@ -300,7 +304,7 @@ void FzbRenderer::PathTracingRenderer::createToLevelAS() {
 		asInstance.transform = nvvk::toTransformMatrixKHR(instance.transform);
 		asInstance.instanceCustomIndex = instance.meshIndex;
 		asInstance.accelerationStructureReference = asBuilder.blasSet[instance.meshIndex].address;
-		asInstance.instanceShaderBindingTableRecordOffset = tlasInstances.size();		//实例用SBT中hitGroup中第i个条目（shader）
+		asInstance.instanceShaderBindingTableRecordOffset = 0;		//实例用SBT中hitGroup中第i个条目（shader）
 		asInstance.flags = flgas;
 		asInstance.mask = 0xFF;
 		tlasInstances.emplace_back(asInstance);
@@ -373,8 +377,8 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 		eMiss,
 		eMissShadow,
 		eClosestHit,
-		eClosestHit2,
-		eClosestHit3,
+		//eClosestHit2,
+		//eClosestHit3,
 		eAnyHit,
 		eShaderGroupCount
 	};
@@ -401,13 +405,13 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 	stages[eClosestHit].pName = "rayClosestHitMain";
 	stages[eClosestHit].stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
 
-	stages[eClosestHit2].pNext = &shaderCode;
-	stages[eClosestHit2].pName = "rayClosestHitMain2";
-	stages[eClosestHit2].stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
-	//
-	stages[eClosestHit3].pNext = &shaderCode;
-	stages[eClosestHit3].pName = "rayClosestHitMain3";
-	stages[eClosestHit3].stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+	//stages[eClosestHit2].pNext = &shaderCode;
+	//stages[eClosestHit2].pName = "rayClosestHitMain2";
+	//stages[eClosestHit2].stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+	////
+	//stages[eClosestHit3].pNext = &shaderCode;
+	//stages[eClosestHit3].pName = "rayClosestHitMain3";
+	//stages[eClosestHit3].stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
 
 	stages[eAnyHit].pNext = &shaderCode;
 	stages[eAnyHit].pName = "rayAnyHitMain";
@@ -441,10 +445,10 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 	group.anyHitShader = eAnyHit;
 	shader_groups.push_back(group);
 
-	group.closestHitShader = eClosestHit2;
-	shader_groups.push_back(group);
-	group.closestHitShader = eClosestHit3;
-	shader_groups.push_back(group);
+	//group.closestHitShader = eClosestHit2;
+	//shader_groups.push_back(group);
+	//group.closestHitShader = eClosestHit3;
+	//shader_groups.push_back(group);
 
 	const VkPushConstantRange push_constant{ VK_SHADER_STAGE_ALL, 0, sizeof(shaderio::TutoPushConstant) };
 
@@ -470,8 +474,10 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 
 	LOGI("Ray tracing pipeline layout created successfully\n");
 
-	sbtGenerator.addData(nvvk::SBTGenerator::eHit, 1, hitShaderRecord[0]);		//data会与group中的条目（shader描述符）放在一起，需要一起对齐
-	sbtGenerator.addData(nvvk::SBTGenerator::eHit, 2, hitShaderRecord[1]);
+	//hitShader条目在group中会同时存储shaderhandle和data，这个data包含三角形索引范围、AABB和自定义数据
+	//如可以通过PrimitiveIndex函数获得三角形索引
+	//sbtGenerator.addData(nvvk::SBTGenerator::eHit, 1, hitShaderRecord[0]);		//data会与group中的条目（shader描述符）放在一起，需要一起对齐
+	//sbtGenerator.addData(nvvk::SBTGenerator::eHit, 2, hitShaderRecord[1]);
 	createShaderBindingTable(rtPipelineInfo);
 }
 //-----------------------------------------光追函数----------------------------------------------------------
@@ -592,14 +598,21 @@ void FzbRenderer::PathTracingRenderer::updateTextures() {
 };
 //-----------------------------------------渲染器行为----------------------------------------------------------
 void FzbRenderer::PathTracingRenderer::init() {
+	//查询是否支持rtPosFetchFeature
+	VkPhysicalDeviceFeatures2 deviceFeatures2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+	deviceFeatures2.pNext = &rtPosFetchFeature;
+	rtPosFetchFeature.pNext = nullptr;
+	rtPosFetchFeature.rayTracingPositionFetch = VK_FALSE;
+	vkGetPhysicalDeviceFeatures2(Application::app->getPhysicalDevice(), &deviceFeatures2);
+	//查询设备参数
+	VkPhysicalDeviceProperties2 prop2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+	prop2.pNext = &rtProperties;
+	vkGetPhysicalDeviceProperties2(Application::app->getPhysicalDevice(), &prop2);
+
 	createImage();
 	createGraphicsDescriptorSetLayout();
 	createGraphicsPipelineLayout();
 	updateTextures();
-
-	VkPhysicalDeviceProperties2 prop2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
-	prop2.pNext = &rtProperties;
-	vkGetPhysicalDeviceProperties2(Application::app->getPhysicalDevice(), &prop2);
 
 	asBuilder.init(&Application::allocator, &Application::stagingUploader, Application::app->getQueue(0));
 	sbtGenerator.init(Application::app->getDevice(), rtProperties);
@@ -661,12 +674,25 @@ void FzbRenderer::PathTracingRenderer::uiRender() {
 			resetFrame();
 		ImGui::TextDisabled("Frame: %d", pushValues.frameIndex);
 
-		ImGui::SeparatorText("Reflection");
+		ImGui::SeparatorText("Bounces");
 		{
 			PE::begin();
-			PE::SliderInt("Reflection Depth", &pushValues.maxDepth, 1, std::min(MAX_DEPTH, rtProperties.maxRayRecursionDepth), "%d", ImGuiSliderFlags_AlwaysClamp,
-				"Maximum reflection depth");
+			PE::SliderInt("Bounces Depth", &pushValues.maxDepth, 1, std::min(MAX_DEPTH, rtProperties.maxRayRecursionDepth), "%d", ImGuiSliderFlags_AlwaysClamp,
+				"Maximum Bounces depth");
 			PE::end();
+		}
+
+		if (rtPosFetchFeature.rayTracingPositionFetch == VK_FALSE)
+		{
+			ImGui::TextColored({ 1, 0, 0, 1 }, "ERROR: Position Fetch not supported!");
+			ImGui::Text("This hardware does not support");
+			ImGui::Text("VK_KHR_ray_tracing_position_fetch");
+			ImGui::Text("Please use RTX 20 series or newer GPU.");
+		}
+		else
+		{
+			ImGui::TextColored({ 0, 1, 0, 1 }, "Position Fetch: SUPPORTED");
+			ImGui::Separator();
 		}
 	}
 	ImGui::End();
