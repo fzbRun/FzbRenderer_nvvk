@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <nvgui/sky.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <unordered_set>
 
 void FzbRenderer::Scene::loadGltfData(const tinygltf::Model& model, bool importInstance) {
 	SCOPED_TIMER(__FUNCTION__);
@@ -143,6 +144,14 @@ void FzbRenderer::Scene::loadGltfData(const tinygltf::Model& model, bool importI
 		}
 	}
 };
+void FzbRenderer::Scene::loadTexture(const std::filesystem::path& texturePath) {
+	VkCommandBuffer       cmd = Application::app->createTempCmdBuffer();
+	nvvk::Image texture = nvsamples::loadAndCreateImage(cmd, Application::stagingUploader, Application::app->getDevice(), texturePath);  // Load the image from the file and create a texture from it
+	NVVK_DBG_NAME(texture.image);
+	Application::app->submitAndWaitTempCmdBuffer(cmd);
+	Application::samplerPool.acquireSampler(texture.descriptor.sampler);
+	textures.emplace_back(texture);  // Store the texture in the vector of textures
+}
 void FzbRenderer::Scene::createSceneFromXML() {
 	scenePath = FzbRenderer::getProjectRootDir() / "resources" / scenePath;
 	std::filesystem::path sceneInfoXMLPath = scenePath / "sceneInfo.xml";
@@ -182,45 +191,61 @@ void FzbRenderer::Scene::createSceneFromXML() {
 		cameraManip->setClipPlanes(glm::vec2(0.1f, 100.0f));		
 	}
 	//------------------------------------------------材质---------------------------------------------------------------
-	std::unordered_map<std::string, uint32_t> uniqueMaterials;
+	std::unordered_map<std::string, uint32_t> uniqueMaterialIDToIndex;
 	materials.resize(0);
+	std::unordered_set<std::string> uniqueTexturePaths;
+	textures.resize(0);
 
 	//默认材质
-	shaderio::GltfMetallicRoughness defaultMaterial = {
-		.baseColorFactor = glm::vec4(1.0f),
-		.metallicFactor = 0.1f,
-		.roughnessFactor = 0.8f,
-		.baseColorTextureIndex = -1
+	shaderio::BSDFMaterial defaultMaterial = {
+		.albedo = glm::vec4(1.0f),
+		.emissive = glm::vec3(0.0f),
+		.eta = glm::vec3(1.0f / 1.5f),		//ext_ior(air) / int_ior(glass)
+		.roughness = 0.1f,
+		.materialMapIndex = { -1, -1, -1 },
 	};
 	materials.push_back(defaultMaterial);
-	uniqueMaterials.insert({ "defaultMaterial", 0 });
+	uniqueMaterialIDToIndex.insert({ "defaultMaterial" , 0});
 
 	pugi::xml_node bsdfsNode = sceneInfoNode.child("bsdfs");
 	for (pugi::xml_node bsdfNode : bsdfsNode.children("bsdf")) {
 		std::string materialID = bsdfNode.attribute("id").value();
-		if (uniqueMaterials.count(materialID)) {
+		if (uniqueMaterialIDToIndex.count(materialID)) {
 			printf("重复material读取: %s\n", materialID);
 			continue;
 		}
-		shaderio::GltfMetallicRoughness material = defaultMaterial;
-		if (pugi::xml_node baseColorNode = bsdfNode.child("baseColorFactor"))
-			material.baseColorFactor = FzbRenderer::getRGBAFromString(baseColorNode.attribute("value").value());
+		std::string materialType = bsdfNode.attribute("type").value();
+		if(materialType != "diffuse") continue;
+		shaderio::BSDFMaterial material = defaultMaterial;
+		material.type = shaderio::Diffuse;	//diffuse
+		if (pugi::xml_node albedoNode = bsdfNode.child("albedo"))
+			material.albedo = FzbRenderer::getRGBAFromString(albedoNode.attribute("value").value());
+		if (pugi::xml_node emissiveNode = bsdfNode.child("emissive"))
+			material.emissive = FzbRenderer::getRGBFromString(emissiveNode.attribute("value").value());
 
-		if (pugi::xml_node metallicNode = bsdfNode.child("metallicFactor"))
-			material.metallicFactor = std::stof(metallicNode.attribute("value").value());
+		for(pugi::xml_node mapNode : bsdfNode.children("texture")) {
+			std::string mapType = mapNode.attribute("type").value();
+			//这里可以用一个enum
+			std::string texturePathStr = mapNode.attribute("value").value();
+			if (uniqueTexturePaths.count(texturePathStr) == 0) continue;
 
-		if (pugi::xml_node roughnessNode = bsdfNode.child("roughnessFactor"))
-			material.roughnessFactor = std::stof(roughnessNode.attribute("value").value());
+			std::filesystem::path texturePath = scenePath / "textures" / texturePathStr;
+			int textureIndex = textures.size();
+			loadTexture(texturePath);
+			uniqueTexturePaths.insert(texturePathStr);
 
-		if (pugi::xml_node textureIndexNode = bsdfNode.child("baseColorTextureIndex"))
-			material.baseColorTextureIndex = std::stoi(textureIndexNode.attribute("value").value());
-
-		uniqueMaterials.insert({ materialID, materials.size()});
+			if (mapType == "albedo") material.materialMapIndex.x = textureIndex;
+			else if (mapType == "normal") material.materialMapIndex.y = textureIndex;
+			else if (mapType == "bsdfPara") material.materialMapIndex.z = textureIndex;
+		}
+		uniqueMaterialIDToIndex.insert({ materialID, materials.size() });
 		materials.push_back(material);
 	}
 	//------------------------------------------------光源---------------------------------------------------------------
 	if (pugi::xml_node lightsNode = sceneInfoNode.child("lights")) {
 		sceneInfo.useSky = false;
+		if (pugi::xml_node useSkyNode = lightsNode.child("useSky"))
+			sceneInfo.useSky = std::string(useSkyNode.attribute("value").value()) == "true";
 		sceneInfo.backgroundColor = glm::vec3(0.85f);
 		if (pugi::xml_node backgroudColorNode = lightsNode.child("backgroundColor"))
 			sceneInfo.backgroundColor = FzbRenderer::getRGBFromString(backgroudColorNode.attribute("value").value());
@@ -276,8 +301,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 		meshIDToIndex.insert({ meshID, meshes.size() });
 
 		if (meshType == "gltf") {
-			std::filesystem::path meshPath = FzbRenderer::getProjectRootDir() / "resources";
-			meshPath = meshPath / (meshNode.child("filename").attribute("value").value());
+			std::filesystem::path meshPath = scenePath / meshNode.child("filename").attribute("value").value();
 			tinygltf::Model gltfModel = nvsamples::loadGltfResources(nvutils::findFile(meshPath, { meshPath }));
 			loadGltfData(gltfModel);
 		}
@@ -292,8 +316,8 @@ void FzbRenderer::Scene::createSceneFromXML() {
 
 		std::string materialID = "defaultMaterial";
 		if (pugi::xml_node materialNode = instanceNode.child("materialRef")) materialID = materialNode.attribute("id").value();
-		if (!uniqueMaterials.count(materialID)) materialID = "defaultMaterial";
-		instance.materialIndex = uniqueMaterials[materialID];
+		if (!uniqueMaterialIDToIndex.count(materialID)) materialID = "defaultMaterial";
+		instance.materialIndex = uniqueMaterialIDToIndex[materialID];
 
 		glm::mat4 transformMatrix(1.0f);
 		if (pugi::xml_node transformNode = instanceNode.select_node("transform").node()) {
@@ -358,15 +382,15 @@ void FzbRenderer::Scene::createSceneInfBuffer() {
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(bMaterials.buffer);
 	NVVK_CHECK(stagingUploader.appendBuffer(bMaterials, 0,
-		std::span<const shaderio::GltfMetallicRoughness>(materials)));
+		std::span<const shaderio::BSDFMaterial>(materials)));
 
 	// Create the scene info buffer
 	NVVK_CHECK(allocator->createBuffer(bSceneInfo,
-		std::span<const shaderio::GltfSceneInfo>(&sceneInfo, 1).size_bytes(),
+		std::span<const shaderio::SceneInfo>(&sceneInfo, 1).size_bytes(),
 		VK_BUFFER_USAGE_2_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT));
 	NVVK_DBG_NAME(bSceneInfo.buffer);
 	NVVK_CHECK(stagingUploader.appendBuffer(bSceneInfo, 0,
-		std::span<const shaderio::GltfSceneInfo>(&sceneInfo, 1)));
+		std::span<const shaderio::SceneInfo>(&sceneInfo, 1)));
 }
 
 void FzbRenderer::Scene::clean() {

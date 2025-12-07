@@ -1,7 +1,7 @@
 #include "./DeferredRenderer.h"
 #include <common/Application/Application.h>
 #include <nvvk/formats.hpp>
-#include "common/Shader/shaderio.h"
+#include "common/Shader/nvvk/shaderio.h"
 #include "./shaders/spv/deferredShaders.h"
 #include <nvgui/sky.hpp>
 #include <nvvk/default_structs.hpp>

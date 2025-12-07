@@ -1,478 +1,239 @@
-#include "shaderio.h"
 #include "nvshaders/constants.h.slang"
-#include "Slang/pbr.h.slang"
-#include "nvshaders/sky_functions.h.slang"
 #include "nvshaders/random.h.slang"
+#include "nvshaders/sky_functions.h.slang"
+#include "nvvk/Slang/pbr.h.slang"
+#include "nvvk/shaderio.h"
+#include "shaderStructType.h"
 
-[[vk::push_constant]] ConstantBuffer<TutoPushConstant> pushConst;
-[[vk::binding(BindingPoints::eTextures, 0)]] Sampler2D textures[];
-[[vk::binding(BindingPoints::eTlas, 1)]] RaytracingAccelerationStructure topLevelAS;
-[[vk::binding(BindingPoints::eOutImage, 1)]] RWTexture2D<float4> outImage;
-[vk::shader_record] ConstantBuffer<float3> shaderRec;
+// clang-format off
+[[vk::push_constant]]                           ConstantBuffer<PushConstant> pushConst;
+[[vk::binding(BindingPoints::eTextures, 0)]]    Sampler2D textures[];
+[[vk::binding(BindingPoints::eTlas, 1)]]        RaytracingAccelerationStructure topLevelAS;
+[[vk::binding(BindingPoints::eOutImage, 1)]]    RWTexture2D<float4> outImage;
+// clang-format on
 
 #define MISS_DEPTH 1000
-//迭代比递归好
-//1. 递归会受到rtPipeline的maxPipelineRayRecursionDepth的限制；而迭代不会
-//2. 迭代所需的空间恒定，而递归需要保存之前的数据
-//#define REFLECTION_RECURSIVE
-#define REFLECTION_ITERATIVE
 
-struct HitPayload{
-	float3 color;
-	float weight;
-	int depth;		//这个不是光线的hitDepth，而是boucne的深度
+// Raytracing Payload
+struct HitPayload {
+    uint randomSeed;
 
-	float3 rayOrigin;
-	float3 rayDirection;
+    float3 radiance;
+    float3 bsdf_cosine; // 累积的bsdf
+    float pdf;          // 累积的pdf
+
+    float3 rayOrigin;
+    float3 rayDirection;
+
+    uint bounceDepth;
+    uint meshIndex;
+};
+struct HitState {
+    float3 pos;
+    float3 normal;
+    float3x3 TBN;
+};
+struct CallablePayload {
+    BSDFMaterial material;
+    float3x3 TBN;
+    uint randomSeed;
+
+    float3 radiance;
+    float3 bsdf; // 新采样向量后的bsdf
+    float pdf;   // 新采样向量的pdf
+
+    float3 hitPos = float3(0.0f);
+    float3 hitNormal = float3(0.0f);
+
+    float3 outgoing;  // 出射方向
+    float3 incidence; // 采样方向
 };
 
-struct HitState{
-	float3 pos;
-	float3 normal;
-	float3 geoNormal;
-}
-
-struct ShadowPayload{
-	int depth;
-};
-
-[shader("raygeneration")]
-void raygenMain(){
-	float2 launchID = (float2)DispatchRaysIndex().xy;
-	float2 launchSize = (float2)DispatchRaysDimensions().xy;
-
-	GltfSceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
-
-	uint seed = xxhash32(uint3(uint2(launchID.xy), pushConst.frameIndex));
-	float r1 = rand(seed);
-	float r2 = rand(seed);
-	float2 subpixel_jitter = pushConst.frameIndex == 0 ? float2(0.5f) : float2(r1, r2);
-
-	const uint rayFlags = 0;
-	const float2 pixelCenter = launchID + subpixel_jitter;
-	const float2 clipCoords = pixelCenter / launchSize * 2.0f - 1.0f;
-	const float4 viewCoords = mul(float4(clipCoords, 1.0f, 1.0f), sceneInfo.projInvMatrix);	//这里不除以w的原因是归一化后没有影响
-
-	RayDesc ray;
-	ray.Origin = mul(float4(0.0f, 0.0f, 0.0f, 1.0f), sceneInfo.viewInvMatrix).xyz;
-	ray.Direction = mul(float4(normalize(viewCoords.xyz), 0.0f), sceneInfo.viewInvMatrix).xyz;
-	ray.TMin = 0.001f;
-	ray.TMax = INFINITE;
-
-	HitPayload payload;
-	payload.color = float3(0.0f);
-	payload.weight = 1.0f;
-	payload.depth = 0;
-	#ifdef REFLECTION_ITERATIVE
-		float3 accumulatedColor = float3(0.0f);
-		while(payload.depth < pushConst.maxDepth && payload.weight > 0.01f){
-			float prevWeight = payload.weight;
-			TraceRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, payload);
-			accumulatedColor += payload.color * prevWeight;
-
-			ray.Origin = payload.rayOrigin;
-			ray.Direction = payload.rayDirection;
-		}
-
-		float3 color = accumulatedColor;
-	#else
-		TraceRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, payload);
-		float3 color = payload.color;
-	#endif
-
-		if(pushConst.frameIndex > 0){
-			float a = 1.0f / float(pushConst.frameIndex + 1);
-			float3 old_color = outImage[int2(launchID)].xyz;
-			outImage[int2(launchID)] = float4(lerp(old_color, color, a), 1.0f);
-		}else{
-			outImage[int2(launchID)] = float4(color, 1.0f);
-		}
-}
-
-/*
-_generic<T : IFloat> T getAttribute(uint8_t* dataBufferAddress, BufferView bufferView, uint attributeIndex)
+__generic<T : IFloat> T getAttribute(uint8_t* dataBufferAddress, BufferView bufferView, uint attributeIndex)
 {
-	if(bufferView.count > 0)
-	{
-	  T* ptr = (T*)(dataBufferAddress + bufferView.offset + attributeIndex * bufferView.byteStride);
-	  return ptr[0];
-	}
-	
-	return T(1);  // Error case
+  if(bufferView.count > 0)
+  {
+    T* ptr = (T*)(dataBufferAddress + bufferView.offset + attributeIndex * bufferView.byteStride);
+    return ptr[0];
+  }
+
+  return T(1);  // Error case
 }
 int3 getTriangleIndices(uint8_t* dataBufferAddress, const TriangleMesh mesh, int primitiveID)
 {
-	if(mesh.indices.byteStride == sizeof(int16_t))
-	{
-	  int16_t3* indices = (int16_t3*)(dataBufferAddress + mesh.indices.offset);
-	  return indices[primitiveID];
-	}
-	else if(mesh.indices.byteStride == sizeof(int32_t))
-	{
-	  int3* indices = (int3*)(dataBufferAddress + mesh.indices.offset);
-	  return indices[primitiveID];
-	}
-	
-	return int3(-1);  // Error case
+  if(mesh.indices.byteStride == sizeof(int16_t))
+  {
+    int16_t3* indices = (int16_t3*)(dataBufferAddress + mesh.indices.offset);
+    return indices[primitiveID];
+  }
+  else if(mesh.indices.byteStride == sizeof(int32_t))
+  {
+    int3* indices = (int3*)(dataBufferAddress + mesh.indices.offset);
+    return indices[primitiveID];
+  }
+
+  return int3(-1);  // Error case
 }
 __generic<T : IFloat> T getTriangleAttribute(uint8_t* dataBufferAddress, BufferView bufferView, uint3 attributeIndex, float3 barycentrics)
 {
-	T attr0 = getAttribute<T>(dataBufferAddress, bufferView, attributeIndex.x);
-	T attr1 = getAttribute<T>(dataBufferAddress, bufferView, attributeIndex.y);
-	T attr2 = getAttribute<T>(dataBufferAddress, bufferView, attributeIndex.z);
-	return T(barycentrics.x) * attr0 + T(barycentrics.y) * attr1 + T(barycentrics.z) * attr2;
+  T attr0 = getAttribute<T>(dataBufferAddress, bufferView, attributeIndex.x);
+  T attr1 = getAttribute<T>(dataBufferAddress, bufferView, attributeIndex.y);
+  T attr2 = getAttribute<T>(dataBufferAddress, bufferView, attributeIndex.z);
+  return T(barycentrics.x) * attr0 + T(barycentrics.y) * attr1 + T(barycentrics.z) * attr2;
 }
-*/
-HitState getHitStateWithPositionFetch(float3 barycentrics){
-	HitState hit;
-	const float3 pos0 = HitTriangleVertexPosition(0);
-	const float3 pos1 = HitTriangleVertexPosition(1);
-	const float3 pos2 = HitTriangleVertexPosition(2);
+HitState getHitStateWithPositionFetch(const float3 barycentrics) {
+    HitState hitState;
 
-	const float3 localPosition = pos0 * barycentrics.x + pos1 * barycentrics.y + pos2 * barycentrics.z;
+    const float3 pos0 = HitTriangleVertexPosition(0);
+    const float3 pos1 = HitTriangleVertexPosition(1);
+    const float3 pos2 = HitTriangleVertexPosition(2);
+    const float3 localPosition = pos0 * barycentrics.x + pos1 * barycentrics.y + pos2 * barycentrics.z;
+    hitState.pos = float3(mul(float4(localPosition, 1.0), ObjectToWorld4x3()));
 
-	hit.pos = float3(mul(float4(localPosition, 1.0f), ObjectToWorld4x3()));
-	const float3 edge1 = pos1 - pos0;
-	const float3 edge2 = pos2 - pos0;
-	const float3 geoNormal = normalize(cross(edge1, edge2));
+    const float3 edge1 = pos1 - pos0;
+    const float3 edge2 = pos2 - pos0;
+    const float3 geoNormal = normalize(cross(edge1, edge2));
 
-	float3 worldGeoNormal = normalize(mul(WorldToObject4x3(), geoNormal).xyz);
-	hit.geoNormal = worldGeoNormal;
-	hit.normal = worldGeoNormal;
+    hitState.normal = normalize(mul(WorldToObject4x3(), geoNormal).xyz);
+    float3 tangent = normalize(edge1);
+    float3 bitangent = cross(hitState.normal, tangent);
+    tangent = cross(bitangent, hitState.normal);
+    hitState.TBN = float3x3(tangent, bitangent, hitState.normal);
 
-	return hit;
-}
-float testShadow(float3 worldPos, float3 worldNormal, float3 lightDirection, GltfPunctual light){
-	RayDesc shadowRay;
-	shadowRay.Origin    = worldPos + worldNormal * 0.001;  // Offset to avoid self-intersection
-	shadowRay.Direction = normalize(lightDirection);
-	shadowRay.TMin      = 0.001;
-	shadowRay.TMax      = light.type == GltfLightType::eDirectional ? INFINITE : length(lightDirection);
-  
-	ShadowPayload shadowPayload;
-	shadowPayload.depth = 0;
-
-	TraceRay(topLevelAS, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, 0xff, 0, 0, 1,
-           shadowRay, shadowPayload);
-	 return shadowPayload.depth != MISS_DEPTH ? 0.0 : 1.0;
-}
-GltfPunctual processLight(GltfSceneInfo sceneInfo, float3 worldPos){
-	GltfPunctual light = sceneInfo.punctualLights[0];
-
-	if(sceneInfo.useSky == 1)
-	{
-		light.direction = sceneInfo.skySimpleParam.sunDirection;
-		light.color     = sceneInfo.skySimpleParam.sunColor;
-		light.intensity = sceneInfo.skySimpleParam.sunIntensity;
-		light.type      = GltfLightType::eDirectional;
-	}
-
-	if(light.type == GltfLightType::ePoint)
-	{
-		light.direction = light.position - worldPos;
-		float d         = length(light.direction);
-		light.intensity /= (d * d);  // Inverse square law
-	}
-	else if(light.type == GltfLightType::eSpot){
-		float3 lightDir = light.position - worldPos;
-		float  d        = length(lightDir);
-		light.intensity /= (d * d);  // Distance attenuation
-
-		float theta         = dot(normalize(lightDir), normalize(light.direction));
-		float spotIntensity = clamp((theta - cos(light.coneAngle)) / (1.0 - cos(light.coneAngle)), 0.0, 1.0);
-		light.intensity *= spotIntensity;
-		light.direction = lightDir;
-	}
-
-	return light;
-}
-[shader("closesthit")]
-void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionAttributes attr){
-	//这里好奇怪，既然得到了重心坐标，那么不就知道了三角形的信息吗，为什么还要我再去访存呢？
-	float3 barycentrics = float3(1 - attr.barycentrics.x - attr.barycentrics.y, attr.barycentrics.x, attr.barycentrics.y);
-
-	uint instanceID = InstanceIndex();
-    uint meshID = InstanceID();		//instanceCustomIndex
-    uint triID = PrimitiveIndex();
-
-    GltfSceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
-    GltfInstance instance = sceneInfo.instances[instanceID];
-    //GltfMesh mesh = sceneInfo.meshes[instance.meshIndex];
-    GltfMetallicRoughness material = sceneInfo.materials[instance.materialIndex];
-
-    //int3 indices = getTriangleIndices(mesh.gltfBuffer, mesh.triMesh, triID);
-    //float3 pos = getTriangleAttribute<float3>(mesh.gltfBuffer, mesh.triMesh.positions, indices, barycentrics);
-    //float3 normal = getTriangleAttribute<float3>(mesh.gltfBuffer, mesh.triMesh.normals, indices, barycentrics);
-    //float3 worldPos = float3(mul(float4(pos, 1.0), ObjectToWorld4x3()));
-    //float3 worldNormal = normalize(mul(WorldToObject4x3(), normal).xyz);
-	//float2 worldTexCoord = getTriangleAttribute<float2>(mesh.gltfBuffer, mesh.triMesh.texCoords, indices, barycentrics);
-	HitState hitState = getHitStateWithPositionFetch(barycentrics);
-
-    float3 albedo = material.baseColorFactor.xyz;
-	//if(material.baseColorTextureIndex > 0) albedo *= textures[material.baseColorTextureIndex].SampleLevel(worldTexCoord, 0).xyz;
-    float metallic = material.metallicFactor;
-	if(pushConst.metallicRoughnessOverride.x >= 0.0f) metallic = pushConst.metallicRoughnessOverride.x;
-    float roughness = material.roughnessFactor;
-	if(pushConst.metallicRoughnessOverride.y >= 0.0f) roughness = pushConst.metallicRoughnessOverride.y;
-
-	GltfPunctual light = processLight(sceneInfo, hitState.pos);
-
-    float3 N = normalize(hitState.normal);
-    float3 V = -WorldRayDirection();
-    float3 L = normalize(light.direction);
-
-	float shadowFactor = testShadow(hitState.pos, N, light.direction, light);
-
-    float3 color = pbrMetallicRoughness(albedo, metallic, roughness, N, V, L);
-    color *= light.color * light.intensity * shadowFactor;
-
-	float3 ambient = sceneInfo.backgroundColor;
-	if(sceneInfo.useSky == 1){
-		float3 skyUpDir = float3(0.0f, 1.0f, 0.0f);
-		float3 groundColor = sceneInfo.skySimpleParam.groundColor;
-		float3 skyColor = sceneInfo.skySimpleParam.skyColor;
-		float3 ambient = lerp(groundColor, skyColor, dot(N, skyUpDir) * 0.5f + 0.5f);
-	}
-	color += ambient * albedo * 0.025f;
-
-	#ifdef REFLECTION_RECURSIVE
-		if(payload.depth < pushConst.maxDepth && metallic > 0.01f){
-			float3 reflectionDir = reflect(-V, N);
-
-			RayDesc reflectionRay;
-			reflectionRay.Origin = hitState.pos + N * 0.001f;
-			reflectionRay.Direction = reflectionDir;
-			reflectionRay.TMin = 0.001f;
-			reflectionRay.TMax = INFINITE;
-
-			HitPayload reflectionPayload;
-			reflectionPayload.color = float(0.0f);
-			relfectionPayload.weight = payload.weight * metallic;	//这里直接将金属制当作菲涅尔项用了
-			reflectionPayload.depth = payload.detph + 1;
-
-			TraceRay(topLevelAS, 0, 0xff, 0, 0, 0, reflectionRay, reflectionPayload);
-
-			reflectionColor = reflectionPayload.color * metallic;
-		}
-		color += reflectionColor;
-	#else
-		payload.rayOrigin = hitState.pos;
-		payload.rayDirection = reflect(-V, N);
-		payload.weight *= metallic;
-		payload.depth++;
-	#endif
-    
-    if(pushConst.transparencyMode == 2) payload.color += color * payload.weight;
-	else payload.color = color;
-}
-/*
-float hitSphere(Sphere sphere, float3 rayOrigin, float3 rayDirection){
-	float3 oc           = rayOrigin - sphere.center;
-	float  a            = dot(rayDirection, rayDirection);
-	float  b            = 2.0 * dot(oc, rayDirection);
-	float  c            = dot(oc, oc) - sphere.radius * sphere.radius;
-	float  discriminant = b * b - 4 * a * c;
-	if(discriminant < 0)
-	{
-	  return -1.0;
-	}
-	else
-	{
-	  return (-b - sqrt(discriminant)) / (2.0 * a);
-	}
-}
-float hitAABB(AABB aabb, float3 rayOrigin, float3 rayDirection){
-	float3 invDir = 1.0 / rayDirection;
-	float3 tbot   = invDir * (aabb.minimum - rayOrigin);
-	float3 ttop   = invDir * (aabb.maximum - rayOrigin);
-	float3 tmin   = min(ttop, tbot);
-	float3 tmax   = max(ttop, tbot);
-	float  t0     = max(tmin.x, max(tmin.y, tmin.z));
-	float  t1     = min(tmax.x, min(tmax.y, tmax.z));
-	return t1 > max(t0, 0.0) ? t0 : -1.0;
-}
-[shader("intersection")]
-void rayIntersectionMain(){
-	float3 rayOrigin = WorldRayOrigin();
-	float3 rayDirection = WorldRayDirection();
-
-	Sphere sphere = allSphere(PrimitiveIndex());
-	flaot tHit = -1;
-	int hitKind = PrimitiveIndex() % 2 == 0 ? ImplicitObjectKind::eSphere : ImplicitObjectKind::eCube;
-
-	if(hitKind == ImplicitObjectKind::eSphere){
-		tHit = hitSphere(sphere, rayOrigin, rayDirection);
-	}else{
-		AABB aabb;
-		aabb.minimum = sphere.center - float3(sphere.radius);
-		aabb.maximum = sphere.center + flaot3(sphere.radius);
-		tHit = hitAABB(aabb, rayOrigin, rayDirection);
-	}
-
-	if(tHit > 0){
-		BuiltInTriangleIntersectionAttributes attr;
-		attr.barycentrics = float2(0.0f);
-		ReportHit(tHit, hitKind, attr);
-	}
+    return hitState;
 }
 
-float3 calculateLighting(float3 worldPos, float3 worldNormal, float3 albedo, float metallic, float roughness, GltfSceneInfo* sceneInfo)
+[shader("raygeneration")]
+void raygenMain()
 {
-	GltfPunctual light = sceneInfo.punctualLights[0];  // Assuming we only use the first light for simplicity
-	
-	if(sceneInfo.useSky == 1)
-	{
-	  light.direction = sceneInfo.skySimpleParam.sunDirection;
-	  light.color     = sceneInfo.skySimpleParam.sunColor;
-	  light.intensity = sceneInfo.skySimpleParam.sunIntensity;
-	  light.type      = GltfLightType::eDirectional;
-	}
-	
-	if(light.type == GltfLightType::ePoint)
-	{
-	  light.direction = light.position - worldPos;
-	  float d         = length(light.direction);
-	  light.intensity /= (d * d);
-	}
-	else if(light.type == GltfLightType::eSpot)
-	{
-	  // For spot lights, we need to calculate the direction and apply attenuation
-	  float3 lightDir = light.position - worldPos;
-	  float  d        = length(lightDir);
-	  light.intensity /= (d * d);
-	  // Cone attenuation can be applied here if needed
-	  float theta         = (dot(normalize(lightDir), normalize(light.direction)));
-	  float spotIntensity = clamp((theta - cos(light.coneAngle)) / (1.0 - cos(light.coneAngle)), 0.0, 1.0);
-	  light.intensity *= spotIntensity;
-	  light.direction = lightDir;
-	}
-	
-	float3 V = -WorldRayDirection();
-	float3 N = normalize(worldNormal);
-	float3 L = normalize(light.direction);
-	
-	// Test for shadows
-	float shadowFactor = testShadow(worldPos, N, light.direction, light);
-	
-	// Calculate PBR lighting with sun's color and intensity
-	float3 color = pbrMetallicRoughness(albedo, metallic, roughness, N, V, L);
-	// Apply light color and intensity, but only if not in shadow
-	color *= light.color * light.intensity * shadowFactor;
-	
-	// Apply ambient
-	float3 ambient = sceneInfo.backgroundColor;
-	if(sceneInfo.useSky == 1)
-	{
-	  // Add ambient lighting (sky effect)
-	  float3 skyUpDir    = float3(0, 1, 0);
-	  float3 groundColor = sceneInfo.skySimpleParam.groundColor;
-	  float3 skyColor    = sceneInfo.skySimpleParam.skyColor;
-	  float3 ambient     = lerp(groundColor, skyColor, dot(N, skyUpDir) * 0.5 + 0.5);
-	}
-	// Add ambient to final color
-	color += ambient * albedo * 0.025;
-	
-	return color;
+    float2 launchID   = (float2)DispatchRaysIndex().xy;
+    float2 launchSize = (float2)DispatchRaysDimensions().xy;
+
+    SceneInfo* sceneInfo = pushConst.sceneInfoAddress;
+
+    uint seed = xxhash32(uint3(uint2(launchID.xy), pushConst.frameIndex));
+    float r1 = rand(seed);
+    float r2 = rand(seed);
+    float2 subpixel_jitter = pushConst.frameIndex == 0 ? float2(0.5f, 0.5f) : float2(r1, r2);
+
+    const uint rayFlags = RAY_FLAG_CULL_BACK_FACING_TRIANGLES;
+    const float2 pixelCenter = launchID + subpixel_jitter;
+    const float2 clipCoords = launchID / launchSize * 2.0 - 1.0;
+    const float4 viewCoords = mul(float4(clipCoords, 1.0, 1.0), sceneInfo.projInvMatrix);
+
+    RayDesc ray;
+    ray.Origin = mul(float4(0.0, 0.0, 0.0, 1.0), sceneInfo.viewInvMatrix).xyz;
+    ray.Direction = mul(float4(normalize(viewCoords.xyz), 0.0), sceneInfo.viewInvMatrix).xyz;
+    ray.TMin = 0.001;
+    ray.TMax = INFINITE;
+
+    // Initial state
+    HitPayload payload;
+    payload.randomSeed = seed;
+    payload.radiance  = float3(0, 0, 0);
+    payload.bsdf_cosine = float3(1.0f);
+    payload.pdf = 1.0f;
+    payload.bounceDepth = 0;
+    payload.rayOrigin = ray.Origin;
+    payload.rayDirection = ray.Direction;
+
+    float3 accumulatedRadiance = float3(0, 0, 0);
+
+    // Iterative reflection loop
+    while (payload.bounceDepth < pushConst.maxDepth && (payload.bsdf_cosine.x + payload.bsdf_cosine.y + payload.bsdf_cosine.z > 0.0f))
+    {
+        TraceRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, payload);
+        accumulatedRadiance += payload.radiance;
+
+        ray.Origin = payload.rayOrigin;
+        ray.Direction = payload.rayDirection;
+    }
+
+    float3 color = accumulatedRadiance;
+
+    if (pushConst.frameIndex > 0)
+    {
+        float a = 1.0f / float(pushConst.frameIndex + 1);
+        float3 old_color = outImage[int2(launchID)].xyz;
+        outImage[int2(launchID)] = float4(lerp(old_color, accumulatedRadiance, a), 1.f);
+    }
+    else outImage[int2(launchID)] = float4(accumulatedRadiance, 1.f);
 }
+
 [shader("closesthit")]
-void rayClosestHitMain2(inout HitPayload payload, in BuiltInTriangleIntersectionAttributes attr){
-	payload.depth++;
-	
-	uint instanceID  = InstanceIndex();
-	uint primitiveID = PrimitiveIndex();
-	int  hitKind     = HitKind();
+void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionAttributes attr)
+{
+    float3 barycentrics = float3(1 - attr.barycentrics.x - attr.barycentrics.y, attr.barycentrics.x, attr.barycentrics.y);
+    uint   instanceID   = InstanceIndex();
+    uint   meshID       = InstanceID();
+    uint   triID        = PrimitiveIndex();
 
-	GltfSceneInfo* sceneInfo = pushConst.sceneInfoAddress;
-	Sphere sphere = allSpheres[primitiveID];
-	float3 worldPos = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
-	float3 normal = normalize(worldPos - sphere.center);
+    SceneInfo         sceneInfo = pushConst.sceneInfoAddress[0];
+    GltfInstance          instance  = sceneInfo.instances[instanceID];
+    GltfMesh              mesh      = sceneInfo.meshes[instance.meshIndex];
+    BSDFMaterial material  = sceneInfo.materials[instance.materialIndex];
 
-	if(hitKind == ImplicitObjectKind::eCube){
-		float3 absN = abs(normal);
-		float maxC = max(max(absN.x, absN.y), absN.z);
-		normal = (maxC == absN.x) ? float3(sign(normal.x), 0, 0) :
-                 (maxC == absN.y) ? float3(0, sign(normal.y), 0) :
-                                    float3(0, 0, sign(normal.z));
-	}
+    HitState hitState = getHitStateWithPositionFetch(barycentrics);
 
-	GltfMatallicRoughness material;
-	material.baseColorFactor = (primitiveID % 2 == 0) ? float4(0.0f, 1.0f, 1.0f, 1.0f) : float4(1.0f, 1.0f, 0.0f, 1.0f);
-	material.metallicFactor = 0.5f;
-	material.roughnessFactor = 0.5f;
+    CallablePayload callablePayload;
+    callablePayload.material = material;
+    callablePayload.TBN = hitState.TBN;
+    callablePayload.randomSeed = payload.randomSeed;
+    callablePayload.radiance = float3(0.0f);
+    callablePayload.bsdf = float3(0.0f);
+    callablePayload.pdf = 0.0f;
+    callablePayload.hitPos = hitState.pos;
+    callablePayload.hitNormal = hitState.normal;
+    callablePayload.outgoing = -payload.rayDirection;
+    CallShader<CallablePayload>(uint(material.type), callablePayload);
+    
+    payload.randomSeed = callablePayload.randomSeed;
+    payload.radiance += (callablePayload.radiance + material.emissive) * payload.bsdf_cosine / payload.pdf;
+    payload.rayDirection = callablePayload.incidence;
+    payload.rayOrigin = hitState.pos + 0.001f * payload.rayDirection;
+    payload.bsdf_cosine *= callablePayload.bsdf * dot(hitState.normal, payload.rayDirection);
+    payload.pdf *= callablePayload.pdf;
 
-	float3 albedo = material.baseColorFactor.xyz;
-
-	float metallic = material.metallicFactor;
-	float roughness = material.roughnessFactor;
-	if(pushConst.metallicRoughnessOverride.x >= 0.0)
-		metallic = pushConst.metallicRoughnessOverride.x;
-	if(pushConst.metallicRoughnessOverride.y >= 0.0)
-		roughness = pushConst.metallicRoughnessOverride.y;
-
-	payload.color = calculateLighting(worldPos, normal, albedo, metallic, roughness, sceneInfo);
+    payload.bounceDepth++;
 }
-[shader("closesthit")]
-void rayClosestHitMain3(inout HitPayload payload, in BuiltInTriangleIntersectionAttributes attr){
-	payload.depth++;
-	payload.color = float3(0.6f, 0.8f, 1.0f);
-}
-*/
+
 [shader("miss")]
-void rayMissMain(inout HitPayload payload){
-	GltfSceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
-
-	if(sceneInfo.useSky == 1)
+void rayMissMain(inout HitPayload payload)
+{
+    SceneInfo *sceneInfo = pushConst.sceneInfoAddress;
+    if (sceneInfo.useSky == 1)
     {
         float3 skyColor = evalSimpleSky(sceneInfo.skySimpleParam, WorldRayDirection());
-        payload.color += skyColor * payload.weight;
-    }else payload.color += sceneInfo.backgroundColor * payload.weight;
+        payload.radiance += skyColor * payload.bsdf_cosine / payload.pdf;
+    }
+    else payload.radiance += sceneInfo.backgroundColor * payload.bsdf_cosine / payload.pdf;
 
-	payload.depth = MISS_DEPTH;
+    payload.bounceDepth = MISS_DEPTH; // Stop
 }
 
-[shader("miss")]
-void rayMissShadowMain(inout ShadowPayload payload){
-	payload.depth = MISS_DEPTH;
-}
-
+//-------------------------------------------------callableShader--------------------------------------------------
 /*
-只有primitive的flag不是VK_GEOMETRY_OPAQUE_BIT_KHR，即是透明的，才能出发anyhitShader
+callableShader会进行如下操作
+1. 计算BSDF
+2. 计算pdf
+3. 计算下一次采样方向
+4. NEE(如果需要)
 */
-[shader("anyhit")]
-void rayAnyHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionAttributes attr){
-	float3 hitPos = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();		//RayTCurrent返回命中点到起点的长度
+[shader("callable")]
+void diffuseMaterialMain(inout CallablePayload payload) {
+    float randomNumber1 = rand(payload.randomSeed);
+    float randomNumber2 = rand(payload.randomSeed);
+    float cosTheta = sqrt(randomNumber1);
+    float sinTheta = sqrt(1.0f - randomNumber1);
+    float phi = M_TWO_PI * randomNumber2;
+    payload.incidence.x = sinTheta * cos(phi);
+    payload.incidence.y = sinTheta * sin(phi);
+    payload.incidence.z = cosTheta;
+    float3 localDirection = payload.incidence;
+    payload.incidence = mul(payload.incidence, payload.TBN);
+    payload.incidence = normalize(payload.incidence);
 
-	uint instanceID = InstanceIndex();
-	GltfSceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
-	GltfInstance instance = sceneInfo.instances[instanceID];
-	GltfMetallicRoughness material = sceneInfo.materials[instance.materialIndex];
-
-	float opacity = material.baseColorFactor.a == 1 ? 1 : material.baseColorFactor.a * pushConst.opacity;
-
-	if(pushConst.transparencyMode == 0){
-		float3 uv = hitPos * 10.1f;
-		if((frac(uv.x) >= 0.5f != frac(uv.y) >= 0.5f) && hitPos.y > 0.01f) return;
-
-		if(length(hitPos) > pushConst.radius){
-			IgnoreHit();
-			return;
-		}
-	}
-	else if(pushConst.transparencyMode == 1){
-		if(opacity == 1) return;
-
-		float2 launchID = (float2)DispatchRaysIndex().xy;
-		uint3 seedInput = uint3(uint2(launchID.xy), pushConst.frameIndex);
-		uint seed = xxhash32(seedInput);
-		float randValue = rand(seed);
-		if(randValue > opacity) IgnoreHit();
-	}
-	else if(pushConst.transparencyMode == 2){
-		if(opacity < 1.0f){
-			float3 tintColor = material.baseColorFactor.rgb;
-			payload.color += tintColor * payload.weight * opacity;
-			payload.weight *= (1.0f - opacity);
-			IgnoreHit();
-		}
-	}
+    float cosine = dot(payload.incidence, payload.hitNormal);
+    payload.pdf = M_1_PI * cosine;
+    payload.bsdf = payload.material.albedo * M_1_PI;
 }

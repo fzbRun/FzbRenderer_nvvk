@@ -6,10 +6,10 @@
 
 #include "renderer/Renderer.h"
 #include <glm/ext/vector_float2.hpp>
-#include "common/Shader/shaderio.h"
+#include "common/Shader/nvvk/shaderio.h"
 #include <nvvk/acceleration_structures.hpp>
 #include <nvvk/sbt_generator.hpp>
-#include <common/Shader/shaderio.h>
+#include "common/Shader/shaderStructType.h"
 
 #ifndef FZB_PATH_TRACING_RENDERER_H
 #define FZB_PATH_TRACING_RENDERER_H
@@ -75,19 +75,8 @@ private:
 
 	VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProperties{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR };
 
-	shaderio::TutoPushConstant pushValues{};
+	shaderio::PushConstant pushValues{};
 	int maxFrames = 2 << 9;
-
-	std::vector<int> shaderGroupIndices;
-	struct HitRecordBuffer {
-		glm::vec3 color;
-	};
-	std::vector<HitRecordBuffer> hitShaderRecord = {
-		{ .color = glm::vec3(0.8f, 1.0f, 0.6f) },
-		{ .color = glm::vec3(0.6f, 0.8f, 1.0f) }
-	};
-
-
 };
 
 }
