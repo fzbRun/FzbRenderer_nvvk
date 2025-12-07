@@ -19,8 +19,8 @@
 #include <nvgui/camera.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <nvgui/tonemapper.hpp>
-#include "common/Shader/spv/sky_simple.slang.h"
-#include "common/Shader/spv/tonemapper.slang.h"
+#include "common/Shader/nvvk/spv/sky_simple.slang.h"
+#include "common/Shader/nvvk/spv/tonemapper.slang.h"
 #include "common/Shader/Shader.h"
 
 void FzbRenderer::Application::getAppInfoFromXML(nvapp::ApplicationCreateInfo& appInfo, nvvk::ContextInitInfo& vkContextInitInfo) {
@@ -55,12 +55,14 @@ void FzbRenderer::Application::getAppInfoFromXML(nvapp::ApplicationCreateInfo& a
 }
 FzbRenderer::Application::Application(nvapp::ApplicationCreateInfo& appInfo, nvvk::Context& vkContext) {
 	VkPhysicalDeviceShaderObjectFeaturesEXT shaderObjectFeatures{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT };
+	
 	nvvk::ContextInitInfo vkSetup{
 		.instanceExtensions = {VK_EXT_DEBUG_UTILS_EXTENSION_NAME},
 		.deviceExtensions =
 			{
 				{VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME},
 				{VK_EXT_SHADER_OBJECT_EXTENSION_NAME, &shaderObjectFeatures},
+				{VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME}
 			},
 	};
 
@@ -73,6 +75,8 @@ FzbRenderer::Application::Application(nvapp::ApplicationCreateInfo& appInfo, nvv
 #else
 	nvvk::ValidationSettings validationSettings;
 	validationSettings.setPreset(nvvk::ValidationSettings::LayerPresets::eStandard);
+	validationSettings.printf_enable = VK_TRUE;
+	validationSettings.printf_buffer_size = 1048576;
 	vkSetup.instanceCreateInfoExt = validationSettings.buildPNextChain();
 #endif
 
@@ -235,7 +239,7 @@ void FzbRenderer::Application::updateDataPerFrame(VkCommandBuffer cmd) {
 	sceneResource.sceneInfo.cameraPosition = sceneResource.cameraManip->getEye();
 	sceneResource.sceneInfo.instances = (shaderio::GltfInstance*)sceneResource.bInstances.address;
 	sceneResource.sceneInfo.meshes = (shaderio::GltfMesh*)sceneResource.bMeshes.address;
-	sceneResource.sceneInfo.materials = (shaderio::GltfMetallicRoughness*)sceneResource.bMaterials.address;
+	sceneResource.sceneInfo.materials = (shaderio::BSDFMaterial*)sceneResource.bMaterials.address;
 
 	nvvk::cmdBufferMemoryBarrier(cmd, { sceneResource.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
 									   VK_PIPELINE_STAGE_2_TRANSFER_BIT });

@@ -15,7 +15,7 @@ sceneManager主要有三个功能
 
 #include <nvutils/camera_manipulator.hpp>
 #include <common/Scene/gltf_utils.hpp>
-
+#include <common/Shader/shaderStructType.h>
 
 namespace FzbRenderer {
 
@@ -36,8 +36,8 @@ public:
 
 	std::vector<shaderio::GltfMesh> meshes;
 	std::vector<shaderio::GltfInstance> instances;
-	std::vector<shaderio::GltfMetallicRoughness> materials;
-	shaderio::GltfSceneInfo sceneInfo;
+	std::vector<shaderio::BSDFMaterial> materials;
+	shaderio::SceneInfo sceneInfo;
 
 	std::vector<nvvk::Buffer> bGltfDatas;	//每个gltf的二进制数据，包含索引和顶点数据
 	nvvk::Buffer bMeshes;
@@ -48,6 +48,7 @@ public:
 	std::vector<uint32_t> meshToBufferIndex;	//meshToBufferIndex[meshIndex] = bufferIndex
 private:
 	void loadGltfData(const tinygltf::Model& mode, bool importInstance = false);
+	void loadTexture(const std::filesystem::path& texturePath);
 };
 
 }
