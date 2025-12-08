@@ -46,7 +46,7 @@ public:
 	nvvk::Buffer bSceneInfo;
 
 	std::vector<uint32_t> meshToBufferIndex;	//meshToBufferIndex[meshIndex] = bufferIndex
-private:
+
 	void loadGltfData(const tinygltf::Model& mode, bool importInstance = false);
 	void loadTexture(const std::filesystem::path& texturePath);
 };

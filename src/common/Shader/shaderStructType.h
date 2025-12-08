@@ -8,6 +8,13 @@
 #define FZBRENDERER_SHADERSTRUCTTYPE_H
 
 NAMESPACE_SHADERIO_BEGIN()
+//-------------------------------------------------------实例------------------------------------------------------------
+struct Instance {
+	float4x4 transform;      // Transform matrix for the instance (local to world)
+	uint32_t materialIndex;  // Material properties for the instance
+	uint32_t meshIndex;      // Index of the mesh in the GltfMesh vector
+};
+
 //-------------------------------------------------------材质------------------------------------------------------------
 enum MaterialType {
 	Diffuse = 0,
@@ -25,12 +32,6 @@ struct BSDFMaterial {
 	float roughness;
 
 	int3 materialMapIndex; // 0:albedo, 2:normal, 3:bsdfPara
-};
-//-------------------------------------------------------实例------------------------------------------------------------
-struct Instance {
-	float4x4 transform;      // Transform matrix for the instance (local to world)
-	uint32_t materialIndex;  // Material properties for the instance
-	uint32_t meshIndex;      // Index of the mesh in the GltfMesh vector
 };
 //-------------------------------------------------------场景信息------------------------------------------------------------
 struct SceneInfo
