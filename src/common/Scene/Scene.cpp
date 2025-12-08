@@ -7,6 +7,7 @@
 #include <nvgui/sky.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <unordered_set>
+#include <common/Material/Material.h>
 
 void FzbRenderer::Scene::loadGltfData(const tinygltf::Model& model, bool importInstance) {
 	SCOPED_TIMER(__FUNCTION__);
@@ -197,13 +198,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 	textures.resize(0);
 
 	//默认材质
-	shaderio::BSDFMaterial defaultMaterial = {
-		.albedo = glm::vec4(1.0f),
-		.emissive = glm::vec3(0.0f),
-		.eta = glm::vec3(1.0f / 1.5f),		//ext_ior(air) / int_ior(glass)
-		.roughness = 0.1f,
-		.materialMapIndex = { -1, -1, -1 },
-	};
+	shaderio::BSDFMaterial defaultMaterial = FzbRenderer::defaultMaterial;
 	materials.push_back(defaultMaterial);
 	uniqueMaterialIDToIndex.insert({ "defaultMaterial" , 0});
 
@@ -214,30 +209,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 			printf("重复material读取: %s\n", materialID);
 			continue;
 		}
-		std::string materialType = bsdfNode.attribute("type").value();
-		if(materialType != "diffuse") continue;
-		shaderio::BSDFMaterial material = defaultMaterial;
-		material.type = shaderio::Diffuse;	//diffuse
-		if (pugi::xml_node albedoNode = bsdfNode.child("albedo"))
-			material.albedo = FzbRenderer::getRGBAFromString(albedoNode.attribute("value").value());
-		if (pugi::xml_node emissiveNode = bsdfNode.child("emissive"))
-			material.emissive = FzbRenderer::getRGBFromString(emissiveNode.attribute("value").value());
-
-		for(pugi::xml_node mapNode : bsdfNode.children("texture")) {
-			std::string mapType = mapNode.attribute("type").value();
-			//这里可以用一个enum
-			std::string texturePathStr = mapNode.attribute("value").value();
-			if (uniqueTexturePaths.count(texturePathStr) == 0) continue;
-
-			std::filesystem::path texturePath = scenePath / "textures" / texturePathStr;
-			int textureIndex = textures.size();
-			loadTexture(texturePath);
-			uniqueTexturePaths.insert(texturePathStr);
-
-			if (mapType == "albedo") material.materialMapIndex.x = textureIndex;
-			else if (mapType == "normal") material.materialMapIndex.y = textureIndex;
-			else if (mapType == "bsdfPara") material.materialMapIndex.z = textureIndex;
-		}
+		shaderio::BSDFMaterial material = FzbRenderer::getMaterialInfoFromSceneInfoXML(bsdfNode, uniqueTexturePaths);
 		uniqueMaterialIDToIndex.insert({ materialID, materials.size() });
 		materials.push_back(material);
 	}

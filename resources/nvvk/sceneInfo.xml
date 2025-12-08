@@ -53,20 +53,18 @@
 				<translate value = "-1.0, 0.0, 0.0" />
 			</transform>
 			<meshRef id = "wuson" />
-			<materialRef id = "defaultMaterial" />
+			<materialRef id = "diffuse" />
 		</instance>
 		<instance>
 			<transform>
 				<translate value = "1.0, 0.0, 0.0" />
 			</transform>
 			<meshRef id = "wuson" />
-			<materialRef id = "defaultMaterial" />
+			<materialRef id = "diffuse" />
 		</instance>
-		<!--
 		<instance>
 			<meshRef id = "plane" />
 			<materialRef id = "defaultMaterial" />
 		</instance>
-		-->
 	</instances>
 </sceneInfo>

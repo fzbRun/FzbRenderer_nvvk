@@ -28,6 +28,8 @@
 #include <nvutils/file_operations.hpp>
 #include <vulkan/vulkan_core.h>
 #include <glm/glm.hpp>
+#include <nvvk/resources.hpp>
+#include <nvvk/staging.hpp>
 
 namespace nvsamples {
 
