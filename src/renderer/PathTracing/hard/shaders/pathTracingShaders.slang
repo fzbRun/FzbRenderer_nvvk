@@ -27,6 +27,8 @@ struct HitPayload {
 
     uint bounceDepth;
     uint meshIndex;
+
+    bool isExt;     //是否在外部，如果发生折射会进入内部
 };
 struct HitState {
     float3 pos;
@@ -47,6 +49,8 @@ struct CallablePayload {
 
     float3 outgoing;  // 出射方向
     float3 incidence; // 采样方向
+
+    bool isExt;
 };
 
 __generic<T : IFloat> T getAttribute(uint8_t* dataBufferAddress, BufferView bufferView, uint attributeIndex)
@@ -116,7 +120,7 @@ void raygenMain()
     float r2 = rand(seed);
     float2 subpixel_jitter = pushConst.frameIndex == 0 ? float2(0.5f, 0.5f) : float2(r1, r2);
 
-    const uint rayFlags = RAY_FLAG_CULL_BACK_FACING_TRIANGLES;
+    const uint rayFlags = 0;    //RAY_FLAG_CULL_BACK_FACING_TRIANGLES;
     const float2 pixelCenter = launchID + subpixel_jitter;
     const float2 clipCoords = launchID / launchSize * 2.0 - 1.0;
     const float4 viewCoords = mul(float4(clipCoords, 1.0, 1.0), sceneInfo.projInvMatrix);
@@ -136,6 +140,7 @@ void raygenMain()
     payload.bounceDepth = 0;
     payload.rayOrigin = ray.Origin;
     payload.rayDirection = ray.Direction;
+    payload.isExt = true;
 
     float3 accumulatedRadiance = float3(0, 0, 0);
 
@@ -174,6 +179,7 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
     BSDFMaterial material  = sceneInfo.materials[instance.materialIndex];
 
     HitState hitState = getHitStateWithPositionFetch(barycentrics);
+    if (dot(hitState.normal, -payload.rayDirection) < 0) hitState.normal = -hitState.normal;
 
     CallablePayload callablePayload;
     callablePayload.material = material;
@@ -185,14 +191,16 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
     callablePayload.hitPos = hitState.pos;
     callablePayload.hitNormal = hitState.normal;
     callablePayload.outgoing = -payload.rayDirection;
+    callablePayload.isExt = payload.isExt;
     CallShader<CallablePayload>(uint(material.type), callablePayload);
     
     payload.randomSeed = callablePayload.randomSeed;
     payload.radiance += (callablePayload.radiance + material.emissive) * payload.bsdf_cosine / payload.pdf;
     payload.rayDirection = callablePayload.incidence;
     payload.rayOrigin = hitState.pos + 0.001f * payload.rayDirection;
-    payload.bsdf_cosine *= callablePayload.bsdf * dot(hitState.normal, payload.rayDirection);
+    payload.bsdf_cosine *= callablePayload.bsdf * abs(dot(hitState.normal, payload.rayDirection));
     payload.pdf *= callablePayload.pdf;
+    payload.isExt = callablePayload.isExt;
 
     payload.bounceDepth++;
 }
@@ -243,4 +251,28 @@ void conductorMaterialMain(inout CallablePayload payload) {
     payload.bsdf = 1.0f;
     payload.pdf = 1.0f;
     payload.incidence = reflect(-payload.outgoing, payload.hitNormal);
+}
+
+[shader("callable")]
+void dielectricMaterialMain(inout CallablePayload payload) {
+    payload.bsdf = 1.0f;
+
+    float eta = payload.material.eta.x;
+    if (!payload.isExt) eta = 1.0f / eta;
+    float cosine_OH = dot(payload.outgoing, payload.hitNormal);
+
+    float3 F = schlickFresnel(payload.material.albedo, float3(1.0F), cosine_OH);
+    float F_oneChanel = 0.299 * F.x + 0.587 * F.y + 0.114 * F.z;
+
+    float randomNumber = rand(payload.randomSeed);
+    if (randomNumber < F_oneChanel) {
+        payload.incidence = reflect(-payload.outgoing, payload.hitNormal);
+        payload.pdf = F_oneChanel;
+    }
+    else {
+        bool totalInternalReflection = false;
+        payload.incidence = refract(payload.outgoing, payload.hitNormal, eta, cosine_OH, totalInternalReflection);
+        payload.pdf = 1.0f - F_oneChanel;
+        if(!totalInternalReflection) payload.isExt = !payload.isExt; 
+    }
 }

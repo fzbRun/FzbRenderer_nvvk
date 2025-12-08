@@ -18,8 +18,8 @@ struct Instance {
 //-------------------------------------------------------²ÄÖÊ------------------------------------------------------------
 enum MaterialType {
 	Diffuse = 0,
-	Conductor,
-	Deielectric,
+	Conductor = 1,
+	Deielectric = 2,
 	RoughConductor,
 	RoughDeielectric
 };

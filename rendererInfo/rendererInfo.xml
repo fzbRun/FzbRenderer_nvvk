@@ -4,7 +4,7 @@
 	<sceneXML path = "./nvvk" />	<!--开头不能加/，但可以是./或不加-->
 
 	<renderer type = "PathTracing">
-		<maxDepth value = "2" />
+		<maxDepth value = "6" />
 	</renderer>
 	
 </rendererInfo>

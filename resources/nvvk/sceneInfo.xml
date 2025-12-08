@@ -9,7 +9,7 @@
 	</sensor>
 	<bsdfs>
 		<bsdf type = "diffuse" id = "diffuse">
-			<albedo value = "0.8, 1.0, 0.6, 0.99" />
+			<albedo value = "1.0, 0.5, 0.5, 0.99" />
 			<!--texture type = "albedoMap" value = "tiled_floor.png" /-->
 			<!--emissive value = "1.0, 1.0, 1.0" /-->
 		</bsdf>
@@ -53,14 +53,14 @@
 				<translate value = "-1.0, 0.0, 0.0" />
 			</transform>
 			<meshRef id = "wuson" />
-			<materialRef id = "conductor" />
+			<materialRef id = "diffuse" />
 		</instance>
 		<instance>
 			<transform>
 				<translate value = "1.0, 0.0, 0.0" />
 			</transform>
 			<meshRef id = "wuson" />
-			<materialRef id = "diffuse" />
+			<materialRef id = "dielectric" />
 		</instance>
 		<instance>
 			<meshRef id = "plane" />
