@@ -1,5 +1,6 @@
 #include "Material.h"
 #include "Diffuse/DiffuseMaterial.h"
+#include "Conductor/ConductorMaterial.h"
 
 const shaderio::BSDFMaterial FzbRenderer::defaultMaterial{
 	.albedo = glm::vec4(1.0f),
@@ -17,6 +18,7 @@ shaderio::BSDFMaterial  FzbRenderer::getMaterialInfoFromSceneInfoXML(
 
 	std::string materialType = bsdfNode.attribute("type").value();
 	if (materialType == "diffuse") FzbRenderer::DiffuseMaterial::getMaterialInfoFromSceneInfoXML(bsdfNode, material, uniqueTexturePaths);
+	else if (materialType == "conductor") FzbRenderer::ConductorMaterial::getMaterialInfoFromSceneInfoXML(bsdfNode, material, uniqueTexturePaths);
 
 	return material;
 }

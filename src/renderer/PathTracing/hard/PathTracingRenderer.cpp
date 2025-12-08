@@ -378,6 +378,7 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 		eClosestHit,
 		//eAnyHit,
 		eCallable_DiffuseMaterial,
+		eCallable_ConductorMaterial,
 		eShaderGroupCount
 	};
 	std::vector<VkPipelineShaderStageCreateInfo> stages(eShaderGroupCount);
@@ -408,6 +409,10 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 	stages[eCallable_DiffuseMaterial].pName = "diffuseMaterialMain";
 	stages[eCallable_DiffuseMaterial].stage = VK_SHADER_STAGE_CALLABLE_BIT_KHR;
 
+	stages[eCallable_ConductorMaterial].pNext = &shaderCode;
+	stages[eCallable_ConductorMaterial].pName = "conductorMaterialMain";
+	stages[eCallable_ConductorMaterial].stage = VK_SHADER_STAGE_CALLABLE_BIT_KHR;
+
 	std::vector<VkRayTracingShaderGroupCreateInfoKHR> shader_groups;	//表示光线追踪pipeline有几个阶段，光纤生成->打中/没打中
 	VkRayTracingShaderGroupCreateInfoKHR group{ VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR };
 	group.anyHitShader = VK_SHADER_UNUSED_KHR;
@@ -436,6 +441,9 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 	group.closestHitShader = VK_SHADER_UNUSED_KHR;
 
 	group.generalShader = eCallable_DiffuseMaterial;
+	shader_groups.push_back(group);
+
+	group.generalShader = eCallable_ConductorMaterial;
 	shader_groups.push_back(group);
 
 	const VkPushConstantRange push_constant{ VK_SHADER_STAGE_ALL, 0, sizeof(shaderio::PushConstant) };

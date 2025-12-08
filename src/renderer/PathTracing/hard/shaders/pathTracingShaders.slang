@@ -237,3 +237,10 @@ void diffuseMaterialMain(inout CallablePayload payload) {
     payload.pdf = M_1_PI * cosine;
     payload.bsdf = payload.material.albedo * M_1_PI;
 }
+
+[shader("callable")]
+void conductorMaterialMain(inout CallablePayload payload) {
+    payload.bsdf = 1.0f;
+    payload.pdf = 1.0f;
+    payload.incidence = reflect(-payload.outgoing, payload.hitNormal);
+}
