@@ -5,6 +5,7 @@
 
 	<renderer type = "PathTracing">
 		<maxDepth value = "6" />
+		<useNEE value = "true" />
 	</renderer>
 	
 </rendererInfo>

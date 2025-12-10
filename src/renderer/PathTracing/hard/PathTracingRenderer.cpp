@@ -18,9 +18,10 @@ FzbRenderer::PathTracingRenderer::PathTracingRenderer(RendererCreateInfo& create
 	createInfo.vkContextInfo.deviceExtensions.push_back({ VK_KHR_RAY_TRACING_POSITION_FETCH_EXTENSION_NAME, &rtPosFetchFeature });
 
 	pugi::xml_node& rendererNode = createInfo.rendererNode;
-	if (pugi::xml_node maxDepthNode = rendererNode.child("maxDepth")) {
+	if (pugi::xml_node maxDepthNode = rendererNode.child("maxDepth")) 
 		pushValues.maxDepth = std::stoi(maxDepthNode.attribute("value").value());
-	}
+	if (pugi::xml_node useNEENode = rendererNode.child("useNEE"))
+		pushValues.NEEShaderIndex = std::string(useNEENode.attribute("value").value()) == "true";
 }
 //-----------------------------------------创建加速结构----------------------------------------------------------
 /*
@@ -377,6 +378,9 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 		eMiss,
 		eClosestHit,
 		//eAnyHit,
+
+		eClosestHit_NEE,
+
 		eCallable_DiffuseMaterial,
 		eCallable_ConductorMaterial,
 		eCallable_DielectricMaterial,
@@ -407,6 +411,10 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 	//stages[eAnyHit].pNext = &shaderCode;
 	//stages[eAnyHit].pName = "rayAnyHitMain";
 	//stages[eAnyHit].stage = VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
+
+	stages[eClosestHit_NEE].pNext = &shaderCode;
+	stages[eClosestHit_NEE].pName = "NEEClosestHitMain";
+	stages[eClosestHit_NEE].stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
 
 	stages[eCallable_DiffuseMaterial].pNext = &shaderCode;
 	stages[eCallable_DiffuseMaterial].pName = "diffuseMaterialMain";
@@ -451,6 +459,13 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 	group.closestHitShader = eClosestHit;
 	//group.anyHitShader = eAnyHit;
 	shader_groups.push_back(group);
+
+	if (pushValues.NEEShaderIndex == 1) {		//使用NEE
+		group.closestHitShader = eClosestHit_NEE;
+		shader_groups.push_back(group);
+
+		pushValues.NEEShaderIndex = 1;
+	}
 
 	group.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
 	group.closestHitShader = VK_SHADER_UNUSED_KHR;
