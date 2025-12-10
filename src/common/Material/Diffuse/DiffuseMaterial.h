@@ -1,8 +1,8 @@
 #pragma once
 #include "common/Material/Material.h"
 
-#ifndef FZBRENDERER_DIFFUSEMATERIAL_H
-#define FZBRENDERER_DIFFUSEMATERIAL_H
+#ifndef FZBRENDERER_DIFFUSE_MATERIAL_H
+#define FZBRENDERER_DIFFUSE_MATERIAL_H
 
 namespace FzbRenderer {
 class DiffuseMaterial {

@@ -59,12 +59,13 @@ nvvk::Image loadAndCreateImage(VkCommandBuffer cmd, nvvk::StagingUploader& stagi
 
 namespace FzbRenderer {
 	glm::vec3 getRGBFromString(std::string str) {
-		std::vector<float> float3_array;
+		std::vector<float> float3_array(0);
 		std::stringstream ss(str);
 		std::string token;
 		while (std::getline(ss, token, ',')) {
 			float3_array.push_back(std::stof(token));
 		}
+		if (float3_array.size() == 1) return glm::vec3(float3_array[0]);
 		return glm::vec3(float3_array[0], float3_array[1], float3_array[2]);
 	}
 	glm::mat4 getMat4FromString(std::string str) {

@@ -18,10 +18,10 @@ struct Instance {
 //-------------------------------------------------------²ÄÖÊ------------------------------------------------------------
 enum MaterialType {
 	Diffuse = 0,
-	Conductor,
-	Deielectric,
-	RoughConductor,
-	RoughDeielectric
+	Conductor = 1,
+	Deielectric = 2,
+	RoughConductor = 3,
+	RoughDeielectric = 4
 };
 struct BSDFMaterial {
 	MaterialType type;

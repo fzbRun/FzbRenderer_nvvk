@@ -124,7 +124,7 @@ float3 hvd_ggx_sample_vndf(float3 k, float2 roughness, float2 xi)
 
   h.x *= roughness.x;
   h.y *= roughness.y;
-  h.z = max(0.0f, h.z);
+  h.z = max(0.01f, h.z);
   return normalize(h);
 }
 
