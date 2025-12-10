@@ -22,12 +22,12 @@
 			<ext_ior value="1.0" />
 		</bsdf>
 		<bsdf type = "roughConductor" id = "roughConductor">
-			<roughness value = "0.1" />
+			<roughness value = "0.01" />
 			<eta value = "1.65746, 0.880369, 0.521229" />
 			<k value="9.22387, 6.26952, 4.837" />
 		</bsdf>
 		<bsdf type = "roughDielectric" id = "roughDielectric">
-			<roughness value = "0.1" />
+			<roughness value = "0.2" />
 			<eta value = "0.66667" />
 		</bsdf>
 	</bsdfs>
@@ -50,21 +50,35 @@
 	<instances>
 		<instance>
 			<transform>
-				<translate value = "-1.0, 0.0, 0.0" />
-			</transform>
-			<meshRef id = "wuson" />
-			<materialRef id = "diffuse" />
-		</instance>
-		<instance>
-			<transform>
 				<translate value = "1.0, 0.0, 0.0" />
 			</transform>
 			<meshRef id = "wuson" />
 			<materialRef id = "dielectric" />
 		</instance>
 		<instance>
+			<transform>
+				<translate value = "0.0, 0.0, 0.0" />
+			</transform>
+			<meshRef id = "wuson" />
+			<materialRef id = "diffuse" />
+		</instance>
+		<instance>
 			<meshRef id = "plane" />
+			<materialRef id = "roughConductor" />
+		</instance>
+		<instance>
+			<transform>
+				<translate value = "-1.0, 0.0, 0.0" />
+			</transform>
+			<meshRef id = "wuson" />
 			<materialRef id = "conductor" />
+		</instance>
+		<instance>
+			<transform>
+				<translate value = "-2.0, 0.0, 0.0" />
+			</transform>
+			<meshRef id = "wuson" />
+			<materialRef id = "roughDielectric" />
 		</instance>
 	</instances>
 </sceneInfo>

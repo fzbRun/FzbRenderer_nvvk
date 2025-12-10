@@ -1,13 +1,14 @@
 #include <common/utils.hpp>
-#include "./DielectricMaterial.h"
+#include "./RoughDielectricMaterial.h"
 #include "common/Application/Application.h"
-#include <nvshaders/slang_types.h>
 
-void FzbRenderer::DielectricMaterial::getMaterialInfoFromSceneInfoXML(
+void FzbRenderer::RoughDielectricMaterial::getMaterialInfoFromSceneInfoXML(
 	pugi::xml_node& bsdfNode,
 	shaderio::BSDFMaterial& material,
 	std::unordered_set<std::string>& uniqueTexturePaths) {
-	material.type = shaderio::Deielectric;
+	material.type = shaderio::RoughDeielectric;
+	if (pugi::xml_node roughnessNode = bsdfNode.child("roughness"))
+		material.roughness = std::stof(roughnessNode.attribute("value").value());
 
 	if (pugi::xml_node etaNode = bsdfNode.child("eta"))
 		material.eta = FzbRenderer::getRGBFromString(etaNode.attribute("value").value());
@@ -22,9 +23,10 @@ void FzbRenderer::DielectricMaterial::getMaterialInfoFromSceneInfoXML(
 			if (intIor == 0 || extIor == 0) LOGW("不允许折射率为0");
 
 			material.eta = glm::vec3(extIor / intIor);
-		}
+		}		
 	}
 	material.albedo = glm::vec3((material.eta - 1.0f) * (material.eta - 1.0f)) / ((material.eta + 1.0f) * (material.eta + 1.0f));
+
 	if (pugi::xml_node emissiveNode = bsdfNode.child("emissive"))
 		material.emissive = FzbRenderer::getRGBFromString(emissiveNode.attribute("value").value());
 

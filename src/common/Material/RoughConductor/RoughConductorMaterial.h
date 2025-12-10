@@ -1,11 +1,11 @@
 #pragma once
 #include "common/Material/Material.h"
 
-#ifndef FZBRENDERER_ROUGHCONDUCTOR_H
-#define FZBRENDERER_ROUGHCONDUCTOR_H
+#ifndef FZBRENDERER_ROUGHCONDUCTOR_MATERIAL_H
+#define FZBRENDERER_ROUGHCONDUCTOR_MATERIAL_H
 
 namespace FzbRenderer {
-class RoughConductor {
+class RoughConductorMaterial {
 public:
 	static void getMaterialInfoFromSceneInfoXML(pugi::xml_node& bsdfNode,
 			shaderio::BSDFMaterial& material,

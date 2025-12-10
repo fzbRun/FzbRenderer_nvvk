@@ -2,6 +2,8 @@
 #include "Diffuse/DiffuseMaterial.h"
 #include "Conductor/ConductorMaterial.h"
 #include "Dielectric/DielectricMaterial.h"
+#include "RoughConductor/RoughConductorMaterial.h"
+#include "RoughDielectric/RoughDielectricMaterial.h"
 
 const shaderio::BSDFMaterial FzbRenderer::defaultMaterial{
 	.albedo = glm::vec4(1.0f),
@@ -21,6 +23,8 @@ shaderio::BSDFMaterial  FzbRenderer::getMaterialInfoFromSceneInfoXML(
 	if (materialType == "diffuse") FzbRenderer::DiffuseMaterial::getMaterialInfoFromSceneInfoXML(bsdfNode, material, uniqueTexturePaths);
 	else if (materialType == "conductor") FzbRenderer::ConductorMaterial::getMaterialInfoFromSceneInfoXML(bsdfNode, material, uniqueTexturePaths);
 	else if (materialType == "dielectric") FzbRenderer::DielectricMaterial::getMaterialInfoFromSceneInfoXML(bsdfNode, material, uniqueTexturePaths);
+	else if (materialType == "roughConductor") FzbRenderer::RoughConductorMaterial::getMaterialInfoFromSceneInfoXML(bsdfNode, material, uniqueTexturePaths);
+	else if (materialType == "roughDielectric") FzbRenderer::RoughDielectricMaterial::getMaterialInfoFromSceneInfoXML(bsdfNode, material, uniqueTexturePaths);
 
 	return material;
 }

@@ -20,8 +20,8 @@ enum MaterialType {
 	Diffuse = 0,
 	Conductor = 1,
 	Deielectric = 2,
-	RoughConductor,
-	RoughDeielectric
+	RoughConductor = 3,
+	RoughDeielectric = 4
 };
 struct BSDFMaterial {
 	MaterialType type;
