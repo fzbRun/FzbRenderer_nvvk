@@ -33,6 +33,26 @@ struct BSDFMaterial {
 
 	int3 materialMapIndex; // 0:albedo, 2:normal, 3:bsdfPara
 };
+
+//---------------------------------------------------------光源--------------------------------------------------------------
+enum LightType {
+	Point = 0,
+	Spot = 1,
+	Directional = 2,
+	Area = 3
+};;
+struct Light {
+	int type;
+	float3 pos;
+	float3 direction;
+	float intensity;
+	float3 color;
+	float coneAngle;
+
+	bool SphericalRectangleSample = false;
+	float3 edge1 = float3(1.0f);
+	float3 edge2 = float3(1.0f);
+};
 //-------------------------------------------------------场景信息------------------------------------------------------------
 struct SceneInfo
 {
@@ -46,7 +66,7 @@ struct SceneInfo
 	GltfInstance* instances;					// Address of the instance buffer containing GltfInstance data
 	GltfMesh* meshes;							// Address of the mesh buffer containing GltfMesh data
 	BSDFMaterial* materials;					// Material properties for the instance
-	GltfPunctual           punctualLights[2];  // Array of punctual lights in the scene (up to 2)
+	Light           lights[2];  // Array of punctual lights in the scene (up to 2)
 	SkySimpleParameters    skySimpleParam;
 };
 //-------------------------------------------------------推送常量------------------------------------------------------------
@@ -55,6 +75,7 @@ struct PushConstant
 	float3x3       normalMatrix;
 	int            instanceIndex;              // Instance index for the current draw call
 	SceneInfo*     sceneInfoAddress;           // Address of the scene information buffer
+	int NEEShaderIndex = -1;
 	int frameIndex = 0;
 	int maxDepth = 3;
 };

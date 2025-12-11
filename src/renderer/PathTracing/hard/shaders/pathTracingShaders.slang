@@ -1,3 +1,7 @@
+/*
+slang大括号的左右(包括开始大括号的下一行开始，以及结束大括号的上行结尾)不能有注释，或者说中文注释
+*/
+
 #include "nvshaders/constants.h.slang"
 #include "nvshaders/random.h.slang"
 #include "nvshaders/sky_functions.h.slang"
@@ -14,6 +18,8 @@
 // clang-format on
 
 #define MISS_DEPTH 1000
+#define MISS_DISTANCE 10000000.0f
+#define NEE_MAX_SAMPLE_NUM 2
 
 // Raytracing Payload
 struct HitPayload {
@@ -41,7 +47,6 @@ struct CallablePayload {
     float3x3 TBN;
     uint randomSeed;
 
-    float3 radiance;
     float3 bsdf; // 新采样向量后的bsdf
     float pdf;   // 新采样向量的pdf
 
@@ -52,8 +57,26 @@ struct CallablePayload {
     float3 incidence; // 采样方向
 
     bool isExt;
+
+    // NEE
+    uint lightNum = NEE_MAX_SAMPLE_NUM;
+    float3 sampleDir_nee[NEE_MAX_SAMPLE_NUM];
+    float3 radiance_nee[NEE_MAX_SAMPLE_NUM];
+    float3 radianceSum_nee;
 };
 
+
+struct NEEPayload {
+    float distance;
+};
+struct Quadrilateral {
+    float3 startPos;
+    float3 normal;
+    float3 edge1;
+    float3 edge2;
+};
+
+//--------------------------------------------------获取顶点属性-------------------------------------------------
 __generic<T : IFloat> T getAttribute(uint8_t* dataBufferAddress, BufferView bufferView, uint attributeIndex)
 {
   if(bufferView.count > 0)
@@ -107,6 +130,231 @@ HitState getHitStateWithPositionFetch(const float3 barycentrics) {
     return hitState;
 }
 
+
+//-------------------------------------------------直接光采样--------------------------------------------------
+bool hitTest(float distance, float3 sampleDir, float3 hitPos, float3 hitNormal) {
+    const uint rayFlags = 0;
+    RayDesc temRay;
+    temRay.Origin = offsetRay(hitPos, hitNormal);
+    temRay.Direction = normalize(sampleDir);
+    temRay.TMin = 0.001f;
+    temRay.TMax = distance + 0.001f;
+    NEEPayload tempPayload;
+    tempPayload.distance = MISS_DISTANCE;
+    TraceRay(topLevelAS, rayFlags, 0xff, pushConst.NEEShaderIndex, 0, 0, temRay, tempPayload);
+
+    if (tempPayload.distance + 0.001f < distance) return false;
+    return true;
+}
+[shader("closesthit")]
+void NEEClosestHitMain(inout NEEPayload payload) {
+    payload.distance = RayTCurrent();
+}
+float3 sphereRectangleSample(Quadrilateral quad, float3 hitPos, float u, float v, inout float pdf) {
+    float exl = length(quad.edge1);
+    float eyl = length(quad.edge2);
+    float3 axisX = quad.edge1 / exl;
+    float3 axisY = quad.edge2 / eyl;
+    float3 axisZ = quad.normal;
+
+    float3 d = quad.startPos - hitPos;
+    float z0 = dot(d, axisZ);
+    if (z0 > 0) {
+        axisZ *= -1.0f;
+        z0 *= -1.0f;
+    }
+    float z0sq = z0 * z0;
+
+    float x0 = dot(d, axisX);
+    float y0 = dot(d, axisY);
+    float x1 = x0 + exl;
+    float y1 = y0 + eyl;
+    float y0sq = y0 * y0;
+    float y1sq = y1 * y1;
+
+    float3 v00 = float3(x0, y0, z0);
+    float3 v01 = float3(x0, y1, z0);
+    float3 v10 = float3(x1, y0, z0);
+    float3 v11 = float3(x1, y1, z0);
+
+    float3 n0 = float3(0.0f, z0, -y0); // normalize(cross(v00, v10));
+    n0.z /= sqrt(z0sq + y0sq);         // 后续只有z需要被用到，x，y会乘以0，不用管
+    float3 n1 = float3(-z0, 0.0f, x1); // normalize(cross(v10, v11));
+    n1.z /= sqrt(z0sq + x1 * x1);
+    float3 n2 = float3(0.0f, -z0, y1); // normalize(cross(v11, v01));
+    n2.z /= sqrt(z0sq + y1sq);
+    float3 n3 = float3(z0, 0.0f, -x0); // normalize(cross(v01, v00));
+    n3.z /= sqrt(z0sq + x0 * x0);
+
+    float g0 = acos(-n0.z * n1.z); // acos(-dot(n0, n1));
+    float g1 = acos(-n1.z * n2.z); // acos(-dot(n1, n2));
+    float g2 = acos(-n2.z * n3.z); // acos(-dot(n2, n3));
+    float g3 = acos(-n3.z * n0.z); // acos(-dot(n3, n0));
+
+    float b0 = n0.z;
+    float b1 = n2.z;
+    float b0sq = b0 * b0;
+    float k = 2 * M_PI - g2 - g3;
+    float S = g0 + g1 - k;
+
+    pdf = 1.0f / S;
+
+    float au = u * S + k;
+    float fu = (cos(au) * b0 - b1) / sin(au);
+    float cu = 1.0f / sqrt(fu * fu + b0sq) * (fu > 0.0f ? 1.0f : -1.0f);
+    cu = clamp(cu, -1.0f, 1.0f);
+    float xu = -(cu * z0) / sqrt(1.0f - cu * cu);
+    xu = clamp(xu, x0, x1);
+
+    float dl = sqrt(xu * xu + z0sq);
+    float h0 = y0 / sqrt(dl * dl + y0sq);
+    float h1 = y1 / sqrt(dl * dl + y1sq);
+    float hv = h0 + v * (h1 - h0);
+    float hv2 = hv * hv;
+    float yv = hv2 < 1 - 1e-6 ? (hv * dl) / sqrt(1.0f - hv2) : y1;
+
+    return xu * axisX + yv * axisY + z0 * axisZ; // 未归一化
+}
+
+void initNEE(inout CallablePayload payload) {
+    SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+
+    payload.lightNum = min(sceneInfo.numLights, NEE_MAX_SAMPLE_NUM);
+    for (int lightIndex = 0; lightIndex < payload.lightNum; ++lightIndex) {
+        payload.radiance_nee[lightIndex] = float3(0.0f);
+        Light light = sceneInfo.lights[lightIndex];
+        float3 flux = light.color * light.intensity;
+        float3 sampleDir;
+        if (light.type == uint(LightType::Point)) {
+            sampleDir = light.pos - payload.hitPos;
+            float distance = length(sampleDir);
+            if (!hitTest(distance, sampleDir, payload.hitPos, payload.hitNormal)) continue; // 遮挡
+
+            payload.radiance_nee[lightIndex] = flux / (4.0f * M_PI * distance * distance);
+        }
+        else if (light.type == uint(LightType::Spot)) {}
+        else if (light.type == uint(LightType::Directional)) {}
+        else if (light.type == uint(LightType::Area)) {
+            float randomNumber1 = rand(payload.randomSeed);
+            float randomNumber2 = rand(payload.randomSeed);
+ 
+            if (light.SphericalRectangleSample) {
+                Quadrilateral quad;
+                quad.startPos = light.pos;
+                quad.normal = light.direction;
+                quad.edge1 = light.edge1;
+                quad.edge2 = light.edge2;
+                float pdf = 1.0f;
+                sampleDir = sphereRectangleSample(quad, payload.hitPos, randomNumber1, randomNumber2, pdf);
+
+                float distance = length(sampleDir);
+                if (!hitTest(distance, sampleDir, payload.hitPos, payload.hitNormal)) continue; // 遮挡
+
+                payload.radiance_nee[lightIndex] = flux / (M_TWO_PI * length(light.edge1) * length(light.edge2) * pdf);
+            } else {
+                float3 samplePos = light.pos + light.edge1 * randomNumber1 + light.edge2 * randomNumber2;
+                sampleDir = samplePos - payload.hitPos;
+                float distance = length(sampleDir);
+                if (!(hitTest(distance, sampleDir, payload.hitPos, payload.hitNormal))) continue; // 遮挡
+
+                // 分母有一个cos和面积，雅可比有一个cos，pdf有一个面积，抵消了
+                payload.radiance_nee[lightIndex] = flux / (M_TWO_PI * distance * distance);
+            }
+        }
+        payload.sampleDir_nee[lightIndex] = normalize(sampleDir);
+        
+        /*
+        float3 bsdf = float3(1.0f);
+        float cosineON = dot(payload.outgoing, payload.hitNormal);
+        sampleDir = normalize(sampleDir);
+        if (payload.material.type == uint(MaterialType::Diffuse)) bsdf = M_1_PI * cosineON * payload.material.albedo;
+        else if (payload.material.type == uint(MaterialType::Conductor)) {
+            float3 h = normalize(sampleDir + payload.outgoing);
+            if (abs(dot(h, payload.hitNormal)) < 0.95f) bsdf = float3(0.0f);
+        }
+        else if (payload.material.type == uint(MaterialType::Deielectric)) {
+            float3 F = schlickFresnel(payload.material.albedo, float3(1.0F), cosineON);
+            if (dot(sampleDir, payload.hitNormal) > 0.0f) {
+                float3 h = normalize(sampleDir + payload.outgoing);
+                if (abs(dot(h, payload.hitNormal)) < 0.99f) bsdf = F;
+            } else {
+                float eta = payload.material.eta.x;
+                if (!payload.isExt) eta = 1.0f / eta; // 所以NEE要在找到incidence之前
+
+                float3 h = normalize(eta * payload.outgoing + sampleDir);
+                if (abs(dot(h, payload.hitNormal)) < 0.99f) bsdf = 1.0f - F;
+            }
+        }
+        else if (payload.material.type == uint(MaterialType::RoughConductor)) {
+            float roughness = payload.material.roughness;
+            float3x3 transposeTBN = transpose(payload.TBN);
+
+            float3 h = normalize(sampleDir + payload.outgoing);
+            h = mul(h, transposeTBN); // h需要在切线空间中
+            float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h);
+            float D = D_costhetaNH / max(h.z, 1e-6f);
+
+            float3 outgoing_tangentSpace = mul(payload.outgoing, transposeTBN);
+            float cosineOH = abs(dot(outgoing_tangentSpace, h));
+            float3 F = schlickFresnel(payload.material.albedo, float3(1.0F), cosineOH);
+
+            float3 incidence_tangentSpace = mul(sampleDir, transposeTBN);
+
+            float G1_outgoing, G1_incidence;
+            float G2 = ggx_smith_shadow_mask(
+                G1_outgoing,
+                G1_incidence,
+                outgoing_tangentSpace,
+                incidence_tangentSpace,
+                float2(roughness)
+            );
+
+            bsdf = (D * G2 * F) / (4.0f * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 1e-6f);
+        }
+        else if (payload.material.type == uint(MaterialType::RoughDeielectric)){
+            float roughness = payload.material.roughness;
+            float eta = payload.material.eta.x;
+            float3x3 transposeTBN = transpose(payload.TBN);
+
+            float3 h;
+            bool refraction = dot(sampleDir, payload.hitNormal) < 0.0f;
+            if (refraction) h = normalize(sampleDir + payload.outgoing * eta);
+            else h = normalize(sampleDir + payload.outgoing);
+
+            h = faceforward(h, payload.outgoing, -h); //dot(I, nerf) < 0 return n;else return -n
+            h = mul(h, transposeTBN); // h需要在切线空间中
+            float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h);
+            float D = D_costhetaNH / max(h.z, 1e-6f);
+
+            float3 outgoing_tangentSpace = mul(payload.outgoing, transposeTBN);
+            float cosineOH = abs(dot(outgoing_tangentSpace, h));
+            float3 F = schlickFresnel(payload.material.albedo, float3(1.0F), cosineOH);
+
+            float3 incidence_tangentSpace = mul(sampleDir, transposeTBN);
+
+            float G1_outgoing, G1_incidence;
+            float G2 = ggx_smith_shadow_mask(
+                G1_outgoing,
+                G1_incidence,
+                outgoing_tangentSpace,
+                incidence_tangentSpace,
+                float2(roughness)
+            );
+
+            if (refraction) {
+                float weight = dot(incidence_tangentSpace, h) / eta + cosineOH;
+                payload.bsdf = D * G2 * (1.0f - F) * abs(dot(incidence_tangentSpace, h)) * cosineOH
+                        / (weight * weight * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 1e-6f);
+            }else
+                bsdf = (D * G2 * F) / (4.0f * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 1e-6f);
+        }
+        
+        radianceSum += radiance * bsdf * abs(dot(sampleDir, payload.hitNormal)); // 除过pdf了
+        */
+    }
+}
+
+//-------------------------------------------------主Shader-------------------------------------------------
 [shader("raygeneration")]
 void raygenMain()
 {
@@ -185,17 +433,20 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
     callablePayload.material = material;
     callablePayload.TBN = hitState.TBN;
     callablePayload.randomSeed = payload.randomSeed;
-    callablePayload.radiance = float3(0.0f);
     callablePayload.bsdf = float3(0.0f);
     callablePayload.pdf = 1.0f;
     callablePayload.hitPos = hitState.pos;
     callablePayload.hitNormal = hitState.normal;
     callablePayload.outgoing = -payload.rayDirection;
     callablePayload.isExt = payload.isExt;
+    if (pushConst.NEEShaderIndex > 0) {
+        initNEE(callablePayload);
+        callablePayload.radianceSum_nee = float3(0.0f);
+    }
     CallShader<CallablePayload>(uint(material.type), callablePayload);
-    
+
     payload.randomSeed = callablePayload.randomSeed;
-    payload.radiance += (callablePayload.radiance + material.emissive) * payload.bsdf_cosine / payload.pdf;
+    payload.radiance += (callablePayload.radianceSum_nee + material.emissive) * payload.bsdf_cosine / payload.pdf;
     payload.rayDirection = callablePayload.incidence;
     payload.rayOrigin = offsetRay(hitState.pos, hitState.normal);    //hitState.pos + 0.001f * payload.rayDirection;
     payload.bsdf_cosine *= callablePayload.bsdf * abs(dot(hitState.normal, payload.rayDirection));
@@ -225,7 +476,6 @@ callableShader会进行如下操作
 1. 计算BSDF
 2. 计算pdf
 3. 计算下一次采样方向
-4. NEE(如果需要)
 */
 [shader("callable")]
 void diffuseMaterialMain(inout CallablePayload payload) {
@@ -243,7 +493,17 @@ void diffuseMaterialMain(inout CallablePayload payload) {
 
     float cosine = dot(payload.incidence, payload.hitNormal);
     payload.pdf = M_1_PI * cosine;
-    payload.bsdf = payload.material.albedo * M_1_PI;
+    payload.bsdf = payload.material.albedo * payload.pdf;
+
+    if (pushConst.NEEShaderIndex > 0) {
+        for (int i = 0; i < payload.lightNum; ++i) {
+            if(payload.radiance_nee[i].x + payload.radiance_nee[i].y + payload.radiance_nee[i].z < 0.01f) continue;
+
+            float cosineON = dot(payload.outgoing, payload.hitNormal);
+            float3 bsdf = M_1_PI * cosineON * payload.material.albedo;
+            payload.radianceSum_nee += payload.radiance_nee[i] * bsdf * abs(dot(payload.sampleDir_nee[i], payload.hitNormal));
+        }
+    }
 }
 
 [shader("callable")]
@@ -251,6 +511,19 @@ void conductorMaterialMain(inout CallablePayload payload) {
     payload.bsdf = 1.0f;
     payload.pdf = 1.0f;
     payload.incidence = reflect(-payload.outgoing, payload.hitNormal);
+
+    if (pushConst.NEEShaderIndex > 0) {
+        for (int i = 0; i < payload.lightNum; ++i) {
+            if(payload.radiance_nee[i].x + payload.radiance_nee[i].y + payload.radiance_nee[i].z < 0.01f) continue;
+
+            float3 sampleDir = payload.sampleDir_nee[i];
+            float3 h = normalize(sampleDir + payload.outgoing);
+            float3 bsdf = float3(1.0f);
+            if (abs(dot(h, payload.hitNormal)) < 0.95f) bsdf = float3(0.0f);
+
+            payload.radianceSum_nee += payload.radiance_nee[i] * bsdf * abs(dot(sampleDir, payload.hitNormal));
+        }
+    }
 }
 
 [shader("callable")]
@@ -275,6 +548,27 @@ void dielectricMaterialMain(inout CallablePayload payload) {
         payload.pdf = 1.0f - F_oneChanel;
         if(!totalInternalReflection) payload.isExt = !payload.isExt; 
     }
+
+    if (pushConst.NEEShaderIndex > 0) {
+        for (int i = 0; i < payload.lightNum; ++i) {
+            if(payload.radiance_nee[i].x + payload.radiance_nee[i].y + payload.radiance_nee[i].z < 0.01f) continue;
+
+            float3 sampleDir = payload.sampleDir_nee[i];
+            float3 bsdf = float3(1.0f);
+            if (dot(sampleDir, payload.hitNormal) > 0.0f) {
+                float3 h = normalize(sampleDir + payload.outgoing);
+                if (abs(dot(h, payload.hitNormal)) < 0.99f) bsdf = F;
+            } else {
+                float eta = payload.material.eta.x;
+                if (!payload.isExt) eta = 1.0f / eta; // 所以NEE要在找到incidence之前
+
+                float3 h = normalize(eta * payload.outgoing + sampleDir);
+                if (abs(dot(h, payload.hitNormal)) < 0.99f) bsdf = 1.0f - F;
+            }
+
+            payload.radianceSum_nee += payload.radiance_nee[i] * bsdf * abs(dot(sampleDir, payload.hitNormal));
+        }
+    }
 }
 
 [shader("callable")]
@@ -282,8 +576,9 @@ void roughConductorMaterialMain(inout CallablePayload payload) {
     float randomNumber1 = rand(payload.randomSeed);
     float randomNumber2 = rand(payload.randomSeed);
     float roughness = payload.material.roughness;
+    float3x3 transposeTBN = transpose(payload.TBN);
 
-    float3 outgoing_tangentSpace = mul(payload.outgoing, transpose(payload.TBN));
+    float3 outgoing_tangentSpace = mul(payload.outgoing, transposeTBN);
     float3 h = hvd_ggx_sample_vndf(outgoing_tangentSpace, float2(roughness), float2(randomNumber1, randomNumber2));
 
     float3 incidence_tangentSpace = reflect(-outgoing_tangentSpace, h);
@@ -304,6 +599,32 @@ void roughConductorMaterialMain(inout CallablePayload payload) {
     );
     float3 F = schlickFresnel(payload.material.albedo, float3(1.0F), cosineOH);
     payload.bsdf = (D * G2 * F) / (4.0f * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 1e-6f);
+
+    if (pushConst.NEEShaderIndex > 0) {
+        for (int i = 0; i < payload.lightNum; ++i) {
+            if(payload.radiance_nee[i].x + payload.radiance_nee[i].y + payload.radiance_nee[i].z < 0.01f) continue;
+
+            float3 sampleDir = payload.sampleDir_nee[i];
+
+            h = normalize(sampleDir + payload.outgoing);
+            h = mul(h, transposeTBN); // h需要在切线空间中
+            D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h);
+            D = D_costhetaNH / max(h.z, 1e-6f);
+
+            incidence_tangentSpace = mul(sampleDir, transposeTBN);
+
+            G2 = ggx_smith_shadow_mask(
+                G1_outgoing,
+                G1_incidence,
+                outgoing_tangentSpace,
+                incidence_tangentSpace,
+                float2(roughness)
+            );
+
+            float3 bsdf = (D * G2 * F) / (4.0f * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 1e-6f);
+            payload.radianceSum_nee += payload.radiance_nee[i] * bsdf * abs(dot(sampleDir, payload.hitNormal));
+        }
+    }
 }
 
 [shader("callable")]
@@ -311,8 +632,9 @@ void roughDielectricMaterialMain(inout CallablePayload payload) {
     float randomNumber1 = rand(payload.randomSeed);
     float randomNumber2 = rand(payload.randomSeed);
     float roughness = payload.material.roughness;
+    float3x3 transposeTBN = transpose(payload.TBN);
 
-    float3 outgoing_tangentSpace = mul(payload.outgoing, transpose(payload.TBN));
+    float3 outgoing_tangentSpace = mul(payload.outgoing, transposeTBN);
     float3 h = hvd_ggx_sample_vndf(outgoing_tangentSpace, float2(roughness), float2(randomNumber1, randomNumber2));
     float cosineOH = abs(dot(outgoing_tangentSpace, h));
 
@@ -359,5 +681,42 @@ void roughDielectricMaterialMain(inout CallablePayload payload) {
         payload.pdf = F_oneChanel * D_costhetaNH / max(4.0f * cosineOH, 0.00001f);
 
         payload.bsdf = D * G2 * F / (4.0f * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 1e-6f);
+    }
+
+    if (pushConst.NEEShaderIndex > 0) {
+        for (int i = 0; i < payload.lightNum; ++i) {
+            if(payload.radiance_nee[i].x + payload.radiance_nee[i].y + payload.radiance_nee[i].z < 0.01f) continue;
+
+            float3 sampleDir = payload.sampleDir_nee[i];
+
+            refraction = dot(sampleDir, payload.hitNormal) < 0.0f;
+            if (refraction) h = normalize(sampleDir + payload.outgoing * eta);
+            else h = normalize(sampleDir + payload.outgoing);
+
+            h = faceforward(h, payload.outgoing, -h); // dot(I, nerf) < 0 return n;else return -n
+            h = mul(h, transposeTBN);                 // h需要在切线空间中
+            D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h);
+            D = D_costhetaNH / max(h.z, 1e-6f);
+
+            incidence_tangentSpace = mul(sampleDir, transposeTBN);
+
+            G2 = ggx_smith_shadow_mask(
+                G1_outgoing,
+                G1_incidence,
+                outgoing_tangentSpace,
+                incidence_tangentSpace,
+                float2(roughness)
+            );
+
+            float3 bsdf = float3(1.0f);
+            if (refraction) {
+                float weight = dot(incidence_tangentSpace, h) / eta + cosineOH;
+                payload.bsdf = D * G2 * (1.0f - F) * abs(dot(incidence_tangentSpace, h)) * cosineOH
+                        / (weight * weight * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 1e-6f);
+            } else
+                bsdf = (D * G2 * F) / (4.0f * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 1e-6f);
+
+            payload.radianceSum_nee += payload.radiance_nee[i] * bsdf * abs(dot(sampleDir, payload.hitNormal));
+        }
     }
 }

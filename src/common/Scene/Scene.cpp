@@ -224,14 +224,26 @@ void FzbRenderer::Scene::createSceneFromXML() {
 
 		sceneInfo.numLights = 0;
 		for (pugi::xml_node lightNode : lightsNode.children("light")) {
-			shaderio::GltfPunctual light;
+			shaderio::Light light;
 
 			std::string lightType = lightNode.attribute("type").value();
 			std::string lightID = lightNode.attribute("id").value();
 
 			glm::mat4 transformMatrix = glm::mat4(1.0f);
-			if (pugi::xml_node tranformNode = lightNode.child("transform"))
-				transformMatrix = FzbRenderer::getMat4FromString(tranformNode.child("matrix").attribute("value").value());
+			if (pugi::xml_node transformNode = lightNode.child("transform")) {
+				if (pugi::xml_node matrixNode = transformNode.select_node("matrix").node())
+					transformMatrix = FzbRenderer::getMat4FromString(matrixNode.attribute("value").value());
+				if (pugi::xml_node translateNode = transformNode.select_node("translate").node()) {
+					glm::vec3 translateValue = FzbRenderer::getRGBFromString(translateNode.attribute("value").value());
+					transformMatrix = glm::translate(transformMatrix, translateValue);
+				}
+				if (pugi::xml_node rotateNode = transformNode.select_node("rotate").node()) {
+					glm::vec3 rotateAngle = glm::radians(FzbRenderer::getRGBFromString(rotateNode.attribute("value").value()));
+					if (rotateAngle.x > 0.01f) transformMatrix = glm::rotate(transformMatrix, rotateAngle.x, glm::vec3(1, 0, 0));
+					if (rotateAngle.y > 0.01f) transformMatrix = glm::rotate(transformMatrix, rotateAngle.y, glm::vec3(0, 1, 0));
+					if (rotateAngle.z > 0.01f) transformMatrix = glm::rotate(transformMatrix, rotateAngle.z, glm::vec3(0, 0, 1));
+				}
+			}
 
 			if(pugi::xml_node emissiveNode = lightNode.child("emissive"))
 				light.color = FzbRenderer::getRGBFromString(emissiveNode.attribute("value").value());
@@ -239,26 +251,26 @@ void FzbRenderer::Scene::createSceneFromXML() {
 				light.intensity = std::stof(intensityNode.attribute("value").value());
 
 			if (lightType == "point") {
-				light.type = shaderio::ePoint;
-				light.position = glm::vec3(transformMatrix * glm::vec4(1.0f));
+				light.type = shaderio::Point;
+				light.pos = glm::vec3(transformMatrix * glm::vec4(glm::vec3(0.0f), 1.0f));
 			}
 			else if (lightType == "spot") {
-				light.type = shaderio::eSpot;
-				light.position = glm::vec3(transformMatrix * glm::vec4(1.0f));
-				light.direction = glm::normalize(glm::vec3(transformMatrix * glm::vec4(1.0f, 1.0f, 2.0f, 1.0f)) - light.position);
+				light.type = shaderio::Spot;
+				light.pos = glm::vec3(transformMatrix * glm::vec4(glm::vec3(0.0f), 1.0f));
+				light.direction = glm::normalize(glm::vec3(transformMatrix * glm::vec4(1.0f, 1.0f, 2.0f, 1.0f)) - light.pos);
 				light.coneAngle = 60.0f;
 				if (pugi::xml_node coneAngleNode = lightNode.child("coneAngle"))
 					light.coneAngle = std::stof(coneAngleNode.attribute("value").value());
 			}
 			else if (lightType == "sun") {
-				light.type == shaderio::eDirectional;
+				light.type == shaderio::Directional;
 				sceneInfo.useSky = true;
 			}
 			else if (lightType == "area") {
-				light.type = shaderio::eArea;
+				light.type = shaderio::Area;
 			}
 
-			sceneInfo.punctualLights[sceneInfo.numLights++] = light;
+			sceneInfo.lights[sceneInfo.numLights++] = light;
 		}
 	}
 	//------------------------------------------------Mesh---------------------------------------------------------------

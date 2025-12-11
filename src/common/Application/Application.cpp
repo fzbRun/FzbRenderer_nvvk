@@ -184,23 +184,23 @@ void FzbRenderer::Application::onUIRender() {
 				PE::end();
 				// Light
 				PE::begin();
-				if (sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::ePoint
-					|| sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::eSpot)
-					UIModified |= PE::DragFloat3("Light Position", glm::value_ptr(sceneResource.sceneInfo.punctualLights[0].position),
+				if (sceneResource.sceneInfo.lights[0].type == shaderio::GltfLightType::ePoint
+					|| sceneResource.sceneInfo.lights[0].type == shaderio::GltfLightType::eSpot)
+					UIModified |= PE::DragFloat3("Light Position", glm::value_ptr(sceneResource.sceneInfo.lights[0].pos),
 						1.0f, -20.0f, 20.0f, "%.2f", ImGuiSliderFlags_None, "Position of the light");
-				if (sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::eDirectional
-					|| sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::eSpot)
-					UIModified |= PE::SliderFloat3("Light Direction", glm::value_ptr(sceneResource.sceneInfo.punctualLights[0].direction),
+				if (sceneResource.sceneInfo.lights[0].type == shaderio::GltfLightType::eDirectional
+					|| sceneResource.sceneInfo.lights[0].type == shaderio::GltfLightType::eSpot)
+					UIModified |= PE::SliderFloat3("Light Direction", glm::value_ptr(sceneResource.sceneInfo.lights[0].direction),
 						-1.0f, 1.0f, "%.2f", ImGuiSliderFlags_None, "Direction of the light");
 
-				UIModified |= PE::SliderFloat("Light Intensity", &sceneResource.sceneInfo.punctualLights[0].intensity, 0.0f, 1000.0f,
+				UIModified |= PE::SliderFloat("Light Intensity", &sceneResource.sceneInfo.lights[0].intensity, 0.0f, 10000.0f,
 					"%.2f", ImGuiSliderFlags_Logarithmic, "Intensity of the light");
-				UIModified |= PE::ColorEdit3("Light Color", glm::value_ptr(sceneResource.sceneInfo.punctualLights[0].color),
+				UIModified |= PE::ColorEdit3("Light Color", glm::value_ptr(sceneResource.sceneInfo.lights[0].color),
 					ImGuiColorEditFlags_NoInputs, "Color of the light");
-				UIModified |= PE::Combo("Light Type", (int*)&sceneResource.sceneInfo.punctualLights[0].type,
+				UIModified |= PE::Combo("Light Type", (int*)&sceneResource.sceneInfo.lights[0].type,
 					"Point\0Spot\0Directional\0", 3, "Type of the light (Point, Spot, Directional)");
-				if (sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::eSpot)
-					UIModified |= PE::SliderAngle("Cone Angle", &sceneResource.sceneInfo.punctualLights[0].coneAngle, 0.f, 90.f, "%.2f",
+				if (sceneResource.sceneInfo.lights[0].type == shaderio::GltfLightType::eSpot)
+					UIModified |= PE::SliderAngle("Cone Angle", &sceneResource.sceneInfo.lights[0].coneAngle, 0.f, 90.f, "%.2f",
 						ImGuiSliderFlags_AlwaysClamp, "Cone angle of the spot light");
 				PE::end();
 			}
