@@ -6,7 +6,6 @@ slang´óÀ¨ºÅµÄ×óÓÒ(°üÀ¨¿ªÊ¼´óÀ¨ºÅµÄÏÂÒ»ĞĞ¿ªÊ¼£¬ÒÔ¼°½áÊø´óÀ¨ºÅµÄÉÏĞĞ½áÎ²)²»ÄÜÓĞ×¢Ê
 #include "nvshaders/random.h.slang"
 #include "nvshaders/sky_functions.h.slang"
 #include "nvvk/Slang/pbr.h.slang"
-#include "nvvk/shaderio.h"
 #include "nvshaders/ray_utils.h.slang"
 #include "shaderStructType.h"
 
@@ -218,7 +217,6 @@ float3 sphereRectangleSample(Quadrilateral quad, float3 hitPos, float u, float v
 
 void initNEE(inout CallablePayload payload) {
     SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
-
     payload.lightNum = min(sceneInfo.numLights, NEE_MAX_SAMPLE_NUM);
     for (int lightIndex = 0; lightIndex < payload.lightNum; ++lightIndex) {
         payload.radiance_nee[lightIndex] = float3(0.0f);
@@ -262,95 +260,6 @@ void initNEE(inout CallablePayload payload) {
             }
         }
         payload.sampleDir_nee[lightIndex] = normalize(sampleDir);
-        
-        /*
-        float3 bsdf = float3(1.0f);
-        float cosineON = dot(payload.outgoing, payload.hitNormal);
-        sampleDir = normalize(sampleDir);
-        if (payload.material.type == uint(MaterialType::Diffuse)) bsdf = M_1_PI * cosineON * payload.material.albedo;
-        else if (payload.material.type == uint(MaterialType::Conductor)) {
-            float3 h = normalize(sampleDir + payload.outgoing);
-            if (abs(dot(h, payload.hitNormal)) < 0.95f) bsdf = float3(0.0f);
-        }
-        else if (payload.material.type == uint(MaterialType::Deielectric)) {
-            float3 F = schlickFresnel(payload.material.albedo, float3(1.0F), cosineON);
-            if (dot(sampleDir, payload.hitNormal) > 0.0f) {
-                float3 h = normalize(sampleDir + payload.outgoing);
-                if (abs(dot(h, payload.hitNormal)) < 0.99f) bsdf = F;
-            } else {
-                float eta = payload.material.eta.x;
-                if (!payload.isExt) eta = 1.0f / eta; // ËùÒÔNEEÒªÔÚÕÒµ½incidenceÖ®Ç°
-
-                float3 h = normalize(eta * payload.outgoing + sampleDir);
-                if (abs(dot(h, payload.hitNormal)) < 0.99f) bsdf = 1.0f - F;
-            }
-        }
-        else if (payload.material.type == uint(MaterialType::RoughConductor)) {
-            float roughness = payload.material.roughness;
-            float3x3 transposeTBN = transpose(payload.TBN);
-
-            float3 h = normalize(sampleDir + payload.outgoing);
-            h = mul(h, transposeTBN); // hĞèÒªÔÚÇĞÏß¿Õ¼äÖĞ
-            float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h);
-            float D = D_costhetaNH / max(h.z, 1e-6f);
-
-            float3 outgoing_tangentSpace = mul(payload.outgoing, transposeTBN);
-            float cosineOH = abs(dot(outgoing_tangentSpace, h));
-            float3 F = schlickFresnel(payload.material.albedo, float3(1.0F), cosineOH);
-
-            float3 incidence_tangentSpace = mul(sampleDir, transposeTBN);
-
-            float G1_outgoing, G1_incidence;
-            float G2 = ggx_smith_shadow_mask(
-                G1_outgoing,
-                G1_incidence,
-                outgoing_tangentSpace,
-                incidence_tangentSpace,
-                float2(roughness)
-            );
-
-            bsdf = (D * G2 * F) / (4.0f * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 1e-6f);
-        }
-        else if (payload.material.type == uint(MaterialType::RoughDeielectric)){
-            float roughness = payload.material.roughness;
-            float eta = payload.material.eta.x;
-            float3x3 transposeTBN = transpose(payload.TBN);
-
-            float3 h;
-            bool refraction = dot(sampleDir, payload.hitNormal) < 0.0f;
-            if (refraction) h = normalize(sampleDir + payload.outgoing * eta);
-            else h = normalize(sampleDir + payload.outgoing);
-
-            h = faceforward(h, payload.outgoing, -h); //dot(I, nerf) < 0 return n;else return -n
-            h = mul(h, transposeTBN); // hĞèÒªÔÚÇĞÏß¿Õ¼äÖĞ
-            float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h);
-            float D = D_costhetaNH / max(h.z, 1e-6f);
-
-            float3 outgoing_tangentSpace = mul(payload.outgoing, transposeTBN);
-            float cosineOH = abs(dot(outgoing_tangentSpace, h));
-            float3 F = schlickFresnel(payload.material.albedo, float3(1.0F), cosineOH);
-
-            float3 incidence_tangentSpace = mul(sampleDir, transposeTBN);
-
-            float G1_outgoing, G1_incidence;
-            float G2 = ggx_smith_shadow_mask(
-                G1_outgoing,
-                G1_incidence,
-                outgoing_tangentSpace,
-                incidence_tangentSpace,
-                float2(roughness)
-            );
-
-            if (refraction) {
-                float weight = dot(incidence_tangentSpace, h) / eta + cosineOH;
-                payload.bsdf = D * G2 * (1.0f - F) * abs(dot(incidence_tangentSpace, h)) * cosineOH
-                        / (weight * weight * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 1e-6f);
-            }else
-                bsdf = (D * G2 * F) / (4.0f * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 1e-6f);
-        }
-        
-        radianceSum += radiance * bsdf * abs(dot(sampleDir, payload.hitNormal)); // ³ı¹ıpdfÁË
-        */
     }
 }
 
@@ -422,8 +331,8 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
     uint   triID        = PrimitiveIndex();
 
     SceneInfo         sceneInfo = pushConst.sceneInfoAddress[0];
-    GltfInstance          instance  = sceneInfo.instances[instanceID];
-    GltfMesh              mesh      = sceneInfo.meshes[instance.meshIndex];
+    Instance          instance  = sceneInfo.instances[instanceID];
+    Mesh              mesh      = sceneInfo.meshes[instance.meshIndex];
     BSDFMaterial material  = sceneInfo.materials[instance.materialIndex];
 
     HitState hitState = getHitStateWithPositionFetch(barycentrics);

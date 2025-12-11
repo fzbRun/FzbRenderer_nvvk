@@ -22,7 +22,7 @@
 			<ext_ior value="1.0" />
 		</bsdf>
 		<bsdf type = "roughConductor" id = "roughConductor">
-			<roughness value = "0.01" />
+			<roughness value = "0.1" />
 			<eta value = "1.65746, 0.880369, 0.521229" />
 			<k value="9.22387, 6.26952, 4.837" />
 		</bsdf>
@@ -32,8 +32,8 @@
 		</bsdf>
 	</bsdfs>
 	<lights>
-		<useSky value = "false" />
-		<backgroundColor value = "0.0, 0.0, 0.0" />
+		<useSky value = "true" />
+		<backgroundColor value = "0.85, 0.85, 0.85" />
 		<light type = "point" id = "light0">
 			<transform>
 				<translate value = "0.0, 4.0, 0.0" />
@@ -49,8 +49,17 @@
 		<mesh type = "gltf" id = "plane">
 			<filename value = "plane.gltf" />
 		</mesh>
+		<mesh type = "gltf" id = "teapot">
+			<filename value = "teapot.gltf" />
+		</mesh>
 	</meshes>
 	<instances>
+		<!--
+		<instance>
+			<meshRef id = "plane" />
+			<lightRef id = "light0" />
+		</instance>
+		-->
 		<instance>
 			<transform>
 				<translate value = "1.0, 0.0, 0.0" />
@@ -82,6 +91,14 @@
 			</transform>
 			<meshRef id = "wuson" />
 			<materialRef id = "roughDielectric" />
+		</instance>
+
+		<instance>
+			<transform>
+				<translate value = "0.0, 5.0, 0.0" />
+			</transform>
+			<meshRef id = "teapot" />
+			<materialRef id = "dielectric" />
 		</instance>
 	</instances>
 </sceneInfo>

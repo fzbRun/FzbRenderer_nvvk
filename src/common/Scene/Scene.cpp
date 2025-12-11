@@ -45,17 +45,17 @@ void FzbRenderer::Scene::loadGltfData(const tinygltf::Model& model, bool importI
 		};
 	};
 
-	nvvk::Buffer bGltfData;
+	nvvk::Buffer bData;
 	uint32_t bufferIndex{};
 	{
 		nvvk::ResourceAllocator* allocator = Application::stagingUploader.getResourceAllocator();
-		NVVK_CHECK(allocator->createBuffer(bGltfData, std::span<const unsigned char>(model.buffers[0].data).size_bytes(),
+		NVVK_CHECK(allocator->createBuffer(bData, std::span<const unsigned char>(model.buffers[0].data).size_bytes(),
 			VK_BUFFER_USAGE_2_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_2_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT
 			| VK_BUFFER_USAGE_2_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR));
-		NVVK_CHECK(Application::stagingUploader.appendBuffer(bGltfData, 0, std::span<const unsigned char>(model.buffers[0].data)));
-		NVVK_DBG_NAME(bGltfData.buffer);
-		bufferIndex = static_cast<uint32_t>(bGltfDatas.size());
-		bGltfDatas.push_back(bGltfData);
+		NVVK_CHECK(Application::stagingUploader.appendBuffer(bData, 0, std::span<const unsigned char>(model.buffers[0].data)));
+		NVVK_DBG_NAME(bData.buffer);
+		bufferIndex = static_cast<uint32_t>(bDatas.size());
+		bDatas.push_back(bData);
 	}
 
 	for (size_t meshIdx = 0; meshIdx < model.meshes.size(); ++meshIdx) {
@@ -75,7 +75,7 @@ void FzbRenderer::Scene::loadGltfData(const tinygltf::Model& model, bool importI
 		};
 		mesh.indexType = accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
 
-		mesh.gltfBuffer = (uint8_t*)bGltfData.address;  //这样address+1只移动1字节，可以按字节偏移寻址
+		mesh.gltfBuffer = (uint8_t*)bData.address;  //这样address+1只移动1字节，可以按字节偏移寻址
 
 		extractAttribute("POSITION", mesh.triMesh.positions, primitive);
 		extractAttribute("NORMAL", mesh.triMesh.normals, primitive);
@@ -284,10 +284,13 @@ void FzbRenderer::Scene::createSceneFromXML() {
 		std::string meshID = meshNode.attribute("id").value();
 		meshIDToIndex.insert({ meshID, meshes.size() });
 
-		if (meshType == "gltf") {
+		if (meshType == "gltf" || meshType == "glb") {
 			std::filesystem::path meshPath = scenePath / meshNode.child("filename").attribute("value").value();
 			tinygltf::Model gltfModel = nvsamples::loadGltfResources(nvutils::findFile(meshPath, { meshPath }));
 			loadGltfData(gltfModel);
+		}
+		else if (meshType == "obj") {
+
 		}
 	}
 	//------------------------------------------------Instance---------------------------------------------------------------
@@ -359,7 +362,7 @@ void FzbRenderer::Scene::createSceneInfBuffer() {
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(bInstances.buffer);
 	NVVK_CHECK(stagingUploader.appendBuffer(bInstances, 0,
-		std::span<const shaderio::GltfInstance>(instances)));
+		std::span<const shaderio::Instance>(instances)));
 
 	// Create all material buffers
 	allocator->createBuffer(bMaterials, std::span(materials).size_bytes(),
@@ -384,7 +387,7 @@ void FzbRenderer::Scene::clean() {
 	allocator.destroyBuffer(bMeshes);
 	allocator.destroyBuffer(bMaterials);
 	allocator.destroyBuffer(bInstances);
-	for (auto& gltfData : bGltfDatas)
+	for (auto& gltfData : bDatas)
 		allocator.destroyBuffer(gltfData);
 	for (auto& texture : textures)
 		allocator.destroyImage(texture);

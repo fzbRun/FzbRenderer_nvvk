@@ -237,8 +237,8 @@ void FzbRenderer::Application::updateDataPerFrame(VkCommandBuffer cmd) {
 	sceneResource.sceneInfo.projInvMatrix = glm::inverse(projMatrix);
 	sceneResource.sceneInfo.viewInvMatrix = glm::inverse(viewMatrix);
 	sceneResource.sceneInfo.cameraPosition = sceneResource.cameraManip->getEye();
-	sceneResource.sceneInfo.instances = (shaderio::GltfInstance*)sceneResource.bInstances.address;
-	sceneResource.sceneInfo.meshes = (shaderio::GltfMesh*)sceneResource.bMeshes.address;
+	sceneResource.sceneInfo.instances = (shaderio::Instance*)sceneResource.bInstances.address;
+	sceneResource.sceneInfo.meshes = (shaderio::Mesh*)sceneResource.bMeshes.address;
 	sceneResource.sceneInfo.materials = (shaderio::BSDFMaterial*)sceneResource.bMaterials.address;
 
 	nvvk::cmdBufferMemoryBarrier(cmd, { sceneResource.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,

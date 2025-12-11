@@ -14,7 +14,7 @@ sceneManager主要有三个功能
 #include <vector>
 
 #include <nvutils/camera_manipulator.hpp>
-#include <common/Scene/gltf_utils.hpp>
+#include <common/Mesh/nvvk/gltf_utils.hpp>
 #include <common/Shader/shaderStructType.h>
 
 namespace FzbRenderer {
@@ -35,11 +35,11 @@ public:
 	std::vector<nvvk::Image>     textures{};
 
 	std::vector<shaderio::GltfMesh> meshes;
-	std::vector<shaderio::GltfInstance> instances;
+	std::vector<shaderio::Instance> instances;
 	std::vector<shaderio::BSDFMaterial> materials;
 	shaderio::SceneInfo sceneInfo;
 
-	std::vector<nvvk::Buffer> bGltfDatas;	//每个gltf的二进制数据，包含索引和顶点数据
+	std::vector<nvvk::Buffer> bDatas;	//每个gltf的二进制数据，包含索引和顶点数据
 	nvvk::Buffer bMeshes;
 	nvvk::Buffer bInstances;
 	nvvk::Buffer bMaterials;

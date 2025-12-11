@@ -53,6 +53,13 @@ struct Light {
 	float3 edge1 = float3(1.0f);
 	float3 edge2 = float3(1.0f);
 };
+//--------------------------------------------------------Mesh-------------------------------------------------------------
+struct Mesh
+{
+	uint8_t* dataBuffer = nullptr;  // Buffer to the data (index, position, normal, ...)
+	TriangleMesh triMesh;               // Mesh data
+	int          indexType;             // Index type (uint16_t or uint32_t)
+};
 //-------------------------------------------------------≥°æ∞–≈œ¢------------------------------------------------------------
 struct SceneInfo
 {
@@ -63,8 +70,8 @@ struct SceneInfo
 	int                    useSky;             // Whether to use the sky rendering
 	float3                 backgroundColor;    // Background color of the scene (used when not using sky)
 	int                    numLights;          // Number of punctual lights in the scene (up to 2)
-	GltfInstance* instances;					// Address of the instance buffer containing GltfInstance data
-	GltfMesh* meshes;							// Address of the mesh buffer containing GltfMesh data
+	Instance* instances;					// Address of the instance buffer containing GltfInstance data
+	Mesh* meshes;							// Address of the mesh buffer containing GltfMesh data
 	BSDFMaterial* materials;					// Material properties for the instance
 	Light           lights[2];  // Array of punctual lights in the scene (up to 2)
 	SkySimpleParameters    skySimpleParam;
