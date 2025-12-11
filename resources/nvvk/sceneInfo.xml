@@ -39,7 +39,7 @@
 				<translate value = "0.0, 4.0, 0.0" />
 			</transform>
 			<emissive value = "1.0, 1.0, 1.0" />
-			<intensity value = "2000.0" />
+			<intensity value = "1000.0" />
 		</light>
 	</lights>
 	<meshes>
