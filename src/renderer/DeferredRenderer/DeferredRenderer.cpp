@@ -210,17 +210,17 @@ void FzbRenderer::DeferredRenderer::render(VkCommandBuffer cmd) {
     for (size_t i = 0; i < Application::sceneResource.instances.size(); ++i)
     {
         uint32_t meshIndex = Application::sceneResource.instances[i].meshIndex;
-        const shaderio::GltfMesh& gltfMesh = Application::sceneResource.meshes[meshIndex];
-        const shaderio::TriangleMesh& triMesh = gltfMesh.triMesh;
+        const shaderio::Mesh& mesh = Application::sceneResource.meshes[meshIndex];
+        const shaderio::TriangleMesh& triMesh = mesh.triMesh;
 
         pushValues.normalMatrix = glm::transpose(glm::inverse(glm::mat3(Application::sceneResource.instances[i].transform)));
         pushValues.instanceIndex = int(i);
         vkCmdPushConstants2(cmd, &pushInfo);
 
         uint32_t bufferIndex = Application::sceneResource.meshToBufferIndex[meshIndex];
-        const nvvk::Buffer& v = Application::sceneResource.bGltfDatas[bufferIndex];
+        const nvvk::Buffer& v = Application::sceneResource.bDatas[bufferIndex];
 
-        vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(gltfMesh.indexType));
+        vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(mesh.indexType));
 
         vkCmdDrawIndexed(cmd, triMesh.indices.count, 1, 0, 0, 0);
     }

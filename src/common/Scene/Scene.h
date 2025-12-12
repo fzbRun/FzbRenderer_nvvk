@@ -34,7 +34,7 @@ public:
 	std::shared_ptr<nvutils::CameraManipulator> cameraManip{ std::make_shared<nvutils::CameraManipulator>() };
 	std::vector<nvvk::Image>     textures{};
 
-	std::vector<shaderio::GltfMesh> meshes;
+	std::vector<shaderio::Mesh> meshes;
 	std::vector<shaderio::Instance> instances;
 	std::vector<shaderio::BSDFMaterial> materials;
 	shaderio::SceneInfo sceneInfo;
@@ -47,7 +47,6 @@ public:
 
 	std::vector<uint32_t> meshToBufferIndex;	//meshToBufferIndex[meshIndex] = bufferIndex
 
-	void loadGltfData(const tinygltf::Model& mode, bool importInstance = false);
 	void loadTexture(const std::filesystem::path& texturePath);
 };
 
