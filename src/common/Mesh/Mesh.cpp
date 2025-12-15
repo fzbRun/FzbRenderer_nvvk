@@ -5,9 +5,12 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <memory>
 #include "./Mesh.h"
+#include <common/Material/Material.h>
 
-void FzbRenderer::Mesh::loadData(std::string meshType, std::filesystem::path meshPath)
+FzbRenderer::Mesh::Mesh(std::string meshID, std::string meshType, std::filesystem::path meshPath)
 {
+	this->meshID = meshID;
+
 	Scene& scene = Application::sceneResource;
 	if (meshType == "gltf" || meshType == "glb") {
 		tinygltf::Model gltfModel = nvsamples::loadGltfResources(nvutils::findFile(meshPath, { meshPath }));
@@ -18,11 +21,24 @@ void FzbRenderer::Mesh::loadData(std::string meshType, std::filesystem::path mes
 	}
 }
 
+/*
+gltf的material采用金属-粗糙度模型，因此很难知道是不是diffuse的，还是别的什么材质的
+所以，我们按照，如果粗糙度为为0，则是光滑的；反之为粗糙度
+如果alphaMode为OPAQUE,则是导体；反之为电介质
+如果为电介质，那么eta就为透明度
+*/
+shaderio::BSDFMaterial loadGltfMaterial(const tinygltf::Material& gltfMaterial) {
+	glm::vec3 albedo = glm::make_vec3(gltfMaterial.pbrMetallicRoughness.baseColorFactor.data());
+	return {
+		.type = gltfMaterial.alphaMode == "OPAQUE" ? shaderio::MaterialType::Conductor : shaderio::MaterialType::Deielectric,
+		.albedo = albedo,
+		.emissive = glm::make_vec3(gltfMaterial.emissiveFactor.data()),
+		.eta = (glm::vec3(1.0f) + albedo) / (glm::vec3(1.0f) - albedo),
+		.roughness = float(gltfMaterial.pbrMetallicRoughness.roughnessFactor),
+	};
+}
 void FzbRenderer::Mesh::loadGltfData(const tinygltf::Model& model, bool importInstance) {
 	SCOPED_TIMER(__FUNCTION__);
-
-	Scene& scene = Application::sceneResource;
-	const uint32_t meshOffset = uint32_t(scene.meshes.size());
 
 	auto getElementByteSize = [](int type) -> uint32_t {	//最小数据单元的大小
 		return  type == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT ? 2U :
@@ -55,19 +71,7 @@ void FzbRenderer::Mesh::loadGltfData(const tinygltf::Model& model, bool importIn
 		};
 		};
 
-	nvvk::Buffer bGltfData;
-	uint32_t bufferIndex{};
-	{
-		nvvk::ResourceAllocator* allocator = Application::stagingUploader.getResourceAllocator();
-		NVVK_CHECK(allocator->createBuffer(bGltfData, std::span<const unsigned char>(model.buffers[0].data).size_bytes(),
-			VK_BUFFER_USAGE_2_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_2_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT
-			| VK_BUFFER_USAGE_2_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR));
-		NVVK_CHECK(Application::stagingUploader.appendBuffer(bGltfData, 0, std::span<const unsigned char>(model.buffers[0].data)));
-		NVVK_DBG_NAME(bGltfData.buffer);
-		bufferIndex = static_cast<uint32_t>(scene.bDatas.size());
-		scene.bDatas.push_back(bGltfData);
-	}
-
+	meshByteData = model.buffers[0].data;
 	for (size_t meshIdx = 0; meshIdx < model.meshes.size(); ++meshIdx) {
 		shaderio::Mesh mesh{};
 
@@ -85,18 +89,30 @@ void FzbRenderer::Mesh::loadGltfData(const tinygltf::Model& model, bool importIn
 		};
 		mesh.indexType = accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
 
-		mesh.dataBuffer = (uint8_t*)bGltfData.address;  //这样address+1只移动1字节，可以按字节偏移寻址
-
 		extractAttribute("POSITION", mesh.triMesh.positions, primitive);
 		extractAttribute("NORMAL", mesh.triMesh.normals, primitive);
 		extractAttribute("COLOR_0", mesh.triMesh.colorVert, primitive);
 		extractAttribute("TEXCOORD_0", mesh.triMesh.texCoords, primitive);
 		extractAttribute("TANGENT", mesh.triMesh.tangents, primitive);
 
-		scene.meshes.emplace_back(mesh);
-		scene.meshToBufferIndex.push_back(bufferIndex);
+		std::string materialID = "defaultMaterial";
+		shaderio::BSDFMaterial material = FzbRenderer::defaultMaterial;
+		if (primitive.material >= 0) {
+			const tinygltf::Material& gltfMaterial = model.materials[primitive.material];
+			materialID = gltfMaterial.name;
+			material = loadGltfMaterial(gltfMaterial);
+		}
+
+		FzbRenderer::ChildMesh childMesh = {
+			.meshID = meshID + model.meshes[meshIdx].name,
+			.mesh = mesh,
+			.materialID = materialID,
+			.material = material
+		};
+		childMeshes.push_back(childMesh);
 	}
 
+	/*
 	if (importInstance) {
 		std::function<void(const tinygltf::Node&, const glm::mat4&)> processNode = [&](const tinygltf::Node& node, const glm::mat4& parentTransform) {
 			glm::mat4 nodeTransform = parentTransform;	//当前node的变换矩阵与父node的变换依赖
@@ -154,9 +170,10 @@ void FzbRenderer::Mesh::loadGltfData(const tinygltf::Model& model, bool importIn
 			if (isRootNode) processNode(node, glm::mat4(1.0f));
 		}
 	}
+	*/
 };
 
-uint32_t addData(std::vector<uint8_t> data, std::vector<uint8_t> newData, uint32_t alignment) {
+uint32_t addData(std::vector<uint8_t>& data, std::vector<uint8_t>& newData, uint32_t alignment) {
 	uint32_t dataSize = data.size();
 	uint32_t padding = alignment - dataSize % alignment;
 	data.reserve(dataSize + padding + newData.size());
@@ -169,9 +186,32 @@ uint32_t addData(std::vector<uint8_t> data, std::vector<uint8_t> newData, uint32
 
 	return padding;
 }
+shaderio::BSDFMaterial loadMtlMaterial(aiMaterial* mtlMaterial) {
+	shaderio::BSDFMaterial material;
+
+	int illumModel = 0;
+	mtlMaterial->Get("$mat.illum", 0, 0, illumModel);
+	material.type = shaderio::MaterialType(illumModel);
+
+	aiColor3D color;
+	mtlMaterial->Get(AI_MATKEY_COLOR_DIFFUSE, color);
+	material.albedo = glm::vec3(color.r, color.g, color.b);
+
+	mtlMaterial->Get(AI_MATKEY_COLOR_EMISSIVE, color);
+	material.emissive = glm::vec3(color.r, color.g, color.b);
+
+	float roughness = 0.1f;
+	mtlMaterial->Get(AI_MATKEY_OPACITY, roughness);
+	material.roughness = roughness;
+
+	float eta = 1.5f;
+	mtlMaterial->Get(AI_MATKEY_REFRACTI, eta);
+	material.eta = glm::vec3(eta);
+
+	return material;
+}
 void FzbRenderer::Mesh::processMesh(aiMesh* meshData, const aiScene* sceneData) {
 	shaderio::Mesh mesh;
-	std::vector<uint8_t> meshByteData;
 
 	uint32_t faceNum = meshData->mNumFaces;
 	uint32_t indexNum = 0;
@@ -308,21 +348,21 @@ void FzbRenderer::Mesh::processMesh(aiMesh* meshData, const aiScene* sceneData) 
 		mesh.triMesh.tangents.offset += padding;
 	}
 	
-	nvvk::Buffer bObjData;
-	uint32_t bufferIndex{};
-	{
-		nvvk::ResourceAllocator* allocator = Application::stagingUploader.getResourceAllocator();
-		NVVK_CHECK(allocator->createBuffer(bObjData, std::span<const unsigned char>(meshByteData).size_bytes(),
-			VK_BUFFER_USAGE_2_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_2_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT
-			| VK_BUFFER_USAGE_2_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR));
-		NVVK_CHECK(Application::stagingUploader.appendBuffer(bObjData, 0, std::span<const unsigned char>(meshByteData)));
-		NVVK_DBG_NAME(bObjData.buffer);
-		bufferIndex = static_cast<uint32_t>(Application::sceneResource.bDatas.size());
-		Application::sceneResource.bDatas.push_back(bObjData);
+	std::string materialID = "defaultMaterial";
+	shaderio::BSDFMaterial material = FzbRenderer::defaultMaterial;
+	if (sceneData->mNumMaterials > 1) {		//有一个默认材质
+		aiMaterial* mtlMaterial = sceneData->mMaterials[meshData->mMaterialIndex];
+		materialID = std::string(mtlMaterial->GetName().data);
+		material = loadMtlMaterial(mtlMaterial);
 	}
+	ChildMesh childMesh = {
+		.meshID = meshID + meshData->mName.C_Str(),
+		.mesh = mesh,
+		.materialID = materialID,
+		.material = material
+	};
 
-	Application::sceneResource.meshes.emplace_back(mesh);
-	Application::sceneResource.meshToBufferIndex.push_back(bufferIndex);
+	childMeshes.emplace_back(childMesh);
 }
 void FzbRenderer::Mesh::processNode(aiNode* node, const aiScene* sceneData) {
 	std::vector<shaderio::Mesh> meshes;

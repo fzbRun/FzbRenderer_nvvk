@@ -45,7 +45,7 @@ void FzbRenderer::DeferredRenderer::createGraphicsPipelineLayout() {
     const VkPushConstantRange pushConstantRange{
         .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
         .offset = 0,
-        .size = sizeof(shaderio::TutoPushConstant)
+        .size = sizeof(shaderio::PushConstant)
     };
 
     const VkPipelineLayoutCreateInfo pipelineLayoutInfo{
@@ -72,7 +72,7 @@ void FzbRenderer::DeferredRenderer::compileAndCreateShaders() {
     const VkPushConstantRange pushConstantRange{
         .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
         .offset = 0,
-        .size = sizeof(shaderio::TutoPushConstant),
+        .size = sizeof(shaderio::PushConstant),
     };
 
     VkShaderCreateInfoEXT shaderInfo{
@@ -144,9 +144,9 @@ void FzbRenderer::DeferredRenderer::resize(VkCommandBuffer cmd, const VkExtent2D
 
 void FzbRenderer::DeferredRenderer::render(VkCommandBuffer cmd) {
     NVVK_DBG_SCOPE(cmd);
-    shaderio::TutoPushConstant pushValues{
-        .sceneInfoAddress = (shaderio::GltfSceneInfo*)Application::sceneResource.bSceneInfo.address,
-        .metallicRoughnessOverride = metallicRoughnessOverride,
+    shaderio::PushConstant pushValues{
+        .sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address,
+        //.metallicRoughnessOverride = metallicRoughnessOverride,
     };
 
     const VkPushConstantsInfo pushInfo{
@@ -154,7 +154,7 @@ void FzbRenderer::DeferredRenderer::render(VkCommandBuffer cmd) {
         .layout = graphicPipelineLayout,
         .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
         .offset = 0,
-        .size = sizeof(shaderio::TutoPushConstant),
+        .size = sizeof(shaderio::PushConstant),
         .pValues = &pushValues,
     };
 
@@ -192,7 +192,9 @@ void FzbRenderer::DeferredRenderer::render(VkCommandBuffer cmd) {
         .descriptorSetCount = 1,
         .pDescriptorSets = descPack.getSetPtr(),
     };
-    vkCmdBindDescriptorSets2(cmd, &bindDescriptorSetsInfo);
+    //vkCmdBindDescriptorSets2(cmd, &bindDescriptorSetsInfo);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicPipelineLayout, 0, 1,
+        descPack.getSetPtr(), 0, nullptr);
 
     vkCmdBeginRendering(cmd, &renderingInfo);
 

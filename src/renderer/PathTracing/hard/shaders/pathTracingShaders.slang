@@ -336,6 +336,16 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
     BSDFMaterial material  = sceneInfo.materials[instance.materialIndex];
 
     HitState hitState = getHitStateWithPositionFetch(barycentrics);
+
+    //int3 indices = getTriangleIndices(mesh.dataBuffer, mesh.triMesh, triID);
+    //float3 pos = getTriangleAttribute<float3>(mesh.dataBuffer, mesh.triMesh.positions, indices, barycentrics);
+    //float3 normal = getTriangleAttribute<float3>(mesh.dataBuffer, mesh.triMesh.normals, indices, barycentrics);
+    //hitState.pos = float3(mul(float4(pos, 1.0), ObjectToWorld4x3()));
+    //hitState.normal = normalize(mul(WorldToObject4x3(), normal).xyz);
+    //float3 tangent, bitangent;
+    //orthonormalBasis(hitState.normal, tangent, bitangent);
+    //hitState.TBN = float3x3(tangent, bitangent, hitState.normal);
+
     if (dot(hitState.normal, -payload.rayDirection) < 0) hitState.normal = -hitState.normal;
 
     CallablePayload callablePayload;

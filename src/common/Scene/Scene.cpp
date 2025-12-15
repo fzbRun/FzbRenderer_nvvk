@@ -8,7 +8,6 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <unordered_set>
 #include <common/Material/Material.h>
-#include "common/Mesh/Mesh.h"
 
 void FzbRenderer::Scene::loadTexture(const std::filesystem::path& texturePath) {
 	VkCommandBuffer       cmd = Application::app->createTempCmdBuffer();
@@ -133,54 +132,94 @@ void FzbRenderer::Scene::createSceneFromXML() {
 			}
 			else if (lightType == "area") {
 				light.type = shaderio::Area;
+				if (pugi::xml_node shapeNode = lightNode.child("filename")) {
+					if (std::string(shapeNode.attribute("type").value()) == "obj") {
+						std::filesystem::path lightMeshPath = scenePath / shapeNode.attribute("value").value();
+
+					}
+				}
 			}
 
 			sceneInfo.lights[sceneInfo.numLights++] = light;
 		}
 	}
 	//------------------------------------------------Mesh---------------------------------------------------------------
+	std::map<std::string, uint32_t> meshSetIDToIndex;
+	meshSets.resize(0);
 	std::map<std::string, uint32_t> meshIDToIndex;
 	meshes.resize(0);
 	pugi::xml_node meshesNode = sceneInfoNode.child("meshes");
 	for (pugi::xml_node meshNode : meshesNode.children("mesh")) {
 		std::string meshType = meshNode.attribute("type").value();
 		std::string meshID = meshNode.attribute("id").value();
-		meshIDToIndex.insert({ meshID, meshes.size() });
+		meshSetIDToIndex.insert({ meshID, meshSets.size() });
 
 		std::filesystem::path meshPath = scenePath / meshNode.child("filename").attribute("value").value();
-		FzbRenderer::Mesh::loadData(meshType, meshPath);
+		FzbRenderer::Mesh meshSet(meshID, meshType, meshPath);
+		meshSets.push_back(meshSet);
+
+		nvvk::Buffer bData;
+		uint32_t bufferIndex{};
+		{
+			nvvk::ResourceAllocator* allocator = Application::stagingUploader.getResourceAllocator();
+			NVVK_CHECK(allocator->createBuffer(bData, std::span<const unsigned char>(meshSet.meshByteData).size_bytes(),
+				VK_BUFFER_USAGE_2_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_2_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT
+				| VK_BUFFER_USAGE_2_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR));
+			NVVK_CHECK(Application::stagingUploader.appendBuffer(bData, 0, std::span<const unsigned char>(meshSet.meshByteData)));
+			NVVK_DBG_NAME(bData.buffer);
+			bufferIndex = static_cast<uint32_t>(bDatas.size());
+			bDatas.push_back(bData);
+		}
+
+		for (int i = 0; i < meshSet.childMeshes.size(); i++)
+		{
+			ChildMesh& childMesh = meshSet.childMeshes[i];
+			childMesh.mesh.dataBuffer = (uint8_t*)bData.address;  //这样address+1只移动1字节，可以按字节偏移寻址
+			meshIDToIndex.insert({ childMesh.meshID, meshes.size() });
+			meshes.emplace_back(childMesh.mesh);
+			meshToBufferIndex.push_back(bufferIndex);
+
+			if (!uniqueMaterialIDToIndex.count(childMesh.materialID)) {
+				uniqueMaterialIDToIndex.insert({ childMesh.materialID, materials.size() });
+				materials.push_back(childMesh.material);
+			}
+		}
 	}
 	//------------------------------------------------Instance---------------------------------------------------------------
 	pugi::xml_node instanceNode = sceneInfoNode.child("instances");
 	for (pugi::xml_node instanceNode : instanceNode.children("instance")) {
-		shaderio::Instance instance;
+		std::string meshSetID = instanceNode.child("meshRef").attribute("id").value();
+		if (!meshSetIDToIndex.count(meshSetID)) LOGW("实例没有对应的mesh：%s\n", meshSetID.c_str());
+		FzbRenderer::Mesh& meshSet = meshSets[meshSetIDToIndex[meshSetID]];
+		for(int i = 0; i < meshSet.childMeshes.size(); i++) {
+			shaderio::Instance instance;
+			ChildMesh& childMesh = meshSet.childMeshes[i];
+			instance.meshIndex = meshIDToIndex[childMesh.meshID];
 
-		std::string meshID = instanceNode.child("meshRef").attribute("id").value();
-		instance.meshIndex = meshIDToIndex[meshID];
+			std::string materialID = "defaultMaterial";
+			if (pugi::xml_node materialNode = instanceNode.child("materialRef")) materialID = materialNode.attribute("id").value();
+			if (!uniqueMaterialIDToIndex.count(materialID)) materialID = childMesh.materialID;
+			instance.materialIndex = uniqueMaterialIDToIndex[materialID];
 
-		std::string materialID = "defaultMaterial";
-		if (pugi::xml_node materialNode = instanceNode.child("materialRef")) materialID = materialNode.attribute("id").value();
-		if (!uniqueMaterialIDToIndex.count(materialID)) materialID = "defaultMaterial";
-		instance.materialIndex = uniqueMaterialIDToIndex[materialID];
-
-		glm::mat4 transformMatrix(1.0f);
-		if (pugi::xml_node transformNode = instanceNode.select_node("transform").node()) {
-			if(pugi::xml_node matrixNode = transformNode.child("matrix"))
-				transformMatrix = FzbRenderer::getMat4FromString(matrixNode.attribute("value").value());
-			if (pugi::xml_node translateNode = transformNode.select_node("translate").node()) {
-				glm::vec3 translateValue = FzbRenderer::getRGBFromString(translateNode.attribute("value").value());
-				transformMatrix = glm::translate(transformMatrix, translateValue);
+			glm::mat4 transformMatrix(1.0f);
+			if (pugi::xml_node transformNode = instanceNode.select_node("transform").node()) {
+				if (pugi::xml_node matrixNode = transformNode.child("matrix"))
+					transformMatrix = FzbRenderer::getMat4FromString(matrixNode.attribute("value").value());
+				if (pugi::xml_node translateNode = transformNode.select_node("translate").node()) {
+					glm::vec3 translateValue = FzbRenderer::getRGBFromString(translateNode.attribute("value").value());
+					transformMatrix = glm::translate(transformMatrix, translateValue);
+				}
+				if (pugi::xml_node rotateNode = transformNode.select_node("rotate").node()) {
+					glm::vec3 rotateAngle = glm::radians(FzbRenderer::getRGBFromString(rotateNode.attribute("value").value()));
+					if (rotateAngle.x > 0.01f) transformMatrix = glm::rotate(transformMatrix, rotateAngle.x, glm::vec3(1, 0, 0));
+					if (rotateAngle.y > 0.01f) transformMatrix = glm::rotate(transformMatrix, rotateAngle.y, glm::vec3(0, 1, 0));
+					if (rotateAngle.z > 0.01f) transformMatrix = glm::rotate(transformMatrix, rotateAngle.z, glm::vec3(0, 0, 1));
+				}
 			}
-			if (pugi::xml_node rotateNode = transformNode.select_node("rotate").node()) {
-				glm::vec3 rotateAngle = glm::radians(FzbRenderer::getRGBFromString(rotateNode.attribute("value").value()));
-				if (rotateAngle.x > 0.01f) transformMatrix = glm::rotate(transformMatrix, rotateAngle.x, glm::vec3(1, 0, 0));
-				if (rotateAngle.y > 0.01f) transformMatrix = glm::rotate(transformMatrix, rotateAngle.y, glm::vec3(0, 1, 0));
-				if (rotateAngle.z > 0.01f) transformMatrix = glm::rotate(transformMatrix, rotateAngle.z, glm::vec3(0, 0, 1));
-			}
+			instance.transform = transformMatrix;
+
+			instances.push_back(instance);
 		}
-		instance.transform = transformMatrix;
-
-		instances.push_back(instance);
 	}
 
 	doc.reset();

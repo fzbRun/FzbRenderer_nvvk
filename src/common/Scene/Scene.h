@@ -13,6 +13,7 @@ sceneManager主要有三个功能
 #include <memory> 
 #include <vector>
 
+#include <common/Mesh/Mesh.h>
 #include <nvutils/camera_manipulator.hpp>
 #include <common/Mesh/nvvk/gltf_utils.hpp>
 #include <common/Shader/shaderStructType.h>
@@ -34,6 +35,8 @@ public:
 	std::shared_ptr<nvutils::CameraManipulator> cameraManip{ std::make_shared<nvutils::CameraManipulator>() };
 	std::vector<nvvk::Image>     textures{};
 
+	std::vector<FzbRenderer::Mesh> meshSets;
+
 	std::vector<shaderio::Mesh> meshes;
 	std::vector<shaderio::Instance> instances;
 	std::vector<shaderio::BSDFMaterial> materials;
@@ -45,7 +48,7 @@ public:
 	nvvk::Buffer bMaterials;
 	nvvk::Buffer bSceneInfo;
 
-	std::vector<uint32_t> meshToBufferIndex;	//meshToBufferIndex[meshIndex] = bufferIndex
+	std::vector<uint32_t> meshToBufferIndex;	//meshToBufferIndex[meshIndex] = bufferIndex，前向或延时渲染时按mesh渲染时使用
 
 	void loadTexture(const std::filesystem::path& texturePath);
 };

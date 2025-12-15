@@ -12,15 +12,27 @@
 #define FZBRENDERER_MESH_H
 
 namespace FzbRenderer {
+
+struct ChildMesh {
+	std::string meshID;
+	shaderio::Mesh mesh;
+	std::string materialID;
+	shaderio::BSDFMaterial material;
+};
+
 class Mesh{
 public:
-	static void loadData(std::string meshType, std::filesystem::path meshPath);
+	Mesh() = default;
+	Mesh(std::string meshID, std::string meshType, std::filesystem::path meshPath);
 
+	std::string meshID;
+	std::vector<ChildMesh> childMeshes;		//当前mesh中的小mesh
+	std::vector<uint8_t> meshByteData;
 private:
-	static void loadGltfData(const tinygltf::Model& model, bool importInstance = false);
-	static void processMesh(aiMesh* meshData, const aiScene* sceneData);
-	static void processNode(aiNode* node, const aiScene* sceneData);
-	static void loadObjData(std::filesystem::path meshPath);
+	void loadGltfData(const tinygltf::Model& model, bool importInstance = false);
+	void processMesh(aiMesh* meshData, const aiScene* sceneData);
+	void processNode(aiNode* node, const aiScene* sceneData);
+	void loadObjData(std::filesystem::path meshPath);
 };
 }
 
