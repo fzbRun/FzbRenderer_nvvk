@@ -130,14 +130,29 @@ void FzbRenderer::Scene::createSceneFromXML() {
 				light.type == shaderio::Directional;
 				sceneInfo.useSky = true;
 			}
-			else if (lightType == "area") {
+			else if (lightType == "area") {		//默认是矩形光源
 				light.type = shaderio::Area;
-				if (pugi::xml_node shapeNode = lightNode.child("filename")) {
+				if (pugi::xml_node shapeNode = lightNode.child("shape")) {
 					if (std::string(shapeNode.attribute("type").value()) == "obj") {
 						std::filesystem::path lightMeshPath = scenePath / shapeNode.attribute("value").value();
+						FzbRenderer::Mesh lightMesh("lightMesh", "obj", lightMeshPath);
+						shaderio::BufferView posBufferView = lightMesh.childMeshes[0].mesh.triMesh.positions;
 
+						std::vector<glm::vec3> lightMeshVertices(posBufferView.count);
+						for (int i = 0; i < posBufferView.count; ++i) {
+							uint32_t posIndex = posBufferView.offset + posBufferView.byteStride * i;
+							memcpy(lightMeshVertices.data() + i, lightMesh.meshByteData.data() + posIndex, sizeof(glm::vec3));
+						}
+
+						light.pos = glm::vec3(transformMatrix * glm::vec4(lightMeshVertices[0], 1.0f));
+						light.edge1 = glm::vec3(transformMatrix * glm::vec4(lightMeshVertices[1], 1.0f)) - light.pos;
+						light.edge2 = glm::vec3(transformMatrix * glm::vec4(lightMeshVertices[3], 1.0f)) - light.pos;
+						light.direction = glm::normalize(glm::cross(light.edge1, light.edge2));
 					}
 				}
+
+				if (pugi::xml_node SRSNode = lightNode.child("SphericalRectangleSample"))
+					light.SphericalRectangleSample = std::string(SRSNode.attribute("value").value()) == "true";
 			}
 
 			sceneInfo.lights[sceneInfo.numLights++] = light;

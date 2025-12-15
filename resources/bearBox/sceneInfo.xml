@@ -1,7 +1,7 @@
 <scene>
 	<sensor type="perspective">
-		<float name="fov" value="60"/>
-		<transform name="to_world">
+		<fov value="60"/>
+		<transform name="lookAt">
 			<!--matrix value="-1 0 0 0 0 1 0 1 0 0 -1 4 0 0 0 1"/-->
 			<eye value = "0, 1.0, 4.0" />
 			<center value = "0, 1.0, 4.5" />
@@ -10,6 +10,34 @@
 	</sensor>
 	
 	<bsdfs>
+	</bsdfs>
+	
+	<lights>
+		<useSky value = "true" />
+		<backgroundColor value = "0.0, 0.0, 0.0" />
+		<light type = "area" id = "light0">
+			<shape type = "obj" value="models/bear_box_light.obj" />
+			<emissive value = "27.0, 22.0, 14.0" />
+			<intensity value = "1.0" />
+			<SphericalRectangleSample value = "false" />
+		</light>
+	</lights>				
+	
+	<meshes>
+		<mesh type="obj" id="bearBox">
+			<filename value="models/bear_box.obj" />
+		</mesh>
+	</meshes>
+
+	<instances>
+		<instance>
+			<meshRef id = "bearBox"/>
+		</instance>
+
+	</instances>
+</scene>
+
+<!--
 		<bsdf type = "diffuse" id = "leftWall">
 			<albedo value = "0.63, 0.065, 0.05, 1.0" />
 		</bsdf>
@@ -19,55 +47,33 @@
 		<bsdf type = "diffuse" id = "diffuse1">
 			<albedo value = "0.64, 0.64, 0.64, 1.0" />
 		</bsdf>
-		<bsdf type = "diffuse" id = "diffuse2">   <!--天花板、地板、后墙、两个长方体-->
-			<albedo value = "0.725, 0.71, 0.68, 1.0" />
+		<bsdf type = "diffuse" id = "diffuse2">   <天花板、地板、后墙、两个长方体>
+		<albedo value = "0.725, 0.71, 0.68, 1.0" />
 		</bsdf>
 		<bsdf type = "diffuse" id = "light">
 			<albedo value = "0.78, 0.78, 0.78, 1.0" />
 		</bsdf>
 		<bsdf type = "roughConductor" id = "plane">
 			<roughness value = "0.8" />
-			<albedo value = "0.357798, 0.60366, 0.64" />
+			<albedo value = "0.357798, 0.60366, 0.64, 1.0" />
 		</bsdf>
 		<bsdf type = "roughConductor" id = "bear">
 			<roughness value = "0.5" />
-			<albedo value = "0.64, 0.359151, 0.039741" />
+			<albedo value = "0.64, 0.359151, 0.039741, 1.0" />
 		</bsdf>
 		<bsdf type = "roughConductor" id = "monkey">
 			<roughness value = "0.8" />
-			<albedo value = "0.428103, 0.20435, 0.062257" />
+			<albedo value = "0.428103, 0.20435, 0.062257, 1.0" />
 		</bsdf>
 		<bsdf type="roughConductor" id="torus">
 			<roughness value = "0.9" />
-			<albedo value = "0.72, 0.72, 0.0" />
+			<albedo value = "0.72, 0.72, 0.0, 1.0" />
 		</bsdf>
 		<bsdf type="dielectric" id="teapot">
 			<float name="int_ior" value="1.5" />
 			<float name="ext_ior" value="1" />
 		</bsdf>
-	</bsdfs>
-	
-	<lights>
-		<useSky value = "false" />
-		<backgroundColor value = "0.0, 0.0, 0.0" />
-		<light type = "area" id = "light0">
-			<shape type = "obj" value="models/bear_box_light.obj" />
-			<emissive value = "27.0, 22.0, 14.0" />
-			<intensity value = "1.0" />
-		</light>
-	</lights>				
-	
-	<meshes>
-		<shape type="obj" id="bearBox">
-			<filename value="models/bear_box.obj" />
-		</shape>
-	</meshes>
-
-	<instances>
-		<instance>
-			<meshRef id = "bearBox"/>
-		</instance>
-		<!--
+		
 		<instance>
 			<meshRef id = "glass_Circle"/>
 			<materialRef id = "diffuse1" />
@@ -124,10 +130,4 @@
 			<meshRef id = "tallBox"/>
 			<materialRef id = "diffuse2" />
 		</instance>
-		-->
-	</instances>
-</scene>
-
-<!--
-
 -->

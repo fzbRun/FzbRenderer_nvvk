@@ -1,0 +1,35 @@
+<scene>
+	<sensor type="perspective">
+		<fov value="60"/>
+		<transform name="lookAt">
+			<!--matrix value="-1 0 0 0 0 1 0 1 0 0 -1 4 0 0 0 1"/-->
+			<eye value = "0, 1.0, 4.0" />
+			<center value = "0, 1.0, 4.5" />
+			<up value = "0.00000, 1.00000, 0.00000" />
+		</transform>
+	</sensor>
+	
+	<bsdfs>
+		<bsdf type="dielectric" id="dragon">
+			<float name="int_ior" value="1.5" />
+			<float name="ext_ior" value="1" />
+		</bsdf>
+	</bsdfs>
+
+	<lights>
+		<useSky value = "true" />
+	</lights>
+
+	<meshes>
+		<mesh type="obj" id="dragon">
+			<filename value="dragon.obj" />
+		</mesh>
+	</meshes>
+
+	<instances>
+		<instance>
+			<meshRef id = "dragon"/>
+			<materialRef id = "dragon" />
+		</instance>
+	</instances>
+</scene>

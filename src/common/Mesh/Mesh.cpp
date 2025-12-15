@@ -7,6 +7,7 @@
 #include "./Mesh.h"
 #include <common/Material/Material.h>
 
+//所有的数据都不是交错的，即pos全放在一起，normal全放在一起……。这也影响这其他所有读取数据的地方，需要注意!!!!!
 FzbRenderer::Mesh::Mesh(std::string meshID, std::string meshType, std::filesystem::path meshPath)
 {
 	this->meshID = meshID;
@@ -175,7 +176,7 @@ void FzbRenderer::Mesh::loadGltfData(const tinygltf::Model& model, bool importIn
 
 uint32_t addData(std::vector<uint8_t>& data, std::vector<uint8_t>& newData, uint32_t alignment) {
 	uint32_t dataSize = data.size();
-	uint32_t padding = alignment - dataSize % alignment;
+	uint32_t padding = (alignment - dataSize % alignment) % alignment;
 	data.reserve(dataSize + padding + newData.size());
 	
 	if (padding > 0) {
@@ -206,12 +207,14 @@ shaderio::BSDFMaterial loadMtlMaterial(aiMaterial* mtlMaterial) {
 
 	float eta = 1.5f;
 	mtlMaterial->Get(AI_MATKEY_REFRACTI, eta);
-	material.eta = glm::vec3(eta);
+	material.eta = glm::vec3(1.0f / eta);
 
 	return material;
 }
 void FzbRenderer::Mesh::processMesh(aiMesh* meshData, const aiScene* sceneData) {
 	shaderio::Mesh mesh;
+
+	uint32_t padding = 0;
 
 	uint32_t faceNum = meshData->mNumFaces;
 	uint32_t indexNum = 0;
@@ -225,6 +228,12 @@ void FzbRenderer::Mesh::processMesh(aiMesh* meshData, const aiScene* sceneData) 
 		}
 	}
 	std::vector<uint8_t> indexByteData;
+	
+	mesh.triMesh.indices = {
+		.offset = uint32_t(meshByteData.size()),
+		.count = indexNum,
+		.byteStride = mesh.indexType == VK_INDEX_TYPE_UINT16 ? 2u : 4u
+	};
 	if (maxIndex <= 0xFFFF) {  // 65535
 		mesh.indexType = VK_INDEX_TYPE_UINT16;
 		std::vector<uint16_t> indexData;
@@ -239,12 +248,14 @@ void FzbRenderer::Mesh::processMesh(aiMesh* meshData, const aiScene* sceneData) 
 			offset += face.mNumIndices;
 		}
 
+		indexByteData.resize(indexNum * 2);
 		memcpy(indexByteData.data(), indexData.data(), sizeof(uint16_t) * indexNum);
-		addData(meshByteData, indexByteData, 2);
+		padding = addData(meshByteData, indexByteData, 2);
 	}
 	else {
 		mesh.indexType = VK_INDEX_TYPE_UINT32;
 
+		indexByteData.resize(indexNum * 4);
 		uint32_t offset = 0;
 		for (uint32_t i = 0; i < faceNum; i++) {
 			aiFace& face = meshData->mFaces[i];
@@ -256,16 +267,12 @@ void FzbRenderer::Mesh::processMesh(aiMesh* meshData, const aiScene* sceneData) 
 			offset += face.mNumIndices;
 		}
 
-		addData(meshByteData, indexByteData, 4);
+		padding = addData(meshByteData, indexByteData, 4);
 	}
-	mesh.triMesh.indices = {
-		.offset = 0,
-		.count = indexNum,
-		.byteStride = mesh.indexType == VK_INDEX_TYPE_UINT16 ? 2u : 4u
-	};
+	mesh.triMesh.indices.offset += padding;
 
 	uint32_t vertexNum = meshData->mNumVertices;
-	if (true) {
+	if (meshData->HasPositions()) {
 		mesh.triMesh.positions = {
 			.offset = uint32_t(meshByteData.size()),
 			.count = vertexNum,
@@ -279,9 +286,10 @@ void FzbRenderer::Mesh::processMesh(aiMesh* meshData, const aiScene* sceneData) 
 		}
 		std::vector<uint8_t> posByteData(sizeof(float) * posData.size());
 		std::memcpy(posByteData.data(), posData.data(), sizeof(float) * posData.size());
-		uint32_t padding = addData(meshByteData, posByteData, sizeof(glm::vec3));
+		padding = addData(meshByteData, posByteData, sizeof(glm::vec3));
 		mesh.triMesh.positions.offset += padding;
 	}
+	/*
 	if (meshData->HasNormals()) {
 		mesh.triMesh.normals = {
 			.offset = uint32_t(meshByteData.size()),
@@ -295,10 +303,10 @@ void FzbRenderer::Mesh::processMesh(aiMesh* meshData, const aiScene* sceneData) 
 			normalData.emplace_back(meshData->mNormals[i].y);
 			normalData.emplace_back(meshData->mNormals[i].z);
 		}
-
+	
 		std::vector<uint8_t> normalByteData(sizeof(float) * normalData.size());
 		std::memcpy(normalByteData.data(), normalData.data(), sizeof(float) * normalData.size());
-		uint32_t padding = addData(meshByteData, normalByteData, sizeof(glm::vec3));
+		padding = addData(meshByteData, normalByteData, sizeof(glm::vec3));
 		mesh.triMesh.normals.offset += padding;
 	}	
 	if (meshData->mTextureCoords[0]) {
@@ -316,7 +324,7 @@ void FzbRenderer::Mesh::processMesh(aiMesh* meshData, const aiScene* sceneData) 
 
 		std::vector<uint8_t> texCoordByteData(sizeof(float) * texCoordData.size());
 		std::memcpy(texCoordByteData.data(), texCoordData.data(), sizeof(float) * texCoordData.size());
-		uint32_t padding = addData(meshByteData, texCoordByteData, sizeof(glm::vec2));
+		padding = addData(meshByteData, texCoordByteData, sizeof(glm::vec2));
 		mesh.triMesh.texCoords.offset += padding;
 	}
 	if (meshData->HasTangentsAndBitangents()) {
@@ -344,9 +352,10 @@ void FzbRenderer::Mesh::processMesh(aiMesh* meshData, const aiScene* sceneData) 
 
 		std::vector<uint8_t> tangentByteData(sizeof(float)* tangentData.size());
 		std::memcpy(tangentByteData.data(), tangentData.data(), sizeof(float)* tangentData.size());
-		uint32_t padding = addData(meshByteData, tangentByteData, sizeof(glm::vec4));
+		padding = addData(meshByteData, tangentByteData, sizeof(glm::vec4));
 		mesh.triMesh.tangents.offset += padding;
 	}
+	*/
 	
 	std::string materialID = "defaultMaterial";
 	shaderio::BSDFMaterial material = FzbRenderer::defaultMaterial;

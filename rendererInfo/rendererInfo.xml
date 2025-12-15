@@ -1,7 +1,7 @@
 <rendererInfo>
 	<name value = "FzbRenderer" />
 	<resolution width = "1280" height = "720" />
-	<sceneXML path = "./nvvk" />	<!--开头不能加/，但可以是./或不加-->
+	<sceneXML path = "./bearBox" />	<!--开头不能加/，但可以是./或不加-->
 
 	<renderer type = "PathTracing">
 		<maxDepth value = "6" />
