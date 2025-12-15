@@ -213,7 +213,8 @@ void FzbRenderer::Scene::createSceneFromXML() {
 
 			std::string materialID = "defaultMaterial";
 			if (pugi::xml_node materialNode = instanceNode.child("materialRef")) materialID = materialNode.attribute("id").value();
-			if (!uniqueMaterialIDToIndex.count(materialID)) materialID = childMesh.materialID;
+			else materialID = childMesh.materialID;
+			if (!uniqueMaterialIDToIndex.count(materialID)) materialID = "defaultMaterial";
 			instance.materialIndex = uniqueMaterialIDToIndex[materialID];
 
 			glm::mat4 transformMatrix(1.0f);

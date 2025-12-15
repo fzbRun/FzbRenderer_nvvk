@@ -3,8 +3,8 @@
 		<fov value="60"/>
 		<transform name="lookAt">
 			<!--matrix value="-1 0 0 0 0 1 0 1 0 0 -1 4 0 0 0 1"/-->
-			<eye value = "0, 1.0, 4.0" />
-			<center value = "0, 1.0, 4.5" />
+			<eye value = "0, 1.0, 1.0" />
+			<center value = "0, 1.0, 1.5" />
 			<up value = "0.00000, 1.00000, 0.00000" />
 		</transform>
 	</sensor>

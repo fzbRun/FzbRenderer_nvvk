@@ -346,7 +346,12 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
     //orthonormalBasis(hitState.normal, tangent, bitangent);
     //hitState.TBN = float3x3(tangent, bitangent, hitState.normal);
 
-    if (dot(hitState.normal, -payload.rayDirection) < 0) hitState.normal = -hitState.normal;
+    float cosineON = dot(hitState.normal, -payload.rayDirection);
+    float3 emissive = material.emissive;
+    if (material.type == uint(MaterialType::Deielectric) || material.type == uint(MaterialType::RoughDeielectric)) {
+        if (cosineON < 0) hitState.normal = -hitState.normal;
+        cosineON = abs(cosineON);
+    } else emissive *= max(cosineON, 0.0f);
 
     CallablePayload callablePayload;
     callablePayload.material = material;
@@ -365,10 +370,10 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
     CallShader<CallablePayload>(uint(material.type), callablePayload);
 
     payload.randomSeed = callablePayload.randomSeed;
-    payload.radiance += (callablePayload.radianceSum_nee + material.emissive) * payload.bsdf_cosine / payload.pdf;
+    payload.radiance += (callablePayload.radianceSum_nee + emissive) * payload.bsdf_cosine / payload.pdf;
     payload.rayDirection = callablePayload.incidence;
-    payload.rayOrigin = offsetRay(hitState.pos, hitState.normal);    //hitState.pos + 0.001f * payload.rayDirection;
-    payload.bsdf_cosine *= callablePayload.bsdf * abs(dot(hitState.normal, payload.rayDirection));
+    payload.rayOrigin = offsetRay(hitState.pos, hitState.normal); // hitState.pos + 0.001f * payload.rayDirection;
+    payload.bsdf_cosine *= callablePayload.bsdf * cosineON;
     payload.pdf *= callablePayload.pdf;
     payload.isExt = callablePayload.isExt;
 
