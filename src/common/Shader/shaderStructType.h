@@ -14,7 +14,7 @@ struct Instance {
 	uint32_t materialIndex;  // Material properties for the instance
 	uint32_t meshIndex;      // Index of the mesh in the GltfMesh vector
 };
-
+CHECK_STRUCT_ALIGNMENT(Instance)
 //-------------------------------------------------------材质------------------------------------------------------------
 enum MaterialType {
 	Diffuse = 0,
@@ -33,7 +33,13 @@ struct BSDFMaterial {
 
 	int3 materialMapIndex; // 0:albedo, 2:normal, 3:bsdfPara
 };
-
+//--------------------------------------------------------Mesh-------------------------------------------------------------
+struct Mesh
+{
+	uint8_t* dataBuffer = nullptr;  // Buffer to the data (index, position, normal, ...)
+	TriangleMesh triMesh;               // Mesh data
+	int          indexType;             // Index type (uint16_t or uint32_t)
+};
 //---------------------------------------------------------光源--------------------------------------------------------------
 enum LightType {
 	Point = 0,
@@ -42,24 +48,19 @@ enum LightType {
 	Area = 3
 };;
 struct Light {
-	int type;
 	float3 pos;
+	int type;
 	float3 direction;
 	float intensity;
 	float3 color;
 	float coneAngle;
 
-	bool SphericalRectangleSample = false;
 	float3 edge1 = float3(1.0f);
 	float3 edge2 = float3(1.0f);
+	uint32_t SphericalRectangleSample = false;
+	float padding;
 };
-//--------------------------------------------------------Mesh-------------------------------------------------------------
-struct Mesh
-{
-	uint8_t* dataBuffer = nullptr;  // Buffer to the data (index, position, normal, ...)
-	TriangleMesh triMesh;               // Mesh data
-	int          indexType;             // Index type (uint16_t or uint32_t)
-};
+CHECK_STRUCT_ALIGNMENT(Light)
 //-------------------------------------------------------场景信息------------------------------------------------------------
 struct SceneInfo
 {
@@ -73,9 +74,10 @@ struct SceneInfo
 	Instance* instances;					// Address of the instance buffer containing GltfInstance data
 	Mesh* meshes;							// Address of the mesh buffer containing GltfMesh data
 	BSDFMaterial* materials;					// Material properties for the instance
-	Light           lights[2];  // Array of punctual lights in the scene (up to 2)
+	Light           lights[2];			// Array of punctual lights in the scene (up to 2)
 	SkySimpleParameters    skySimpleParam;
 };
+CHECK_STRUCT_ALIGNMENT(SceneInfo)
 //-------------------------------------------------------推送常量------------------------------------------------------------
 struct PushConstant
 {

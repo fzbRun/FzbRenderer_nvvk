@@ -36,6 +36,7 @@ public:
 	std::vector<nvvk::Image>     textures{};
 
 	std::vector<FzbRenderer::Mesh> meshSets;
+	uint32_t customPrimitiveCount = 0;
 
 	std::vector<shaderio::Mesh> meshes;
 	std::vector<shaderio::Instance> instances;

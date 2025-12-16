@@ -60,7 +60,6 @@ void FzbRenderer::Scene::createSceneFromXML() {
 	materials.resize(0);
 	std::unordered_set<std::string> uniqueTexturePaths;
 	textures.resize(0);
-
 	//默认材质
 	shaderio::BSDFMaterial defaultMaterial = FzbRenderer::defaultMaterial;
 	materials.push_back(defaultMaterial);
@@ -150,6 +149,12 @@ void FzbRenderer::Scene::createSceneFromXML() {
 						light.direction = glm::normalize(glm::cross(light.edge1, light.edge2));
 					}
 				}
+				else {
+					light.pos = glm::vec3(transformMatrix * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+					light.edge1 = glm::vec3(transformMatrix * glm::vec4(1.0f, 0.0f, 0.0f, 1.0f)) - light.pos;
+					light.edge2 = glm::vec3(transformMatrix * glm::vec4(0.0f, 1.0f, 0.0f, 1.0f)) - light.pos;
+					light.direction = glm::normalize(glm::cross(light.edge1, light.edge2));
+				}
 
 				if (pugi::xml_node SRSNode = lightNode.child("SphericalRectangleSample"))
 					light.SphericalRectangleSample = std::string(SRSNode.attribute("value").value()) == "true";
@@ -163,6 +168,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 	meshSets.resize(0);
 	std::map<std::string, uint32_t> meshIDToIndex;
 	meshes.resize(0);
+
 	pugi::xml_node meshesNode = sceneInfoNode.child("meshes");
 	for (pugi::xml_node meshNode : meshesNode.children("mesh")) {
 		std::string meshType = meshNode.attribute("type").value();
@@ -173,18 +179,9 @@ void FzbRenderer::Scene::createSceneFromXML() {
 		FzbRenderer::Mesh meshSet(meshID, meshType, meshPath);
 		meshSets.push_back(meshSet);
 
-		nvvk::Buffer bData;
-		uint32_t bufferIndex{};
-		{
-			nvvk::ResourceAllocator* allocator = Application::stagingUploader.getResourceAllocator();
-			NVVK_CHECK(allocator->createBuffer(bData, std::span<const unsigned char>(meshSet.meshByteData).size_bytes(),
-				VK_BUFFER_USAGE_2_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_2_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT
-				| VK_BUFFER_USAGE_2_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR));
-			NVVK_CHECK(Application::stagingUploader.appendBuffer(bData, 0, std::span<const unsigned char>(meshSet.meshByteData)));
-			NVVK_DBG_NAME(bData.buffer);
-			bufferIndex = static_cast<uint32_t>(bDatas.size());
-			bDatas.push_back(bData);
-		}
+		nvvk::Buffer bData = meshSet.createMeshDataBuffer();
+		uint32_t bufferIndex = static_cast<uint32_t>(bDatas.size());
+		bDatas.push_back(bData);
 
 		for (int i = 0; i < meshSet.childMeshes.size(); i++)
 		{
@@ -204,11 +201,37 @@ void FzbRenderer::Scene::createSceneFromXML() {
 	pugi::xml_node instanceNode = sceneInfoNode.child("instances");
 	for (pugi::xml_node instanceNode : instanceNode.children("instance")) {
 		std::string meshSetID = instanceNode.child("meshRef").attribute("id").value();
-		if (!meshSetIDToIndex.count(meshSetID)) LOGW("实例没有对应的mesh：%s\n", meshSetID.c_str());
-		FzbRenderer::Mesh& meshSet = meshSets[meshSetIDToIndex[meshSetID]];
-		for(int i = 0; i < meshSet.childMeshes.size(); i++) {
+		std::vector<ChildMesh> childMeshes;
+		if (meshSetID == "custom") {
+			FzbRenderer::Mesh mesh;
+			std::string meshType = instanceNode.child("meshRef").attribute("type").value();
+			nvutils::PrimitiveMesh primitive;
+			if (meshType == "plane") primitive = FzbRenderer::Mesh::createPlane(1, 1.0f, 1.0f);
+			meshSetID = "custom" + meshType + std::to_string(customPrimitiveCount++);
+			mesh = FzbRenderer::Mesh(meshSetID, primitive);
+			meshSetIDToIndex.insert({ meshSetID, meshSets.size() });
+
+			nvvk::Buffer bData = mesh.createMeshDataBuffer();
+			uint32_t bufferIndex = static_cast<uint32_t>(bDatas.size());
+			bDatas.push_back(bData);
+
+			childMeshes = mesh.childMeshes;
+			for (int i = 0; i < childMeshes.size(); ++i) {
+				ChildMesh& childMesh = mesh.childMeshes[i];
+				childMesh.mesh.dataBuffer = (uint8_t*)bData.address;
+				meshIDToIndex.insert({ childMesh.meshID, meshes.size() });
+				meshes.emplace_back(childMesh.mesh);
+				meshToBufferIndex.push_back(bufferIndex);
+			}
+		}
+		else {
+			if (!meshSetIDToIndex.count(meshSetID)) LOGW("实例没有对应的mesh：%s\n", meshSetID.c_str());
+			FzbRenderer::Mesh& meshSet = meshSets[meshSetIDToIndex[meshSetID]];
+			childMeshes = meshSet.childMeshes;
+		}
+		for (int i = 0; i < childMeshes.size(); i++) {
 			shaderio::Instance instance;
-			ChildMesh& childMesh = meshSet.childMeshes[i];
+			ChildMesh& childMesh = childMeshes[i];
 			instance.meshIndex = meshIDToIndex[childMesh.meshID];
 
 			std::string materialID = "defaultMaterial";
@@ -299,8 +322,8 @@ void FzbRenderer::Scene::clean() {
 	allocator.destroyBuffer(bMeshes);
 	allocator.destroyBuffer(bMaterials);
 	allocator.destroyBuffer(bInstances);
-	for (auto& gltfData : bDatas)
-		allocator.destroyBuffer(gltfData);
+	for (auto& data : bDatas)
+		allocator.destroyBuffer(data);
 	for (auto& texture : textures)
 		allocator.destroyImage(texture);
 }

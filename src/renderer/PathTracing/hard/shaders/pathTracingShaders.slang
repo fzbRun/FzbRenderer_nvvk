@@ -10,7 +10,8 @@ slang´óÀ¨ºÅµÄ×óÓÒ(°üÀ¨¿ªÊ¼´óÀ¨ºÅµÄÏÂÒ»ÐÐ¿ªÊ¼£¬ÒÔ¼°½áÊø´óÀ¨ºÅµÄÉÏÐÐ½áÎ²)²»ÄÜÓÐ×¢Ê
 #include "shaderStructType.h"
 
 // clang-format off
-[[vk::push_constant]]                           ConstantBuffer<PushConstant> pushConst;
+//ScalarDataLayout
+[[vk::push_constant]]                           ConstantBuffer<PushConstant, ScalarDataLayout> pushConst;
 [[vk::binding(BindingPoints::eTextures, 0)]]    Sampler2D textures[];
 [[vk::binding(BindingPoints::eTlas, 1)]]        RaytracingAccelerationStructure topLevelAS;
 [[vk::binding(BindingPoints::eOutImage, 1)]]    RWTexture2D<float4> outImage;
@@ -236,7 +237,7 @@ void initNEE(inout CallablePayload payload) {
             float randomNumber1 = rand(payload.randomSeed);
             float randomNumber2 = rand(payload.randomSeed);
  
-            if (light.SphericalRectangleSample) {
+            if (light.SphericalRectangleSample == 1) {
                 Quadrilateral quad;
                 quad.startPos = light.pos;
                 quad.normal = light.direction;
@@ -245,6 +246,8 @@ void initNEE(inout CallablePayload payload) {
                 float pdf = 1.0f;
                 sampleDir = sphereRectangleSample(quad, payload.hitPos, randomNumber1, randomNumber2, pdf);
 
+                if (dot(-sampleDir, light.direction) <= 0.01f) continue;
+
                 float distance = length(sampleDir);
                 if (!hitTest(distance, sampleDir, payload.hitPos, payload.hitNormal)) continue; // ÕÚµ²
 
@@ -252,6 +255,9 @@ void initNEE(inout CallablePayload payload) {
             } else {
                 float3 samplePos = light.pos + light.edge1 * randomNumber1 + light.edge2 * randomNumber2;
                 sampleDir = samplePos - payload.hitPos;
+
+                if (dot(-sampleDir, light.direction) <= 0.01f) continue;
+
                 float distance = length(sampleDir);
                 if (!(hitTest(distance, sampleDir, payload.hitPos, payload.hitNormal))) continue; // ÕÚµ²
 
@@ -363,10 +369,10 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
     callablePayload.hitNormal = hitState.normal;
     callablePayload.outgoing = -payload.rayDirection;
     callablePayload.isExt = payload.isExt;
-    if (pushConst.NEEShaderIndex > 0) {
-        initNEE(callablePayload);
-        callablePayload.radianceSum_nee = float3(0.0f);
-    }
+
+    callablePayload.radianceSum_nee = float3(0.0f);
+    if (pushConst.NEEShaderIndex > 0) initNEE(callablePayload);
+
     CallShader<CallablePayload>(uint(material.type), callablePayload);
 
     payload.randomSeed = callablePayload.randomSeed;
@@ -383,7 +389,7 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
 [shader("miss")]
 void rayMissMain(inout HitPayload payload)
 {
-    SceneInfo *sceneInfo = pushConst.sceneInfoAddress;
+    SceneInfo* sceneInfo = pushConst.sceneInfoAddress;
     if (sceneInfo.useSky == 1)
     {
         float3 skyColor = evalSimpleSky(sceneInfo.skySimpleParam, WorldRayDirection());

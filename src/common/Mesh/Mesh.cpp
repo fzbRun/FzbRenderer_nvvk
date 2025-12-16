@@ -212,7 +212,7 @@ shaderio::BSDFMaterial loadMtlMaterial(aiMaterial* mtlMaterial) {
 	return material;
 }
 void FzbRenderer::Mesh::processMesh(aiMesh* meshData, const aiScene* sceneData) {
-	shaderio::Mesh mesh;
+	shaderio::Mesh mesh{};
 
 	uint32_t padding = 0;
 
@@ -289,7 +289,6 @@ void FzbRenderer::Mesh::processMesh(aiMesh* meshData, const aiScene* sceneData) 
 		padding = addData(meshByteData, posByteData, sizeof(glm::vec3));
 		mesh.triMesh.positions.offset += padding;
 	}
-	/*
 	if (meshData->HasNormals()) {
 		mesh.triMesh.normals = {
 			.offset = uint32_t(meshByteData.size()),
@@ -355,7 +354,6 @@ void FzbRenderer::Mesh::processMesh(aiMesh* meshData, const aiScene* sceneData) 
 		padding = addData(meshByteData, tangentByteData, sizeof(glm::vec4));
 		mesh.triMesh.tangents.offset += padding;
 	}
-	*/
 	
 	std::string materialID = "defaultMaterial";
 	shaderio::BSDFMaterial material = FzbRenderer::defaultMaterial;
@@ -364,13 +362,13 @@ void FzbRenderer::Mesh::processMesh(aiMesh* meshData, const aiScene* sceneData) 
 		materialID = std::string(mtlMaterial->GetName().data);
 		material = loadMtlMaterial(mtlMaterial);
 	}
+
 	ChildMesh childMesh = {
 		.meshID = meshID + meshData->mName.C_Str(),
 		.mesh = mesh,
 		.materialID = materialID,
 		.material = material
 	};
-
 	childMeshes.emplace_back(childMesh);
 }
 void FzbRenderer::Mesh::processNode(aiNode* node, const aiScene* sceneData) {
@@ -394,4 +392,151 @@ void FzbRenderer::Mesh::loadObjData(std::filesystem::path meshPath) {
 		LOGW(import.GetErrorString());
 
 	processNode(sceneData->mRootNode, sceneData);
+}
+
+FzbRenderer::Mesh::Mesh(std::string meshID, nvutils::PrimitiveMesh primitiveMesh)
+{
+	this->meshID = meshID;
+	shaderio::Mesh mesh{};
+
+	uint32_t indexCount = primitiveMesh.triangles.size() * 3;
+	uint32_t maxIndex = 0;
+	for (const auto& tri : primitiveMesh.triangles)
+		maxIndex = std::max(maxIndex, std::max(tri.indices.x, std::max(tri.indices.y, tri.indices.z)));
+	if(maxIndex <= 0xFFFF) {
+		mesh.indexType = VK_INDEX_TYPE_UINT16;
+		std::vector<uint16_t> indexData;
+		indexData.reserve(indexCount);
+		for (const auto& tri : primitiveMesh.triangles) {
+			indexData.emplace_back(static_cast<uint16_t>(tri.indices.x));
+			indexData.emplace_back(static_cast<uint16_t>(tri.indices.y));
+			indexData.emplace_back(static_cast<uint16_t>(tri.indices.z));
+		}
+		meshByteData.resize(sizeof(uint16_t) * indexCount);
+		memcpy(meshByteData.data(), indexData.data(), sizeof(uint16_t) * indexCount);
+	}
+	else {
+		mesh.indexType = VK_INDEX_TYPE_UINT32;
+		memcpy(meshByteData.data(), primitiveMesh.triangles.data(), sizeof(uint32_t) * indexCount);
+	}
+	mesh.triMesh.indices = {
+		.offset = 0,
+		.count = indexCount,
+		.byteStride = mesh.indexType == VK_INDEX_TYPE_UINT16 ? 2u : 4u
+	};
+
+	uint32_t vertexNum = primitiveMesh.vertices.size();
+	mesh.triMesh.positions = {
+		.offset = uint32_t(meshByteData.size()),
+		.count = vertexNum,
+		.byteStride = sizeof(glm::vec3)
+	};
+	std::vector<float> posData; posData.reserve(vertexNum * sizeof(glm::vec3));
+	for (uint32_t i = 0; i < vertexNum; i++) {
+		posData.emplace_back(primitiveMesh.vertices[i].pos.x);
+		posData.emplace_back(primitiveMesh.vertices[i].pos.y);
+		posData.emplace_back(primitiveMesh.vertices[i].pos.z);
+	}
+	std::vector<uint8_t> posByteData(sizeof(float) * posData.size());
+	std::memcpy(posByteData.data(), posData.data(), sizeof(float) * posData.size());
+	uint32_t padding = addData(meshByteData, posByteData, sizeof(glm::vec3));
+	mesh.triMesh.positions.offset += padding;
+
+	mesh.triMesh.normals = {
+		.offset = uint32_t(meshByteData.size()),
+		.count = vertexNum,
+		.byteStride = sizeof(glm::vec3)
+	};
+	std::vector<float> normalData; normalData.reserve(vertexNum * sizeof(glm::vec3));
+	for (uint32_t i = 0; i < vertexNum; i++) {
+		normalData.emplace_back(primitiveMesh.vertices[i].nrm.x);
+		normalData.emplace_back(primitiveMesh.vertices[i].nrm.y);
+		normalData.emplace_back(primitiveMesh.vertices[i].nrm.z);
+	}
+	std::vector<uint8_t> normalByteData(sizeof(float) * normalData.size());
+	std::memcpy(normalByteData.data(), normalData.data(), sizeof(float) * normalData.size());
+	padding = addData(meshByteData, normalByteData, sizeof(glm::vec3));
+	mesh.triMesh.normals.offset += padding;
+
+	ChildMesh childMesh = {
+		.meshID = meshID,
+		.mesh = mesh,
+	};
+	childMeshes.emplace_back(childMesh);
+}
+
+nvvk::Buffer FzbRenderer::Mesh::createMeshDataBuffer() {
+	nvvk::Buffer bData;
+	uint32_t bufferIndex{};
+	{
+		nvvk::ResourceAllocator* allocator = Application::stagingUploader.getResourceAllocator();
+		NVVK_CHECK(allocator->createBuffer(bData, std::span<const unsigned char>(meshByteData).size_bytes(),
+			VK_BUFFER_USAGE_2_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_2_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT
+			| VK_BUFFER_USAGE_2_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR));
+		NVVK_CHECK(Application::stagingUploader.appendBuffer(bData, 0, std::span<const unsigned char>(meshByteData)));
+		NVVK_DBG_NAME(bData.buffer);
+	}
+
+	return bData;
+}
+
+//-----------------------------------------------------生成图元----------------------------------------------------
+static uint32_t addPos(nvutils::PrimitiveMesh& mesh, glm::vec3 p)
+{
+	nvutils::PrimitiveVertex v{};
+	v.pos = p;
+	mesh.vertices.emplace_back(v);
+	return static_cast<uint32_t>(mesh.vertices.size()) - 1;
+}
+static void addTriangle(nvutils::PrimitiveMesh& mesh, uint32_t a, uint32_t b, uint32_t c)
+{
+	mesh.triangles.push_back({ {a, b, c} });
+}
+static void addTriangle(nvutils::PrimitiveMesh& mesh, glm::vec3 a, glm::vec3 b, glm::vec3 c)
+{
+	mesh.triangles.push_back({ {addPos(mesh, a), addPos(mesh, b), addPos(mesh, c)} });
+}
+nvutils::PrimitiveMesh FzbRenderer::Mesh::createPlane(int steps, float width, float height) {
+	nvutils::PrimitiveMesh mesh;
+
+	if (steps <= 0) return mesh;
+
+	const float invSteps = 1.0f / static_cast<float>(steps);
+
+	// 生成顶点：从 (0,0,0) 开始，横向为 X(0..width)，纵向为 Y(0..depth)，Z = 0
+	for (int sy = 0; sy <= steps; ++sy)
+	{
+		for (int sx = 0; sx <= steps; ++sx)
+		{
+			nvutils::PrimitiveVertex v{};
+
+			float u = static_cast<float>(sx) * invSteps; // 0..1
+			float v_t = static_cast<float>(sy) * invSteps; // 0..1
+
+			v.pos = glm::vec3(u * width, v_t * height, 0.0f); // XY 平面，起点 (0,0,0)
+			v.nrm = glm::vec3(0.0f, 0.0f, 1.0f);               // 指向 +Z
+			v.tex = glm::vec2(u, v_t);                        // (0,0) -> (1,1)
+
+			mesh.vertices.emplace_back(v);
+		}
+	}
+
+	// 生成索引（三角形），确保顶点顺序在 XY 平面上为 CCW（面朝 +Z）
+	const int rowStride = steps + 1;
+	for (int sy = 0; sy < steps; ++sy)
+	{
+		for (int sx = 0; sx < steps; ++sx)
+		{
+			int a = sx + sy * rowStride;                 // (sx, sy)
+			int c = (sx + 1) + sy * rowStride;           // (sx+1, sy)
+			int b = (sx + 1) + (sy + 1) * rowStride;     // (sx+1, sy+1)
+			int d = sx + (sy + 1) * rowStride;           // (sx, sy+1)
+
+			// 两个三角形： (a, c, b) 和 (a, b, d) -> 保证朝向 +Z（CCW）
+			addTriangle(mesh, a, c, b);
+			addTriangle(mesh, a, b, d);
+		}
+	}
+
+	return mesh;
 }

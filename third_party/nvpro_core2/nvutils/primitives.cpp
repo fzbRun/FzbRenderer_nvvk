@@ -204,7 +204,8 @@ PrimitiveMesh createPlane(int steps, float width, float depth)
     {
       PrimitiveVertex v{};
 
-      v.pos = glm::vec3(-0.5F + (static_cast<float>(sx) * increment), 0.0F, -0.5F + (static_cast<float>(sz) * increment));
+      //v.pos = glm::vec3(-0.5F + (static_cast<float>(sx) * increment), 0.0F, -0.5F + (static_cast<float>(sz) * increment));    
+      v.pos = glm::vec3((static_cast<float>(sx) * increment), 0.0F, (static_cast<float>(sz) * increment));    
       v.pos *= glm::vec3(width, 1.0F, depth);
       v.nrm = glm::vec3(0.0F, 1.0F, 0.0F);
       v.tex = glm::vec2(static_cast<float>(sx) / static_cast<float>(steps),

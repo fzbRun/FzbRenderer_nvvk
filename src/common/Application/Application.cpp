@@ -55,14 +55,15 @@ void FzbRenderer::Application::getAppInfoFromXML(nvapp::ApplicationCreateInfo& a
 }
 FzbRenderer::Application::Application(nvapp::ApplicationCreateInfo& appInfo, nvvk::Context& vkContext) {
 	VkPhysicalDeviceShaderObjectFeaturesEXT shaderObjectFeatures{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT };
-	
+
 	nvvk::ContextInitInfo vkSetup{
 		.instanceExtensions = {VK_EXT_DEBUG_UTILS_EXTENSION_NAME},
 		.deviceExtensions =
 			{
 				{VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME},
 				{VK_EXT_SHADER_OBJECT_EXTENSION_NAME, &shaderObjectFeatures},
-				{VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME}
+				{VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME},
+				{VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME}
 			},
 	};
 
@@ -86,6 +87,8 @@ FzbRenderer::Application::Application(nvapp::ApplicationCreateInfo& appInfo, nvv
 	aftermath.addExtensions(vkSetup.deviceExtensions);
 	nvvk::CheckError::getInstance().setCallbackFunction([&](VkResult result) { aftermath.errorCallback(result); });
 #endif
+
+	//vkContext.m_deviceFeatures12.scalarBlockLayout = VK_TRUE;
 
 	if (vkContext.init(vkSetup) != VK_SUCCESS)
 	{
@@ -141,6 +144,11 @@ void FzbRenderer::Application::initSlangCompiler() {
 
 	slangCompiler.addOption({ slang::CompilerOptionName::DebugInformation,
 		{slang::CompilerOptionValueKind::Int, SLANG_DEBUG_INFO_LEVEL_MAXIMAL} });
+
+	slangCompiler.addOption({
+			.name = slang::CompilerOptionName::GLSLForceScalarLayout,
+			.value = slang::CompilerOptionValue{.kind = slang::CompilerOptionValueKind::Int, .intValue0 = 1 }
+	});
 
 #if defined(AFTERMATH_AVAILABLE)
 	slangCompiler.setCompileCallback([&](const std::filesystem::path& sourceFile, const uint32_t* spirvCode, size_t spirvSize) {

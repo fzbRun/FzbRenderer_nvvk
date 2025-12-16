@@ -96,6 +96,7 @@ namespace FzbRenderer {
 		while (std::getline(ss, token, ',')) {
 			float4_array.push_back(std::stof(token));
 		}
+		if (float4_array.size() == 3) return glm::vec4(float4_array[0], float4_array[1], float4_array[2], 1.0f);
 		return glm::vec4(float4_array[0], float4_array[1], float4_array[2], float4_array[3]);
 	}
 }

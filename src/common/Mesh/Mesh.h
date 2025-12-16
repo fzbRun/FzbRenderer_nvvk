@@ -6,6 +6,8 @@
 #include "common/Shader/shaderStructType.h"
 #include <filesystem>
 #include <tinygltf/tiny_gltf.h>
+#include <nvutils/primitives.hpp>
+#include <nvvk/buffer_suballocator.hpp>
 
 
 #ifndef FZBRENDERER_MESH_H
@@ -24,6 +26,11 @@ class Mesh{
 public:
 	Mesh() = default;
 	Mesh(std::string meshID, std::string meshType, std::filesystem::path meshPath);
+	Mesh(std::string meshID, nvutils::PrimitiveMesh primitiveMesh);
+
+	nvvk::Buffer createMeshDataBuffer();
+
+	static nvutils::PrimitiveMesh createPlane(int steps, float width, float height);
 
 	std::string meshID;
 	std::vector<ChildMesh> childMeshes;		//当前mesh中的小mesh

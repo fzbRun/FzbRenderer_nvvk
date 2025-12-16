@@ -155,7 +155,8 @@ PSout fragmentMain(VSout stage)
     float3 ambient     = lerp(groundColor, skyColor, dot(N, skyUpDir) * 0.5 + 0.5);
   }
   // Add ambient to final color
-  color += ambient * albedo * 0.025;
+  // color += ambient * albedo * 0.025;
+  color = dot(V, N);
 
   PSout output;
   output.color = float4(clamp(color, float3(0.0), float3(1.0)), 1.0);
