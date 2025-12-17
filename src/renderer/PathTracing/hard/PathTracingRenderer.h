@@ -37,7 +37,7 @@ public:
 	void render(VkCommandBuffer cmd) override;
 	void onLastHeadlessFrame() override;
 private:
-	nvvk::AccelerationStructureGeometryInfo primitiveToGeometry(const shaderio::GltfMesh& gltfMesh);
+	nvvk::AccelerationStructureGeometryInfo primitiveToGeometry(const shaderio::Mesh& mesh);
 	void createBottomLevelAS();
 	void createToLevelAS();
 	void createRayTracingDescriptorLayout();

@@ -1,0 +1,148 @@
+<scene>
+	<sensor type="perspective">
+		<fov value="60"/>
+		<transform type = "lookAt">
+			<matrix value="-1 0 0 0 0 1 0 1 0 0 -1 4 0 0 0 1"/>
+			<eye value = "0, 1.0, 3.0" />
+			<center value = "0, 1.0, 0.0" />
+			<up value = "0.00000, 1.00000, 0.00000" />
+		</transform>
+	</sensor>
+	
+	<bsdfs>
+	</bsdfs>
+	
+	<lights>
+		<useSky value = "true" />
+		<backgroundColor value = "0.0, 0.0, 0.0" />
+		<light type = "area" id = "light0">
+			<shape type = "obj" value="models/bear_box_light.obj" />
+			<emissive value = "27.0, 22.0, 14.0" />
+			<intensity value = "1.0" />
+			<SphericalRectangleSample value = "false" />
+		</light>
+	</lights>				
+	
+	<meshes>
+		<mesh type="obj" id="bearBox">
+			<filename value="models/bear_box.obj" />
+		</mesh>
+	</meshes>
+
+	<instances>
+		<instance>
+			<meshRef id = "bearBox"/>
+		</instance>
+		<instance>
+			<transform>
+				<matrix value="0.730445 0 0 -4.4391 0 -1.32136 -1.42138e-007 1.50656 0 1.42138e-007 -1.93037 -4.44377 0 0 0 1" />
+			</transform>
+			<meshRef id="custom" type="plane" />
+			<materialRef id="DiffuseBSDF"/>
+		</instance>
+	</instances>
+</scene>
+
+<!--
+		<instance>
+			<transform>
+				<matrix value="1 0 0 0 0 1 0 1 0 0 1 1.5 0 0 0 1" />
+				<rotate value="90, 0, 0" />
+			</transform>
+			<meshRef id="custom" type="plane" />
+			<materialRef id="DiffuseBSDF"/>
+		</instance>
+
+		<bsdf type = "diffuse" id = "leftWall">
+			<albedo value = "0.63, 0.065, 0.05, 1.0" />
+		</bsdf>
+		<bsdf type = "diffuse" id = "rightWall">
+			<albedo value = "0.14, 0.45, 0.091, 1.0" />
+		</bsdf>
+		<bsdf type = "diffuse" id = "diffuse1">
+			<albedo value = "0.64, 0.64, 0.64, 1.0" />
+		</bsdf>
+		<bsdf type = "diffuse" id = "diffuse2">   <天花板、地板、后墙、两个长方体>
+		<albedo value = "0.725, 0.71, 0.68, 1.0" />
+		</bsdf>
+		<bsdf type = "diffuse" id = "light">
+			<albedo value = "0.78, 0.78, 0.78, 1.0" />
+		</bsdf>
+		<bsdf type = "roughConductor" id = "plane">
+			<roughness value = "0.8" />
+			<albedo value = "0.357798, 0.60366, 0.64, 1.0" />
+		</bsdf>
+		<bsdf type = "roughConductor" id = "bear">
+			<roughness value = "0.5" />
+			<albedo value = "0.64, 0.359151, 0.039741, 1.0" />
+		</bsdf>
+		<bsdf type = "roughConductor" id = "monkey">
+			<roughness value = "0.8" />
+			<albedo value = "0.428103, 0.20435, 0.062257, 1.0" />
+		</bsdf>
+		<bsdf type="roughConductor" id="torus">
+			<roughness value = "0.9" />
+			<albedo value = "0.72, 0.72, 0.0, 1.0" />
+		</bsdf>
+		<bsdf type="dielectric" id="teapot">
+			<float name="int_ior" value="1.5" />
+			<float name="ext_ior" value="1" />
+		</bsdf>
+		
+		<instance>
+			<meshRef id = "glass_Circle"/>
+			<materialRef id = "diffuse1" />
+		</instance>
+		<instance>
+			<meshRef id = "Sphere.014"/>
+			<materialRef id = "bear" />
+		</instance>
+		<instance>
+			<meshRef id = "Torus"/>
+			<materialRef id = "torus" />
+		</instance>
+		<instance>
+			<meshRef id = "Teapot01"/>
+			<materialRef id = "teapot" />
+		</instance>
+		<instance>
+			<meshRef id = "Airplane_default2"/>
+			<materialRef id = "airplane" />
+		</instance>
+		<instance>
+			<meshRef id = "Suzanne"/>
+			<materialRef id = "monkey" />
+		</instance>
+		<instance>
+			<meshRef id = "ceiling"/>
+			<materialRef id = "ceiling" />
+		</instance>
+		<instance>
+			<meshRef id = "leftWall"/>
+			<materialRef id = "leftWall" />
+		</instance>
+		<instance>
+			<meshRef id = "shortBox"/>
+			<materialRef id = "diffuse2" />
+		</instance>
+		<instance>
+			<meshRef id = "backWall"/>
+			<materialRef id = "diffuse2" />
+		</instance>
+		<instance>
+			<meshRef id = "rightWall"/>
+			<materialRef id = "rightWall" />
+		</instance>
+		<instance>
+			<meshRef id = "floor"/>
+			<materialRef id = "diffuse2" />
+		</instance>
+		<instance>
+			<meshRef id = "light"/>
+			<materialRef id = "light" />
+		</instance>
+		<instance>
+			<meshRef id = "tallBox"/>
+			<materialRef id = "diffuse2" />
+		</instance>
+-->

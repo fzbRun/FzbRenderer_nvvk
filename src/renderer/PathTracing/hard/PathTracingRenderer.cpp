@@ -249,23 +249,23 @@ callableRegion.size = 0;
 LOGI(" Shader binding table created and populated\n");
 }
 */
-nvvk::AccelerationStructureGeometryInfo FzbRenderer::PathTracingRenderer::primitiveToGeometry(const shaderio::GltfMesh& gltfMesh) {
+nvvk::AccelerationStructureGeometryInfo FzbRenderer::PathTracingRenderer::primitiveToGeometry(const shaderio::Mesh& mesh) {
 	//这个函数就和我之前cuda实现BVH的思路一摸一样啊
 
 	nvvk::AccelerationStructureGeometryInfo result{};
 
-	const shaderio::TriangleMesh triMesh = gltfMesh.triMesh;
+	const shaderio::TriangleMesh triMesh = mesh.triMesh;
 	const auto triangleCount = static_cast<uint32_t>(triMesh.indices.count / 3U);
 
 	//从一个大的buffer中将顶点和索引找到，构成三角形的信息
 	VkAccelerationStructureGeometryTrianglesDataKHR triangles{
 		.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
 		.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT,
-		.vertexData = {.deviceAddress = VkDeviceAddress(gltfMesh.gltfBuffer) + triMesh.positions.offset},
+		.vertexData = {.deviceAddress = VkDeviceAddress(mesh.dataBuffer) + triMesh.positions.offset},
 		.vertexStride = triMesh.positions.byteStride,
 		.maxVertex = triMesh.positions.count - 1,
-		.indexType = VkIndexType(gltfMesh.indexType),
-		.indexData = {.deviceAddress = VkDeviceAddress(gltfMesh.gltfBuffer) + triMesh.indices.offset},
+		.indexType = VkIndexType(mesh.indexType),
+		.indexData = {.deviceAddress = VkDeviceAddress(mesh.dataBuffer) + triMesh.indices.offset},
 	};
 
 	//然后使用三角形创建BVH
@@ -300,7 +300,7 @@ void FzbRenderer::PathTracingRenderer::createToLevelAS() {
 	tlasInstances.reserve(Application::sceneResource.instances.size());		//每个mesh一个顶层实例
 	const VkGeometryInstanceFlagsKHR flgas{ VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV };	//没有背面剔除
 
-	for (const shaderio::GltfInstance& instance : Application::sceneResource.instances) {
+	for (const shaderio::Instance& instance : Application::sceneResource.instances) {
 		VkAccelerationStructureInstanceKHR asInstance{};
 		asInstance.transform = nvvk::toTransformMatrixKHR(instance.transform);
 		asInstance.instanceCustomIndex = instance.meshIndex;
@@ -687,8 +687,7 @@ void FzbRenderer::PathTracingRenderer::uiRender() {
 	if (ImGui::Begin("PathTracingSettings"))
 	{
 		ImGui::SeparatorText("Jitter");
-		if (ImGui::SliderInt("Max Frames", &maxFrames, 1, 2 << 10) || UIModified)
-			resetFrame();
+		UIModified |= ImGui::SliderInt("Max Frames", &maxFrames, 1, 2 << 10);
 		ImGui::TextDisabled("Frame: %d", pushValues.frameIndex);
 
 		ImGui::SeparatorText("Bounces");
@@ -697,6 +696,14 @@ void FzbRenderer::PathTracingRenderer::uiRender() {
 			PE::SliderInt("Bounces Depth", &pushValues.maxDepth, 1, std::min(MAX_DEPTH, rtProperties.maxRayRecursionDepth), "%d", ImGuiSliderFlags_AlwaysClamp,
 				"Maximum Bounces depth");
 			PE::end();
+		}
+
+		bool NEEChange = ImGui::Checkbox("USE NEE", (bool*)&pushValues.NEEShaderIndex);
+		if (NEEChange) {
+			vkQueueWaitIdle(Application::app->getQueue(0).queue);
+			createRayTracingPipeline();
+
+			UIModified |= NEEChange;
 		}
 
 		if (rtPosFetchFeature.rayTracingPositionFetch == VK_FALSE)
@@ -713,6 +720,8 @@ void FzbRenderer::PathTracingRenderer::uiRender() {
 		}
 	}
 	ImGui::End();
+
+	if(UIModified) resetFrame();
 };
 void FzbRenderer::PathTracingRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 	resetFrame();

@@ -138,13 +138,6 @@ private:
   VkDevice         m_device{};
   VkPhysicalDevice m_physicalDevice{};
 
-  // For device creation
-  VkPhysicalDeviceFeatures2        m_deviceFeatures{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
-  VkPhysicalDeviceVulkan11Features m_deviceFeatures11{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
-  VkPhysicalDeviceVulkan12Features m_deviceFeatures12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
-  VkPhysicalDeviceVulkan13Features m_deviceFeatures13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
-  VkPhysicalDeviceVulkan14Features m_deviceFeatures14{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES};
-
   // For Queue creation
   std::vector<VkQueueFlags>            m_desiredQueues{};
   std::vector<VkDeviceQueueCreateInfo> m_queueCreateInfos{};
@@ -154,6 +147,12 @@ private:
   // Callback for debug messages
   VkDebugUtilsMessengerEXT m_dbgMessenger = VK_NULL_HANDLE;
 
+  // For device creation
+  VkPhysicalDeviceFeatures2        m_deviceFeatures{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+  VkPhysicalDeviceVulkan11Features m_deviceFeatures11{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
+  VkPhysicalDeviceVulkan12Features m_deviceFeatures12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+  VkPhysicalDeviceVulkan13Features m_deviceFeatures13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
+  VkPhysicalDeviceVulkan14Features m_deviceFeatures14{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES};
 
   // Filters available Vulkan extensions based on desired extensions and their specifications.
   bool filterAvailableExtensions(const std::vector<VkExtensionProperties>& availableExtensions,

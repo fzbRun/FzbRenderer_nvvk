@@ -6,12 +6,12 @@ slang´óÀ¨ºÅµÄ×óÓÒ(°üÀ¨¿ªÊ¼´óÀ¨ºÅµÄÏÂÒ»ÐÐ¿ªÊ¼£¬ÒÔ¼°½áÊø´óÀ¨ºÅµÄÉÏÐÐ½áÎ²)²»ÄÜÓÐ×¢Ê
 #include "nvshaders/random.h.slang"
 #include "nvshaders/sky_functions.h.slang"
 #include "nvvk/Slang/pbr.h.slang"
-#include "nvvk/shaderio.h"
 #include "nvshaders/ray_utils.h.slang"
 #include "shaderStructType.h"
 
 // clang-format off
-[[vk::push_constant]]                           ConstantBuffer<PushConstant> pushConst;
+//ScalarDataLayout
+[[vk::push_constant]]                           ConstantBuffer<PushConstant, ScalarDataLayout> pushConst;
 [[vk::binding(BindingPoints::eTextures, 0)]]    Sampler2D textures[];
 [[vk::binding(BindingPoints::eTlas, 1)]]        RaytracingAccelerationStructure topLevelAS;
 [[vk::binding(BindingPoints::eOutImage, 1)]]    RWTexture2D<float4> outImage;
@@ -35,7 +35,7 @@ struct HitPayload {
     uint bounceDepth;
     uint meshIndex;
 
-    bool isExt;     //ÊÇ·ñÔÚÍâ²¿£¬Èç¹û·¢ÉúÕÛÉä»á½øÈëÄÚ²¿
+    bool isExt;
 };
 struct HitState {
     float3 pos;
@@ -135,8 +135,8 @@ HitState getHitStateWithPositionFetch(const float3 barycentrics) {
 bool hitTest(float distance, float3 sampleDir, float3 hitPos, float3 hitNormal) {
     const uint rayFlags = 0;
     RayDesc temRay;
-    temRay.Origin = offsetRay(hitPos, hitNormal);
     temRay.Direction = normalize(sampleDir);
+    temRay.Origin = hitPos + 0.001f * temRay.Direction;    //offsetRay(hitPos, hitNormal);
     temRay.TMin = 0.001f;
     temRay.TMax = distance + 0.001f;
     NEEPayload tempPayload;
@@ -218,13 +218,12 @@ float3 sphereRectangleSample(Quadrilateral quad, float3 hitPos, float u, float v
 
 void initNEE(inout CallablePayload payload) {
     SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
-
     payload.lightNum = min(sceneInfo.numLights, NEE_MAX_SAMPLE_NUM);
     for (int lightIndex = 0; lightIndex < payload.lightNum; ++lightIndex) {
         payload.radiance_nee[lightIndex] = float3(0.0f);
         Light light = sceneInfo.lights[lightIndex];
         float3 flux = light.color * light.intensity;
-        float3 sampleDir;
+        float3 sampleDir = float3(1.0f);
         if (light.type == uint(LightType::Point)) {
             sampleDir = light.pos - payload.hitPos;
             float distance = length(sampleDir);
@@ -238,7 +237,7 @@ void initNEE(inout CallablePayload payload) {
             float randomNumber1 = rand(payload.randomSeed);
             float randomNumber2 = rand(payload.randomSeed);
  
-            if (light.SphericalRectangleSample) {
+            if (light.SphericalRectangleSample == 1) {
                 Quadrilateral quad;
                 quad.startPos = light.pos;
                 quad.normal = light.direction;
@@ -247,6 +246,8 @@ void initNEE(inout CallablePayload payload) {
                 float pdf = 1.0f;
                 sampleDir = sphereRectangleSample(quad, payload.hitPos, randomNumber1, randomNumber2, pdf);
 
+                if (dot(-sampleDir, light.direction) <= 0.01f) continue;
+
                 float distance = length(sampleDir);
                 if (!hitTest(distance, sampleDir, payload.hitPos, payload.hitNormal)) continue; // ÕÚµ²
 
@@ -254,103 +255,22 @@ void initNEE(inout CallablePayload payload) {
             } else {
                 float3 samplePos = light.pos + light.edge1 * randomNumber1 + light.edge2 * randomNumber2;
                 sampleDir = samplePos - payload.hitPos;
+
+                bool judgment1 = dot(-sampleDir, light.direction) <= 0.01f;
+                bool judgment2 = dot(sampleDir, payload.hitNormal) <= 0.01f &&
+                                 (payload.material.type != uint(MaterialType::Deielectric) ||
+                                 payload.material.type != uint(MaterialType::RoughDeielectric));
+                if (judgment1 || judgment2) continue;
+
                 float distance = length(sampleDir);
                 if (!(hitTest(distance, sampleDir, payload.hitPos, payload.hitNormal))) continue; // ÕÚµ²
 
                 // ·ÖÄ¸ÓÐÒ»¸öcosºÍÃæ»ý£¬ÑÅ¿É±ÈÓÐÒ»¸öcos£¬pdfÓÐÒ»¸öÃæ»ý£¬µÖÏûÁË
+                distance = max(distance, 0.001f);
                 payload.radiance_nee[lightIndex] = flux / (M_TWO_PI * distance * distance);
             }
         }
         payload.sampleDir_nee[lightIndex] = normalize(sampleDir);
-        
-        /*
-        float3 bsdf = float3(1.0f);
-        float cosineON = dot(payload.outgoing, payload.hitNormal);
-        sampleDir = normalize(sampleDir);
-        if (payload.material.type == uint(MaterialType::Diffuse)) bsdf = M_1_PI * cosineON * payload.material.albedo;
-        else if (payload.material.type == uint(MaterialType::Conductor)) {
-            float3 h = normalize(sampleDir + payload.outgoing);
-            if (abs(dot(h, payload.hitNormal)) < 0.95f) bsdf = float3(0.0f);
-        }
-        else if (payload.material.type == uint(MaterialType::Deielectric)) {
-            float3 F = schlickFresnel(payload.material.albedo, float3(1.0F), cosineON);
-            if (dot(sampleDir, payload.hitNormal) > 0.0f) {
-                float3 h = normalize(sampleDir + payload.outgoing);
-                if (abs(dot(h, payload.hitNormal)) < 0.99f) bsdf = F;
-            } else {
-                float eta = payload.material.eta.x;
-                if (!payload.isExt) eta = 1.0f / eta; // ËùÒÔNEEÒªÔÚÕÒµ½incidenceÖ®Ç°
-
-                float3 h = normalize(eta * payload.outgoing + sampleDir);
-                if (abs(dot(h, payload.hitNormal)) < 0.99f) bsdf = 1.0f - F;
-            }
-        }
-        else if (payload.material.type == uint(MaterialType::RoughConductor)) {
-            float roughness = payload.material.roughness;
-            float3x3 transposeTBN = transpose(payload.TBN);
-
-            float3 h = normalize(sampleDir + payload.outgoing);
-            h = mul(h, transposeTBN); // hÐèÒªÔÚÇÐÏß¿Õ¼äÖÐ
-            float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h);
-            float D = D_costhetaNH / max(h.z, 1e-6f);
-
-            float3 outgoing_tangentSpace = mul(payload.outgoing, transposeTBN);
-            float cosineOH = abs(dot(outgoing_tangentSpace, h));
-            float3 F = schlickFresnel(payload.material.albedo, float3(1.0F), cosineOH);
-
-            float3 incidence_tangentSpace = mul(sampleDir, transposeTBN);
-
-            float G1_outgoing, G1_incidence;
-            float G2 = ggx_smith_shadow_mask(
-                G1_outgoing,
-                G1_incidence,
-                outgoing_tangentSpace,
-                incidence_tangentSpace,
-                float2(roughness)
-            );
-
-            bsdf = (D * G2 * F) / (4.0f * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 1e-6f);
-        }
-        else if (payload.material.type == uint(MaterialType::RoughDeielectric)){
-            float roughness = payload.material.roughness;
-            float eta = payload.material.eta.x;
-            float3x3 transposeTBN = transpose(payload.TBN);
-
-            float3 h;
-            bool refraction = dot(sampleDir, payload.hitNormal) < 0.0f;
-            if (refraction) h = normalize(sampleDir + payload.outgoing * eta);
-            else h = normalize(sampleDir + payload.outgoing);
-
-            h = faceforward(h, payload.outgoing, -h); //dot(I, nerf) < 0 return n;else return -n
-            h = mul(h, transposeTBN); // hÐèÒªÔÚÇÐÏß¿Õ¼äÖÐ
-            float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h);
-            float D = D_costhetaNH / max(h.z, 1e-6f);
-
-            float3 outgoing_tangentSpace = mul(payload.outgoing, transposeTBN);
-            float cosineOH = abs(dot(outgoing_tangentSpace, h));
-            float3 F = schlickFresnel(payload.material.albedo, float3(1.0F), cosineOH);
-
-            float3 incidence_tangentSpace = mul(sampleDir, transposeTBN);
-
-            float G1_outgoing, G1_incidence;
-            float G2 = ggx_smith_shadow_mask(
-                G1_outgoing,
-                G1_incidence,
-                outgoing_tangentSpace,
-                incidence_tangentSpace,
-                float2(roughness)
-            );
-
-            if (refraction) {
-                float weight = dot(incidence_tangentSpace, h) / eta + cosineOH;
-                payload.bsdf = D * G2 * (1.0f - F) * abs(dot(incidence_tangentSpace, h)) * cosineOH
-                        / (weight * weight * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 1e-6f);
-            }else
-                bsdf = (D * G2 * F) / (4.0f * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 1e-6f);
-        }
-        
-        radianceSum += radiance * bsdf * abs(dot(sampleDir, payload.hitNormal)); // ³ý¹ýpdfÁË
-        */
     }
 }
 
@@ -422,12 +342,27 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
     uint   triID        = PrimitiveIndex();
 
     SceneInfo         sceneInfo = pushConst.sceneInfoAddress[0];
-    GltfInstance          instance  = sceneInfo.instances[instanceID];
-    GltfMesh              mesh      = sceneInfo.meshes[instance.meshIndex];
+    Instance          instance  = sceneInfo.instances[instanceID];
+    Mesh              mesh      = sceneInfo.meshes[instance.meshIndex];
     BSDFMaterial material  = sceneInfo.materials[instance.materialIndex];
 
     HitState hitState = getHitStateWithPositionFetch(barycentrics);
-    if (dot(hitState.normal, -payload.rayDirection) < 0) hitState.normal = -hitState.normal;
+
+    //int3 indices = getTriangleIndices(mesh.dataBuffer, mesh.triMesh, triID);
+    //float3 pos = getTriangleAttribute<float3>(mesh.dataBuffer, mesh.triMesh.positions, indices, barycentrics);
+    //float3 normal = getTriangleAttribute<float3>(mesh.dataBuffer, mesh.triMesh.normals, indices, barycentrics);
+    //hitState.pos = float3(mul(float4(pos, 1.0), ObjectToWorld4x3()));
+    //hitState.normal = normalize(mul(WorldToObject4x3(), normal).xyz);
+    //float3 tangent, bitangent;
+    //orthonormalBasis(hitState.normal, tangent, bitangent);
+    //hitState.TBN = float3x3(tangent, bitangent, hitState.normal);
+
+    float cosineON = dot(hitState.normal, -payload.rayDirection);
+    float3 emissive = material.emissive;
+    if (material.type == uint(MaterialType::Deielectric) || material.type == uint(MaterialType::RoughDeielectric)) {
+        if (cosineON < 0) hitState.normal = -hitState.normal;
+        cosineON = abs(cosineON);
+    } else emissive *= max(cosineON, 0.0f);
 
     CallablePayload callablePayload;
     callablePayload.material = material;
@@ -439,17 +374,17 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
     callablePayload.hitNormal = hitState.normal;
     callablePayload.outgoing = -payload.rayDirection;
     callablePayload.isExt = payload.isExt;
-    if (pushConst.NEEShaderIndex > 0) {
-        initNEE(callablePayload);
-        callablePayload.radianceSum_nee = float3(0.0f);
-    }
-    CallShader<CallablePayload>(uint(material.type), callablePayload);
 
+    callablePayload.radianceSum_nee = float3(0.0f);
+    if (pushConst.NEEShaderIndex > 0) initNEE(callablePayload);
+
+    CallShader<CallablePayload>(uint(material.type), callablePayload);
+        
     payload.randomSeed = callablePayload.randomSeed;
-    payload.radiance += (callablePayload.radianceSum_nee + material.emissive) * payload.bsdf_cosine / payload.pdf;
+    payload.radiance += (callablePayload.radianceSum_nee + emissive) * payload.bsdf_cosine / payload.pdf;
     payload.rayDirection = callablePayload.incidence;
-    payload.rayOrigin = offsetRay(hitState.pos, hitState.normal);    //hitState.pos + 0.001f * payload.rayDirection;
-    payload.bsdf_cosine *= callablePayload.bsdf * abs(dot(hitState.normal, payload.rayDirection));
+    payload.rayOrigin = offsetRay(hitState.pos, hitState.normal); // hitState.pos + 0.001f * payload.rayDirection;
+    payload.bsdf_cosine *= callablePayload.bsdf * cosineON;
     payload.pdf *= callablePayload.pdf;
     payload.isExt = callablePayload.isExt;
 
@@ -459,7 +394,7 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
 [shader("miss")]
 void rayMissMain(inout HitPayload payload)
 {
-    SceneInfo *sceneInfo = pushConst.sceneInfoAddress;
+    SceneInfo* sceneInfo = pushConst.sceneInfoAddress;
     if (sceneInfo.useSky == 1)
     {
         float3 skyColor = evalSimpleSky(sceneInfo.skySimpleParam, WorldRayDirection());
@@ -585,7 +520,7 @@ void roughConductorMaterialMain(inout CallablePayload payload) {
     payload.incidence = mul(incidence_tangentSpace, payload.TBN);
 
     float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h); // hÐèÒªÔÚÇÐÏß¿Õ¼äÖÐ
-    float D = D_costhetaNH / max(h.z, 1e-6f);
+    float D = D_costhetaNH / h.z;   //max(h.z, 1e-6f);
     float cosineOH = abs(dot(outgoing_tangentSpace, h));
     payload.pdf = D_costhetaNH / max(4.0f * cosineOH, 0.00001f);
 
@@ -608,8 +543,10 @@ void roughConductorMaterialMain(inout CallablePayload payload) {
 
             h = normalize(sampleDir + payload.outgoing);
             h = mul(h, transposeTBN); // hÐèÒªÔÚÇÐÏß¿Õ¼äÖÐ
+            //ÒòÎªTBN¿ÉÄÜ²»×¼£¬µ¼ÖÂ³öÏÖÏ¸Î¢µÄÐ¡ÓÚ0µÄz£¬µ¼ÖÂ³ö´í¡£ÉÏÃæµÄh²»ÓÃÕâÑùÊÇÒòÎªhvd_ggx_sample_vndf±ØÈ»Éú³Éz´óÓÚ0µÄh
+            if (h.z <= 0.001f) continue; 
             D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h);
-            D = D_costhetaNH / max(h.z, 1e-6f);
+            D = D_costhetaNH / h.z;
 
             incidence_tangentSpace = mul(sampleDir, transposeTBN);
 
@@ -693,10 +630,13 @@ void roughDielectricMaterialMain(inout CallablePayload payload) {
             if (refraction) h = normalize(sampleDir + payload.outgoing * eta);
             else h = normalize(sampleDir + payload.outgoing);
 
-            h = faceforward(h, payload.outgoing, -h); // dot(I, nerf) < 0 return n;else return -n
-            h = mul(h, transposeTBN);                 // hÐèÒªÔÚÇÐÏß¿Õ¼äÖÐ
+            //ÕâÀïÓëroughConductor²»Í¬£¬hÐèÒªÓë·¨ÏßÍ¬²à
+            h = mul(h, transposeTBN);                      // hÐèÒªÔÚÇÐÏß¿Õ¼äÖÐ
+            if(h.z < 0.0f) h = -h;
             D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h);
             D = D_costhetaNH / max(h.z, 1e-6f);
+
+            h = faceforward(h, outgoing_tangentSpace, -h); // dot(I, nerf) < 0 return n;else return -n
 
             incidence_tangentSpace = mul(sampleDir, transposeTBN);
 

@@ -13,8 +13,9 @@ sceneManager主要有三个功能
 #include <memory> 
 #include <vector>
 
+#include <common/Mesh/Mesh.h>
 #include <nvutils/camera_manipulator.hpp>
-#include <common/Scene/gltf_utils.hpp>
+#include <common/Mesh/nvvk/gltf_utils.hpp>
 #include <common/Shader/shaderStructType.h>
 
 namespace FzbRenderer {
@@ -34,20 +35,22 @@ public:
 	std::shared_ptr<nvutils::CameraManipulator> cameraManip{ std::make_shared<nvutils::CameraManipulator>() };
 	std::vector<nvvk::Image>     textures{};
 
-	std::vector<shaderio::GltfMesh> meshes;
-	std::vector<shaderio::GltfInstance> instances;
+	std::vector<FzbRenderer::Mesh> meshSets;
+	uint32_t customPrimitiveCount = 0;
+
+	std::vector<shaderio::Mesh> meshes;
+	std::vector<shaderio::Instance> instances;
 	std::vector<shaderio::BSDFMaterial> materials;
 	shaderio::SceneInfo sceneInfo;
 
-	std::vector<nvvk::Buffer> bGltfDatas;	//每个gltf的二进制数据，包含索引和顶点数据
+	std::vector<nvvk::Buffer> bDatas;	//每个gltf的二进制数据，包含索引和顶点数据
 	nvvk::Buffer bMeshes;
 	nvvk::Buffer bInstances;
 	nvvk::Buffer bMaterials;
 	nvvk::Buffer bSceneInfo;
 
-	std::vector<uint32_t> meshToBufferIndex;	//meshToBufferIndex[meshIndex] = bufferIndex
+	std::vector<uint32_t> meshToBufferIndex;	//meshToBufferIndex[meshIndex] = bufferIndex，前向或延时渲染时按mesh渲染时使用
 
-	void loadGltfData(const tinygltf::Model& mode, bool importInstance = false);
 	void loadTexture(const std::filesystem::path& texturePath);
 };
 

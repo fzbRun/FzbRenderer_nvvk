@@ -13,7 +13,7 @@
 #include <common/Scene/Scene.h>
 
 #include <nvutils/camera_manipulator.hpp>
-#include <common/Scene/gltf_utils.hpp>
+#include <common/Mesh/nvvk/gltf_utils.hpp>
 #include <nvvk/acceleration_structures.hpp>
 
 #ifndef FZB_APPLICATION_H

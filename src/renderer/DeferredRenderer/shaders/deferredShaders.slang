@@ -17,12 +17,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include "nvvk/Slang/pbr.h.slang"
 #include <nvshaders/slang_types.h>
-#include "Slang/pbr.h.slang"
-#include "shaderio.h"
+#include "shaderStructType.h"
 
 // clang-format off
-[[vk::push_constant]]                       ConstantBuffer<TutoPushConstant> pushConst;
+[[vk::push_constant]]                       ConstantBuffer<PushConstant> pushConst;
 [[vk::binding(BindingPoints::eTextures)]]   Sampler2D textures[];
 // clang-format on
 
@@ -66,15 +66,15 @@ VSout vertexMain(VSin input, uint vertexIndex: SV_VertexID)
 {
   int instanceIndex = pushConst.instanceIndex;
 
-  GltfSceneInfo* sceneInfo = pushConst.sceneInfoAddress;
+  SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
 
-  GltfInstance instance = sceneInfo.instances[instanceIndex];
-  GltfMesh     meshIo   = sceneInfo.meshes[instance.meshIndex];
+  Instance instance = sceneInfo.instances[instanceIndex];
+  Mesh     meshIo   = sceneInfo.meshes[instance.meshIndex];
 
   // Retrieve the data
-  float3 posMesh  = getAttribute<float3>(meshIo.gltfBuffer, meshIo.triMesh.positions, vertexIndex);
-  float3 normal   = getAttribute<float3>(meshIo.gltfBuffer, meshIo.triMesh.normals, vertexIndex);
-  float2 texCoord = getAttribute<float2>(meshIo.gltfBuffer, meshIo.triMesh.texCoords, vertexIndex);
+  float3 posMesh  = getAttribute<float3>(meshIo.dataBuffer, meshIo.triMesh.positions, vertexIndex);
+  float3 normal   = getAttribute<float3>(meshIo.dataBuffer, meshIo.triMesh.normals, vertexIndex);
+  float2 texCoord = getAttribute<float2>(meshIo.dataBuffer, meshIo.triMesh.texCoords, vertexIndex);
 
   float4 pos = mul(float4(posMesh, 1.0), instance.transform);
 
@@ -91,11 +91,11 @@ VSout vertexMain(VSin input, uint vertexIndex: SV_VertexID)
 [shader("pixel")]
 PSout fragmentMain(VSout stage)
 {
-  GltfSceneInfo         sceneInfo = pushConst.sceneInfoAddress[0];
-  GltfInstance          instance  = sceneInfo.instances[pushConst.instanceIndex];
-  GltfMetallicRoughness material  = sceneInfo.materials[instance.materialIndex];
+  SceneInfo         sceneInfo = pushConst.sceneInfoAddress[0];
+  Instance          instance  = sceneInfo.instances[pushConst.instanceIndex];
+  BSDFMaterial material  = sceneInfo.materials[instance.materialIndex];
 
-  GltfPunctual light = sceneInfo.punctualLights[0];  // Assuming we only use the first light for simplicity
+  Light light = sceneInfo.lights[0];  // Assuming we only use the first light for simplicity
 
   if(sceneInfo.useSky == 1)
   {
@@ -107,14 +107,14 @@ PSout fragmentMain(VSout stage)
 
   if(light.type == GltfLightType::ePoint)
   {
-    light.direction = light.position - stage.worldPos;
+    light.direction = light.pos - stage.worldPos;
     float d         = length(light.direction);
     light.intensity /= (d * d);
   }
   else if(light.type == GltfLightType::eSpot)
   {
     // For spot lights, we need to calculate the direction and apply attenuation
-    float3 lightDir = light.position - stage.worldPos;
+    float3 lightDir = light.pos - stage.worldPos;
     float  d        = length(lightDir);
     light.intensity /= (d * d);
     // Cone attenuation can be applied here if needed
@@ -129,19 +129,15 @@ PSout fragmentMain(VSout stage)
   float3 L = normalize(light.direction);
 
   // Get base color from material or texture
-  float3 albedo = material.baseColorFactor.xyz;
-  if(material.baseColorTextureIndex > 0)
-  {
-    albedo *= textures[material.baseColorTextureIndex].Sample(stage.worldTexCoord).xyz;
-  }
+  float3 albedo = material.albedo;
+  //if(material.baseColorTextureIndex > 0)
+  //{
+  //  albedo *= textures[material.baseColorTextureIndex].Sample(stage.worldTexCoord).xyz;
+  //}
 
   // Get metallic and roughness from material
-  float metallic  = material.metallicFactor;
-  float roughness = material.roughnessFactor;
-  if(pushConst.metallicRoughnessOverride.x >= 0.0)
-    metallic = pushConst.metallicRoughnessOverride.x;
-  if(pushConst.metallicRoughnessOverride.y >= 0.0)
-    roughness = pushConst.metallicRoughnessOverride.y;
+  float metallic = 1.0f;    //material.metallicFactor;
+  float roughness = material.roughness;
 
   // Calculate PBR lighting with sun's color and intensity
   float3 color = pbrMetallicRoughness(albedo, metallic, roughness, N, V, L);
@@ -159,7 +155,8 @@ PSout fragmentMain(VSout stage)
     float3 ambient     = lerp(groundColor, skyColor, dot(N, skyUpDir) * 0.5 + 0.5);
   }
   // Add ambient to final color
-  color += ambient * albedo * 0.025;
+  // color += ambient * albedo * 0.025;
+  color = dot(V, N);
 
   PSout output;
   output.color = float4(clamp(color, float3(0.0), float3(1.0)), 1.0);

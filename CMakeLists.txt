@@ -48,6 +48,8 @@ target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_BINARY_DIR} ${CMAKE_S
 #------------------------------------------------------------------------------------------------------
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/pugixml_setup.cmake")
 target_link_libraries(${PROJECT_NAME} PRIVATE pugixml)
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/assimp_setup.cmake")
 #--------------------------------------------------------------------------------------
 set(COPY_FILES ${NsightAftermath_DLLS})
 list(APPEND COPY_FILES ${EXTRA_COPY_FILES})

@@ -55,14 +55,15 @@ void FzbRenderer::Application::getAppInfoFromXML(nvapp::ApplicationCreateInfo& a
 }
 FzbRenderer::Application::Application(nvapp::ApplicationCreateInfo& appInfo, nvvk::Context& vkContext) {
 	VkPhysicalDeviceShaderObjectFeaturesEXT shaderObjectFeatures{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT };
-	
+
 	nvvk::ContextInitInfo vkSetup{
 		.instanceExtensions = {VK_EXT_DEBUG_UTILS_EXTENSION_NAME},
 		.deviceExtensions =
 			{
 				{VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME},
 				{VK_EXT_SHADER_OBJECT_EXTENSION_NAME, &shaderObjectFeatures},
-				{VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME}
+				{VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME},
+				{VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME}
 			},
 	};
 
@@ -86,6 +87,8 @@ FzbRenderer::Application::Application(nvapp::ApplicationCreateInfo& appInfo, nvv
 	aftermath.addExtensions(vkSetup.deviceExtensions);
 	nvvk::CheckError::getInstance().setCallbackFunction([&](VkResult result) { aftermath.errorCallback(result); });
 #endif
+
+	//vkContext.m_deviceFeatures12.scalarBlockLayout = VK_TRUE;
 
 	if (vkContext.init(vkSetup) != VK_SUCCESS)
 	{
@@ -141,6 +144,11 @@ void FzbRenderer::Application::initSlangCompiler() {
 
 	slangCompiler.addOption({ slang::CompilerOptionName::DebugInformation,
 		{slang::CompilerOptionValueKind::Int, SLANG_DEBUG_INFO_LEVEL_MAXIMAL} });
+
+	slangCompiler.addOption({
+			.name = slang::CompilerOptionName::GLSLForceScalarLayout,
+			.value = slang::CompilerOptionValue{.kind = slang::CompilerOptionValueKind::Int, .intValue0 = 1 }
+	});
 
 #if defined(AFTERMATH_AVAILABLE)
 	slangCompiler.setCompileCallback([&](const std::filesystem::path& sourceFile, const uint32_t* spirvCode, size_t spirvSize) {
@@ -237,8 +245,8 @@ void FzbRenderer::Application::updateDataPerFrame(VkCommandBuffer cmd) {
 	sceneResource.sceneInfo.projInvMatrix = glm::inverse(projMatrix);
 	sceneResource.sceneInfo.viewInvMatrix = glm::inverse(viewMatrix);
 	sceneResource.sceneInfo.cameraPosition = sceneResource.cameraManip->getEye();
-	sceneResource.sceneInfo.instances = (shaderio::GltfInstance*)sceneResource.bInstances.address;
-	sceneResource.sceneInfo.meshes = (shaderio::GltfMesh*)sceneResource.bMeshes.address;
+	sceneResource.sceneInfo.instances = (shaderio::Instance*)sceneResource.bInstances.address;
+	sceneResource.sceneInfo.meshes = (shaderio::Mesh*)sceneResource.bMeshes.address;
 	sceneResource.sceneInfo.materials = (shaderio::BSDFMaterial*)sceneResource.bMaterials.address;
 
 	nvvk::cmdBufferMemoryBarrier(cmd, { sceneResource.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
