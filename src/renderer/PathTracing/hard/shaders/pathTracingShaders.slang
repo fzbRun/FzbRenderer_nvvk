@@ -35,7 +35,7 @@ struct HitPayload {
     uint bounceDepth;
     uint meshIndex;
 
-    bool isExt;     //是否在外部，如果发生折射会进入内部
+    bool isExt;
 };
 struct HitState {
     float3 pos;
@@ -135,8 +135,8 @@ HitState getHitStateWithPositionFetch(const float3 barycentrics) {
 bool hitTest(float distance, float3 sampleDir, float3 hitPos, float3 hitNormal) {
     const uint rayFlags = 0;
     RayDesc temRay;
-    temRay.Origin = offsetRay(hitPos, hitNormal);
     temRay.Direction = normalize(sampleDir);
+    temRay.Origin = hitPos + 0.001f * temRay.Direction;    //offsetRay(hitPos, hitNormal);
     temRay.TMin = 0.001f;
     temRay.TMax = distance + 0.001f;
     NEEPayload tempPayload;
@@ -223,7 +223,7 @@ void initNEE(inout CallablePayload payload) {
         payload.radiance_nee[lightIndex] = float3(0.0f);
         Light light = sceneInfo.lights[lightIndex];
         float3 flux = light.color * light.intensity;
-        float3 sampleDir;
+        float3 sampleDir = float3(1.0f);
         if (light.type == uint(LightType::Point)) {
             sampleDir = light.pos - payload.hitPos;
             float distance = length(sampleDir);
@@ -256,12 +256,17 @@ void initNEE(inout CallablePayload payload) {
                 float3 samplePos = light.pos + light.edge1 * randomNumber1 + light.edge2 * randomNumber2;
                 sampleDir = samplePos - payload.hitPos;
 
-                if (dot(-sampleDir, light.direction) <= 0.01f) continue;
+                bool judgment1 = dot(-sampleDir, light.direction) <= 0.01f;
+                bool judgment2 = dot(sampleDir, payload.hitNormal) <= 0.01f &&
+                                 (payload.material.type != uint(MaterialType::Deielectric) ||
+                                 payload.material.type != uint(MaterialType::RoughDeielectric));
+                if (judgment1 || judgment2) continue;
 
                 float distance = length(sampleDir);
                 if (!(hitTest(distance, sampleDir, payload.hitPos, payload.hitNormal))) continue; // 遮挡
 
                 // 分母有一个cos和面积，雅可比有一个cos，pdf有一个面积，抵消了
+                distance = max(distance, 0.001f);
                 payload.radiance_nee[lightIndex] = flux / (M_TWO_PI * distance * distance);
             }
         }
@@ -374,7 +379,7 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
     if (pushConst.NEEShaderIndex > 0) initNEE(callablePayload);
 
     CallShader<CallablePayload>(uint(material.type), callablePayload);
-
+        
     payload.randomSeed = callablePayload.randomSeed;
     payload.radiance += (callablePayload.radianceSum_nee + emissive) * payload.bsdf_cosine / payload.pdf;
     payload.rayDirection = callablePayload.incidence;
@@ -515,7 +520,7 @@ void roughConductorMaterialMain(inout CallablePayload payload) {
     payload.incidence = mul(incidence_tangentSpace, payload.TBN);
 
     float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h); // h需要在切线空间中
-    float D = D_costhetaNH / max(h.z, 1e-6f);
+    float D = D_costhetaNH / h.z;   //max(h.z, 1e-6f);
     float cosineOH = abs(dot(outgoing_tangentSpace, h));
     payload.pdf = D_costhetaNH / max(4.0f * cosineOH, 0.00001f);
 
@@ -538,8 +543,10 @@ void roughConductorMaterialMain(inout CallablePayload payload) {
 
             h = normalize(sampleDir + payload.outgoing);
             h = mul(h, transposeTBN); // h需要在切线空间中
+            //因为TBN可能不准，导致出现细微的小于0的z，导致出错。上面的h不用这样是因为hvd_ggx_sample_vndf必然生成z大于0的h
+            if (h.z <= 0.001f) continue; 
             D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h);
-            D = D_costhetaNH / max(h.z, 1e-6f);
+            D = D_costhetaNH / h.z;
 
             incidence_tangentSpace = mul(sampleDir, transposeTBN);
 
@@ -623,10 +630,13 @@ void roughDielectricMaterialMain(inout CallablePayload payload) {
             if (refraction) h = normalize(sampleDir + payload.outgoing * eta);
             else h = normalize(sampleDir + payload.outgoing);
 
-            h = faceforward(h, payload.outgoing, -h); // dot(I, nerf) < 0 return n;else return -n
-            h = mul(h, transposeTBN);                 // h需要在切线空间中
+            //这里与roughConductor不同，h需要与法线同侧
+            h = mul(h, transposeTBN);                      // h需要在切线空间中
+            if(h.z < 0.0f) h = -h;
             D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h);
             D = D_costhetaNH / max(h.z, 1e-6f);
+
+            h = faceforward(h, outgoing_tangentSpace, -h); // dot(I, nerf) < 0 return n;else return -n
 
             incidence_tangentSpace = mul(sampleDir, transposeTBN);
 

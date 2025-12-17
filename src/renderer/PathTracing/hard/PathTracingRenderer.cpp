@@ -687,8 +687,7 @@ void FzbRenderer::PathTracingRenderer::uiRender() {
 	if (ImGui::Begin("PathTracingSettings"))
 	{
 		ImGui::SeparatorText("Jitter");
-		if (ImGui::SliderInt("Max Frames", &maxFrames, 1, 2 << 10) || UIModified)
-			resetFrame();
+		UIModified |= ImGui::SliderInt("Max Frames", &maxFrames, 1, 2 << 10);
 		ImGui::TextDisabled("Frame: %d", pushValues.frameIndex);
 
 		ImGui::SeparatorText("Bounces");
@@ -697,6 +696,14 @@ void FzbRenderer::PathTracingRenderer::uiRender() {
 			PE::SliderInt("Bounces Depth", &pushValues.maxDepth, 1, std::min(MAX_DEPTH, rtProperties.maxRayRecursionDepth), "%d", ImGuiSliderFlags_AlwaysClamp,
 				"Maximum Bounces depth");
 			PE::end();
+		}
+
+		bool NEEChange = ImGui::Checkbox("USE NEE", (bool*)&pushValues.NEEShaderIndex);
+		if (NEEChange) {
+			vkQueueWaitIdle(Application::app->getQueue(0).queue);
+			createRayTracingPipeline();
+
+			UIModified |= NEEChange;
 		}
 
 		if (rtPosFetchFeature.rayTracingPositionFetch == VK_FALSE)
@@ -713,6 +720,8 @@ void FzbRenderer::PathTracingRenderer::uiRender() {
 		}
 	}
 	ImGui::End();
+
+	if(UIModified) resetFrame();
 };
 void FzbRenderer::PathTracingRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 	resetFrame();

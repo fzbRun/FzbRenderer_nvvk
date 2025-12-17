@@ -56,8 +56,8 @@ struct Light {
 	float coneAngle;
 
 	float3 edge1 = float3(1.0f);
-	float3 edge2 = float3(1.0f);
 	uint32_t SphericalRectangleSample = false;
+	float3 edge2 = float3(1.0f);
 	float padding;
 };
 CHECK_STRUCT_ALIGNMENT(Light)
