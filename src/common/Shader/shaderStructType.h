@@ -15,6 +15,16 @@ struct Instance {
 	uint32_t meshIndex;      // Index of the mesh in the GltfMesh vector
 };
 CHECK_STRUCT_ALIGNMENT(Instance)
+//-------------------------------------------------------Œ∆¿Ì------------------------------------------------------------
+enum TextureType {
+	NormalMap = 0,
+	AlbedoMap = 1,
+	BsdfParamMap = 2,
+};
+enum AlbedoMapType {
+	Texture = 0,
+	Checkerboard = 1000,
+};
 //-------------------------------------------------------≤ƒ÷ ------------------------------------------------------------
 enum MaterialType {
 	Diffuse = 0,
@@ -31,7 +41,7 @@ struct BSDFMaterial {
 	float3 eta;
 	float roughness;
 
-	int3 materialMapIndex; // 0:albedo, 2:normal, 3:bsdfPara
+	int3 materialMapIndex; // 0:normal, 2:albedo, 3:bsdfPara
 };
 //--------------------------------------------------------Mesh-------------------------------------------------------------
 struct Mesh

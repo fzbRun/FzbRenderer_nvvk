@@ -12,6 +12,7 @@ sceneManager主要有三个功能
 
 #include <memory> 
 #include <vector>
+#include <unordered_set>
 
 #include <common/Mesh/Mesh.h>
 #include <nvutils/camera_manipulator.hpp>
@@ -33,6 +34,7 @@ public:
 
 	std::filesystem::path scenePath;
 	std::shared_ptr<nvutils::CameraManipulator> cameraManip{ std::make_shared<nvutils::CameraManipulator>() };
+	std::unordered_map<std::filesystem::path, int> texturePathMap;
 	std::vector<nvvk::Image>     textures{};
 
 	std::vector<FzbRenderer::Mesh> meshSets;
@@ -51,7 +53,7 @@ public:
 
 	std::vector<uint32_t> meshToBufferIndex;	//meshToBufferIndex[meshIndex] = bufferIndex，前向或延时渲染时按mesh渲染时使用
 
-	void loadTexture(const std::filesystem::path& texturePath);
+	int loadTexture(const std::filesystem::path& texturePath);
 };
 
 }

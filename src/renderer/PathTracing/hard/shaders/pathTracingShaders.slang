@@ -85,7 +85,7 @@ __generic<T : IFloat> T getAttribute(uint8_t* dataBufferAddress, BufferView buff
     return ptr[0];
   }
 
-  return T(1);  // Error case
+  return T(0);  // Error case
 }
 int3 getTriangleIndices(uint8_t* dataBufferAddress, const TriangleMesh mesh, int primitiveID)
 {
@@ -130,6 +130,31 @@ HitState getHitStateWithPositionFetch(const float3 barycentrics) {
     return hitState;
 }
 
+//-------------------------------------------------获取纹理数据------------------------------------------------
+void getTextueData(inout CallablePayload payload, float2 texCoords) {
+    if (texCoords.x == 0.0f && texCoords.y == 0.0f) return;
+
+    int normalMapIndex = payload.material.materialMapIndex.x;
+    if (normalMapIndex >= 0) {
+        float3 localNormal = textures[normalMapIndex].SampleLevel(texCoords, 0).xyz;
+        payload.hitNormal = mul(localNormal, payload.TBN);
+        float3 tangent, bitangent;
+        orthonormalBasis(payload.hitNormal, tangent, bitangent);
+        payload.TBN = float3x3(tangent, bitangent, payload.hitNormal);
+    }
+
+    int albedoMapIndex = payload.material.materialMapIndex.y;
+    if (albedoMapIndex == int(AlbedoMapType::Checkerboard)) {
+    }
+    else if (albedoMapIndex >= 0) payload.material.albedo *= textures[albedoMapIndex].SampleLevel(texCoords, 0).xyz;
+
+    int bsdfParamMapIndex = payload.material.materialMapIndex.z;
+    if (bsdfParamMapIndex >= 0) {
+        float4 bsdfParam = textures[bsdfParamMapIndex].SampleLevel(texCoords, 0);
+        payload.material.eta = bsdfParam.xyz;
+        payload.material.roughness = bsdfParam.w;
+    }
+}
 
 //-------------------------------------------------直接光采样--------------------------------------------------
 bool hitTest(float distance, float3 sampleDir, float3 hitPos, float3 hitNormal) {
@@ -311,12 +336,17 @@ void raygenMain()
     payload.isExt = true;
 
     float3 accumulatedRadiance = float3(0, 0, 0);
+    float RR = 0.8f;
 
     // Iterative reflection loop
     while (payload.bounceDepth < pushConst.maxDepth && (payload.bsdf_cosine.x + payload.bsdf_cosine.y + payload.bsdf_cosine.z > 0.0f))
     {
         TraceRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, payload);
         accumulatedRadiance += payload.radiance;
+
+        float randomNumber = rand(payload.randomSeed);
+        if (randomNumber >= RR) break;
+        payload.pdf *= RR;
 
         ray.Origin = payload.rayOrigin;
         ray.Direction = payload.rayDirection;
@@ -349,13 +379,13 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
     HitState hitState = getHitStateWithPositionFetch(barycentrics);
 
     //int3 indices = getTriangleIndices(mesh.dataBuffer, mesh.triMesh, triID);
-    //float3 pos = getTriangleAttribute<float3>(mesh.dataBuffer, mesh.triMesh.positions, indices, barycentrics);
+    // float3 pos = getTriangleAttribute<float3>(mesh.dataBuffer, mesh.triMesh.positions, indices, barycentrics);
     //float3 normal = getTriangleAttribute<float3>(mesh.dataBuffer, mesh.triMesh.normals, indices, barycentrics);
-    //hitState.pos = float3(mul(float4(pos, 1.0), ObjectToWorld4x3()));
-    //hitState.normal = normalize(mul(WorldToObject4x3(), normal).xyz);
-    //float3 tangent, bitangent;
-    //orthonormalBasis(hitState.normal, tangent, bitangent);
-    //hitState.TBN = float3x3(tangent, bitangent, hitState.normal);
+    // hitState.pos = float3(mul(float4(pos, 1.0), ObjectToWorld4x3()));
+    // hitState.normal = normalize(mul(WorldToObject4x3(), normal).xyz);
+    // float3 tangent, bitangent;
+    // orthonormalBasis(hitState.normal, tangent, bitangent);
+    // hitState.TBN = float3x3(tangent, bitangent, hitState.normal);
 
     float cosineON = dot(hitState.normal, -payload.rayDirection);
     float3 emissive = material.emissive;
@@ -375,6 +405,13 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
     callablePayload.outgoing = -payload.rayDirection;
     callablePayload.isExt = payload.isExt;
 
+    if (material.materialMapIndex.x >= 0 || material.materialMapIndex.y >= 0 || material.materialMapIndex.z >= 0) {
+        int3 indices = getTriangleIndices(mesh.dataBuffer, mesh.triMesh, triID);
+        float2 texCoords = getTriangleAttribute<float2>(mesh.dataBuffer, mesh.triMesh.texCoords, indices, barycentrics);
+        texCoords.y = 1.0f - texCoords.y;
+        getTextueData(callablePayload, texCoords);
+    }
+    
     callablePayload.radianceSum_nee = float3(0.0f);
     if (pushConst.NEEShaderIndex > 0) initNEE(callablePayload);
 

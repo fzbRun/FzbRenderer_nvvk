@@ -4,8 +4,7 @@
 
 void FzbRenderer::RoughDielectricMaterial::getMaterialInfoFromSceneInfoXML(
 	pugi::xml_node& bsdfNode,
-	shaderio::BSDFMaterial& material,
-	std::unordered_set<std::string>& uniqueTexturePaths) {
+	shaderio::BSDFMaterial& material) {
 	material.type = shaderio::RoughDeielectric;
 	if (pugi::xml_node roughnessNode = bsdfNode.child("roughness"))
 		material.roughness = std::stof(roughnessNode.attribute("value").value());
@@ -29,21 +28,4 @@ void FzbRenderer::RoughDielectricMaterial::getMaterialInfoFromSceneInfoXML(
 
 	if (pugi::xml_node emissiveNode = bsdfNode.child("emissive"))
 		material.emissive = FzbRenderer::getRGBFromString(emissiveNode.attribute("value").value());
-
-	FzbRenderer::Scene& scene = FzbRenderer::Application::sceneResource;
-	for (pugi::xml_node mapNode : bsdfNode.children("texture")) {
-		std::string mapType = mapNode.attribute("type").value();
-		//这里可以用一个enum
-		std::string texturePathStr = mapNode.attribute("value").value();
-		if (uniqueTexturePaths.count(texturePathStr) == 0) continue;
-
-		std::filesystem::path texturePath = scene.scenePath / "textures" / texturePathStr;
-		int textureIndex = scene.textures.size();
-		scene.loadTexture(texturePath);
-		uniqueTexturePaths.insert(texturePathStr);
-
-		if (mapType == "albedo") material.materialMapIndex.x = textureIndex;
-		else if (mapType == "normal") material.materialMapIndex.y = textureIndex;
-		else if (mapType == "bsdfParams") material.materialMapIndex.z = textureIndex;
-	}
 }
