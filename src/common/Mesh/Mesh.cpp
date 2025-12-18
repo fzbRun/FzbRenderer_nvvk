@@ -231,8 +231,7 @@ void FzbRenderer::Mesh::processMesh(aiMesh* meshData, const aiScene* sceneData) 
 	
 	mesh.triMesh.indices = {
 		.offset = uint32_t(meshByteData.size()),
-		.count = indexNum,
-		.byteStride = mesh.indexType == VK_INDEX_TYPE_UINT16 ? 2u : 4u
+		.count = indexNum
 	};
 	if (maxIndex <= 0xFFFF) {  // 65535
 		mesh.indexType = VK_INDEX_TYPE_UINT16;
@@ -270,6 +269,7 @@ void FzbRenderer::Mesh::processMesh(aiMesh* meshData, const aiScene* sceneData) 
 		padding = addData(meshByteData, indexByteData, 4);
 	}
 	mesh.triMesh.indices.offset += padding;
+	mesh.triMesh.indices.byteStride = mesh.indexType == VK_INDEX_TYPE_UINT16 ? 2u : 4u;
 
 	uint32_t vertexNum = meshData->mNumVertices;
 	if (meshData->HasPositions()) {
@@ -278,7 +278,7 @@ void FzbRenderer::Mesh::processMesh(aiMesh* meshData, const aiScene* sceneData) 
 			.count = vertexNum,
 			.byteStride = sizeof(glm::vec3)
 		};
-		std::vector<float> posData; posData.reserve(vertexNum * sizeof(glm::vec3));
+		std::vector<float> posData; posData.reserve(vertexNum * 3);
 		for (uint32_t i = 0; i < vertexNum; i++) {
 			posData.emplace_back(meshData->mVertices[i].x);
 			posData.emplace_back(meshData->mVertices[i].y);
@@ -296,7 +296,7 @@ void FzbRenderer::Mesh::processMesh(aiMesh* meshData, const aiScene* sceneData) 
 			.byteStride = sizeof(glm::vec3)
 		};
 		std::vector<float> normalData;
-		normalData.reserve(vertexNum * sizeof(glm::vec3));
+		normalData.reserve(vertexNum * 3);
 		for (uint32_t i = 0; i < vertexNum; i++) {
 			normalData.emplace_back(meshData->mNormals[i].x);
 			normalData.emplace_back(meshData->mNormals[i].y);
@@ -315,7 +315,7 @@ void FzbRenderer::Mesh::processMesh(aiMesh* meshData, const aiScene* sceneData) 
 			.byteStride = sizeof(glm::vec2)
 		};
 		std::vector<float> texCoordData;
-		texCoordData.reserve(vertexNum * sizeof(glm::vec2));
+		texCoordData.reserve(vertexNum * 2);
 		for (uint32_t i = 0; i < vertexNum; i++) {
 			texCoordData.emplace_back(meshData->mTextureCoords[0][i].x);
 			texCoordData.emplace_back(meshData->mTextureCoords[0][i].y);
@@ -333,7 +333,7 @@ void FzbRenderer::Mesh::processMesh(aiMesh* meshData, const aiScene* sceneData) 
 			.byteStride = sizeof(glm::vec4)
 		};
 		std::vector<float> tangentData;
-		tangentData.reserve(vertexNum * sizeof(glm::vec4));
+		tangentData.reserve(vertexNum * 4);
 		for (uint32_t i = 0; i < vertexNum; i++) {
 			glm::vec3 T(meshData->mTangents[i].x, meshData->mTangents[i].y, meshData->mTangents[i].z);
 			glm::vec3 B(meshData->mBitangents[i].x, meshData->mBitangents[i].y, meshData->mBitangents[i].z);
@@ -467,16 +467,12 @@ FzbRenderer::Mesh::Mesh(std::string meshID, nvutils::PrimitiveMesh primitiveMesh
 
 nvvk::Buffer FzbRenderer::Mesh::createMeshDataBuffer() {
 	nvvk::Buffer bData;
-	uint32_t bufferIndex{};
-	{
-		nvvk::ResourceAllocator* allocator = Application::stagingUploader.getResourceAllocator();
-		NVVK_CHECK(allocator->createBuffer(bData, std::span<const unsigned char>(meshByteData).size_bytes(),
-			VK_BUFFER_USAGE_2_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_2_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT
-			| VK_BUFFER_USAGE_2_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR));
-		NVVK_CHECK(Application::stagingUploader.appendBuffer(bData, 0, std::span<const unsigned char>(meshByteData)));
-		NVVK_DBG_NAME(bData.buffer);
-	}
-
+	nvvk::ResourceAllocator* allocator = Application::stagingUploader.getResourceAllocator();
+	NVVK_CHECK(allocator->createBuffer(bData, std::span<const unsigned char>(meshByteData).size_bytes(),
+		VK_BUFFER_USAGE_2_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_2_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT
+		| VK_BUFFER_USAGE_2_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR));
+	NVVK_CHECK(Application::stagingUploader.appendBuffer(bData, 0, std::span<const unsigned char>(meshByteData)));
+	NVVK_DBG_NAME(bData.buffer);
 	return bData;
 }
 

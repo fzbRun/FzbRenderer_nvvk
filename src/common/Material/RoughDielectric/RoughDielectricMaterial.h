@@ -7,9 +7,7 @@
 namespace FzbRenderer {
 class RoughDielectricMaterial {
 public:
-	static void getMaterialInfoFromSceneInfoXML(pugi::xml_node& bsdfNode,
-			shaderio::BSDFMaterial& material,
-			std::unordered_set<std::string>& uniqueTexturePaths);
+	static void getMaterialInfoFromSceneInfoXML(pugi::xml_node& bsdfNode, shaderio::BSDFMaterial& material);
 };
 }
 

@@ -628,7 +628,7 @@ void FzbRenderer::PathTracingRenderer::updateTextures() {
 
 	nvvk::WriteSetContainer write{};
 	VkWriteDescriptorSet    allTextures =
-		descPack.makeWrite(shaderio::BindingPoints::eTextures, 0, 1, uint32_t(Application::sceneResource.textures.size()));
+		descPack.makeWrite(shaderio::BindingPoints::eTextures, 0, 0, uint32_t(Application::sceneResource.textures.size()));
 	nvvk::Image* allImages = Application::sceneResource.textures.data();
 	write.append(allTextures, allImages);
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);

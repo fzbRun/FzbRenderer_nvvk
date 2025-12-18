@@ -1,6 +1,6 @@
 # FzbRenderer 1.0
 
-<img src="./result/cover.png" alt="ToyRenderPipeline" style="width:100%; border-radius:6px; display:block;" />
+<img src="./result/cover.png" alt="FzbRenderer_nvvk" style="width:100%; border-radius:6px; display:block;" />
 
 ## 项目简介
 

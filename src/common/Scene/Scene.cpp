@@ -6,16 +6,19 @@
 #include <unordered_map>
 #include <nvgui/sky.hpp>
 #include <glm/gtc/type_ptr.hpp>
-#include <unordered_set>
 #include <common/Material/Material.h>
 
-void FzbRenderer::Scene::loadTexture(const std::filesystem::path& texturePath) {
+int FzbRenderer::Scene::loadTexture(const std::filesystem::path& texturePath) {
+	if (texturePathMap.count(texturePath)) return texturePathMap[texturePath];
+
 	VkCommandBuffer       cmd = Application::app->createTempCmdBuffer();
 	nvvk::Image texture = nvsamples::loadAndCreateImage(cmd, Application::stagingUploader, Application::app->getDevice(), texturePath);  // Load the image from the file and create a texture from it
 	NVVK_DBG_NAME(texture.image);
 	Application::app->submitAndWaitTempCmdBuffer(cmd);
 	Application::samplerPool.acquireSampler(texture.descriptor.sampler);
 	textures.emplace_back(texture);  // Store the texture in the vector of textures
+	texturePathMap.insert({ texturePath, textures.size() - 1 });
+	return textures.size() - 1;
 }
 void FzbRenderer::Scene::createSceneFromXML() {
 	scenePath = FzbRenderer::getProjectRootDir() / "resources" / scenePath;
@@ -58,8 +61,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 	//------------------------------------------------材质---------------------------------------------------------------
 	std::unordered_map<std::string, uint32_t> uniqueMaterialIDToIndex;
 	materials.resize(0);
-	std::unordered_set<std::string> uniqueTexturePaths;
-	textures.resize(0);
+	texturePathMap.clear();
 	//默认材质
 	shaderio::BSDFMaterial defaultMaterial = FzbRenderer::defaultMaterial;
 	materials.push_back(defaultMaterial);
@@ -72,7 +74,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 			printf("重复material读取: %s\n", materialID);
 			continue;
 		}
-		shaderio::BSDFMaterial material = FzbRenderer::getMaterialInfoFromSceneInfoXML(bsdfNode, uniqueTexturePaths);
+		shaderio::BSDFMaterial material = FzbRenderer::getMaterialInfoFromSceneInfoXML(bsdfNode);
 		uniqueMaterialIDToIndex.insert({ materialID, materials.size() });
 		materials.push_back(material);
 	}

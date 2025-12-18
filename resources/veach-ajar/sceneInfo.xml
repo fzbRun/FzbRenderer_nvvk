@@ -10,16 +10,16 @@
 	</sensor>
 	<bsdfs>
 		<bsdf type="diffuse" id="LandscapeBSDF">
-			<texture type = "albedoMap">
+			<albedoMap type = "texture">
 				<filename value="textures/landscape-with-a-lake.jpg" />
 				<filter_type value="bilinear" />
-			</texture>
+			</albedoMap>
 		</bsdf>
 		<bsdf type="diffuse" id="TableBSDF">
-			<texture type = "albedoMap">
+			<albedoMap type = "texture">
 				<filename value = "textures/Good Textures_005844.jpg" />
 				<filter_type value = "bilinear" />
-			</texture>
+			</albedoMap>
 		</bsdf>
 		<bsdf type="roughConductor" id="DoorHandleBSDF">
 			<roughness value="0.25" />

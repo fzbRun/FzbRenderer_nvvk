@@ -10,9 +10,8 @@
 namespace FzbRenderer {
 	extern const shaderio::BSDFMaterial defaultMaterial;
 
-	shaderio::BSDFMaterial getMaterialInfoFromSceneInfoXML(
-		pugi::xml_node& bsdfNode,
-		std::unordered_set<std::string>& uniqueTexturePaths);
+	shaderio::BSDFMaterial getMaterialInfoFromSceneInfoXML(pugi::xml_node& bsdfNode);
+	void addTexture(pugi::xml_node& bsdfNode, shaderio::BSDFMaterial& material);
 }
 
 #endif
