@@ -575,64 +575,6 @@ void FzbRenderer::PathTracingRenderer::updateDataPerFrame(VkCommandBuffer cmd) {
 	}
 	Application::frameIndex = std::min(++Application::frameIndex, maxFrames);
 }
-//-----------------------------------------基础输入----------------------------------------------------------
-void FzbRenderer::PathTracingRenderer::createImage() {
-	VkSampler linearSampler{};
-	NVVK_CHECK(Application::samplerPool.acquireSampler(linearSampler));
-	NVVK_DBG_NAME(linearSampler);
-
-	nvvk::GBufferInitInfo gBufferInit{
-		.allocator = &Application::allocator,
-		.colorFormats = { VK_FORMAT_R32G32B32A32_SFLOAT, VK_FORMAT_R8G8B8A8_UNORM },
-		//.depthFormat = nvvk::findDepthFormat(Application::app->getPhysicalDevice()),
-		.imageSampler = linearSampler,
-		.descriptorPool = Application::app->getTextureDescriptorPool(),
-	};
-	gBuffers.init(gBufferInit);
-};
-void FzbRenderer::PathTracingRenderer::createGraphicsDescriptorSetLayout() {
-	nvvk::DescriptorBindings bindings;
-	bindings.addBinding({ .binding = shaderio::BindingPoints::eTextures,
-						 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-						 .descriptorCount = 10,
-						 .stageFlags = VK_SHADER_STAGE_ALL },
-		VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
-		| VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
-	descPack.init(bindings, Application::app->getDevice(), 1, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
-		VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT);
-
-	NVVK_DBG_NAME(descPack.getLayout());
-	NVVK_DBG_NAME(descPack.getPool());
-	NVVK_DBG_NAME(descPack.getSet(0));
-};
-void FzbRenderer::PathTracingRenderer::createGraphicsPipelineLayout() {
-	const VkPushConstantRange pushConstantRange{
-		.stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
-		.offset = 0,
-		.size = sizeof(shaderio::PushConstant)
-	};
-
-	const VkPipelineLayoutCreateInfo pipelineLayoutInfo{
-		.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-		.setLayoutCount = 1,
-		.pSetLayouts = descPack.getLayoutPtr(),
-		.pushConstantRangeCount = 1,
-		.pPushConstantRanges = &pushConstantRange,
-	};
-	NVVK_CHECK(vkCreatePipelineLayout(Application::app->getDevice(), &pipelineLayoutInfo, nullptr, &graphicPipelineLayout));
-	NVVK_DBG_NAME(graphicPipelineLayout);
-};
-void FzbRenderer::PathTracingRenderer::updateTextures() {
-	if (Application::sceneResource.textures.empty())
-		return;
-
-	nvvk::WriteSetContainer write{};
-	VkWriteDescriptorSet    allTextures =
-		descPack.makeWrite(shaderio::BindingPoints::eTextures, 0, 0, uint32_t(Application::sceneResource.textures.size()));
-	nvvk::Image* allImages = Application::sceneResource.textures.data();
-	write.append(allTextures, allImages);
-	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
-};
 //-----------------------------------------渲染器行为----------------------------------------------------------
 void FzbRenderer::PathTracingRenderer::init() {
 	//查询是否支持rtPosFetchFeature
@@ -646,10 +588,10 @@ void FzbRenderer::PathTracingRenderer::init() {
 	prop2.pNext = &rtProperties;
 	vkGetPhysicalDeviceProperties2(Application::app->getPhysicalDevice(), &prop2);
 
-	createImage();
-	createGraphicsDescriptorSetLayout();
-	createGraphicsPipelineLayout();
-	updateTextures();
+	Renderer::createGBuffer(false);
+	Renderer::createGraphicsDescriptorSetLayout();
+	Renderer::createGraphicsPipelineLayout();
+	Renderer::addTextureArrayDescriptor();
 
 	asBuilder.init(&Application::allocator, &Application::stagingUploader, Application::app->getQueue(0));
 	sbtGenerator.init(Application::app->getDevice(), rtProperties);
@@ -661,11 +603,8 @@ void FzbRenderer::PathTracingRenderer::init() {
 	createRayTracingPipeline();
 }
 void FzbRenderer::PathTracingRenderer::clean() {
+	Renderer::clean();
 	VkDevice device = Application::app->getDevice();
-
-	descPack.deinit();
-	vkDestroyPipelineLayout(device, graphicPipelineLayout, nullptr);
-	gBuffers.deinit();
 
 	asBuilder.deinitAccelerationStructures();
 	asBuilder.deinit();
@@ -730,16 +669,6 @@ void FzbRenderer::PathTracingRenderer::resize(VkCommandBuffer cmd, const VkExten
 void FzbRenderer::PathTracingRenderer::render(VkCommandBuffer cmd) {
 	rayTraceScene(cmd);
 	postProcess(cmd);
-};
-void FzbRenderer::PathTracingRenderer::postProcess(VkCommandBuffer cmd) {
-	NVVK_DBG_SCOPE(cmd);
-	Application::tonemapper.runCompute(cmd, gBuffers.getSize(), Application::tonemapperData, gBuffers.getDescriptorImageInfo(eImgRendered),
-		gBuffers.getDescriptorImageInfo(eImgTonemapped));
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
-};
-void FzbRenderer::PathTracingRenderer::onLastHeadlessFrame() {
-	Application::app->saveImageToFile(gBuffers.getColorImage(eImgTonemapped), gBuffers.getSize(),
-		nvutils::getExecutablePath().replace_extension(".jpg").string());
 };
 
 void FzbRenderer::PathTracingRenderer::compileAndCreateShaders() {

@@ -145,6 +145,10 @@ void getTextueData(inout CallablePayload payload, float2 texCoords) {
 
     int albedoMapIndex = payload.material.materialMapIndex.y;
     if (albedoMapIndex == int(AlbedoMapType::Checkerboard)) {
+        float2 uv = float2(texCoords.x * 20.0f, texCoords.y * 80.0f) * 2.0f;
+        float2 checker = floor(uv) % 2.0f;
+        float pattern = (checker.x + checker.y) % 2.0f;
+        payload.material.albedo *= lerp(float3(0.8f), float3(0.2f), pattern);
     }
     else if (albedoMapIndex >= 0) payload.material.albedo *= textures[albedoMapIndex].SampleLevel(texCoords, 0).xyz;
 

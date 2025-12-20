@@ -1,6 +1,8 @@
 #include "Renderer.h"
+#include <common/Application/Application.h>
 #include "DeferredRenderer/DeferredRenderer.h"
 #include "PathTracing/hard/PathTracingRenderer.h"
+#include <nvvk/formats.hpp>
 
 enum FzbRendererType {
 	FZB_RENDERER_FORWARD,
@@ -37,7 +39,18 @@ std::shared_ptr<FzbRenderer::Renderer> FzbRenderer::createRenderer(RendererCreat
 	return nullptr;
 }
 
-void FzbRenderer::Renderer::addExtensions() {};
-void FzbRenderer::Renderer::compileAndCreateShaders() {};
-void FzbRenderer::Renderer::onLastHeadlessFrame() {};
-void FzbRenderer::Renderer::updateDataPerFrame(VkCommandBuffer cmd) {};
+void FzbRenderer::Renderer::clean() {
+	for (int i = 0; i < features.size(); ++i) features[i].clean();
+	Feature::clean();
+}
+void FzbRenderer::Renderer::onLastHeadlessFrame() {
+	Application::app->saveImageToFile(gBuffers.getColorImage(eImgTonemapped), gBuffers.getSize(),
+		nvutils::getExecutablePath().replace_extension(".jpg").string());
+};
+
+void FzbRenderer::Renderer::postProcess(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
+	Application::tonemapper.runCompute(cmd, gBuffers.getSize(), Application::tonemapperData, gBuffers.getDescriptorImageInfo(eImgRendered),
+		gBuffers.getDescriptorImageInfo(eImgTonemapped));
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
+}

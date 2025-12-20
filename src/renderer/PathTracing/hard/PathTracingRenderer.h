@@ -1,9 +1,5 @@
 #pragma once
 
-#include <nvvk/gbuffers.hpp>
-#include <nvvk/graphics_pipeline.hpp>
-#include <nvvk/descriptors.hpp>
-
 #include "renderer/Renderer.h"
 #include <glm/ext/vector_float2.hpp>
 #include "common/Shader/nvvk/shaderio.h"
@@ -17,25 +13,20 @@
 namespace FzbRenderer {
 
 class PathTracingRenderer : public FzbRenderer::Renderer {
-	enum
-	{
-		eImgRendered,
-		eImgTonemapped
-	};
-
 public:
 	PathTracingRenderer() = default;
 	~PathTracingRenderer() = default;
 
 	PathTracingRenderer(RendererCreateInfo& createInfo);
+
 	void init() override;
-	void compileAndCreateShaders() override;
 	void clean() override;
 	void uiRender() override;
 	void resize(VkCommandBuffer cmd, const VkExtent2D& size) override;
-	void updateDataPerFrame(VkCommandBuffer cmd) override;
 	void render(VkCommandBuffer cmd) override;
-	void onLastHeadlessFrame() override;
+
+	void compileAndCreateShaders() override;
+	void updateDataPerFrame(VkCommandBuffer cmd) override;
 private:
 	nvvk::AccelerationStructureGeometryInfo primitiveToGeometry(const shaderio::Mesh& mesh);
 	void createBottomLevelAS();
@@ -46,19 +37,6 @@ private:
 	void rayTraceScene(VkCommandBuffer cmd);
 
 	void resetFrame();
-
-	void createImage();
-	void createGraphicsDescriptorSetLayout();
-	void createGraphicsPipelineLayout();
-	void updateTextures();
-	void postProcess(VkCommandBuffer cmd) override;
-
-	nvvk::GBuffer            gBuffers{};
-	nvvk::GraphicsPipelineState dynamicPipeline;
-	nvvk::DescriptorPack        descPack;
-	VkPipelineLayout            graphicPipelineLayout{};
-
-	glm::vec2 metallicRoughnessOverride{ -0.01f, -0.01f };
 
 	nvvk::DescriptorPack rtDescPack;
 	VkPipeline rtPipeline{};
