@@ -5,13 +5,13 @@ slang´óÀ¨ºÅµÄ×óÓÒ(°üÀ¨¿ªÊ¼´óÀ¨ºÅµÄÏÂÒ»ĞĞ¿ªÊ¼£¬ÒÔ¼°½áÊø´óÀ¨ºÅµÄÉÏĞĞ½áÎ²)²»ÄÜÓĞ×¢Ê
 #include "nvshaders/constants.h.slang"
 #include "nvshaders/random.h.slang"
 #include "nvshaders/sky_functions.h.slang"
-#include "nvvk/Slang/pbr.h.slang"
+#include "common/Shader/nvvk/Slang/pbr.h.slang"
 #include "nvshaders/ray_utils.h.slang"
-#include "shaderStructType.h"
+#include "../shaderio.h"
 
 // clang-format off
 //ScalarDataLayout
-[[vk::push_constant]]                           ConstantBuffer<PushConstant, ScalarDataLayout> pushConst;
+[[vk::push_constant]]                           ConstantBuffer<PathTracingPushConstant, ScalarDataLayout> pushConst;
 [[vk::binding(BindingPoints::eTextures, 0)]]    Sampler2D textures[];
 [[vk::binding(BindingPoints::eTlas, 1)]]        RaytracingAccelerationStructure topLevelAS;
 [[vk::binding(BindingPoints::eOutImage, 1)]]    RWTexture2D<float4> outImage;

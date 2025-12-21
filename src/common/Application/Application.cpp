@@ -23,7 +23,7 @@
 #include "common/Shader/nvvk/spv/tonemapper.slang.h"
 #include "common/Shader/Shader.h"
 
-void FzbRenderer::Application::getAppInfoFromXML(nvapp::ApplicationCreateInfo& appInfo, nvvk::ContextInitInfo& vkContextInitInfo) {
+void FzbRenderer::Application::getAppInfoFromXML(nvapp::ApplicationCreateInfo& appInfo) {
 	std::filesystem::path exePath = nvutils::getExecutablePath().parent_path();
 	std::filesystem::path rendererInfoXMLPath = std::filesystem::absolute(exePath / TARGET_EXE_TO_SOURCE_DIRECTORY / "rendererInfo") / "rendererInfo.xml";
 	pugi::xml_document doc;
@@ -45,7 +45,6 @@ void FzbRenderer::Application::getAppInfoFromXML(nvapp::ApplicationCreateInfo& a
 		RendererCreateInfo rendererCreateInfo{
 			.rendererTypeStr = rendererType,
 			.rendererNode = rendererNode,
-			.vkContextInfo = vkContextInitInfo,
 		};
 		renderer = FzbRenderer::createRenderer(rendererCreateInfo);
 	}
@@ -54,9 +53,10 @@ void FzbRenderer::Application::getAppInfoFromXML(nvapp::ApplicationCreateInfo& a
 	doc.reset();
 }
 FzbRenderer::Application::Application(nvapp::ApplicationCreateInfo& appInfo, nvvk::Context& vkContext) {
-	VkPhysicalDeviceShaderObjectFeaturesEXT shaderObjectFeatures{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT };
+	this->vkContext = &vkContext;
 
-	nvvk::ContextInitInfo vkSetup{
+	VkPhysicalDeviceShaderObjectFeaturesEXT shaderObjectFeatures{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT };
+	vkContextInitInfo = {
 		.instanceExtensions = {VK_EXT_DEBUG_UTILS_EXTENSION_NAME},
 		.deviceExtensions =
 			{
@@ -67,10 +67,10 @@ FzbRenderer::Application::Application(nvapp::ApplicationCreateInfo& appInfo, nvv
 			},
 	};
 
-	getAppInfoFromXML(appInfo, vkSetup);
+	getAppInfoFromXML(appInfo);
 
 	if (!appInfo.headless)
-		nvvk::addSurfaceExtensions(vkSetup.instanceExtensions, &vkSetup.deviceExtensions);
+		nvvk::addSurfaceExtensions(vkContextInitInfo.instanceExtensions, &vkContextInitInfo.deviceExtensions);
 
 #ifdef NDEBUG
 #else
@@ -78,7 +78,7 @@ FzbRenderer::Application::Application(nvapp::ApplicationCreateInfo& appInfo, nvv
 	validationSettings.setPreset(nvvk::ValidationSettings::LayerPresets::eStandard);
 	validationSettings.printf_enable = VK_TRUE;
 	validationSettings.printf_buffer_size = 1048576;
-	vkSetup.instanceCreateInfoExt = validationSettings.buildPNextChain();
+	vkContextInitInfo.instanceCreateInfoExt = validationSettings.buildPNextChain();
 #endif
 
 #if defined(USE_NSIGHT_AFTERMATH)   //GPU崩溃之后的调试工具
@@ -90,7 +90,7 @@ FzbRenderer::Application::Application(nvapp::ApplicationCreateInfo& appInfo, nvv
 
 	//vkContext.m_deviceFeatures12.scalarBlockLayout = VK_TRUE;
 
-	if (vkContext.init(vkSetup) != VK_SUCCESS)
+	if (vkContext.init(vkContextInitInfo) != VK_SUCCESS)
 	{
 		LOGE("Error in Vulkan context creation\n");
 		throw std::runtime_error("VulkanContext 初始化失败");
@@ -125,7 +125,7 @@ void FzbRenderer::Application::onAttach(nvapp::Application* app) {
 void FzbRenderer::Application::initSlangCompiler() {
 	//必须要有一个，否则在查询shader的for循环不会进入（数量为0），那么直接找不到;
 //后面给绝对地址也没关系 commonShaderPath/xxx。会会删去commonShaderPath的，直接得到xxx
-	std::filesystem::path commonShaderPath = FzbRenderer::getCommonDir() / "Shader";
+	std::filesystem::path commonShaderPath = FzbRenderer::getCommonDir().parent_path();
 	slangCompiler.addSearchPaths({ commonShaderPath });
 
 	slangCompiler.defaultTarget();

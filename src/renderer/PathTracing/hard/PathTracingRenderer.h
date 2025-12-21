@@ -6,6 +6,7 @@
 #include <nvvk/acceleration_structures.hpp>
 #include <nvvk/sbt_generator.hpp>
 #include "common/Shader/shaderStructType.h"
+#include "./shaderio.h"
 
 #ifndef FZB_PATH_TRACING_RENDERER_H
 #define FZB_PATH_TRACING_RENDERER_H
@@ -17,7 +18,7 @@ public:
 	PathTracingRenderer() = default;
 	~PathTracingRenderer() = default;
 
-	PathTracingRenderer(RendererCreateInfo& createInfo);
+	PathTracingRenderer(pugi::xml_node& rendererNode);
 
 	void init() override;
 	void clean() override;
@@ -53,7 +54,7 @@ private:
 
 	VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProperties{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR };
 
-	shaderio::PushConstant pushValues{};
+	shaderio::PathTracingPushConstant pushValues{};
 	int maxFrames = 2 << 9;
 };
 

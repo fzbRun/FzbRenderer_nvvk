@@ -6,6 +6,10 @@
 	<renderer type = "PathTracing">  <!--PathTracing  Deferred-->
 		<maxDepth value = "6" />
 		<useNEE value = "true" />
+		<RasterVoxelization>
+			<voxelCount value="64" />
+			<debugMode type="wireframe" value="2.0"/>
+		</RasterVoxelization>
 	</renderer>
 	
 </rendererInfo>

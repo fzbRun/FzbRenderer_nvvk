@@ -30,8 +30,8 @@ std::shared_ptr<FzbRenderer::Renderer> FzbRenderer::createRenderer(RendererCreat
 	if (RendererTypeMap.count(createInfo.rendererTypeStr)) {
 		rendererType = RendererTypeMap[createInfo.rendererTypeStr];
 		switch (rendererType) {
-			case FZB_RENDERER_DEFERRED: return std::make_shared<DeferredRenderer>(createInfo);
-			case FZB_RENDERER_PATH_TRACING: return std::make_shared<PathTracingRenderer>(createInfo);
+			case FZB_RENDERER_DEFERRED: return std::make_shared<DeferredRenderer>(createInfo.rendererNode);
+			case FZB_RENDERER_PATH_TRACING: return std::make_shared<PathTracingRenderer>(createInfo.rendererNode);
 		}
 		return nullptr;
 	}

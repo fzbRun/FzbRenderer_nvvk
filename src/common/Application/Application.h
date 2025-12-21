@@ -11,6 +11,7 @@
 #include <nvaftermath/aftermath.hpp>
 #include <renderer/Renderer.h>
 #include <common/Scene/Scene.h>
+#include <nvvk/context.hpp>
 
 #include <nvutils/camera_manipulator.hpp>
 #include <common/Mesh/nvvk/gltf_utils.hpp>
@@ -47,6 +48,9 @@ public:
 	void onLastHeadlessFrame() override;
 	std::shared_ptr<nvutils::CameraManipulator> getCameraManipulator() const { return sceneResource.cameraManip; };
 
+	inline static nvvk::ContextInitInfo vkContextInitInfo{};
+	inline static nvvk::Context* vkContext = nullptr;
+
 	//所有的全局共用资源
 	inline static nvapp::Application* app{};
 	inline static nvvk::ResourceAllocator allocator{};
@@ -69,7 +73,7 @@ private:
 		2. 渲染sceneInfo.xml的地址
 		3. 渲染器的类型，如前向渲染、路径追踪，并初始化相应的渲染器
 	*/
-	void getAppInfoFromXML(nvapp::ApplicationCreateInfo& appInfo, nvvk::ContextInitInfo& vkContextInitInfo);
+	void getAppInfoFromXML(nvapp::ApplicationCreateInfo& appInfo);
 	void initSlangCompiler();
 
 	void updateDataPerFrame(VkCommandBuffer cmd);

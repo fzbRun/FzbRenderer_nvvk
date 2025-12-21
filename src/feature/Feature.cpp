@@ -7,11 +7,12 @@ void FzbRenderer::Feature::clean() {
 	descPack.deinit();
 	vkDestroyPipelineLayout(device, graphicPipelineLayout, nullptr);
 	gBuffers.deinit();
+
+	scene.clean();
 }
 void FzbRenderer::Feature::uiRender() {};
 void FzbRenderer::Feature::resize(VkCommandBuffer cmd, const VkExtent2D& size) {};
 
-void FzbRenderer::Feature::addExtensions() {};
 void FzbRenderer::Feature::createGBuffer(bool useDepth) {
 	VkSampler linearSampler{};
 	NVVK_CHECK(Application::samplerPool.acquireSampler(linearSampler));
@@ -42,11 +43,11 @@ void FzbRenderer::Feature::createGraphicsDescriptorSetLayout() {
 	NVVK_DBG_NAME(descPack.getPool());
 	NVVK_DBG_NAME(descPack.getSet(0));
 }
-void FzbRenderer::Feature::createGraphicsPipelineLayout() {
+void FzbRenderer::Feature::createGraphicsPipelineLayout(uint32_t pushConstantSize) {
 	const VkPushConstantRange pushConstantRange{
 	.stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
 	.offset = 0,
-	.size = sizeof(shaderio::PushConstant)
+	.size = pushConstantSize
 	};
 
 	const VkPipelineLayoutCreateInfo pipelineLayoutInfo{

@@ -15,7 +15,7 @@ public:
 	DeferredRenderer() = default;
 	~DeferredRenderer() = default;
 
-	DeferredRenderer(RendererCreateInfo& createInfo);
+	DeferredRenderer(pugi::xml_node& rendererNode);
 
 	void init() override;
 	void clean() override;

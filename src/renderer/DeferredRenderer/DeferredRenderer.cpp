@@ -8,7 +8,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include "common/Shader/Shader.h"
 
-FzbRenderer::DeferredRenderer::DeferredRenderer(RendererCreateInfo& createInfo) {
+FzbRenderer::DeferredRenderer::DeferredRenderer(pugi::xml_node& rendererNode) {
 
 }
 
@@ -26,7 +26,7 @@ void FzbRenderer::DeferredRenderer::compileAndCreateShaders() {
     const VkPushConstantRange pushConstantRange{
         .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
         .offset = 0,
-        .size = sizeof(shaderio::PushConstant),
+        .size = sizeof(shaderio::DefaultPushConstant),
     };
 
     VkShaderCreateInfoEXT shaderInfo{
@@ -84,7 +84,7 @@ void FzbRenderer::DeferredRenderer::resize(VkCommandBuffer cmd, const VkExtent2D
 
 void FzbRenderer::DeferredRenderer::render(VkCommandBuffer cmd) {
     NVVK_DBG_SCOPE(cmd);
-    shaderio::PushConstant pushValues{
+    shaderio::DefaultPushConstant pushValues{
         .sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address,
         //.metallicRoughnessOverride = metallicRoughnessOverride,
     };
@@ -94,7 +94,7 @@ void FzbRenderer::DeferredRenderer::render(VkCommandBuffer cmd) {
         .layout = graphicPipelineLayout,
         .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
         .offset = 0,
-        .size = sizeof(shaderio::PushConstant),
+        .size = sizeof(shaderio::DefaultPushConstant),
         .pValues = &pushValues,
     };
 

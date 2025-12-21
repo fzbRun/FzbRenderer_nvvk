@@ -9,15 +9,14 @@
 
 #define MAX_DEPTH 64U
 
-FzbRenderer::PathTracingRenderer::PathTracingRenderer(RendererCreateInfo& createInfo) {
-	createInfo.vkContextInfo.deviceExtensions.push_back( { VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, &accelFeature });
-	createInfo.vkContextInfo.deviceExtensions.push_back({ VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, &rtPipelineFeature });
-	createInfo.vkContextInfo.deviceExtensions.push_back({ VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME });
+FzbRenderer::PathTracingRenderer::PathTracingRenderer(pugi::xml_node& rendererNode) {
+	Application::vkContextInitInfo.deviceExtensions.push_back( { VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, &accelFeature });
+	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, &rtPipelineFeature });
+	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME });
 
 	rtPosFetchFeature.rayTracingPositionFetch = VK_TRUE;
-	createInfo.vkContextInfo.deviceExtensions.push_back({ VK_KHR_RAY_TRACING_POSITION_FETCH_EXTENSION_NAME, &rtPosFetchFeature });
+	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_KHR_RAY_TRACING_POSITION_FETCH_EXTENSION_NAME, &rtPosFetchFeature });
 
-	pugi::xml_node& rendererNode = createInfo.rendererNode;
 	if (pugi::xml_node maxDepthNode = rendererNode.child("maxDepth")) 
 		pushValues.maxDepth = std::stoi(maxDepthNode.attribute("value").value());
 	if (pugi::xml_node useNEENode = rendererNode.child("useNEE"))
@@ -485,7 +484,7 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 	group.generalShader = eCallable_RoughDielectricMaterial;
 	shader_groups.push_back(group);
 
-	const VkPushConstantRange push_constant{ VK_SHADER_STAGE_ALL, 0, sizeof(shaderio::PushConstant) };
+	const VkPushConstantRange push_constant{ VK_SHADER_STAGE_ALL, 0, sizeof(shaderio::PathTracingPushConstant) };
 
 	VkPipelineLayoutCreateInfo pipeline_layout_create_info{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
 	pipeline_layout_create_info.pushConstantRangeCount = 1;
@@ -544,7 +543,7 @@ void FzbRenderer::PathTracingRenderer::rayTraceScene(VkCommandBuffer cmd) {
 		.sType = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
 		.layout = rtPipelineLayout,
 		.stageFlags = VK_SHADER_STAGE_ALL,
-		.size = sizeof(shaderio::PushConstant),
+		.size = sizeof(shaderio::PathTracingPushConstant),
 		.pValues = &pushValues
 	};
 	vkCmdPushConstants2(cmd, &pushInfo);
@@ -588,9 +587,14 @@ void FzbRenderer::PathTracingRenderer::init() {
 	prop2.pNext = &rtProperties;
 	vkGetPhysicalDeviceProperties2(Application::app->getPhysicalDevice(), &prop2);
 
+	std::string shaderioPath = (std::filesystem::path(__FILE__).parent_path() / "shaderio.h").string();
+	Application::slangCompiler.addOption({ .name = slang::CompilerOptionName::Include,
+		.value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = shaderioPath.c_str()}
+		});
+
 	Renderer::createGBuffer(false);
 	Renderer::createGraphicsDescriptorSetLayout();
-	Renderer::createGraphicsPipelineLayout();
+	Renderer::createGraphicsPipelineLayout(sizeof(shaderio::PathTracingPushConstant));
 	Renderer::addTextureArrayDescriptor();
 
 	asBuilder.init(&Application::allocator, &Application::stagingUploader, Application::app->getQueue(0));

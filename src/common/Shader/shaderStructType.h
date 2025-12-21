@@ -89,14 +89,11 @@ struct SceneInfo
 };
 CHECK_STRUCT_ALIGNMENT(SceneInfo)
 //-------------------------------------------------------ÍÆËÍ³£Á¿------------------------------------------------------------
-struct PushConstant
+struct DefaultPushConstant
 {
 	float3x3       normalMatrix;
 	int            instanceIndex;              // Instance index for the current draw call
 	SceneInfo*     sceneInfoAddress;           // Address of the scene information buffer
-	int NEEShaderIndex = -1;
-	int frameIndex = 0;
-	int maxDepth = 3;
 };
 NAMESPACE_SHADERIO_END()
 #endif

@@ -13,7 +13,6 @@ namespace FzbRenderer {
 struct RendererCreateInfo {
 	std::string rendererTypeStr;
 	pugi::xml_node& rendererNode;
-	nvvk::ContextInitInfo& vkContextInfo;
 };
 
 class Renderer : public Feature {
