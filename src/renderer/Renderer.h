@@ -30,8 +30,6 @@ public:
 	virtual void onLastHeadlessFrame();
 
 	virtual void postProcess(VkCommandBuffer cmd);
-
-	std::vector<Feature> features;
 };
 
 std::shared_ptr<Renderer> createRenderer(RendererCreateInfo& createInfo);

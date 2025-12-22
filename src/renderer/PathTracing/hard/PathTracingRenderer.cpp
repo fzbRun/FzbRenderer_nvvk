@@ -21,6 +21,9 @@ FzbRenderer::PathTracingRenderer::PathTracingRenderer(pugi::xml_node& rendererNo
 		pushValues.maxDepth = std::stoi(maxDepthNode.attribute("value").value());
 	if (pugi::xml_node useNEENode = rendererNode.child("useNEE"))
 		pushValues.NEEShaderIndex = std::string(useNEENode.attribute("value").value()) == "true";
+
+	if (pugi::xml_node rasterVoxelizationNode = rendererNode.child("RasterVoxelization"))
+		rasterVoxelization = std::make_shared<RasterVoxelization>(rasterVoxelizationNode);
 }
 //-----------------------------------------创建加速结构----------------------------------------------------------
 /*
@@ -587,6 +590,8 @@ void FzbRenderer::PathTracingRenderer::init() {
 	prop2.pNext = &rtProperties;
 	vkGetPhysicalDeviceProperties2(Application::app->getPhysicalDevice(), &prop2);
 
+	rasterVoxelization->init();
+
 	std::string shaderioPath = (std::filesystem::path(__FILE__).parent_path() / "shaderio.h").string();
 	Application::slangCompiler.addOption({ .name = slang::CompilerOptionName::Include,
 		.value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = shaderioPath.c_str()}
@@ -607,6 +612,8 @@ void FzbRenderer::PathTracingRenderer::init() {
 	createRayTracingPipeline();
 }
 void FzbRenderer::PathTracingRenderer::clean() {
+	rasterVoxelization->clean();
+
 	Renderer::clean();
 	VkDevice device = Application::app->getDevice();
 
@@ -621,6 +628,8 @@ void FzbRenderer::PathTracingRenderer::clean() {
 };
 void FzbRenderer::PathTracingRenderer::uiRender() {
 	bool UIModified = Application::UIModified;
+
+	rasterVoxelization->uiRender();
 
 	namespace PE = nvgui::PropertyEditor;
 	if (ImGui::Begin("Viewport"))
@@ -673,8 +682,11 @@ void FzbRenderer::PathTracingRenderer::resize(VkCommandBuffer cmd, const VkExten
 void FzbRenderer::PathTracingRenderer::render(VkCommandBuffer cmd) {
 	rayTraceScene(cmd);
 	postProcess(cmd);
+
+	rasterVoxelization->render(cmd);
 };
 
 void FzbRenderer::PathTracingRenderer::compileAndCreateShaders() {
 	createRayTracingPipeline();
+	rasterVoxelization->compileAndCreateShaders();
 };

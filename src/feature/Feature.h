@@ -24,7 +24,7 @@ public:
 	virtual void createGBuffer(bool useDepth = true);
 	virtual void createGraphicsDescriptorSetLayout();
 	virtual void createGraphicsPipelineLayout(uint32_t pushConstantSize = sizeof(shaderio::DefaultPushConstant));
-	virtual void addTextureArrayDescriptor();
+	virtual void addTextureArrayDescriptor(uint32_t textureBinding = shaderio::eTextures);
 
 	virtual void compileAndCreateShaders();
 	virtual void updateDataPerFrame(VkCommandBuffer cmd);

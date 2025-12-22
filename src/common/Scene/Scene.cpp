@@ -9,7 +9,7 @@
 #include <common/Material/Material.h>
 
 int FzbRenderer::Scene::loadTexture(const std::filesystem::path& texturePath) {
-	if (texturePathMap.count(texturePath)) return texturePathMap[texturePath];
+	if (texturePathToIndex.count(texturePath)) return texturePathToIndex[texturePath];
 
 	VkCommandBuffer       cmd = Application::app->createTempCmdBuffer();
 	nvvk::Image texture = nvsamples::loadAndCreateImage(cmd, Application::stagingUploader, Application::app->getDevice(), texturePath);  // Load the image from the file and create a texture from it
@@ -17,8 +17,34 @@ int FzbRenderer::Scene::loadTexture(const std::filesystem::path& texturePath) {
 	Application::app->submitAndWaitTempCmdBuffer(cmd);
 	Application::samplerPool.acquireSampler(texture.descriptor.sampler);
 	textures.emplace_back(texture);  // Store the texture in the vector of textures
-	texturePathMap.insert({ texturePath, textures.size() - 1 });
+	texturePathToIndex.insert({ texturePath, textures.size() - 1 });
 	return textures.size() - 1;
+}
+void FzbRenderer::Scene::addMeshSet(MeshSet& meshSet) {
+	nvvk::Buffer bData = meshSet.createMeshDataBuffer();
+	uint32_t bufferIndex = static_cast<uint32_t>(bDatas.size());
+	bDatas.push_back(bData);
+
+	meshSet.meshOffset = meshes.size();
+	for (int i = 0; i < meshSet.childMeshInfos.size(); i++)
+	{
+		MeshInfo& childMeshInfo = meshSet.childMeshInfos[i];
+		childMeshInfo.meshIndex = meshes.size();
+		childMeshInfo.mesh.dataBuffer = (uint8_t*)bData.address;
+
+		meshIndexToMeshSetIndex.push_back(meshSets.size());
+		meshes.emplace_back(childMeshInfo.mesh);
+		
+		meshToBufferIndex.push_back(bufferIndex);
+
+		if (!uniqueMaterialIDToIndex.count(childMeshInfo.materialID)) {
+			uniqueMaterialIDToIndex.insert({ childMeshInfo.materialID, materials.size() });
+			materials.push_back(childMeshInfo.material);
+		}
+	}
+
+	meshSetIDToIndex.insert({ meshSet.meshID, meshSets.size() });
+	meshSets.push_back(meshSet);
 }
 void FzbRenderer::Scene::createSceneFromXML() {
 	scenePath = FzbRenderer::getProjectRootDir() / "resources" / scenePath;
@@ -59,9 +85,10 @@ void FzbRenderer::Scene::createSceneFromXML() {
 		cameraManip->setClipPlanes(glm::vec2(0.1f, 100.0f));		
 	}
 	//------------------------------------------------材质---------------------------------------------------------------
-	std::unordered_map<std::string, uint32_t> uniqueMaterialIDToIndex;
 	materials.resize(0);
-	texturePathMap.clear();
+	uniqueMaterialIDToIndex.clear();
+	texturePathToIndex.clear();
+
 	//默认材质
 	shaderio::BSDFMaterial defaultMaterial = FzbRenderer::defaultMaterial;
 	materials.push_back(defaultMaterial);
@@ -136,8 +163,8 @@ void FzbRenderer::Scene::createSceneFromXML() {
 				if (pugi::xml_node shapeNode = lightNode.child("shape")) {
 					if (std::string(shapeNode.attribute("type").value()) == "obj") {
 						std::filesystem::path lightMeshPath = scenePath / shapeNode.attribute("value").value();
-						FzbRenderer::Mesh lightMesh("lightMesh", "obj", lightMeshPath);
-						shaderio::BufferView posBufferView = lightMesh.childMeshes[0].mesh.triMesh.positions;
+						FzbRenderer::MeshSet lightMesh("lightMesh", "obj", lightMeshPath);
+						shaderio::BufferView posBufferView = lightMesh.childMeshInfos[0].mesh.triMesh.positions;
 
 						std::vector<glm::vec3> lightMeshVertices(posBufferView.count);
 						for (int i = 0; i < posBufferView.count; ++i) {
@@ -166,75 +193,48 @@ void FzbRenderer::Scene::createSceneFromXML() {
 		}
 	}
 	//------------------------------------------------Mesh---------------------------------------------------------------
-	std::map<std::string, uint32_t> meshSetIDToIndex;
 	meshSets.resize(0);
-	std::map<std::string, uint32_t> meshIDToIndex;
 	meshes.resize(0);
 
 	pugi::xml_node meshesNode = sceneInfoNode.child("meshes");
 	for (pugi::xml_node meshNode : meshesNode.children("mesh")) {
 		std::string meshType = meshNode.attribute("type").value();
 		std::string meshID = meshNode.attribute("id").value();
-		meshSetIDToIndex.insert({ meshID, meshSets.size() });
 
 		std::filesystem::path meshPath = scenePath / meshNode.child("filename").attribute("value").value();
-		FzbRenderer::Mesh meshSet(meshID, meshType, meshPath);
-		meshSets.push_back(meshSet);
-
-		nvvk::Buffer bData = meshSet.createMeshDataBuffer();
-		uint32_t bufferIndex = static_cast<uint32_t>(bDatas.size());
-		bDatas.push_back(bData);
-
-		for (int i = 0; i < meshSet.childMeshes.size(); i++)
-		{
-			ChildMesh& childMesh = meshSet.childMeshes[i];
-			childMesh.mesh.dataBuffer = (uint8_t*)bData.address;  //这样address+1只移动1字节，可以按字节偏移寻址
-			meshIDToIndex.insert({ childMesh.meshID, meshes.size() });
-			meshes.emplace_back(childMesh.mesh);
-			meshToBufferIndex.push_back(bufferIndex);
-
-			if (!uniqueMaterialIDToIndex.count(childMesh.materialID)) {
-				uniqueMaterialIDToIndex.insert({ childMesh.materialID, materials.size() });
-				materials.push_back(childMesh.material);
-			}
-		}
+		FzbRenderer::MeshSet meshSet(meshID, meshType, meshPath);	//创建MeshSet
+		addMeshSet(meshSet);
 	}
 	//------------------------------------------------Instance---------------------------------------------------------------
+	/*
+	流程是
+	1. 根据instanceXML的meshRef的id在meshSetIDToIndexc中找到索引，根据索引找到meshSet
+	2. 为meshSet的每一个childMesh创建一个instance，根据childMesh的meshID知道meshes的索引
+	3. 根据materialID在uniqueMaterialIDToIndex找到索引
+	4. 记录meshes和materials的索引
+	*/
 	pugi::xml_node instanceNode = sceneInfoNode.child("instances");
 	for (pugi::xml_node instanceNode : instanceNode.children("instance")) {
 		std::string meshSetID = instanceNode.child("meshRef").attribute("id").value();
-		std::vector<ChildMesh> childMeshes;
+		std::vector<MeshInfo> childMeshInfos;
 		if (meshSetID == "custom") {
-			FzbRenderer::Mesh mesh;
+			FzbRenderer::MeshSet mesh;
 			std::string meshType = instanceNode.child("meshRef").attribute("type").value();
 			nvutils::PrimitiveMesh primitive;
-			if (meshType == "plane") primitive = FzbRenderer::Mesh::createPlane(1, 1.0f, 1.0f);
+			if (meshType == "plane") primitive = FzbRenderer::MeshSet::createPlane(1, 1.0f, 1.0f);
 			meshSetID = "custom" + meshType + std::to_string(customPrimitiveCount++);
-			mesh = FzbRenderer::Mesh(meshSetID, primitive);
-			meshSetIDToIndex.insert({ meshSetID, meshSets.size() });
-
-			nvvk::Buffer bData = mesh.createMeshDataBuffer();
-			uint32_t bufferIndex = static_cast<uint32_t>(bDatas.size());
-			bDatas.push_back(bData);
-
-			childMeshes = mesh.childMeshes;
-			for (int i = 0; i < childMeshes.size(); ++i) {
-				ChildMesh& childMesh = mesh.childMeshes[i];
-				childMesh.mesh.dataBuffer = (uint8_t*)bData.address;
-				meshIDToIndex.insert({ childMesh.meshID, meshes.size() });
-				meshes.emplace_back(childMesh.mesh);
-				meshToBufferIndex.push_back(bufferIndex);
-			}
+			mesh = FzbRenderer::MeshSet(meshSetID, primitive);
+			addMeshSet(mesh);
 		}
 		else {
 			if (!meshSetIDToIndex.count(meshSetID)) LOGW("实例没有对应的mesh：%s\n", meshSetID.c_str());
-			FzbRenderer::Mesh& meshSet = meshSets[meshSetIDToIndex[meshSetID]];
-			childMeshes = meshSet.childMeshes;
+			FzbRenderer::MeshSet& meshSet = meshSets[meshSetIDToIndex[meshSetID]];
+			childMeshInfos = meshSet.childMeshInfos;
 		}
-		for (int i = 0; i < childMeshes.size(); i++) {
+		for (int i = 0; i < childMeshInfos.size(); i++) {
 			shaderio::Instance instance;
-			ChildMesh& childMesh = childMeshes[i];
-			instance.meshIndex = meshIDToIndex[childMesh.meshID];
+			MeshInfo& childMesh = childMeshInfos[i];
+			instance.meshIndex = childMesh.meshIndex;
 
 			std::string materialID = "defaultMaterial";
 			if (pugi::xml_node materialNode = instanceNode.child("materialRef")) materialID = materialNode.attribute("id").value();
@@ -335,4 +335,10 @@ void FzbRenderer::Scene::UIRender() {
 
 	}
 	ImGui::End();
+}
+
+FzbRenderer::MeshInfo FzbRenderer::Scene::getMeshInfo(uint32_t meshIndex) {
+	uint32_t meshSetIndex = getMeshSetIndex(meshIndex);
+	MeshSet& meshSet = meshSets[meshSetIndex];
+	return meshSet.childMeshInfos[meshIndex - meshSet.meshOffset];
 }

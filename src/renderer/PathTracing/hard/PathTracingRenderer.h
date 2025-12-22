@@ -7,6 +7,7 @@
 #include <nvvk/sbt_generator.hpp>
 #include "common/Shader/shaderStructType.h"
 #include "./shaderio.h"
+#include <feature/SceneDivision/RasterVoxelization/RasterVoxelization.h>
 
 #ifndef FZB_PATH_TRACING_RENDERER_H
 #define FZB_PATH_TRACING_RENDERER_H
@@ -56,6 +57,8 @@ private:
 
 	shaderio::PathTracingPushConstant pushValues{};
 	int maxFrames = 2 << 9;
+
+	std::shared_ptr<FzbRenderer::RasterVoxelization> rasterVoxelization;
 };
 
 }

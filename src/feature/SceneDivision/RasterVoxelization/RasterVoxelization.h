@@ -16,12 +16,14 @@ enum DebugMode{
 };
 
 struct RasterVoxelizationSetting{
+	VkExtent2D resolution;
 	shaderio::RasterVoxelizationPushConstant pushConstant;
 	DebugMode debugMode;
 	float lineWidth = 1.0f;
 };
 
-class RasterVoxelization : public Feature{
+class RasterVoxelization : public Feature {
+public:
 	RasterVoxelization() = default;
 	virtual ~RasterVoxelization() = default;
 
@@ -32,15 +34,19 @@ class RasterVoxelization : public Feature{
 	void uiRender() override;
 	void render(VkCommandBuffer cmd) override;
 
-	void createGBuffer(bool useDepth = true) override;
 	void createGraphicsDescriptorSetLayout() override;
-	void createGraphicsPipelineLayout(uint32_t pushConstantSize = sizeof(shaderio::DefaultPushConstant)) override;
 
 	void compileAndCreateShaders() override;
 	void updateDataPerFrame(VkCommandBuffer cmd) override;
 
 	RasterVoxelizationSetting setting;
 	nvvk::Buffer VGB;
+
+	VkShaderEXT vertexShader{};
+	VkShaderEXT geometryShader{};
+	VkShaderEXT fragmentShader{};
+
+	VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures{};
 };
 }
 

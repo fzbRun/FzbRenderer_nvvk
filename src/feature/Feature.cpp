@@ -60,13 +60,13 @@ void FzbRenderer::Feature::createGraphicsPipelineLayout(uint32_t pushConstantSiz
 	NVVK_CHECK(vkCreatePipelineLayout(Application::app->getDevice(), &pipelineLayoutInfo, nullptr, &graphicPipelineLayout));
 	NVVK_DBG_NAME(graphicPipelineLayout);
 }
-void FzbRenderer::Feature::addTextureArrayDescriptor() {
+void FzbRenderer::Feature::addTextureArrayDescriptor(uint32_t textureBinding) {
 	if (Application::sceneResource.textures.empty())
 		return;
 
 	nvvk::WriteSetContainer write{};
 	VkWriteDescriptorSet    allTextures =
-		descPack.makeWrite(shaderio::BindingPoints::eTextures, 0, 0, uint32_t(Application::sceneResource.textures.size()));
+		descPack.makeWrite(textureBinding, 0, 0, uint32_t(Application::sceneResource.textures.size()));
 	nvvk::Image* allImages = Application::sceneResource.textures.data();
 	write.append(allTextures, allImages);
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);

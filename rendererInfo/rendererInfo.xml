@@ -7,6 +7,7 @@
 		<maxDepth value = "6" />
 		<useNEE value = "true" />
 		<RasterVoxelization>
+			<resolution value = "4096, 4096" />
 			<voxelCount value="64" />
 			<debugMode type="wireframe" value="2.0"/>
 		</RasterVoxelization>

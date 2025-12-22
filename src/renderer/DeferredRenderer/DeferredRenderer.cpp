@@ -139,7 +139,7 @@ void FzbRenderer::DeferredRenderer::render(VkCommandBuffer cmd) {
     vkCmdBeginRendering(cmd, &renderingInfo);
 
     //使用VK_EXT_SHADER_OBJECT_EXTENSION_NAME后可以不需要pipeline，直接通过命令设置渲染设置和着色器
-    dynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;
+    dynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
     dynamicPipeline.cmdApplyAllStates(cmd);
     dynamicPipeline.cmdSetViewportAndScissor(cmd, Application::app->getViewportSize());
     vkCmdSetDepthTestEnable(cmd, VK_TRUE);
@@ -159,7 +159,7 @@ void FzbRenderer::DeferredRenderer::render(VkCommandBuffer cmd) {
         pushValues.instanceIndex = int(i);
         vkCmdPushConstants2(cmd, &pushInfo);
 
-        uint32_t bufferIndex = Application::sceneResource.meshToBufferIndex[meshIndex];
+        uint32_t bufferIndex = Application::sceneResource.getMeshBufferIndex(meshIndex);
         const nvvk::Buffer& v = Application::sceneResource.bDatas[bufferIndex];
 
         vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(mesh.indexType));
@@ -168,6 +168,7 @@ void FzbRenderer::DeferredRenderer::render(VkCommandBuffer cmd) {
     }
 
     vkCmdEndRendering(cmd);
+    //nvvk的cmdImageMemoryBarrier函数可以根据image的old和new layout判断前后的可能的所有stage和access
     nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(eImgRendered),
                                       VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
 

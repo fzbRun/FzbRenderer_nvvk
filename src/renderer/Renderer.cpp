@@ -40,7 +40,6 @@ std::shared_ptr<FzbRenderer::Renderer> FzbRenderer::createRenderer(RendererCreat
 }
 
 void FzbRenderer::Renderer::clean() {
-	for (int i = 0; i < features.size(); ++i) features[i].clean();
 	Feature::clean();
 }
 void FzbRenderer::Renderer::onLastHeadlessFrame() {
