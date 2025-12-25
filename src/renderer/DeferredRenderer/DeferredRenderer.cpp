@@ -57,8 +57,8 @@ void FzbRenderer::DeferredRenderer::compileAndCreateShaders() {
 }
 void FzbRenderer::DeferredRenderer::init() {
     FzbRenderer::Renderer::createGBuffer(true);
-    Renderer::createGraphicsDescriptorSetLayout();
-    Renderer::createGraphicsPipelineLayout();
+    Renderer::createDescriptorSetLayout();
+    Renderer::createPipelineLayout();
     compileAndCreateShaders();
     Renderer::addTextureArrayDescriptor();
 }
@@ -91,7 +91,7 @@ void FzbRenderer::DeferredRenderer::render(VkCommandBuffer cmd) {
 
     const VkPushConstantsInfo pushInfo{
         .sType = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
-        .layout = graphicPipelineLayout,
+        .layout = pipelineLayout,
         .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
         .offset = 0,
         .size = sizeof(shaderio::DefaultPushConstant),
@@ -127,23 +127,23 @@ void FzbRenderer::DeferredRenderer::render(VkCommandBuffer cmd) {
     const VkBindDescriptorSetsInfo bindDescriptorSetsInfo{
         .sType = VK_STRUCTURE_TYPE_BIND_DESCRIPTOR_SETS_INFO,
         .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
-        .layout = graphicPipelineLayout,
+        .layout = pipelineLayout,
         .firstSet = 0,
         .descriptorSetCount = 1,
         .pDescriptorSets = descPack.getSetPtr(),
     };
     //vkCmdBindDescriptorSets2(cmd, &bindDescriptorSetsInfo);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicPipelineLayout, 0, 1,
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1,
         descPack.getSetPtr(), 0, nullptr);
 
     vkCmdBeginRendering(cmd, &renderingInfo);
 
     //使用VK_EXT_SHADER_OBJECT_EXTENSION_NAME后可以不需要pipeline，直接通过命令设置渲染设置和着色器
-    dynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
-    dynamicPipeline.cmdApplyAllStates(cmd);
-    dynamicPipeline.cmdSetViewportAndScissor(cmd, Application::app->getViewportSize());
+    graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
+    graphicsDynamicPipeline.cmdApplyAllStates(cmd);
+    graphicsDynamicPipeline.cmdSetViewportAndScissor(cmd, Application::app->getViewportSize());
     vkCmdSetDepthTestEnable(cmd, VK_TRUE);
-    dynamicPipeline.cmdBindShaders(cmd, { .vertex = vertexShader, .fragment = fragmentShader });
+    graphicsDynamicPipeline.cmdBindShaders(cmd, { .vertex = vertexShader, .fragment = fragmentShader });
 
     VkVertexInputBindingDescription2EXT bindingDescription{};
     VkVertexInputAttributeDescription2EXT attributeDescription = {};

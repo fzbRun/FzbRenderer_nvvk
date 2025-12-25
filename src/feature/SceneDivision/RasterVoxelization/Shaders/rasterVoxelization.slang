@@ -16,14 +16,8 @@ struct VSout
 
 struct GSout {
     float4 sv_position : SV_Position;
-    nointerpolation uint viewportIndex : SV_ViewportArrayIndex;
     float3 worldPos : POSITION;
     float3 worldNormal : NORMAL;
-};
-
-struct PSout
-{
-    float4 color : SV_Target;
 };
 
 __generic<T : IFloat> T getAttribute(uint8_t *dataBufferAddress, BufferView bufferView, uint attributeIndex)
@@ -84,9 +78,9 @@ void geometryMain(
     int viewIndex = normal.x > normal.y ? (normal.x > normal.z ? 1 : 0) : (normal.y > normal.z ? 2 : 0);
 
     GSout output;
-    output.viewportIndex = pushConst.threeView.x == 1 ? viewIndex : 0;
     for (int i = 0; i < 3; i++) {
         output.sv_position = mul(float4(input[i].worldPos, 1.0f), pushConst.VP[viewIndex]);
+        output.worldPos = input[i].worldPos;
         output.worldNormal = input[i].worldNormal;
         outputStream.Append(output);
     }
@@ -94,8 +88,8 @@ void geometryMain(
     outputStream.RestartStrip();
 }
 
-int getVoxelIndex(GSout input) {
-    int3 voxelIndex = int3((input.worldPos - pushConst.voxelGroupStartPos) / pushConst.voxelSize_Count.xyz);
+int getVoxelIndex(float3 worldPos) {
+    int3 voxelIndex = int3((worldPos - pushConst.voxelGroupStartPos) / pushConst.voxelSize_Count.xyz);
     int voxelCount = uint(pushConst.voxelSize_Count.w);
     int voxelTotalCount = voxelCount * voxelCount * voxelCount;
     int voxelIndexU = 0;
@@ -117,7 +111,7 @@ int getVoxelIndex(GSout input) {
     }
     return voxelIndexU;
 }
-void atomicAABB(GSout input, int voxelIndexU) {
+void atomicAABB(float3 worldPos, int voxelIndexU) {
     AABBU aabbU = VGB[voxelIndexU].aabbU;
     float leftX = asfloat(aabbU.minimum.x);
     float leftY = asfloat(aabbU.minimum.y);
@@ -126,72 +120,72 @@ void atomicAABB(GSout input, int voxelIndexU) {
     float rightY = asfloat(aabbU.maximum.y);
     float rightZ = asfloat(aabbU.maximum.z);
 
-    if (input.worldPos.x < leftX) {
+    if (worldPos.x < leftX) {
         uint preVal = aabbU.minimum.x;
-        uint newVal = asuint(input.worldPos.x);
+        uint newVal = asuint(worldPos.x);
         uint curVal;
         InterlockedCompareExchange(VGB[voxelIndexU].aabbU.minimum.x, preVal, newVal, curVal);
         while (curVal != preVal) {
-            if (asfloat(curVal) <= input.worldPos.x) break;
+            if (asfloat(curVal) <= worldPos.x) break;
             preVal = curVal;
             InterlockedCompareExchange(VGB[voxelIndexU].aabbU.minimum.x, preVal, newVal, curVal);
         }
-    } else if (input.worldPos.x > rightX) {
+    } else if (worldPos.x > rightX) {
         uint preVal = aabbU.maximum.x;
-        uint newVal = asuint(input.worldPos.x);
+        uint newVal = asuint(worldPos.x);
         uint curVal;
         InterlockedCompareExchange(VGB[voxelIndexU].aabbU.maximum.x, preVal, newVal, curVal);
         while (curVal != preVal) {
-            if (asfloat(curVal) >= input.worldPos.x) break;
+            if (asfloat(curVal) >= worldPos.x) break;
             preVal = curVal;
             InterlockedCompareExchange(VGB[voxelIndexU].aabbU.maximum.x, preVal, newVal, curVal);
         }
     }
-    if (input.worldPos.y < leftY) {
+    if (worldPos.y < leftY) {
         uint preVal = aabbU.minimum.y;
-        uint newVal = asuint(input.worldPos.y);
+        uint newVal = asuint(worldPos.y);
         uint curVal;
         InterlockedCompareExchange(VGB[voxelIndexU].aabbU.minimum.y, preVal, newVal, curVal);
         while (curVal != preVal) {
-            if (asfloat(curVal) <= input.worldPos.y) break;
+            if (asfloat(curVal) <= worldPos.y) break;
             preVal = curVal;
             InterlockedCompareExchange(VGB[voxelIndexU].aabbU.minimum.y, preVal, newVal, curVal);
         }
-    } else if (input.worldPos.y > rightY) {
+    } else if (worldPos.y > rightY) {
         uint preVal = aabbU.maximum.y;
-        uint newVal = asuint(input.worldPos.y);
+        uint newVal = asuint(worldPos.y);
         uint curVal;
         InterlockedCompareExchange(VGB[voxelIndexU].aabbU.maximum.y, preVal, newVal, curVal);
         while (curVal != preVal) {
-            if (asfloat(curVal) >= input.worldPos.y) break;
+            if (asfloat(curVal) >= worldPos.y) break;
             preVal = curVal;
             InterlockedCompareExchange(VGB[voxelIndexU].aabbU.maximum.y, preVal, newVal, curVal);
         }
     }
-    if (input.worldPos.z < leftZ) {
+    if (worldPos.z < leftZ) {
         uint preVal = aabbU.minimum.z;
-        uint newVal = asuint(input.worldPos.z);
+        uint newVal = asuint(worldPos.z);
         uint curVal;
         InterlockedCompareExchange(VGB[voxelIndexU].aabbU.minimum.z, preVal, newVal, curVal);
         while (curVal != preVal) {
-            if (asfloat(curVal) <= input.worldPos.z) break;
+            if (asfloat(curVal) <= worldPos.z) break;
             preVal = curVal;
             InterlockedCompareExchange(VGB[voxelIndexU].aabbU.minimum.z, preVal, newVal, curVal);
         }
-    } else if (input.worldPos.z > rightZ) {
+    } else if (worldPos.z > rightZ) {
         uint preVal = aabbU.maximum.z;
-        uint newVal = asuint(input.worldPos.z);
+        uint newVal = asuint(worldPos.z);
         uint curVal;
         InterlockedCompareExchange(VGB[voxelIndexU].aabbU.maximum.z, preVal, newVal, curVal);
         while (curVal != preVal) {
-            if (asfloat(curVal) >= input.worldPos.z) break;
+            if (asfloat(curVal) >= worldPos.z) break;
             preVal = curVal;
             InterlockedCompareExchange(VGB[voxelIndexU].aabbU.maximum.z, preVal, newVal, curVal);
         }
     }
 }
-void atomicNormalG(GSout input, int voxelIndexU) {
-    float3 normal_G = normalize(input.worldNormal);
+void atomicNormalG(float3 normal, int voxelIndexU) {
+    float3 normal_G = normalize(normal);
     InterlockedAdd<float>(VGB[voxelIndexU].sumNormal_G.w, 1.0f);
     InterlockedAdd<float>(VGB[voxelIndexU].sumNormal_G.x, normal_G.x);
     InterlockedAdd<float>(VGB[voxelIndexU].sumNormal_G.y, normal_G.y);
@@ -200,22 +194,114 @@ void atomicNormalG(GSout input, int voxelIndexU) {
 
 [shader("pixel")]
 void fragmentMain(GSout input) {
-    int voxelIndexU = getVoxelIndex(input);
-    atomicAABB(input, voxelIndexU);
-    atomicNormalG(input, voxelIndexU);
+    int voxelIndexU = getVoxelIndex(input.worldPos);
+    atomicAABB(input.worldPos, voxelIndexU);
+    atomicNormalG(input.worldNormal, voxelIndexU);
+}
+
+[numthreads(512, 1, 1)]
+[shader("compute")]
+void computeMain_clearVGB(uint3 dispatchId: SV_DispatchThreadID) {
+    uint totalVoxelCount = pow(pushConst.voxelSize_Count.w, 3);
+    if (dispatchId.x >= totalVoxelCount) return;
+
+    VGBVoxelData voxelData;
+    voxelData.aabbU.minimum = uint3(asuint(3.402823466e+38F));
+    voxelData.aabbU.maximum = uint3(asuint(-3.402823466e+38F));
+    voxelData.radiance = float4(0.0f);
+    voxelData.sumNormal_G = float4(0.0f);
+    voxelData.sumNormal_E = float4(0.0f);
+
+    VGB[dispatchId.x] = voxelData;
+}
 
 #ifndef NDEBUG
-    if (pushConst.frameIndex == 0) InterlockedAdd<uint>(fragmentCountBuffer[0], 1);
-#endif
+//--------------------------------------------threeView---------------------------------------
+struct GSout_ThreeView {
+    float4 sv_position : SV_Position;
+    nointerpolation uint viewportIndex : SV_ViewportArrayIndex;
+    float3 worldPos : POSITION;
+    float3 worldNormal : NORMAL;
+};
+struct PSout
+{
+    float4 color : SV_Target;
+};
+
+[shader("geometry")]
+[maxvertexcount(3)]
+void geometryMain_ThreeView(
+    triangle VSout input[3],
+    inout TriangleStream<GSout_ThreeView> outputStream
+) {
+    float3 normal0 = input[0].worldNormal;
+    float3 normal1 = input[1].worldNormal;
+    float3 normal2 = input[2].worldNormal;
+    float3 normal = normalize(normal0 + normal1 + normal2);
+    int viewIndex = normal.x > normal.y ? (normal.x > normal.z ? 1 : 0) : (normal.y > normal.z ? 2 : 0);
+
+    GSout_ThreeView output;
+    output.viewportIndex = viewIndex;
+    for (int i = 0; i < 3; i++) {
+        output.sv_position = mul(float4(input[i].worldPos, 1.0f), pushConst.VP[viewIndex]);
+        output.worldPos = input[i].worldPos;
+        output.worldNormal = input[i].worldNormal;
+        outputStream.Append(output);
+    }
+
+    outputStream.RestartStrip();
 }
 
 [shader("pixel")]
-PSout fragmentMain_ThreeView(GSout input) {
-    int voxelIndexU = getVoxelIndex(input);
-    atomicAABB(input, voxelIndexU);
-    atomicNormalG(input, voxelIndexU);
-#ifndef NDEBUG
+PSout fragmentMain_ThreeView(GSout_ThreeView input) {
+    int voxelIndexU = getVoxelIndex(input.worldPos);
+
+    atomicAABB(input.worldPos, voxelIndexU);
+    atomicNormalG(input.worldNormal, voxelIndexU);
+
     if (pushConst.frameIndex == 0) InterlockedAdd<uint>(fragmentCountBuffer[0], 1);
-#endif
+
     return { float4(abs(input.worldNormal), 1.0f) };
 }
+//---------------------------------------------cube--------------------------------------------
+struct VSout_Cube {
+    float4 sv_position : SV_Position;
+    float3 worldPos : POSITION;
+}
+
+[shader("vertex")]
+VSout_Cube vertexMain_Cube(uint vertexIndex: SV_VertexID, int instanceIndex : SV_InstanceID)
+{
+    int voxelCount = int(pushConst.voxelSize_Count.w);
+    int voxelCountSquared = voxelCount * voxelCount;
+
+    int Z = instanceIndex / voxelCountSquared;
+    instanceIndex -= Z * voxelCountSquared;
+    int Y = instanceIndex / voxelCount;
+    int X = instanceIndex - Y * voxelCount;
+    float3 offset = float3(X, Y, Z);
+
+    SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+    float3 posMesh = float3(0.0f);
+    posMesh.x = ((vertexIndex & 3) * 2) % 6 == 0 ? 0.0f : pushConst.voxelSize_Count.x;
+    posMesh.y = (vertexIndex & 3) <= 1 ? 0.0f : pushConst.voxelSize_Count.y;
+    posMesh.z = vertexIndex / 4 == 0 ? 0.0f : pushConst.voxelSize_Count.z;
+
+    VSout_Cube output;
+    output.worldPos = pushConst.voxelGroupStartPos + offset * pushConst.voxelSize_Count.xyz + posMesh;
+    output.sv_position = mul(float4(output.worldPos, 1.0f), sceneInfo.viewProjMatrix);
+    return output;
+}
+[shader("pixel")]
+PSout fragmentMain_Cube(VSout_Cube input) {
+    int voxelIndexU = getVoxelIndex(input.worldPos);
+    VGBVoxelData voxelData = VGB[voxelIndexU];
+    if (voxelData.sumNormal_G.w < 0.1f) discard;
+
+    float3 normal = voxelData.sumNormal_G.xyz / voxelData.sumNormal_G.w;
+    float3 result = normalize(normal);
+
+    return { float4(abs(result), 1.0f) };
+}
+
+#endif

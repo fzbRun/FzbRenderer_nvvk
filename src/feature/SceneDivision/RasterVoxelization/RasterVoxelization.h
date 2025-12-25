@@ -15,6 +15,11 @@ enum DebugMode{
 	Cube,
 	Wireframe,
 };
+enum RasterVoxelizationGBuffer {
+	ThreeViewMap,
+	CubeMap,
+	WireframeMap
+};
 
 struct RasterVoxelizationSetting{
 	VkExtent2D resolution;
@@ -37,14 +42,17 @@ public:
 	void preRender() override;
 	void render(VkCommandBuffer cmd) override;
 
-	void createGraphicsDescriptorSetLayout() override;
+	void createDescriptorSetLayout() override;
 
 	void compileAndCreateShaders() override;
 	void updateDataPerFrame(VkCommandBuffer cmd) override;
 
+	void clearVGB(VkCommandBuffer cmd);
+
 	RasterVoxelizationSetting setting;
 	nvvk::Buffer VGB;
 
+	VkShaderEXT computeShader_clearVGB{};
 	VkShaderEXT vertexShader{};
 	VkShaderEXT geometryShader{};
 	VkShaderEXT fragmentShader{};
@@ -52,18 +60,31 @@ public:
 	VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures{};
 
 private:
-	void copyFragmentCount(VkCommandBuffer cmd);
+	void createVGB(VkCommandBuffer cmd);
 
-	void createVGB(VkCommandBuffer cmd, bool outputThreeView = false);
+	VkShaderModuleCreateInfo shaderCode;
+	VkBindDescriptorSetsInfo bindDescriptorSetsInfo;
+	VkPushConstantsInfo pushInfo;
+
+#ifndef NDBUG
+public:
+	VkShaderEXT geometryShader_ThreeView{};
+	VkShaderEXT fragmentShader_ThreeView{};
+
+	VkShaderEXT vertexShader_Cube{};
+	VkShaderEXT fragmentShader_Cube{};
+private:
+	void resetFragmentCount(VkCommandBuffer cmd);
+	void createVGB_ThreeView(VkCommandBuffer cmd);
+	void debug_Cube(VkCommandBuffer cmd);
 	void debug_Wireframe(VkCommandBuffer cmd);
-
-	bool showThreeViewMap = false;
 
 	uint32_t fragmentCount_host = 0;
 	nvvk::Buffer fragmentCountBuffer;
 	nvvk::Buffer fragmentCountStageBuffer;
-
-	nvvk::Image wireframeImage;
+	bool showThreeViewMap = false;
+	bool showCubeMap = false;
+#endif
 };
 }
 

@@ -562,7 +562,7 @@ void FzbRenderer::PathTracingRenderer::resetFrame() {
 	Application::frameIndex = 0;
 }
 void FzbRenderer::PathTracingRenderer::updateDataPerFrame(VkCommandBuffer cmd) {
-
+	rasterVoxelization->updateDataPerFrame(cmd);
 }
 //-----------------------------------------渲染器行为----------------------------------------------------------
 void FzbRenderer::PathTracingRenderer::init() {
@@ -585,8 +585,8 @@ void FzbRenderer::PathTracingRenderer::init() {
 		});
 
 	Renderer::createGBuffer(false);
-	Renderer::createGraphicsDescriptorSetLayout();
-	Renderer::createGraphicsPipelineLayout(sizeof(shaderio::PathTracingPushConstant));
+	Renderer::createDescriptorSetLayout();
+	Renderer::createPipelineLayout(sizeof(shaderio::PathTracingPushConstant));
 	Renderer::addTextureArrayDescriptor();
 
 	asBuilder.init(&Application::allocator, &Application::stagingUploader, Application::app->getQueue(0));
@@ -684,6 +684,7 @@ void FzbRenderer::PathTracingRenderer::preRender() {
 	rasterVoxelization->preRender();
 }
 void FzbRenderer::PathTracingRenderer::render(VkCommandBuffer cmd) {
+	updateDataPerFrame(cmd);
 	rasterVoxelization->render(cmd);
 	rayTraceScene(cmd);
 	postProcess(cmd);

@@ -27,7 +27,7 @@ public:
 	~Scene() = default;
 
 	void createSceneFromXML();
-	void createSceneInfBuffer();
+	void createSceneInfoBuffer();
 	void clean();
 
 	void UIRender();

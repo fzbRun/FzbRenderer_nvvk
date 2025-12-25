@@ -581,3 +581,78 @@ nvutils::PrimitiveMesh FzbRenderer::MeshSet::createPlane(int steps, float width,
 
 	return mesh;
 }
+nvutils::PrimitiveMesh FzbRenderer::MeshSet::createCube(bool normal, bool texCoords,float width, float height , float depth)
+{
+	nvutils::PrimitiveMesh mesh;
+	if (normal == false && texCoords == false) {
+		std::vector<glm::vec3> pos = { {0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 0.0f}, {0.0f, 1.0f, 0.0f},
+									   {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 1.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f, 1.0f} };
+		for (int i = 0; i < 8; ++i) {
+			mesh.vertices.push_back({ pos[i] });
+		}
+		mesh.triangles = {
+			{{1, 0, 3}}, {{1, 3, 2}},
+			{{4, 5, 6}}, {{4, 6, 7}},
+			{{5, 1, 2}}, {{5, 2, 6}},
+			{{0, 4, 7}}, {{0, 7, 3}},
+			{{7, 6, 2}}, {{7, 2, 3}},
+			{{0, 1, 5}}, {{0, 5, 4}}
+		};
+	}
+	else {
+		// 每个面由四个原始顶点索引组成（按你原来的面顺序）
+		const uint32_t faces[6][4] = {
+			{1, 0, 3, 2}, // z = 0 面（back）
+			{4, 5, 6, 7}, // z = 1 面（front）
+			{5, 1, 2, 6}, // x = 1 面（right）
+			{0, 4, 7, 3}, // x = 0 面（left）
+			{7, 6, 2, 3}, // y = 1 面（top）
+			{0, 1, 5, 4}  // y = 0 面（bottom）
+		};
+		const glm::vec3 pos[8] = {
+				{0.0f, 0.0f, 0.0f}, // 0
+				{1.0f, 0.0f, 0.0f}, // 1
+				{1.0f, 1.0f, 0.0f}, // 2
+				{0.0f, 1.0f, 0.0f}, // 3
+				{0.0f, 0.0f, 1.0f}, // 4
+				{1.0f, 0.0f, 1.0f}, // 5
+				{1.0f, 1.0f, 1.0f}, // 6
+				{0.0f, 1.0f, 1.0f}  // 7
+		};
+		// 对应每个面的法线（与上面 faces 顺序一一对应）
+		const glm::vec3 normals[6] = {
+			{ 0.0f,  0.0f, -1.0f}, // back
+			{ 0.0f,  0.0f,  1.0f}, // front
+			{ 1.0f,  0.0f,  0.0f}, // right
+			{-1.0f,  0.0f,  0.0f}, // left
+			{ 0.0f,  1.0f,  0.0f}, // top
+			{ 0.0f, -1.0f,  0.0f}  // bottom
+		};
+		const glm::vec2 texcoords[4] = {
+			{0.0f, 0.0f},
+			{1.0f, 0.0f},
+			{1.0f, 1.0f},
+			{0.0f, 1.0f}
+		};
+		mesh.vertices.clear();
+		mesh.triangles.clear();
+
+		// 为每个面 push 4 个顶点
+		for (int f = 0; f < 6; ++f) {
+			for (int v = 0; v < 4; ++v) {
+				uint32_t pi = faces[f][v];
+				nvutils::PrimitiveVertex vertexData;
+				vertexData.pos = pos[pi];
+				if (normal) vertexData.nrm = normals[f];
+				if (texCoords) vertexData.tex = texcoords[v];
+				mesh.vertices.push_back(vertexData);
+			}
+			glm::uvec3 indices0 = glm::uvec3(faces[f][0], faces[f][1], faces[f][2]);
+			glm::uvec3 indices1 = glm::uvec3(faces[f][1], faces[f][2], faces[f][3]);
+			mesh.triangles.push_back({ indices0 });
+			mesh.triangles.push_back({ indices1 });
+		}
+	}
+
+	return mesh;
+}

@@ -151,6 +151,7 @@ void FzbRenderer::Application::initSlangCompiler() {
 	});
 
 #ifndef NDEBUG
+#else
 	slangCompiler.addOption({
 		.name = slang::CompilerOptionName::MacroDefine,
 		.value = slang::CompilerOptionValue{.kind = slang::CompilerOptionValueKind::String, .stringValue0 = "NDEBUG"}
@@ -265,7 +266,7 @@ void FzbRenderer::Application::updateDataPerFrame(VkCommandBuffer cmd) {
 
 	nvvk::cmdBufferMemoryBarrier(cmd, { sceneResource.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
 									   VK_PIPELINE_STAGE_2_TRANSFER_BIT });
-	vkCmdUpdateBuffer(cmd, sceneResource.bSceneInfo.buffer, 0, sizeof(shaderio::GltfSceneInfo), &sceneResource.sceneInfo);
+	vkCmdUpdateBuffer(cmd, sceneResource.bSceneInfo.buffer, 0, sizeof(shaderio::SceneInfo), &sceneResource.sceneInfo);
 	nvvk::cmdBufferMemoryBarrier(cmd, { sceneResource.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
 									   VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT });
 }

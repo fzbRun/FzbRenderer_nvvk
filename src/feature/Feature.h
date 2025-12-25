@@ -23,8 +23,8 @@ public:
 	virtual void render(VkCommandBuffer cmd) = 0;
 
 	virtual void createGBuffer(bool useDepth = true, bool postProcess = true, uint32_t colorAttachmentCount = 1);
-	virtual void createGraphicsDescriptorSetLayout();
-	virtual void createGraphicsPipelineLayout(uint32_t pushConstantSize = sizeof(shaderio::DefaultPushConstant));
+	virtual void createDescriptorSetLayout();
+	virtual void createPipelineLayout(uint32_t pushConstantSize = sizeof(shaderio::DefaultPushConstant));
 	virtual void addTextureArrayDescriptor(uint32_t textureBinding = shaderio::eTextures);
 
 	virtual void compileAndCreateShaders();
@@ -32,8 +32,8 @@ public:
 
 	nvvk::GBuffer gBuffers{};	//GBuffer实际上可以认为是所有的需要的纹理数据
 	nvvk::DescriptorPack descPack;
-	VkPipelineLayout graphicPipelineLayout{};
-	nvvk::GraphicsPipelineState dynamicPipeline;
+	VkPipelineLayout pipelineLayout{};
+	nvvk::GraphicsPipelineState graphicsDynamicPipeline;
 
 	FzbRenderer::Scene scene;
 };

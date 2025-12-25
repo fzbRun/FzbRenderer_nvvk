@@ -37,6 +37,7 @@ public:
 	shaderio::AABB getAABB(glm::mat4 transformMatrix = glm::mat4(1.0f));
 
 	static nvutils::PrimitiveMesh createPlane(int steps, float width, float height);
+	static nvutils::PrimitiveMesh createCube(bool normal = false, bool texCoords = false, float width = 1.0F, float height = 1.0F, float depth = 1.0F);
 
 	std::string meshID;
 	uint32_t meshOffset;

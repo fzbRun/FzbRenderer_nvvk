@@ -21,7 +21,6 @@ struct RasterVoxelizationPushConstant
 	float3 voxelGroupStartPos;
 	int instanceIndex;
 	int frameIndex;		//debug
-	int threeView;
 	SceneInfo* sceneInfoAddress;           // Address of the scene information buffer
 };
 
@@ -32,7 +31,7 @@ struct AABBU {
 struct VGBVoxelData {
 	float4 radiance;
 	float4 sumNormal_G;
-	float4 sunNormal_E;
+	float4 sumNormal_E;
 	AABBU aabbU;
 };
 

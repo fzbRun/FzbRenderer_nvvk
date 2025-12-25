@@ -265,7 +265,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 
 	doc.reset();
 
-	createSceneInfBuffer();
+	createSceneInfoBuffer();
 
 	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
 	Application::stagingUploader.cmdUploadAppended(cmd);
@@ -283,31 +283,37 @@ void FzbRenderer::Scene::createSceneFromXML() {
 	(根据给blas的顶点buffer和索引buffer，就像我cuda床架BVH一样，可以记录三角形中每个顶点在缓冲中的索引)
 	会返回打中的图元的索引，然后同理拿到顶点数据
 */
-void FzbRenderer::Scene::createSceneInfBuffer() {
+void FzbRenderer::Scene::createSceneInfoBuffer() {
 	SCOPED_TIMER(__FUNCTION__);
 
 	nvvk::StagingUploader& stagingUploader = Application::stagingUploader;
 	nvvk::ResourceAllocator* allocator = stagingUploader.getResourceAllocator();
 
 	// Create all mesh buffers
-	allocator->createBuffer(bMeshes, std::span(meshes).size_bytes(),
-		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-	NVVK_DBG_NAME(bMeshes.buffer);
-	NVVK_CHECK(stagingUploader.appendBuffer(bMeshes, 0, std::span<const shaderio::Mesh>(meshes)));
+	if (meshes.size() > 0) {
+		allocator->createBuffer(bMeshes, std::span(meshes).size_bytes(),
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+		NVVK_DBG_NAME(bMeshes.buffer);
+		NVVK_CHECK(stagingUploader.appendBuffer(bMeshes, 0, std::span<const shaderio::Mesh>(meshes)));
+	}
 
 	// Create all instance buffers
-	allocator->createBuffer(bInstances, std::span(instances).size_bytes(),
-		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-	NVVK_DBG_NAME(bInstances.buffer);
-	NVVK_CHECK(stagingUploader.appendBuffer(bInstances, 0,
-		std::span<const shaderio::Instance>(instances)));
+	if (instances.size() > 0) {
+		allocator->createBuffer(bInstances, std::span(instances).size_bytes(),
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+		NVVK_DBG_NAME(bInstances.buffer);
+		NVVK_CHECK(stagingUploader.appendBuffer(bInstances, 0,
+			std::span<const shaderio::Instance>(instances)));
+	}
 
 	// Create all material buffers
-	allocator->createBuffer(bMaterials, std::span(materials).size_bytes(),
-		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-	NVVK_DBG_NAME(bMaterials.buffer);
-	NVVK_CHECK(stagingUploader.appendBuffer(bMaterials, 0,
-		std::span<const shaderio::BSDFMaterial>(materials)));
+	if (materials.size() > 0) {
+		allocator->createBuffer(bMaterials, std::span(materials).size_bytes(),
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+		NVVK_DBG_NAME(bMaterials.buffer);
+		NVVK_CHECK(stagingUploader.appendBuffer(bMaterials, 0,
+			std::span<const shaderio::BSDFMaterial>(materials)));
+	}
 
 	// Create the scene info buffer
 	NVVK_CHECK(allocator->createBuffer(bSceneInfo,

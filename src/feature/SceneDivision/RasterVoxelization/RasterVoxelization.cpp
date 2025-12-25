@@ -6,6 +6,7 @@
 #include <bit>
 #include <cstdint>
 #include <nvgui/property_editor.hpp>
+#include <nvvk/compute_pipeline.hpp>
 
 FzbRenderer::RasterVoxelization::RasterVoxelization(pugi::xml_node& featureNode) {
 	Application::vkContext->getPhysicalDeviceFeatures_notConst().geometryShader = VK_TRUE;
@@ -33,8 +34,6 @@ FzbRenderer::RasterVoxelization::RasterVoxelization(pugi::xml_node& featureNode)
 
 	Application::vkContext->getPhysicalDeviceFeatures_notConst().fillModeNonSolid = VK_TRUE;
 	Application::vkContext->getPhysicalDeviceFeatures_notConst().wideLines = VK_TRUE;
-
-	setting.pushConstant.threeView = 0;
 #endif
 }
 
@@ -89,9 +88,9 @@ void FzbRenderer::RasterVoxelization::init() {
 		setting.pushConstant.voxelSize_Count = glm::vec4(distance / glm::vec3(setting.pushConstant.voxelSize_Count.w), setting.pushConstant.voxelSize_Count.w);
 	}
 	//---------------------------------------------------------------------------------------------
-	createGraphicsDescriptorSetLayout();
-	Feature::createGraphicsPipelineLayout(sizeof(shaderio::RasterVoxelizationPushConstant));
-	compileAndCreateShaders();
+	createDescriptorSetLayout();	//创建描述符集合布局
+	Feature::createPipelineLayout(sizeof(shaderio::RasterVoxelizationPushConstant));	//创建管线布局：pushConstant+描述符集合布局
+	compileAndCreateShaders();		//编译shader以及创建静态pipeline
 
 	uint32_t voxelTotalCount = std::pow(setting.pushConstant.voxelSize_Count.w, 3);
 	uint32_t VGBByteSize = voxelTotalCount * sizeof(shaderio::VGBVoxelData);
@@ -101,13 +100,6 @@ void FzbRenderer::RasterVoxelization::init() {
 		allocator->createBuffer(VGB, VGBByteSize,
 			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 		NVVK_DBG_NAME(VGB.buffer);
-
-		std::vector<shaderio::VGBVoxelData> initVoxelData(voxelTotalCount);
-		for (int i = 0; i < voxelTotalCount; ++i) {
-			initVoxelData[i].aabbU.minimum = glm::uvec3(std::bit_cast<uint32_t>(FLT_MAX));
-			initVoxelData[i].aabbU.maximum = glm::uvec3(std::bit_cast<uint32_t>(-FLT_MAX));
-		}
-		NVVK_CHECK(stagingUploader.appendBuffer(VGB, 0, std::span<const shaderio::VGBVoxelData>(initVoxelData)));
 	}
 
 	Feature::addTextureArrayDescriptor(shaderio::RasterVoxelizationBindingPoints::eTextures_RV);
@@ -117,11 +109,11 @@ void FzbRenderer::RasterVoxelization::init() {
 	write.append(VGBWrite, VGB, 0, VGBByteSize);
 
 #ifndef NDEBUG
-	Feature::createGBuffer(true, false, 1);		//一张图，多视口
+	Feature::createGBuffer(true, false, 2);		//第一张图：threeView，多视口；第二张图：Cube
 	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
 	gBuffers.update(cmd, setting.resolution);	//不随窗口分辨率
 	Application::app->submitAndWaitTempCmdBuffer(cmd);
-
+	//-------------------------------------------threeView----------------------------------------
 	{
 		nvvk::StagingUploader& stagingUploader = Application::stagingUploader;
 		nvvk::ResourceAllocator* allocator = stagingUploader.getResourceAllocator();
@@ -140,34 +132,197 @@ void FzbRenderer::RasterVoxelization::init() {
 	VkWriteDescriptorSet    fcWrite =
 		descPack.makeWrite(shaderio::RasterVoxelizationBindingPoints::eFragmentCountBuffer_RV, 0, 0, 1);
 	write.append(fcWrite, fragmentCountBuffer, 0, sizeof(uint32_t));
+	//---------------------------------------------cube----------------------------------------
+	nvutils::PrimitiveMesh primitive = FzbRenderer::MeshSet::createCube(false, false);
+	FzbRenderer::MeshSet mesh = FzbRenderer::MeshSet("Cube", primitive);
+	scene.addMeshSet(mesh);
+	scene.createSceneInfoBuffer();
 #endif
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }
+void FzbRenderer::RasterVoxelization::createDescriptorSetLayout() {
+	nvvk::DescriptorBindings bindings;
+	bindings.addBinding({ .binding = shaderio::RasterVoxelizationBindingPoints::eTextures_RV,
+					 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+					 .descriptorCount = 10,
+					 .stageFlags = VK_SHADER_STAGE_ALL },
+		VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
+		| VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
+	bindings.addBinding({ .binding = shaderio::RasterVoxelizationBindingPoints::eVGB_RV,
+						 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+						 .descriptorCount = 1,
+						 .stageFlags = VK_SHADER_STAGE_ALL },
+		VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
+		| VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
+#ifndef NDEBUG
+	bindings.addBinding({ .binding = 2,
+					 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+					 .descriptorCount = 1,
+					 .stageFlags = VK_SHADER_STAGE_ALL },
+		VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
+		| VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
+#endif
+	descPack.init(bindings, Application::app->getDevice(), 1, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
+		VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT);
+
+	NVVK_DBG_NAME(descPack.getLayout());
+	NVVK_DBG_NAME(descPack.getPool());
+	NVVK_DBG_NAME(descPack.getSet(0));
+}
+void FzbRenderer::RasterVoxelization::compileAndCreateShaders() {
+	SCOPED_TIMER(__FUNCTION__);
+
+	//编译后的数据放在了slangCompiler中
+	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
+	std::filesystem::path shaderSource = shaderPath / "rasterVoxelization.slang";
+	shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
+
+	const VkPushConstantRange pushConstantRange{
+		.stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS | VK_SHADER_STAGE_COMPUTE_BIT ,
+		.offset = 0,
+		.size = sizeof(shaderio::RasterVoxelizationPushConstant),
+	};
+
+	VkShaderCreateInfoEXT shaderInfo{
+		.sType = VK_STRUCTURE_TYPE_SHADER_CREATE_INFO_EXT,
+		.codeType = VK_SHADER_CODE_TYPE_SPIRV_EXT,
+		.pName = "main",
+		.setLayoutCount = 1,
+		.pSetLayouts = descPack.getLayoutPtr(),
+		.pushConstantRangeCount = 1,
+		.pPushConstantRanges = &pushConstantRange,
+	};
+	VkDevice device = Application::app->getDevice();
+	//--------------------------------------------------------------------------------------
+	vkDestroyShaderEXT(device, computeShader_clearVGB, nullptr);
+
+	shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	shaderInfo.nextStage = 0;
+	shaderInfo.pName = "computeMain_clearVGB";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_clearVGB);
+	NVVK_DBG_NAME(computeShader_clearVGB);
+	//--------------------------------------------------------------------------------------
+	vkDestroyShaderEXT(device, vertexShader, nullptr);
+
+	shaderInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+	shaderInfo.nextStage = VK_SHADER_STAGE_GEOMETRY_BIT;
+	shaderInfo.pName = "vertexMain";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &vertexShader);
+	NVVK_DBG_NAME(vertexShader);
+#ifndef NDEBUG
+	//------------------------------------------ThreeView--------------------------------------
+	vkDestroyShaderEXT(device, geometryShader_ThreeView, nullptr);
+	vkDestroyShaderEXT(device, fragmentShader_ThreeView, nullptr);
+
+	shaderInfo.stage = VK_SHADER_STAGE_GEOMETRY_BIT;
+	shaderInfo.nextStage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	shaderInfo.pName = "geometryMain_ThreeView";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &geometryShader_ThreeView);
+	NVVK_DBG_NAME(geometryShader_ThreeView);
+
+	shaderInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	shaderInfo.nextStage = 0;
+	shaderInfo.pName = "fragmentMain_ThreeView";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &fragmentShader_ThreeView);
+	NVVK_DBG_NAME(fragmentShader_ThreeView);
+	//-------------------------------------------Cube--------------------------------------
+	vkDestroyShaderEXT(device, vertexShader_Cube, nullptr);
+	vkDestroyShaderEXT(device, fragmentShader_Cube, nullptr);
+
+	shaderInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+	shaderInfo.nextStage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	shaderInfo.pName = "vertexMain_Cube";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &vertexShader_Cube);
+	NVVK_DBG_NAME(vertexShader_Cube);
+
+	shaderInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	shaderInfo.nextStage = 0;
+	shaderInfo.pName = "fragmentMain_Cube";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &fragmentShader_Cube);
+	NVVK_DBG_NAME(fragmentShader_Cube);
+#else
+	vkDestroyShaderEXT(device, geometryShader, nullptr);
+	vkDestroyShaderEXT(device, fragmentShader, nullptr);
+
+	shaderInfo.stage = VK_SHADER_STAGE_GEOMETRY_BIT;
+	shaderInfo.nextStage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	shaderInfo.pName = "geometryMain";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &geometryShader);
+	NVVK_DBG_NAME(geometryShader);
+
+	shaderInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	shaderInfo.nextStage = 0;
+	shaderInfo.pName = "fragmentMain";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &fragmentShader);
+	NVVK_DBG_NAME(fragmentShader);
+#endif
+}
+void FzbRenderer::RasterVoxelization::updateDataPerFrame(VkCommandBuffer cmd) {
+	const glm::mat4& viewMatrix = Application::sceneResource.cameraManip->getViewMatrix();
+	const glm::mat4& projMatrix = Application::sceneResource.cameraManip->getPerspectiveMatrix();
+
+	scene.sceneInfo.viewProjMatrix = projMatrix * viewMatrix;
+	scene.sceneInfo.projInvMatrix = glm::inverse(projMatrix);
+	scene.sceneInfo.viewInvMatrix = glm::inverse(viewMatrix);
+	scene.sceneInfo.cameraPosition = Application::sceneResource.cameraManip->getEye();
+	scene.sceneInfo.meshes = (shaderio::Mesh*)scene.bMeshes.address;
+
+	nvvk::cmdBufferMemoryBarrier(cmd, { scene.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+								   VK_PIPELINE_STAGE_2_TRANSFER_BIT });
+	vkCmdUpdateBuffer(cmd, scene.bSceneInfo.buffer, 0, sizeof(shaderio::SceneInfo), &scene.sceneInfo);
+	nvvk::cmdBufferMemoryBarrier(cmd, { scene.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+									   VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT });
+}
+
 void FzbRenderer::RasterVoxelization::clean() {
 	Feature::clean();
 	Application::allocator.destroyBuffer(VGB);
-	Application::allocator.destroyBuffer(fragmentCountBuffer);
-	Application::allocator.destroyBuffer(fragmentCountStageBuffer);
 
 	VkDevice device = Application::app->getDevice();
+	vkDestroyShaderEXT(device, computeShader_clearVGB, nullptr);
 	vkDestroyShaderEXT(device, vertexShader, nullptr);
 	vkDestroyShaderEXT(device, geometryShader, nullptr);
 	vkDestroyShaderEXT(device, fragmentShader, nullptr);
+#ifndef NDBUG
+	Application::allocator.destroyBuffer(fragmentCountBuffer);
+	Application::allocator.destroyBuffer(fragmentCountStageBuffer);
+
+	vkDestroyShaderEXT(device, geometryShader_ThreeView, nullptr);
+	vkDestroyShaderEXT(device, fragmentShader_ThreeView, nullptr);
+
+	vkDestroyShaderEXT(device, vertexShader_Cube, nullptr);
+	vkDestroyShaderEXT(device, fragmentShader_Cube, nullptr);
+#endif
 }
 void FzbRenderer::RasterVoxelization::uiRender() {
+#ifndef NDEBUG
 	bool& UIModified = Application::UIModified;
 
-	if (showThreeViewMap) Application::viewportImage = gBuffers.getDescriptorSet(0);
+	if (showThreeViewMap) Application::viewportImage = gBuffers.getDescriptorSet(RasterVoxelizationGBuffer::ThreeViewMap);
+	else if(showCubeMap) Application::viewportImage = gBuffers.getDescriptorSet(RasterVoxelizationGBuffer::CubeMap);
 
 	namespace PE = nvgui::PropertyEditor;
 	if (ImGui::Begin("RasterVoxelization")) {
+		//---------------------------------------threeView-------------------------------------------
 		std::string fragmentCountText = "fragment count: " + std::to_string(fragmentCount_host);
 		ImGui::Text(fragmentCountText.c_str());
-		if (UIModified |= ImGui::Checkbox("ThreeViewMap", (bool*)&setting.debugMode)) {
-			setting.pushConstant.threeView = abs(setting.pushConstant.threeView - int(DebugMode::ThreeView));
-			compileAndCreateShaders();
-		}
 		if (PE::begin()) {
 			if (PE::entry("ThreeViewMap", [&] {
 				static const ImVec4 highlightColor = ImVec4(118.f / 255.f, 185.f / 255.f, 0.f, 1.f);
@@ -177,7 +332,7 @@ void FzbRenderer::RasterVoxelization::uiRender() {
 				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, hoveredColor);
 				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(5, 5));
 		
-				bool result = ImGui::ImageButton("##but", (ImTextureID)gBuffers.getDescriptorSet(0),
+				bool result = ImGui::ImageButton("##but", (ImTextureID)gBuffers.getDescriptorSet(RasterVoxelizationGBuffer::ThreeViewMap),
 					ImVec2(100 * gBuffers.getAspectRatio(), 100));		//这里应该有一个降采样
 		
 				ImGui::PopStyleColor(2);
@@ -189,8 +344,31 @@ void FzbRenderer::RasterVoxelization::uiRender() {
 			}
 		}
 		PE::end();
+		//------------------------------------------cube---------------------------------------------
+		if (PE::begin()) {
+			if (PE::entry("CubeMap", [&] {
+				static const ImVec4 highlightColor = ImVec4(118.f / 255.f, 185.f / 255.f, 0.f, 1.f);
+				ImVec4 selectedColor = showCubeMap ? highlightColor : ImGui::GetStyleColorVec4(ImGuiCol_Button);
+				ImVec4 hoveredColor = ImVec4(selectedColor.x * 1.2f, selectedColor.y * 1.2f, selectedColor.z * 1.2f, 1.f);
+				ImGui::PushStyleColor(ImGuiCol_Button, selectedColor);
+				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, hoveredColor);
+				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(5, 5));
+
+				bool result = ImGui::ImageButton("##but", (ImTextureID)gBuffers.getDescriptorSet(RasterVoxelizationGBuffer::CubeMap),
+					ImVec2(100 * gBuffers.getAspectRatio(), 100));
+
+				ImGui::PopStyleColor(2);
+				ImGui::PopStyleVar();
+				return result;
+				}))
+			{
+				showCubeMap = !showCubeMap;
+			}
+		}
+		PE::end();
 	}
 	ImGui::End();
+#endif
 }
 void FzbRenderer::RasterVoxelization::resize(VkCommandBuffer cmd, const VkExtent2D& size) {}
 void FzbRenderer::RasterVoxelization::preRender() {
@@ -215,160 +393,61 @@ void FzbRenderer::RasterVoxelization::preRender() {
 	Application::app->submitAndWaitTempCmdBuffer(cmd);
 	
 	memcpy(&fragmentCount_host, fragmentCountStageBuffer.mapping, sizeof(uint32_t));
-	
-	int tempData = 0;
-	memcpy(fragmentCountStageBuffer.mapping, &tempData, sizeof(uint32_t));
 #endif
 }
 void FzbRenderer::RasterVoxelization::render(VkCommandBuffer cmd) {
-#ifndef NDEBUG
-	switch (setting.debugMode) {
-		case DebugMode::None: createVGB(cmd); break;
-		case DebugMode::ThreeView: createVGB(cmd, true); break;		//会在
-		case DebugMode::Wireframe: debug_Wireframe(cmd); break;
-	}
-#else
-	createVGB(cmd);
-#endif
-}
-
-void FzbRenderer::RasterVoxelization::createGraphicsDescriptorSetLayout() {
-	nvvk::DescriptorBindings bindings;
-	bindings.addBinding({ .binding = shaderio::RasterVoxelizationBindingPoints::eTextures_RV,
-					 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-					 .descriptorCount = 10,
-					 .stageFlags = VK_SHADER_STAGE_ALL },
-		VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
-		| VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
-	bindings.addBinding({ .binding = shaderio::RasterVoxelizationBindingPoints::eVGB_RV,
-						 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-						 .descriptorCount = 1,
-						 .stageFlags = VK_SHADER_STAGE_ALL },
-		VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
-		| VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
-	bindings.addBinding({ .binding = 2,
-					 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-					 .descriptorCount = 1,
-					 .stageFlags = VK_SHADER_STAGE_ALL },
-		VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
-		| VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
-
-	descPack.init(bindings, Application::app->getDevice(), 1, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
-		VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT);
-
-	NVVK_DBG_NAME(descPack.getLayout());
-	NVVK_DBG_NAME(descPack.getPool());
-	NVVK_DBG_NAME(descPack.getSet(0));
-}
-void FzbRenderer::RasterVoxelization::compileAndCreateShaders() {
-	SCOPED_TIMER(__FUNCTION__);
-
-	//std::string shaderioPath = (std::filesystem::path(__FILE__).parent_path()).string();
-	//Application::slangCompiler.addOption({ .name = slang::CompilerOptionName::Include,
-	//	.value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = shaderioPath.c_str()}
-	//	});
-
-	//编译后的数据放在了slangCompiler中
-	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
-	std::filesystem::path shaderSource = shaderPath / "rasterVoxelization.slang";
-	VkShaderModuleCreateInfo shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
-
-	vkDestroyShaderEXT(Application::app->getDevice(), vertexShader, nullptr);
-	vkDestroyShaderEXT(Application::app->getDevice(), geometryShader, nullptr);
-	vkDestroyShaderEXT(Application::app->getDevice(), fragmentShader, nullptr);
-
-	const VkPushConstantRange pushConstantRange{
-		.stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
-		.offset = 0,
-		.size = sizeof(shaderio::RasterVoxelizationPushConstant),
+	bindDescriptorSetsInfo = {
+	.sType = VK_STRUCTURE_TYPE_BIND_DESCRIPTOR_SETS_INFO,
+		.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+		.layout = pipelineLayout,
+		.firstSet = 0,
+		.descriptorSetCount = 1,
+		.pDescriptorSets = descPack.getSetPtr(),
 	};
 
-	VkShaderCreateInfoEXT shaderInfo{
-		.sType = VK_STRUCTURE_TYPE_SHADER_CREATE_INFO_EXT,
-		.codeType = VK_SHADER_CODE_TYPE_SPIRV_EXT,
-		.pName = "main",
-		.setLayoutCount = 1,
-		.pSetLayouts = descPack.getLayoutPtr(),
-		.pushConstantRangeCount = 1,
-		.pPushConstantRanges = &pushConstantRange,
-	};
-
-	shaderInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
-	shaderInfo.nextStage = VK_SHADER_STAGE_GEOMETRY_BIT;
-	shaderInfo.pName = "vertexMain";
-	shaderInfo.codeSize = shaderCode.codeSize;
-	shaderInfo.pCode = shaderCode.pCode;
-	vkCreateShadersEXT(Application::app->getDevice(), 1U, &shaderInfo, nullptr, &vertexShader);
-	NVVK_DBG_NAME(vertexShader);
-
-	shaderInfo.stage = VK_SHADER_STAGE_GEOMETRY_BIT;
-	shaderInfo.nextStage = VK_SHADER_STAGE_FRAGMENT_BIT;
-	shaderInfo.pName = "geometryMain";
-	shaderInfo.codeSize = shaderCode.codeSize;
-	shaderInfo.pCode = shaderCode.pCode;
-	vkCreateShadersEXT(Application::app->getDevice(), 1U, &shaderInfo, nullptr, &geometryShader);
-	NVVK_DBG_NAME(geometryShader);
-
-	shaderInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-	shaderInfo.nextStage = 0;
-#ifndef NDEBUG
-	shaderInfo.pName = setting.debugMode == DebugMode::ThreeView ? "fragmentMain_ThreeView" : "fragmentMain";
-#else
-	shaderInfo.pName = "fragmentMain";
-#endif
-	shaderInfo.codeSize = shaderCode.codeSize;
-	shaderInfo.pCode = shaderCode.pCode;
-	vkCreateShadersEXT(Application::app->getDevice(), 1U, &shaderInfo, nullptr, &fragmentShader);
-	NVVK_DBG_NAME(fragmentShader);
-}
-void FzbRenderer::RasterVoxelization::updateDataPerFrame(VkCommandBuffer cmd) {
-
-}
-
-void FzbRenderer::RasterVoxelization::copyFragmentCount(VkCommandBuffer cmd) {
-#ifndef NDEBUG
-	{
-		VkBufferCopy2 copyRegionInfo{
-			.sType = VK_STRUCTURE_TYPE_BUFFER_COPY_2,
-			.srcOffset = 0,
-			.dstOffset = 0,
-			.size = sizeof(uint32_t),
-		};
-		VkCopyBufferInfo2 copyBufferInfo{
-			.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_INFO_2,
-			.srcBuffer = fragmentCountStageBuffer.buffer,
-			.dstBuffer = fragmentCountBuffer.buffer,
-			.regionCount = 1,
-			.pRegions = &copyRegionInfo,
-		};
-		vkCmdCopyBuffer2(cmd, &copyBufferInfo);
-		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
-	}
-#endif
-}
-void FzbRenderer::RasterVoxelization::createVGB(VkCommandBuffer cmd, bool outputThreeView) {
-	NVVK_DBG_SCOPE(cmd);
-
-	copyFragmentCount(cmd);
-
-	setting.pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
-	const VkPushConstantsInfo pushInfo{
+	pushInfo = {
 		.sType = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
-		.layout = graphicPipelineLayout,
-		.stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
+		.layout = pipelineLayout,
+		.stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS | VK_SHADER_STAGE_COMPUTE_BIT,
 		.offset = 0,
 		.size = sizeof(shaderio::RasterVoxelizationPushConstant),
 		.pValues = &setting.pushConstant,
 	};
+	setting.pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
+	setting.pushConstant.frameIndex = Application::frameIndex;
+
+	clearVGB(cmd);
+
+#ifndef NDEBUG
+	resetFragmentCount(cmd);
+	createVGB_ThreeView(cmd);
+	debug_Cube(cmd);
+#else
+	createVGB(cmd);
+#endif
+
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR);
+}
+
+void FzbRenderer::RasterVoxelization::clearVGB(VkCommandBuffer cmd) {
+	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_clearVGB);
+
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1,
+		descPack.getSetPtr(), 0, nullptr);
+
+	vkCmdPushConstants2(cmd, &pushInfo);
+
+	uint32_t totalVoxelCount = pow(setting.pushConstant.voxelSize_Count.w, 3);
+	VkExtent2D groupSize = nvvk::getGroupCounts({ totalVoxelCount, 1 }, VkExtent2D{ 512, 1 });
+	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
+
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
+}
+void FzbRenderer::RasterVoxelization::createVGB(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
 
 	VkRenderingAttachmentInfo colorAttachment = DEFAULT_VkRenderingAttachmentInfo;
-	if (outputThreeView) {
-		colorAttachment.loadOp = Application::sceneResource.sceneInfo.useSky ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR;
-		colorAttachment.imageView = gBuffers.getColorImageView(0);
-		colorAttachment.clearValue = { .color = {Application::sceneResource.sceneInfo.backgroundColor.x,
-												Application::sceneResource.sceneInfo.backgroundColor.y,
-												Application::sceneResource.sceneInfo.backgroundColor.z, 1.0f} };
-	}
 
 	VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
 	renderingInfo.renderArea = { {0, 0}, setting.resolution };
@@ -376,46 +455,19 @@ void FzbRenderer::RasterVoxelization::createVGB(VkCommandBuffer cmd, bool output
 	renderingInfo.pColorAttachments = &colorAttachment;
 	renderingInfo.pDepthAttachment = nullptr;
 
-	const VkBindDescriptorSetsInfo bindDescriptorSetsInfo{
-		.sType = VK_STRUCTURE_TYPE_BIND_DESCRIPTOR_SETS_INFO,
-		.stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
-		.layout = graphicPipelineLayout,
-		.firstSet = 0,
-		.descriptorSetCount = 1,
-		.pDescriptorSets = descPack.getSetPtr(),
-	};
-	//vkCmdBindDescriptorSets2(cmd, &bindDescriptorSetsInfo);
-	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicPipelineLayout, 0, 1,
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1,
 		descPack.getSetPtr(), 0, nullptr);
 
 	vkCmdBeginRendering(cmd, &renderingInfo);
 
 	//使用VK_EXT_SHADER_OBJECT_EXTENSION_NAME后可以不需要pipeline，直接通过命令设置渲染设置和着色器
-	dynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;
-	dynamicPipeline.depthStencilState.depthTestEnable = VK_FALSE;
-	dynamicPipeline.depthStencilState.depthBoundsTestEnable = VK_FALSE;
-	dynamicPipeline.cmdApplyAllStates(cmd);
+	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;
+	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_FALSE;
+	graphicsDynamicPipeline.depthStencilState.depthBoundsTestEnable = VK_FALSE;		//depthBoundsTestEnable是根据min、max depth进行测试，相当于自定义裁剪的z的范围
+	graphicsDynamicPipeline.cmdApplyAllStates(cmd);
 	vkCmdSetDepthBoundsTestEnable(cmd, VK_FALSE);
-#ifndef NDEBUG
-	if (outputThreeView) {
-		float width = float(setting.resolution.width) * 0.5f;
-		float height = float(setting.resolution.height) * 0.5f;
-	
-		std::vector<VkViewport> viewports(3);
-		viewports[0] = { 0.0F, 0.0F, width, height, 0.0f, 1.0f };
-		viewports[1] = { width, 0.0F, width, height, 0.0f, 1.0f };
-		viewports[2] = { 0.0F, height, width, height, 0.0f, 1.0f };
-		std::vector<VkRect2D> scissors(3);
-		scissors[0] = { {0, 0},{uint32_t(width),  uint32_t(height)} };
-		scissors[1] = { {int(width), 0}, {uint32_t(width),  uint32_t(height)} };
-		scissors[2] = { {0, int(height)}, { uint32_t(width),  uint32_t(height)} };
-		vkCmdSetViewportWithCount(cmd, 3, viewports.data());
-		vkCmdSetScissorWithCount(cmd, 3, scissors.data());
-	}else dynamicPipeline.cmdSetViewportAndScissor(cmd, setting.resolution);
-#else
-	dynamicPipeline.cmdSetViewportAndScissor(cmd, setting.resolution);
-#endif
-	dynamicPipeline.cmdBindShaders(cmd, { .vertex = vertexShader, .fragment = fragmentShader, .geometry = geometryShader });
+	graphicsDynamicPipeline.cmdSetViewportAndScissor(cmd, setting.resolution);
+	graphicsDynamicPipeline.cmdBindShaders(cmd, { .vertex = vertexShader, .fragment = fragmentShader, .geometry = geometryShader });
 
 	VkVertexInputBindingDescription2EXT bindingDescription{};
 	VkVertexInputAttributeDescription2EXT attributeDescription = {};
@@ -428,7 +480,6 @@ void FzbRenderer::RasterVoxelization::createVGB(VkCommandBuffer cmd, bool output
 		const shaderio::TriangleMesh& triMesh = mesh.triMesh;
 
 		setting.pushConstant.instanceIndex = int(i);
-		setting.pushConstant.frameIndex = Application::frameIndex;
 		vkCmdPushConstants2(cmd, &pushInfo);
 
 		uint32_t bufferIndex = Application::sceneResource.getMeshBufferIndex(meshIndex);
@@ -441,23 +492,35 @@ void FzbRenderer::RasterVoxelization::createVGB(VkCommandBuffer cmd, bool output
 
 	vkCmdEndRendering(cmd);
 }
-void FzbRenderer::RasterVoxelization::debug_Wireframe(VkCommandBuffer cmd) {
+
+#ifndef NDEBUG
+void FzbRenderer::RasterVoxelization::resetFragmentCount(VkCommandBuffer cmd) {
+#ifndef NDEBUG
+	int tempData = 0;
+	memcpy(fragmentCountStageBuffer.mapping, &tempData, sizeof(uint32_t));
+
+	VkBufferCopy2 copyRegionInfo{
+		.sType = VK_STRUCTURE_TYPE_BUFFER_COPY_2,
+		.srcOffset = 0,
+		.dstOffset = 0,
+		.size = sizeof(uint32_t),
+	};
+	VkCopyBufferInfo2 copyBufferInfo{
+		.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_INFO_2,
+		.srcBuffer = fragmentCountStageBuffer.buffer,
+		.dstBuffer = fragmentCountBuffer.buffer,
+		.regionCount = 1,
+		.pRegions = &copyRegionInfo,
+	};
+	vkCmdCopyBuffer2(cmd, &copyBufferInfo);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
+#endif
+}
+void FzbRenderer::RasterVoxelization::createVGB_ThreeView(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
 
-	copyFragmentCount(cmd);
-
-	setting.pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
-	const VkPushConstantsInfo pushInfo{
-		.sType = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
-		.layout = graphicPipelineLayout,
-		.stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
-		.offset = 0,
-		.size = sizeof(shaderio::RasterVoxelizationPushConstant),
-		.pValues = &setting.pushConstant,
-	};
-
 	VkRenderingAttachmentInfo colorAttachment = DEFAULT_VkRenderingAttachmentInfo;
-	colorAttachment.loadOp = Application::sceneResource.sceneInfo.useSky ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR;
+	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;		//真正渲染需要根据usesky判断是因为天空盒会覆盖上一帧内容，所以不需要clear
 	colorAttachment.imageView = gBuffers.getColorImageView(0);
 	colorAttachment.clearValue = { .color = {Application::sceneResource.sceneInfo.backgroundColor.x,
 											Application::sceneResource.sceneInfo.backgroundColor.y,
@@ -469,28 +532,32 @@ void FzbRenderer::RasterVoxelization::debug_Wireframe(VkCommandBuffer cmd) {
 	renderingInfo.pColorAttachments = &colorAttachment;
 	renderingInfo.pDepthAttachment = nullptr;
 
-	const VkBindDescriptorSetsInfo bindDescriptorSetsInfo{
-		.sType = VK_STRUCTURE_TYPE_BIND_DESCRIPTOR_SETS_INFO,
-		.stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
-		.layout = graphicPipelineLayout,
-		.firstSet = 0,
-		.descriptorSetCount = 1,
-		.pDescriptorSets = descPack.getSetPtr(),
-	};
-	//vkCmdBindDescriptorSets2(cmd, &bindDescriptorSetsInfo);
-	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicPipelineLayout, 0, 1,
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1,
 		descPack.getSetPtr(), 0, nullptr);
 
 	vkCmdBeginRendering(cmd, &renderingInfo);
 
 	//使用VK_EXT_SHADER_OBJECT_EXTENSION_NAME后可以不需要pipeline，直接通过命令设置渲染设置和着色器
-	dynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;
-	dynamicPipeline.depthStencilState.depthTestEnable = VK_FALSE;
-	dynamicPipeline.depthStencilState.depthBoundsTestEnable = VK_FALSE;
-	dynamicPipeline.cmdApplyAllStates(cmd);
+	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;
+	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_FALSE;
+	graphicsDynamicPipeline.depthStencilState.depthBoundsTestEnable = VK_FALSE;		//depthBoundsTestEnable是根据min、max depth进行测试，相当于自定义裁剪的z的范围
+	graphicsDynamicPipeline.cmdApplyAllStates(cmd);
 	vkCmdSetDepthBoundsTestEnable(cmd, VK_FALSE);
-	dynamicPipeline.cmdSetViewportAndScissor(cmd, setting.resolution);
-	dynamicPipeline.cmdBindShaders(cmd, { .vertex = vertexShader, .fragment = fragmentShader, .geometry = geometryShader });
+
+	float width = float(setting.resolution.width) * 0.5f;
+	float height = float(setting.resolution.height) * 0.5f;
+	std::vector<VkViewport> viewports(3);
+	viewports[0] = { 0.0F, 0.0F, width, height, 0.0f, 1.0f };
+	viewports[1] = { width, 0.0F, width, height, 0.0f, 1.0f };
+	viewports[2] = { 0.0F, height, width, height, 0.0f, 1.0f };
+	std::vector<VkRect2D> scissors(3);
+	scissors[0] = { {0, 0},{uint32_t(width),  uint32_t(height)} };
+	scissors[1] = { {int(width), 0}, {uint32_t(width),  uint32_t(height)} };
+	scissors[2] = { {0, int(height)}, { uint32_t(width),  uint32_t(height)} };
+	vkCmdSetViewportWithCount(cmd, 3, viewports.data());
+	vkCmdSetScissorWithCount(cmd, 3, scissors.data());
+
+	graphicsDynamicPipeline.cmdBindShaders(cmd, { .vertex = vertexShader, .fragment = fragmentShader_ThreeView, .geometry = geometryShader_ThreeView });
 
 	VkVertexInputBindingDescription2EXT bindingDescription{};
 	VkVertexInputAttributeDescription2EXT attributeDescription = {};
@@ -503,7 +570,6 @@ void FzbRenderer::RasterVoxelization::debug_Wireframe(VkCommandBuffer cmd) {
 		const shaderio::TriangleMesh& triMesh = mesh.triMesh;
 
 		setting.pushConstant.instanceIndex = int(i);
-		setting.pushConstant.frameIndex = Application::frameIndex;
 		vkCmdPushConstants2(cmd, &pushInfo);
 
 		uint32_t bufferIndex = Application::sceneResource.getMeshBufferIndex(meshIndex);
@@ -515,4 +581,59 @@ void FzbRenderer::RasterVoxelization::debug_Wireframe(VkCommandBuffer cmd) {
 	}
 
 	vkCmdEndRendering(cmd);
+
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
 }
+void FzbRenderer::RasterVoxelization::debug_Cube(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
+
+	VkRenderingAttachmentInfo colorAttachment = DEFAULT_VkRenderingAttachmentInfo;
+	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	colorAttachment.imageView = gBuffers.getColorImageView(RasterVoxelizationGBuffer::CubeMap);
+	colorAttachment.clearValue = { .color = {Application::sceneResource.sceneInfo.backgroundColor.x,
+											Application::sceneResource.sceneInfo.backgroundColor.y,
+											Application::sceneResource.sceneInfo.backgroundColor.z, 1.0f} };
+	VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
+	depthAttachment.imageView = gBuffers.getDepthImageView();
+	depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
+
+	VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
+	renderingInfo.renderArea = { {0, 0}, setting.resolution };
+	renderingInfo.colorAttachmentCount = 1;
+	renderingInfo.pColorAttachments = &colorAttachment;
+	renderingInfo.pDepthAttachment = &depthAttachment;
+
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1,
+		descPack.getSetPtr(), 0, nullptr);
+
+	vkCmdBeginRendering(cmd, &renderingInfo);
+
+	//使用VK_EXT_SHADER_OBJECT_EXTENSION_NAME后可以不需要pipeline，直接通过命令设置渲染设置和着色器
+	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
+	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_FALSE;
+	graphicsDynamicPipeline.depthStencilState.depthBoundsTestEnable = VK_FALSE;		//depthBoundsTestEnable是根据min、max depth进行测试，相当于自定义裁剪的z的范围
+	graphicsDynamicPipeline.cmdApplyAllStates(cmd);
+	vkCmdSetDepthBoundsTestEnable(cmd, VK_FALSE);
+	graphicsDynamicPipeline.cmdSetViewportAndScissor(cmd, setting.resolution);
+	graphicsDynamicPipeline.cmdBindShaders(cmd, { .vertex = vertexShader_Cube, .fragment = fragmentShader_Cube });
+
+	VkVertexInputBindingDescription2EXT bindingDescription{};
+	VkVertexInputAttributeDescription2EXT attributeDescription = {};
+	vkCmdSetVertexInputEXT(cmd, 0, nullptr, 0, nullptr);
+
+	const shaderio::Mesh& mesh = scene.meshes[0];
+	const shaderio::TriangleMesh& triMesh = mesh.triMesh;
+
+	setting.pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)scene.bSceneInfo.address;
+	vkCmdPushConstants2(cmd, &pushInfo);
+
+	uint32_t bufferIndex = scene.getMeshBufferIndex(0);
+	const nvvk::Buffer& v = scene.bDatas[bufferIndex];
+
+	vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(mesh.indexType));
+	vkCmdDrawIndexed(cmd, triMesh.indices.count, pow(setting.pushConstant.voxelSize_Count.w, 3), 0, 0, 0);
+
+	vkCmdEndRendering(cmd);
+}
+void FzbRenderer::RasterVoxelization::debug_Wireframe(VkCommandBuffer cmd) {}
+#endif

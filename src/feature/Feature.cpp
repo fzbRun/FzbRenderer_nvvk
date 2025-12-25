@@ -5,7 +5,7 @@
 void FzbRenderer::Feature::clean() {
 	VkDevice device = Application::app->getDevice();
 	descPack.deinit();
-	vkDestroyPipelineLayout(device, graphicPipelineLayout, nullptr);
+	vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
 	gBuffers.deinit();
 
 	scene.clean();
@@ -34,7 +34,7 @@ void FzbRenderer::Feature::createGBuffer(bool useDepth, bool postProcess, uint32
 
 	gBuffers.init(gBufferInit);
 };
-void FzbRenderer::Feature::createGraphicsDescriptorSetLayout() {
+void FzbRenderer::Feature::createDescriptorSetLayout() {
 	nvvk::DescriptorBindings bindings;
 	bindings.addBinding({ .binding = shaderio::BindingPoints::eTextures,
 						 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -49,9 +49,9 @@ void FzbRenderer::Feature::createGraphicsDescriptorSetLayout() {
 	NVVK_DBG_NAME(descPack.getPool());
 	NVVK_DBG_NAME(descPack.getSet(0));
 }
-void FzbRenderer::Feature::createGraphicsPipelineLayout(uint32_t pushConstantSize) {
+void FzbRenderer::Feature::createPipelineLayout(uint32_t pushConstantSize) {
 	const VkPushConstantRange pushConstantRange{
-		.stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
+		.stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS | VK_SHADER_STAGE_COMPUTE_BIT,
 		.offset = 0,
 		.size = pushConstantSize
 	};
@@ -63,8 +63,8 @@ void FzbRenderer::Feature::createGraphicsPipelineLayout(uint32_t pushConstantSiz
 		.pushConstantRangeCount = 1,
 		.pPushConstantRanges = &pushConstantRange,
 	};
-	NVVK_CHECK(vkCreatePipelineLayout(Application::app->getDevice(), &pipelineLayoutInfo, nullptr, &graphicPipelineLayout));
-	NVVK_DBG_NAME(graphicPipelineLayout);
+	NVVK_CHECK(vkCreatePipelineLayout(Application::app->getDevice(), &pipelineLayoutInfo, nullptr, &pipelineLayout));
+	NVVK_DBG_NAME(pipelineLayout);
 }
 void FzbRenderer::Feature::addTextureArrayDescriptor(uint32_t textureBinding) {
 	if (Application::sceneResource.textures.empty())
