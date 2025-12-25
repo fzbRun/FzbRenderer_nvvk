@@ -26,6 +26,7 @@ public:
 	Renderer() = default;
 	virtual ~Renderer() = default;
 
+	void init() override;
 	void clean() override;
 	virtual void onLastHeadlessFrame();
 

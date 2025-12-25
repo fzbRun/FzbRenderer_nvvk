@@ -7,7 +7,7 @@ slang´óÀ¨ºÅµÄ×óÓÒ(°üÀ¨¿ªÊ¼´óÀ¨ºÅµÄÏÂÒ»ĞĞ¿ªÊ¼£¬ÒÔ¼°½áÊø´óÀ¨ºÅµÄÉÏĞĞ½áÎ²)²»ÄÜÓĞ×¢Ê
 #include "nvshaders/sky_functions.h.slang"
 #include "common/Shader/nvvk/Slang/pbr.h.slang"
 #include "nvshaders/ray_utils.h.slang"
-#include "../shaderio.h"
+#include "renderer/PathTracing/hard/shaderio.h"
 
 // clang-format off
 //ScalarDataLayout

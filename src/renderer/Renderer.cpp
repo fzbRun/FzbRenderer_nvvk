@@ -39,6 +39,11 @@ std::shared_ptr<FzbRenderer::Renderer> FzbRenderer::createRenderer(RendererCreat
 	return nullptr;
 }
 
+void FzbRenderer::Renderer::init() {
+	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
+	Application::stagingUploader.cmdUploadAppended(cmd);
+	Application::app->submitAndWaitTempCmdBuffer(cmd);
+}
 void FzbRenderer::Renderer::clean() {
 	Feature::clean();
 }

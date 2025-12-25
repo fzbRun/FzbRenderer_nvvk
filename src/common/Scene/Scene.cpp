@@ -266,6 +266,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 	doc.reset();
 
 	createSceneInfBuffer();
+
 	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
 	Application::stagingUploader.cmdUploadAppended(cmd);
 	Application::app->submitAndWaitTempCmdBuffer(cmd);

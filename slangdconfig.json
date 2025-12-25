@@ -5,7 +5,7 @@
     "slang.additionalSearchPaths": [
 	".",
         "C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/src",
-	"C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/third_party/nvpro_core2"
+	"C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/third_party/nvpro_core2",
     ],
     "slang.enableCommitCharactersInAutoCompletion": "on"
 }

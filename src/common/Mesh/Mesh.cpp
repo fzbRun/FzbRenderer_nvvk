@@ -410,7 +410,7 @@ void FzbRenderer::MeshSet::processNode(aiNode* node, const aiScene* sceneData) {
 }
 void FzbRenderer::MeshSet::loadObjData(std::filesystem::path meshPath) {
 	Assimp::Importer import;
-	uint32_t needs = aiProcess_Triangulate;// |
+	uint32_t needs = aiProcess_Triangulate | aiProcess_GenSmoothNormals;// |
 		//(vertexFormat.useTexCoord ? aiProcess_FlipUVs : aiPostProcessSteps(0u)) |
 		//(vertexFormat.useNormal ? aiProcess_GenSmoothNormals : aiPostProcessSteps(0u)) |
 		//(vertexFormat.useTangent ? aiProcess_CalcTangentSpace : aiPostProcessSteps(0u));

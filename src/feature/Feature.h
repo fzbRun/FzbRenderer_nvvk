@@ -19,9 +19,10 @@ public:
 	virtual void clean();
 	virtual void uiRender();
 	virtual void resize(VkCommandBuffer cmd, const VkExtent2D& size);
+	virtual void preRender();
 	virtual void render(VkCommandBuffer cmd) = 0;
 
-	virtual void createGBuffer(bool useDepth = true);
+	virtual void createGBuffer(bool useDepth = true, bool postProcess = true, uint32_t colorAttachmentCount = 1);
 	virtual void createGraphicsDescriptorSetLayout();
 	virtual void createGraphicsPipelineLayout(uint32_t pushConstantSize = sizeof(shaderio::DefaultPushConstant));
 	virtual void addTextureArrayDescriptor(uint32_t textureBinding = shaderio::eTextures);

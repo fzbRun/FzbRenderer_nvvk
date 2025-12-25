@@ -150,6 +150,13 @@ void FzbRenderer::Application::initSlangCompiler() {
 			.value = slang::CompilerOptionValue{.kind = slang::CompilerOptionValueKind::Int, .intValue0 = 1 }
 	});
 
+#ifndef NDEBUG
+	slangCompiler.addOption({
+		.name = slang::CompilerOptionName::MacroDefine,
+		.value = slang::CompilerOptionValue{.kind = slang::CompilerOptionValueKind::String, .stringValue0 = "NDEBUG"}
+		});
+#endif
+
 #if defined(AFTERMATH_AVAILABLE)
 	slangCompiler.setCompileCallback([&](const std::filesystem::path& sourceFile, const uint32_t* spirvCode, size_t spirvSize) {
 		std::span<const uint32_t> data(spirvCode, spirvSize / sizeof(uint32_t));
@@ -224,9 +231,17 @@ void FzbRenderer::Application::onUIRender() {
 	}
 	ImGui::End();
 	renderer->uiRender();
+
+	if (ImGui::Begin("Viewport"))
+		ImGui::Image(ImTextureID(viewportImage), ImGui::GetContentRegionAvail());
+	ImGui::End();
 }
 void FzbRenderer::Application::onResize(VkCommandBuffer cmd, const VkExtent2D& size) {
-	renderer->resize(cmd, size);
+	renderer->resize(cmd, size);	//这一步会初始化gBuffer
+}
+void FzbRenderer::Application::onPreRender() {
+	frameIndex = std::min(++frameIndex, maxFrames);
+	renderer->preRender();
 }
 void FzbRenderer::Application::onRender(VkCommandBuffer cmd) {
 	updateDataPerFrame(cmd);
@@ -235,7 +250,6 @@ void FzbRenderer::Application::onRender(VkCommandBuffer cmd) {
 void FzbRenderer::Application::updateDataPerFrame(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
 
-	++frameIndex;
 	renderer->updateDataPerFrame(cmd);
 
 	const glm::mat4& viewMatrix = sceneResource.cameraManip->getViewMatrix();

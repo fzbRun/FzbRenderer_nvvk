@@ -1,11 +1,12 @@
 #include "common/Shader/shaderStructType.h"
-#include "../shaderio.h"
+#include "feature/SceneDivision/RasterVoxelization/shaderio.h"
 #include "nvshaders/functions.h.slang"
 #include "common/Shader/Slang/commonFunction.slang"
 
 [[vk::push_constant]] ConstantBuffer<RasterVoxelizationPushConstant> pushConst;
 [[vk::binding(RasterVoxelizationBindingPoints::eTextures_RV)]] Sampler2D textures[];
 [[vk::binding(RasterVoxelizationBindingPoints::eVGB_RV)]] RWStructuredBuffer<VGBVoxelData, ScalarDataLayout> VGB;
+[[vk::binding(RasterVoxelizationBindingPoints::eFragmentCountBuffer_RV)]] RWStructuredBuffer<uint32_t> fragmentCountBuffer;
 
 struct VSout
 {
@@ -15,6 +16,7 @@ struct VSout
 
 struct GSout {
     float4 sv_position : SV_Position;
+    nointerpolation uint viewportIndex : SV_ViewportArrayIndex;
     float3 worldPos : POSITION;
     float3 worldNormal : NORMAL;
 };
@@ -32,18 +34,15 @@ __generic<T : IFloat> T getAttribute(uint8_t *dataBufferAddress, BufferView buff
         return ptr[0];
     }
 
-    return T(1); // Error case
+    return T(0); // Error case
 }
 
 // Vertex  Shader
 [shader("vertex")]
 VSout vertexMain(uint vertexIndex: SV_VertexID)
 {
-    int instanceIndex = pushConst.instanceIndex;
-
     SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
-
-    Instance instance = sceneInfo.instances[instanceIndex];
+    Instance instance = sceneInfo.instances[pushConst.instanceIndex];
     Mesh mesh = sceneInfo.meshes[instance.meshIndex];
 
     // Retrieve the data
@@ -67,7 +66,7 @@ VSout vertexMain(uint vertexIndex: SV_VertexID)
 
     VSout output;
     output.worldPos = pos.xyz;
-    output.worldNormal = normalize(normal);
+    output.worldNormal = normal;
 
     return output;
 }
@@ -81,10 +80,11 @@ void geometryMain(
     float3 normal0 = input[0].worldNormal;
     float3 normal1 = input[1].worldNormal;
     float3 normal2 = input[2].worldNormal;
-    float3 normal = (normal0 + normal1 + normal2) * 0.33333f;
+    float3 normal = normalize(normal0 + normal1 + normal2);
     int viewIndex = normal.x > normal.y ? (normal.x > normal.z ? 1 : 0) : (normal.y > normal.z ? 2 : 0);
 
     GSout output;
+    output.viewportIndex = pushConst.threeView.x == 1 ? viewIndex : 0;
     for (int i = 0; i < 3; i++) {
         output.sv_position = mul(float4(input[i].worldPos, 1.0f), pushConst.VP[viewIndex]);
         output.worldNormal = input[i].worldNormal;
@@ -94,10 +94,9 @@ void geometryMain(
     outputStream.RestartStrip();
 }
 
-[shader("pixel")]
-PSout fragmentMain(GSout input) {
-    int3 voxelIndex = int3((input.worldPos - pushConst.voxelGroupStartPos.xyz) / pushConst.voxelSize_Count.xyz);
-    int voxelCount = pushConst.voxelSize_Count.w;
+int getVoxelIndex(GSout input) {
+    int3 voxelIndex = int3((input.worldPos - pushConst.voxelGroupStartPos) / pushConst.voxelSize_Count.xyz);
+    int voxelCount = uint(pushConst.voxelSize_Count.w);
     int voxelTotalCount = voxelCount * voxelCount * voxelCount;
     int voxelIndexU = 0;
     while (voxelTotalCount > 1) {
@@ -116,7 +115,9 @@ PSout fragmentMain(GSout input) {
             voxelIndex.x -= voxelCount;
         }
     }
-
+    return voxelIndexU;
+}
+void atomicAABB(GSout input, int voxelIndexU) {
     AABBU aabbU = VGB[voxelIndexU].aabbU;
     float leftX = asfloat(aabbU.minimum.x);
     float leftY = asfloat(aabbU.minimum.y);
@@ -188,10 +189,33 @@ PSout fragmentMain(GSout input) {
             InterlockedCompareExchange(VGB[voxelIndexU].aabbU.maximum.z, preVal, newVal, curVal);
         }
     }
-
+}
+void atomicNormalG(GSout input, int voxelIndexU) {
     float3 normal_G = normalize(input.worldNormal);
     InterlockedAdd<float>(VGB[voxelIndexU].sumNormal_G.w, 1.0f);
     InterlockedAdd<float>(VGB[voxelIndexU].sumNormal_G.x, normal_G.x);
     InterlockedAdd<float>(VGB[voxelIndexU].sumNormal_G.y, normal_G.y);
     InterlockedAdd<float>(VGB[voxelIndexU].sumNormal_G.z, normal_G.z);
+}
+
+[shader("pixel")]
+void fragmentMain(GSout input) {
+    int voxelIndexU = getVoxelIndex(input);
+    atomicAABB(input, voxelIndexU);
+    atomicNormalG(input, voxelIndexU);
+
+#ifndef NDEBUG
+    if (pushConst.frameIndex == 0) InterlockedAdd<uint>(fragmentCountBuffer[0], 1);
+#endif
+}
+
+[shader("pixel")]
+PSout fragmentMain_ThreeView(GSout input) {
+    int voxelIndexU = getVoxelIndex(input);
+    atomicAABB(input, voxelIndexU);
+    atomicNormalG(input, voxelIndexU);
+#ifndef NDEBUG
+    if (pushConst.frameIndex == 0) InterlockedAdd<uint>(fragmentCountBuffer[0], 1);
+#endif
+    return { float4(abs(input.worldNormal), 1.0f) };
 }

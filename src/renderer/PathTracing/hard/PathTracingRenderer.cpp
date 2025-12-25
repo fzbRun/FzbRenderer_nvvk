@@ -559,23 +559,10 @@ void FzbRenderer::PathTracingRenderer::rayTraceScene(VkCommandBuffer cmd) {
 }
 
 void FzbRenderer::PathTracingRenderer::resetFrame() {
-	Application::frameIndex = -1;
+	Application::frameIndex = 0;
 }
 void FzbRenderer::PathTracingRenderer::updateDataPerFrame(VkCommandBuffer cmd) {
-	std::shared_ptr<nvutils::CameraManipulator> cameraManip = Application::sceneResource.cameraManip;
 
-	static glm::mat4 refCamMatrix;
-	static float refFov{ cameraManip->getFov() };
-
-	const auto& m = cameraManip->getViewMatrix();
-	const auto& fov = cameraManip->getFov();
-
-	if (refCamMatrix != m || refFov != fov) {	//如果相机参数变化，则从新累计帧
-		resetFrame();
-		refCamMatrix = m;
-		refFov = fov;
-	}
-	Application::frameIndex = std::min(++Application::frameIndex, maxFrames);
 }
 //-----------------------------------------渲染器行为----------------------------------------------------------
 void FzbRenderer::PathTracingRenderer::init() {
@@ -610,6 +597,8 @@ void FzbRenderer::PathTracingRenderer::init() {
 
 	createRayTracingDescriptorLayout();
 	createRayTracingPipeline();
+
+	Renderer::init();
 }
 void FzbRenderer::PathTracingRenderer::clean() {
 	rasterVoxelization->clean();
@@ -627,19 +616,15 @@ void FzbRenderer::PathTracingRenderer::clean() {
 	Application::allocator.destroyBuffer(sbtBuffer);
 };
 void FzbRenderer::PathTracingRenderer::uiRender() {
-	bool UIModified = Application::UIModified;
-
-	rasterVoxelization->uiRender();
+	bool& UIModified = Application::UIModified;
 
 	namespace PE = nvgui::PropertyEditor;
-	if (ImGui::Begin("Viewport"))
-		ImGui::Image(ImTextureID(gBuffers.getDescriptorSet(eImgTonemapped)), ImGui::GetContentRegionAvail());
-	ImGui::End();
+	Application::viewportImage = gBuffers.getDescriptorSet(eImgTonemapped);
 
 	if (ImGui::Begin("PathTracingSettings"))
 	{
 		ImGui::SeparatorText("Jitter");
-		UIModified |= ImGui::SliderInt("Max Frames", &maxFrames, 1, 2 << 10);
+		UIModified |= ImGui::SliderInt("Max Frames", &Application::maxFrames, 1, 2 << 10);
 		ImGui::TextDisabled("Frame: %d", pushValues.frameIndex);
 
 		ImGui::SeparatorText("Bounces");
@@ -673,17 +658,35 @@ void FzbRenderer::PathTracingRenderer::uiRender() {
 	}
 	ImGui::End();
 
+	rasterVoxelization->uiRender();
+
 	if(UIModified) resetFrame();
 };
 void FzbRenderer::PathTracingRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
-	resetFrame();
+	rasterVoxelization->resize(cmd, size);
 	NVVK_CHECK(gBuffers.update(cmd, size));
 };
+void FzbRenderer::PathTracingRenderer::preRender() {
+	std::shared_ptr<nvutils::CameraManipulator> cameraManip = Application::sceneResource.cameraManip;
+
+	static glm::mat4 refCamMatrix;
+	static float refFov{ cameraManip->getFov() };
+
+	const auto& m = cameraManip->getViewMatrix();
+	const auto& fov = cameraManip->getFov();
+
+	if (refCamMatrix != m || refFov != fov) {	//如果相机参数变化，则从新累计帧
+		resetFrame();
+		refCamMatrix = m;
+		refFov = fov;
+	}
+
+	rasterVoxelization->preRender();
+}
 void FzbRenderer::PathTracingRenderer::render(VkCommandBuffer cmd) {
+	rasterVoxelization->render(cmd);
 	rayTraceScene(cmd);
 	postProcess(cmd);
-
-	rasterVoxelization->render(cmd);
 };
 
 void FzbRenderer::PathTracingRenderer::compileAndCreateShaders() {

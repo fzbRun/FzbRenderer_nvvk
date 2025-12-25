@@ -25,6 +25,7 @@ public:
 	void clean() override;
 	void uiRender() override;
 	void resize(VkCommandBuffer cmd, const VkExtent2D& size) override;
+	void preRender();
 	void render(VkCommandBuffer cmd) override;
 
 	void compileAndCreateShaders() override;
@@ -56,7 +57,6 @@ private:
 	VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProperties{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR };
 
 	shaderio::PathTracingPushConstant pushValues{};
-	int maxFrames = 2 << 9;
 
 	std::shared_ptr<FzbRenderer::RasterVoxelization> rasterVoxelization;
 };

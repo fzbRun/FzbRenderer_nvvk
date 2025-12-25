@@ -41,7 +41,10 @@ public:
 	4. 那么0，1，2帧CPU可以无需等待GPU执行完直接处理指令，并将相应的数组元素+3；而第三帧3 < 2不能执行
 	5. 当第一帧GPU执行完后，时间线信号量+1变为3，那么第三帧可以执行，并将数组元素设置为6
 	6. ……
+
+	并且其渲染顺序为UIRender->PreRender->Render
 	*/
+	void onPreRender() override;
 	void onRender(VkCommandBuffer cmd);
 
 	void onUIMenu() override;
@@ -64,8 +67,10 @@ public:
 	inline static nvshaders::Tonemapper tonemapper{};
 	inline static shaderio::TonemapperData tonemapperData{};
 
-	inline static int frameIndex = 0;
+	inline static int maxFrames = 2 << 9;
+	inline static int frameIndex = -1;
 	inline static bool UIModified = false;
+	inline static VkDescriptorSet viewportImage = nullptr;
 private:
 	/*
 		这个函数会从项目根目录/rendererInfo/rendererInfo.xml中读取信息，包括

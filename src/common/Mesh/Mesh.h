@@ -20,7 +20,7 @@ struct MeshInfo {
 	shaderio::Mesh mesh;
 	std::string materialID;		//mtl或gltf中的materialID
 	shaderio::BSDFMaterial material;	//mtl或gltf中的material
-	shaderio::AABB aabb;
+	shaderio::AABB aabb = { { FLT_MAX, FLT_MAX, FLT_MAX }, { -FLT_MAX, -FLT_MAX, -FLT_MAX } };
 
 	uint32_t meshIndex;
 
@@ -42,7 +42,7 @@ public:
 	uint32_t meshOffset;
 	std::vector<MeshInfo> childMeshInfos;		//当前mesh中的小mesh
 	std::vector<uint8_t> meshByteData;
-	shaderio::AABB aabb;
+	shaderio::AABB aabb = { { FLT_MAX, FLT_MAX, FLT_MAX }, { -FLT_MAX, -FLT_MAX, -FLT_MAX } };
 private:
 	void loadGltfData(const tinygltf::Model& model, bool importInstance = false);
 	void processMesh(aiMesh* meshData, const aiScene* sceneData);

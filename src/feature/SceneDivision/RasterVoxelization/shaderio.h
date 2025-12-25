@@ -10,15 +10,18 @@ enum RasterVoxelizationBindingPoints
 {
 	eTextures_RV = 0,
 	eVGB_RV = 1,
+	eFragmentCountBuffer_RV = 2,
 };
 
 struct RasterVoxelizationPushConstant
 {
+	//float3x3 normalMatrix;
 	float4x4 VP[3];
 	float4 voxelSize_Count;
-	float4 voxelGroupStartPos;
-	//float3x3 normalMatrix;
+	float3 voxelGroupStartPos;
 	int instanceIndex;
+	int frameIndex;		//debug
+	int threeView;
 	SceneInfo* sceneInfoAddress;           // Address of the scene information buffer
 };
 

@@ -11,16 +11,22 @@ void FzbRenderer::Feature::clean() {
 	scene.clean();
 }
 void FzbRenderer::Feature::uiRender() {};
-void FzbRenderer::Feature::resize(VkCommandBuffer cmd, const VkExtent2D& size) {};
+void FzbRenderer::Feature::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
+	NVVK_CHECK(gBuffers.update(cmd, size));
+};
+void FzbRenderer::Feature::preRender() {};
 
-void FzbRenderer::Feature::createGBuffer(bool useDepth) {
+void FzbRenderer::Feature::createGBuffer(bool useDepth, bool postProcess, uint32_t colorAttachmentCount) {
 	VkSampler linearSampler{};
 	NVVK_CHECK(Application::samplerPool.acquireSampler(linearSampler));
 	NVVK_DBG_NAME(linearSampler);
 
+	std::vector<VkFormat> colorAttachmentFormat(colorAttachmentCount);
+	for (int i = 0; i < colorAttachmentCount; ++i) colorAttachmentFormat[i] = VK_FORMAT_R32G32B32A32_SFLOAT;
+	if (postProcess) colorAttachmentFormat.push_back(VK_FORMAT_R8G8B8A8_UNORM);
 	nvvk::GBufferInitInfo gBufferInit{
 		.allocator = &Application::allocator,
-		.colorFormats = { VK_FORMAT_R32G32B32A32_SFLOAT, VK_FORMAT_R8G8B8A8_UNORM },	//一个是renderer颜色输出纹理；一个是后处理输出纹理
+		.colorFormats = colorAttachmentFormat,
 		.imageSampler = linearSampler,
 		.descriptorPool = Application::app->getTextureDescriptorPool(),
 	};
@@ -45,9 +51,9 @@ void FzbRenderer::Feature::createGraphicsDescriptorSetLayout() {
 }
 void FzbRenderer::Feature::createGraphicsPipelineLayout(uint32_t pushConstantSize) {
 	const VkPushConstantRange pushConstantRange{
-	.stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
-	.offset = 0,
-	.size = pushConstantSize
+		.stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
+		.offset = 0,
+		.size = pushConstantSize
 	};
 
 	const VkPipelineLayoutCreateInfo pipelineLayoutInfo{
