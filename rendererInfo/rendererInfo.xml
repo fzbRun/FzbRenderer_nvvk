@@ -7,7 +7,7 @@
 		<maxDepth value = "6" />
 		<useNEE value = "true" />
 		<RasterVoxelization>
-			<resolution value = "1024, 1024" />
+			<resolution value = "2048, 2048" />
 			<voxelCount value="64" />
 		</RasterVoxelization>
 	</renderer>

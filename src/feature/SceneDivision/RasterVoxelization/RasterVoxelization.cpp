@@ -57,35 +57,36 @@ void FzbRenderer::RasterVoxelization::init() {
 			aabb.maximum.z = std::max(meshAABB.maximum.z, aabb.maximum.z);
 		}
 
-		glm::vec3 distance = aabb.maximum - aabb.minimum;
+		//放大一点，防止边界处的数据错误（比方说2个voxel，那么右边界的索引是2不是1;不然会导致2->0，0voxel本没有数据先有了数据）
+		glm::vec3 distance = (aabb.maximum - aabb.minimum) * 1.1f;		
 		float maxDistance = std::max(distance.x, std::max(distance.y, distance.z));
 		glm::vec3 center = (aabb.maximum + aabb.minimum) * 0.5f;
-		glm::vec3 minimum = center - maxDistance * 0.5f;
-		glm::vec3 maximum = center + maxDistance * 0.5f;
+		glm::vec3 minimum = center - distance * 0.5f;
+		glm::vec3 maximum = center + distance * 0.5f;
 
 		glm::mat4 VP[3];
 		//前面
 		glm::vec3 viewPoint = glm::vec3(center.x, center.y, maximum.z + 0.1f);	//世界坐标右手螺旋，即+z朝后
 		glm::mat4 viewMatrix = glm::lookAt(viewPoint, viewPoint + glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-		glm::mat4 orthoMatrix = glm::orthoRH_ZO(-0.5f * maxDistance, 0.5f * maxDistance, -0.5f * maxDistance, 0.5f * maxDistance, 0.1f, maxDistance + 0.1f);
+		glm::mat4 orthoMatrix = glm::orthoRH_ZO(-0.5f * distance.x, 0.5f * distance.x, -0.5f * distance.y, 0.5f * distance.y, 0.1f, distance.z + 0.1f);
 		orthoMatrix[1][1] *= -1;
 		VP[0] = orthoMatrix * viewMatrix;
 		//左边
 		viewPoint = glm::vec3(minimum.x - 0.1f, center.y, center.z);
 		viewMatrix = glm::lookAt(viewPoint, viewPoint + glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-		orthoMatrix = glm::orthoRH_ZO(-0.5f * maxDistance, 0.5f * maxDistance, -0.5f * maxDistance, 0.5f * maxDistance, 0.1f, maxDistance + 0.1f);
+		orthoMatrix = glm::orthoRH_ZO(-0.5f * distance.z, 0.5f * distance.z, -0.5f * distance.y, 0.5f * distance.y, 0.1f, distance.x + 0.1f);
 		orthoMatrix[1][1] *= -1;
 		VP[1] = orthoMatrix * viewMatrix;
 		//下面
 		viewPoint = glm::vec3(center.x, minimum.y - 0.1f, center.z);
 		viewMatrix = glm::lookAt(viewPoint, viewPoint + glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-		orthoMatrix = glm::orthoRH_ZO(-0.5f * maxDistance, 0.5f * maxDistance, -0.5f * maxDistance, 0.5f * maxDistance, 0.1f, maxDistance + 0.1f);
+		orthoMatrix = glm::orthoRH_ZO(-0.5f * distance.x, 0.5f * distance.x, -0.5f * distance.z, 0.5f * distance.z, 0.1f, distance.y + 0.1f);
 		orthoMatrix[1][1] *= -1;
 		VP[2] = orthoMatrix * viewMatrix;
 
 		for (int i = 0; i < 3; ++i) setting.pushConstant.VP[i] = VP[i];
-		setting.pushConstant.voxelGroupStartPos = aabb.minimum;
-		setting.pushConstant.voxelSize_Count = glm::vec4(distance / glm::vec3(setting.pushConstant.voxelSize_Count.w), setting.pushConstant.voxelSize_Count.w);
+		setting.pushConstant.voxelGroupStartPos = minimum;
+		setting.pushConstant.voxelSize_Count = glm::vec4(distance / setting.pushConstant.voxelSize_Count.w, setting.pushConstant.voxelSize_Count.w);
 	}
 	//---------------------------------------------------------------------------------------------
 	createDescriptorSetLayout();	//创建描述符集合布局
@@ -109,7 +110,7 @@ void FzbRenderer::RasterVoxelization::init() {
 	write.append(VGBWrite, VGB, 0, VGBByteSize);
 
 #ifndef NDEBUG
-	Feature::createGBuffer(true, false, 2);		//第一张图：threeView，多视口；第二张图：Cube
+	Feature::createGBuffer(true, false, 3);		//第一张图：threeView，多视口；第二张图：Cube；第三张图：wireframe
 	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
 	gBuffers.update(cmd, setting.resolution);	//不随窗口分辨率
 	Application::app->submitAndWaitTempCmdBuffer(cmd);
@@ -417,11 +418,14 @@ void FzbRenderer::RasterVoxelization::render(VkCommandBuffer cmd) {
 	setting.pushConstant.frameIndex = Application::frameIndex;
 
 	clearVGB(cmd);
-
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
 #ifndef NDEBUG
 	resetFragmentCount(cmd);
 	createVGB_ThreeView(cmd);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT);
 	debug_Cube(cmd);
+	//nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT);
+	//debug_Wireframe(cmd);
 #else
 	createVGB(cmd);
 #endif
@@ -441,8 +445,6 @@ void FzbRenderer::RasterVoxelization::clearVGB(VkCommandBuffer cmd) {
 	uint32_t totalVoxelCount = pow(setting.pushConstant.voxelSize_Count.w, 3);
 	VkExtent2D groupSize = nvvk::getGroupCounts({ totalVoxelCount, 1 }, VkExtent2D{ 512, 1 });
 	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
-
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
 }
 void FzbRenderer::RasterVoxelization::createVGB(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
@@ -540,9 +542,8 @@ void FzbRenderer::RasterVoxelization::createVGB_ThreeView(VkCommandBuffer cmd) {
 	//使用VK_EXT_SHADER_OBJECT_EXTENSION_NAME后可以不需要pipeline，直接通过命令设置渲染设置和着色器
 	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;
 	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_FALSE;
-	graphicsDynamicPipeline.depthStencilState.depthBoundsTestEnable = VK_FALSE;		//depthBoundsTestEnable是根据min、max depth进行测试，相当于自定义裁剪的z的范围
 	graphicsDynamicPipeline.cmdApplyAllStates(cmd);
-	vkCmdSetDepthBoundsTestEnable(cmd, VK_FALSE);
+	vkCmdSetDepthBoundsTestEnable(cmd, VK_FALSE);	//depthBoundsTestEnable是根据min、max depth进行测试，相当于自定义裁剪的z的范围
 
 	float width = float(setting.resolution.width) * 0.5f;
 	float height = float(setting.resolution.height) * 0.5f;
@@ -581,8 +582,6 @@ void FzbRenderer::RasterVoxelization::createVGB_ThreeView(VkCommandBuffer cmd) {
 	}
 
 	vkCmdEndRendering(cmd);
-
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
 }
 void FzbRenderer::RasterVoxelization::debug_Cube(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
@@ -608,12 +607,10 @@ void FzbRenderer::RasterVoxelization::debug_Cube(VkCommandBuffer cmd) {
 
 	vkCmdBeginRendering(cmd, &renderingInfo);
 
-	//使用VK_EXT_SHADER_OBJECT_EXTENSION_NAME后可以不需要pipeline，直接通过命令设置渲染设置和着色器
+	//如果没有深度测试，我们实例化是从0-n进行渲染的，那么从0那一面看过去会被n那一面覆盖掉；但从n那一面看是没有问题的
 	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
-	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_FALSE;
-	graphicsDynamicPipeline.depthStencilState.depthBoundsTestEnable = VK_FALSE;		//depthBoundsTestEnable是根据min、max depth进行测试，相当于自定义裁剪的z的范围
+	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_TRUE;
 	graphicsDynamicPipeline.cmdApplyAllStates(cmd);
-	vkCmdSetDepthBoundsTestEnable(cmd, VK_FALSE);
 	graphicsDynamicPipeline.cmdSetViewportAndScissor(cmd, setting.resolution);
 	graphicsDynamicPipeline.cmdBindShaders(cmd, { .vertex = vertexShader_Cube, .fragment = fragmentShader_Cube });
 
@@ -635,5 +632,53 @@ void FzbRenderer::RasterVoxelization::debug_Cube(VkCommandBuffer cmd) {
 
 	vkCmdEndRendering(cmd);
 }
-void FzbRenderer::RasterVoxelization::debug_Wireframe(VkCommandBuffer cmd) {}
+void FzbRenderer::RasterVoxelization::debug_Wireframe(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
+
+	VkRenderingAttachmentInfo colorAttachment = DEFAULT_VkRenderingAttachmentInfo;
+	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	colorAttachment.imageView = gBuffers.getColorImageView(RasterVoxelizationGBuffer::WireframeMap);
+	colorAttachment.clearValue = { .color = {Application::sceneResource.sceneInfo.backgroundColor.x,
+											Application::sceneResource.sceneInfo.backgroundColor.y,
+											Application::sceneResource.sceneInfo.backgroundColor.z, 1.0f} };
+	VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
+	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;		//使用cube的深度缓冲
+	depthAttachment.imageView = gBuffers.getDepthImageView();
+
+	VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
+	renderingInfo.renderArea = { {0, 0}, setting.resolution };
+	renderingInfo.colorAttachmentCount = 1;
+	renderingInfo.pColorAttachments = &colorAttachment;
+	renderingInfo.pDepthAttachment = &depthAttachment;
+
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1,
+		descPack.getSetPtr(), 0, nullptr);
+
+	vkCmdBeginRendering(cmd, &renderingInfo);
+
+	//如果没有深度测试，我们实例化是从0-n进行渲染的，那么从0那一面看过去会被n那一面覆盖掉；但从n那一面看是没有问题的
+	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
+	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_TRUE;
+	graphicsDynamicPipeline.cmdApplyAllStates(cmd);
+	graphicsDynamicPipeline.cmdSetViewportAndScissor(cmd, setting.resolution);
+	graphicsDynamicPipeline.cmdBindShaders(cmd, { .vertex = vertexShader_Cube, .fragment = fragmentShader_Cube });
+
+	VkVertexInputBindingDescription2EXT bindingDescription{};
+	VkVertexInputAttributeDescription2EXT attributeDescription = {};
+	vkCmdSetVertexInputEXT(cmd, 0, nullptr, 0, nullptr);
+
+	const shaderio::Mesh& mesh = scene.meshes[0];
+	const shaderio::TriangleMesh& triMesh = mesh.triMesh;
+
+	setting.pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)scene.bSceneInfo.address;
+	vkCmdPushConstants2(cmd, &pushInfo);
+
+	uint32_t bufferIndex = scene.getMeshBufferIndex(0);
+	const nvvk::Buffer& v = scene.bDatas[bufferIndex];
+
+	vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(mesh.indexType));
+	vkCmdDrawIndexed(cmd, triMesh.indices.count, pow(setting.pushConstant.voxelSize_Count.w, 3), 0, 0, 0);
+
+	vkCmdEndRendering(cmd);
+}
 #endif

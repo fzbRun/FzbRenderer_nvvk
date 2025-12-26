@@ -5,9 +5,26 @@
 
 [[vk::push_constant]] ConstantBuffer<RasterVoxelizationPushConstant> pushConst;
 [[vk::binding(RasterVoxelizationBindingPoints::eTextures_RV)]] Sampler2D textures[];
-[[vk::binding(RasterVoxelizationBindingPoints::eVGB_RV)]] RWStructuredBuffer<VGBVoxelData, ScalarDataLayout> VGB;
+[[vk::binding(RasterVoxelizationBindingPoints::eVGB_RV)]] globallycoherent volatile RWStructuredBuffer<VGBVoxelData, ScalarDataLayout> VGB;
 [[vk::binding(RasterVoxelizationBindingPoints::eFragmentCountBuffer_RV)]] RWStructuredBuffer<uint32_t> fragmentCountBuffer;
 
+//----------------------------------------------clearVGB--------------------------------------------
+[numthreads(512, 1, 1)]
+[shader("compute")]
+void computeMain_clearVGB(uint3 dispatchId: SV_DispatchThreadID) {
+    uint totalVoxelCount = pow(pushConst.voxelSize_Count.w, 3);
+    if (dispatchId.x >= totalVoxelCount) return;
+
+    VGBVoxelData voxelData;
+    voxelData.aabbU.minimum = uint3(asuint(3.402823466e+38F));
+    voxelData.aabbU.maximum = uint3(asuint(-3.402823466e+38F));
+    voxelData.radiance = float4(0.0f);
+    voxelData.sumNormal_G = float4(0.0f);
+    voxelData.sumNormal_E = float4(0.0f);
+
+    VGB[dispatchId.x] = voxelData;
+}
+//----------------------------------------------createVGB--------------------------------------------
 struct VSout
 {
     float3 worldPos : POSITION;
@@ -75,7 +92,8 @@ void geometryMain(
     float3 normal1 = input[1].worldNormal;
     float3 normal2 = input[2].worldNormal;
     float3 normal = normalize(normal0 + normal1 + normal2);
-    int viewIndex = normal.x > normal.y ? (normal.x > normal.z ? 1 : 0) : (normal.y > normal.z ? 2 : 0);
+    float3 absNormal = abs(normal);
+    int viewIndex = absNormal.x > absNormal.y ? (absNormal.x > absNormal.z ? 1 : 0) : (absNormal.y > absNormal.z ? 2 : 0);
 
     GSout output;
     for (int i = 0; i < 3; i++) {
@@ -120,20 +138,22 @@ void atomicAABB(float3 worldPos, int voxelIndexU) {
     float rightY = asfloat(aabbU.maximum.y);
     float rightZ = asfloat(aabbU.maximum.z);
 
+    uint preVal;
+    uint newVal;
+    uint curVal;
     if (worldPos.x < leftX) {
-        uint preVal = aabbU.minimum.x;
-        uint newVal = asuint(worldPos.x);
-        uint curVal;
+        preVal = aabbU.minimum.x;
+        newVal = asuint(worldPos.x);
         InterlockedCompareExchange(VGB[voxelIndexU].aabbU.minimum.x, preVal, newVal, curVal);
         while (curVal != preVal) {
             if (asfloat(curVal) <= worldPos.x) break;
             preVal = curVal;
             InterlockedCompareExchange(VGB[voxelIndexU].aabbU.minimum.x, preVal, newVal, curVal);
         }
-    } else if (worldPos.x > rightX) {
-        uint preVal = aabbU.maximum.x;
-        uint newVal = asuint(worldPos.x);
-        uint curVal;
+    } 
+    if (worldPos.x > rightX) {
+        preVal = aabbU.maximum.x;
+        newVal = asuint(worldPos.x);
         InterlockedCompareExchange(VGB[voxelIndexU].aabbU.maximum.x, preVal, newVal, curVal);
         while (curVal != preVal) {
             if (asfloat(curVal) >= worldPos.x) break;
@@ -142,19 +162,18 @@ void atomicAABB(float3 worldPos, int voxelIndexU) {
         }
     }
     if (worldPos.y < leftY) {
-        uint preVal = aabbU.minimum.y;
-        uint newVal = asuint(worldPos.y);
-        uint curVal;
+        preVal = aabbU.minimum.y;
+        newVal = asuint(worldPos.y);
         InterlockedCompareExchange(VGB[voxelIndexU].aabbU.minimum.y, preVal, newVal, curVal);
         while (curVal != preVal) {
             if (asfloat(curVal) <= worldPos.y) break;
             preVal = curVal;
             InterlockedCompareExchange(VGB[voxelIndexU].aabbU.minimum.y, preVal, newVal, curVal);
         }
-    } else if (worldPos.y > rightY) {
-        uint preVal = aabbU.maximum.y;
-        uint newVal = asuint(worldPos.y);
-        uint curVal;
+    } 
+    if (worldPos.y > rightY) {
+        preVal = aabbU.maximum.y;
+        newVal = asuint(worldPos.y);
         InterlockedCompareExchange(VGB[voxelIndexU].aabbU.maximum.y, preVal, newVal, curVal);
         while (curVal != preVal) {
             if (asfloat(curVal) >= worldPos.y) break;
@@ -163,19 +182,18 @@ void atomicAABB(float3 worldPos, int voxelIndexU) {
         }
     }
     if (worldPos.z < leftZ) {
-        uint preVal = aabbU.minimum.z;
-        uint newVal = asuint(worldPos.z);
-        uint curVal;
+        preVal = aabbU.minimum.z;
+        newVal = asuint(worldPos.z);
         InterlockedCompareExchange(VGB[voxelIndexU].aabbU.minimum.z, preVal, newVal, curVal);
         while (curVal != preVal) {
             if (asfloat(curVal) <= worldPos.z) break;
             preVal = curVal;
             InterlockedCompareExchange(VGB[voxelIndexU].aabbU.minimum.z, preVal, newVal, curVal);
         }
-    } else if (worldPos.z > rightZ) {
-        uint preVal = aabbU.maximum.z;
-        uint newVal = asuint(worldPos.z);
-        uint curVal;
+    } 
+    if (worldPos.z > rightZ) {
+        preVal = aabbU.maximum.z;
+        newVal = asuint(worldPos.z);
         InterlockedCompareExchange(VGB[voxelIndexU].aabbU.maximum.z, preVal, newVal, curVal);
         while (curVal != preVal) {
             if (asfloat(curVal) >= worldPos.z) break;
@@ -199,22 +217,6 @@ void fragmentMain(GSout input) {
     atomicNormalG(input.worldNormal, voxelIndexU);
 }
 
-[numthreads(512, 1, 1)]
-[shader("compute")]
-void computeMain_clearVGB(uint3 dispatchId: SV_DispatchThreadID) {
-    uint totalVoxelCount = pow(pushConst.voxelSize_Count.w, 3);
-    if (dispatchId.x >= totalVoxelCount) return;
-
-    VGBVoxelData voxelData;
-    voxelData.aabbU.minimum = uint3(asuint(3.402823466e+38F));
-    voxelData.aabbU.maximum = uint3(asuint(-3.402823466e+38F));
-    voxelData.radiance = float4(0.0f);
-    voxelData.sumNormal_G = float4(0.0f);
-    voxelData.sumNormal_E = float4(0.0f);
-
-    VGB[dispatchId.x] = voxelData;
-}
-
 #ifndef NDEBUG
 //--------------------------------------------threeView---------------------------------------
 struct GSout_ThreeView {
@@ -223,7 +225,7 @@ struct GSout_ThreeView {
     float3 worldPos : POSITION;
     float3 worldNormal : NORMAL;
 };
-struct PSout
+struct PSout_ThreeView
 {
     float4 color : SV_Target;
 };
@@ -238,13 +240,22 @@ void geometryMain_ThreeView(
     float3 normal1 = input[1].worldNormal;
     float3 normal2 = input[2].worldNormal;
     float3 normal = normalize(normal0 + normal1 + normal2);
-    int viewIndex = normal.x > normal.y ? (normal.x > normal.z ? 1 : 0) : (normal.y > normal.z ? 2 : 0);
+
+    //float3 pos0 = input[0].worldPos;
+    //float3 pos1 = input[1].worldPos;
+    //float3 pos2 = input[2].worldPos;
+    //float3 e0 = pos1 - pos0;
+    //float3 e1 = pos2 - pos0;
+    //float3 normal = normalize(cross(e0, e1));
+    float3 absNormal = abs(normal);
+
+    int viewIndex = absNormal.x > absNormal.y ? (absNormal.x > absNormal.z ? 1 : 0) : (absNormal.y > absNormal.z ? 2 : 0);
 
     GSout_ThreeView output;
     output.viewportIndex = viewIndex;
     for (int i = 0; i < 3; i++) {
-        output.sv_position = mul(float4(input[i].worldPos, 1.0f), pushConst.VP[viewIndex]);
         output.worldPos = input[i].worldPos;
+        output.sv_position = mul(float4(output.worldPos, 1.0f), pushConst.VP[viewIndex]);
         output.worldNormal = input[i].worldNormal;
         outputStream.Append(output);
     }
@@ -253,7 +264,7 @@ void geometryMain_ThreeView(
 }
 
 [shader("pixel")]
-PSout fragmentMain_ThreeView(GSout_ThreeView input) {
+PSout_ThreeView fragmentMain_ThreeView(GSout_ThreeView input) {
     int voxelIndexU = getVoxelIndex(input.worldPos);
 
     atomicAABB(input.worldPos, voxelIndexU);
@@ -261,47 +272,65 @@ PSout fragmentMain_ThreeView(GSout_ThreeView input) {
 
     if (pushConst.frameIndex == 0) InterlockedAdd<uint>(fragmentCountBuffer[0], 1);
 
-    return { float4(abs(input.worldNormal), 1.0f) };
+    PSout_ThreeView output;
+    output.color = float4(abs(input.worldNormal), 1.0f);
+    return output;
 }
 //---------------------------------------------cube--------------------------------------------
 struct VSout_Cube {
     float4 sv_position : SV_Position;
     float3 worldPos : POSITION;
+    float3 color;
 }
+struct PSout_Cube
+{
+    float4 color : SV_Target;
+};
 
 [shader("vertex")]
 VSout_Cube vertexMain_Cube(uint vertexIndex: SV_VertexID, int instanceIndex : SV_InstanceID)
 {
-    int voxelCount = int(pushConst.voxelSize_Count.w);
-    int voxelCountSquared = voxelCount * voxelCount;
-
-    int Z = instanceIndex / voxelCountSquared;
-    instanceIndex -= Z * voxelCountSquared;
-    int Y = instanceIndex / voxelCount;
-    int X = instanceIndex - Y * voxelCount;
-    float3 offset = float3(X, Y, Z);
-
-    SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
-    float3 posMesh = float3(0.0f);
-    posMesh.x = ((vertexIndex & 3) * 2) % 6 == 0 ? 0.0f : pushConst.voxelSize_Count.x;
-    posMesh.y = (vertexIndex & 3) <= 1 ? 0.0f : pushConst.voxelSize_Count.y;
-    posMesh.z = vertexIndex / 4 == 0 ? 0.0f : pushConst.voxelSize_Count.z;
-
+    VGBVoxelData voxelData = VGB[instanceIndex];
     VSout_Cube output;
-    output.worldPos = pushConst.voxelGroupStartPos + offset * pushConst.voxelSize_Count.xyz + posMesh;
-    output.sv_position = mul(float4(output.worldPos, 1.0f), sceneInfo.viewProjMatrix);
+    if (voxelData.sumNormal_G.w == 0.0f) output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
+    else {
+        output.worldPos.x = ((vertexIndex & 3) * 2) % 6 == 0 ? asfloat(voxelData.aabbU.minimum.x) : asfloat(voxelData.aabbU.maximum.x);
+        output.worldPos.y = (vertexIndex & 3) <= 1 ? asfloat(voxelData.aabbU.minimum.y) : asfloat(voxelData.aabbU.maximum.y);
+        output.worldPos.z = vertexIndex / 4 == 0 ? asfloat(voxelData.aabbU.minimum.z) : asfloat(voxelData.aabbU.maximum.z);
+
+        SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+        //Slightly reduce the depth to prevent depth conflicts in subsequent wireframes
+        output.sv_position = mul(float4(output.worldPos.xy, output.worldPos.z * 0.99f, 1.0f), sceneInfo.viewProjMatrix);
+        output.color = normalize(max(voxelData.sumNormal_G.xyz / voxelData.sumNormal_G.w, 0.0f));
+    }
     return output;
 }
 [shader("pixel")]
-PSout fragmentMain_Cube(VSout_Cube input) {
-    int voxelIndexU = getVoxelIndex(input.worldPos);
-    VGBVoxelData voxelData = VGB[voxelIndexU];
-    if (voxelData.sumNormal_G.w < 0.1f) discard;
-
-    float3 normal = voxelData.sumNormal_G.xyz / voxelData.sumNormal_G.w;
-    float3 result = normalize(normal);
-
-    return { float4(abs(result), 1.0f) };
+PSout_Cube fragmentMain_Cube(VSout_Cube input) {
+    return { float4(input.color, 1.0f) };
 }
+//---------------------------------------------wireframe----------------------------------------
+struct VSout_Wireframe {
+    float4 sv_position : SV_Position;
+    float3 worldPos : POSITION;
+}
+struct PSout_Wireframe
+{
+    float4 color : SV_Target;
+};
 
+[shader("vertex")]
+VSout_Cube vertexMain_Wireframe(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID)
+{
+    VSout_Cube output;
+    VGBVoxelData voxelData = VGB[instanceIndex];
+    if (voxelData.sumNormal_G.w < 0.1f) output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
+    else {
+        SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+        // Slightly reduce the depth to prevent depth conflicts in subsequent wireframes
+        output.sv_position = mul(float4(output.worldPos.xy, output.worldPos.z * 0.99f, 1.0f), sceneInfo.viewProjMatrix);
+        output.color = normalize(max(voxelData.sumNormal_G.xyz / voxelData.sumNormal_G.w, 0.0f));
+    }
+    return output;
+}
 #endif
