@@ -1,15 +1,13 @@
 #pragma once
 
-#include <nvvk/gbuffers.hpp>
-#include <nvvk/graphics_pipeline.hpp>
-#include <nvvk/descriptors.hpp>
-
 #include "renderer/Renderer.h"
 #include <glm/ext/vector_float2.hpp>
 #include "common/Shader/nvvk/shaderio.h"
 #include <nvvk/acceleration_structures.hpp>
 #include <nvvk/sbt_generator.hpp>
 #include "common/Shader/shaderStructType.h"
+#include "./shaderio.h"
+#include <feature/SceneDivision/RasterVoxelization/RasterVoxelization.h>
 
 #ifndef FZB_PATH_TRACING_RENDERER_H
 #define FZB_PATH_TRACING_RENDERER_H
@@ -17,25 +15,21 @@
 namespace FzbRenderer {
 
 class PathTracingRenderer : public FzbRenderer::Renderer {
-	enum
-	{
-		eImgRendered,
-		eImgTonemapped
-	};
-
 public:
 	PathTracingRenderer() = default;
 	~PathTracingRenderer() = default;
 
-	PathTracingRenderer(RendererCreateInfo& createInfo);
+	PathTracingRenderer(pugi::xml_node& rendererNode);
+
 	void init() override;
-	void compileAndCreateShaders() override;
 	void clean() override;
 	void uiRender() override;
 	void resize(VkCommandBuffer cmd, const VkExtent2D& size) override;
-	void updateDataPerFrame(VkCommandBuffer cmd) override;
+	void preRender();
 	void render(VkCommandBuffer cmd) override;
-	void onLastHeadlessFrame() override;
+
+	void compileAndCreateShaders() override;
+	void updateDataPerFrame(VkCommandBuffer cmd) override;
 private:
 	nvvk::AccelerationStructureGeometryInfo primitiveToGeometry(const shaderio::Mesh& mesh);
 	void createBottomLevelAS();
@@ -46,19 +40,6 @@ private:
 	void rayTraceScene(VkCommandBuffer cmd);
 
 	void resetFrame();
-
-	void createImage();
-	void createGraphicsDescriptorSetLayout();
-	void createGraphicsPipelineLayout();
-	void updateTextures();
-	void postProcess(VkCommandBuffer cmd) override;
-
-	nvvk::GBuffer            gBuffers{};
-	nvvk::GraphicsPipelineState dynamicPipeline;
-	nvvk::DescriptorPack        descPack;
-	VkPipelineLayout            graphicPipelineLayout{};
-
-	glm::vec2 metallicRoughnessOverride{ -0.01f, -0.01f };
 
 	nvvk::DescriptorPack rtDescPack;
 	VkPipeline rtPipeline{};
@@ -75,8 +56,9 @@ private:
 
 	VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProperties{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR };
 
-	shaderio::PushConstant pushValues{};
-	int maxFrames = 2 << 9;
+	shaderio::PathTracingPushConstant pushValues{};
+
+	std::shared_ptr<FzbRenderer::RasterVoxelization> rasterVoxelization;
 };
 
 }

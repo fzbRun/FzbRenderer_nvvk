@@ -7,8 +7,33 @@
 #include "./Mesh.h"
 #include <common/Material/Material.h>
 
+shaderio::AABB FzbRenderer::MeshInfo::getAABB(glm::mat4 transformMatrix) {
+	glm::vec3 maxmum = { FLT_MAX, FLT_MAX, FLT_MAX };
+	if (aabb.minimum != maxmum && aabb.maximum != -maxmum) return aabb;
+
+	Scene& sceneRsource = Application::sceneResource;
+	std::vector<uint8_t>& meshByteData = sceneRsource.meshSets[sceneRsource.getMeshSetIndex(meshIndex)].meshByteData;
+	const auto& positions = mesh.triMesh.positions;
+	const glm::vec3* vertexData = reinterpret_cast<const glm::vec3*>(
+		meshByteData.data() + positions.offset
+		);
+
+	for (uint32_t i = 0; i < positions.count; ++i) {
+		const glm::vec3& pos = vertexData[i];
+		glm::vec3 pos_transform = transformMatrix * glm::vec4(pos, 1.0f);
+		aabb.minimum.x = std::min(pos.x, aabb.minimum.x);
+		aabb.minimum.y = std::min(pos.y, aabb.minimum.y);
+		aabb.minimum.z = std::min(pos.z, aabb.minimum.z);
+		aabb.maximum.x = std::max(pos.x, aabb.maximum.x);
+		aabb.maximum.y = std::max(pos.y, aabb.maximum.y);
+		aabb.maximum.z = std::max(pos.z, aabb.maximum.z);
+	}
+
+	return aabb;
+}
+//-----------------------------------------------------MeshSet---------------------------------------------------
 //所有的数据都不是交错的，即pos全放在一起，normal全放在一起……。这也影响这其他所有读取数据的地方，需要注意!!!!!
-FzbRenderer::Mesh::Mesh(std::string meshID, std::string meshType, std::filesystem::path meshPath)
+FzbRenderer::MeshSet::MeshSet(std::string meshID, std::string meshType, std::filesystem::path meshPath)
 {
 	this->meshID = meshID;
 
@@ -20,6 +45,9 @@ FzbRenderer::Mesh::Mesh(std::string meshID, std::string meshType, std::filesyste
 	else if (meshType == "obj") {
 		loadObjData(meshPath);
 	}
+
+	aabb.minimum = { FLT_MAX, FLT_MAX, FLT_MAX };
+	aabb.maximum = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
 }
 
 /*
@@ -38,7 +66,7 @@ shaderio::BSDFMaterial loadGltfMaterial(const tinygltf::Material& gltfMaterial) 
 		.roughness = float(gltfMaterial.pbrMetallicRoughness.roughnessFactor),
 	};
 }
-void FzbRenderer::Mesh::loadGltfData(const tinygltf::Model& model, bool importInstance) {
+void FzbRenderer::MeshSet::loadGltfData(const tinygltf::Model& model, bool importInstance) {
 	SCOPED_TIMER(__FUNCTION__);
 
 	auto getElementByteSize = [](int type) -> uint32_t {	//最小数据单元的大小
@@ -104,13 +132,13 @@ void FzbRenderer::Mesh::loadGltfData(const tinygltf::Model& model, bool importIn
 			material = loadGltfMaterial(gltfMaterial);
 		}
 
-		FzbRenderer::ChildMesh childMesh = {
+		FzbRenderer::MeshInfo childMesh = {
 			.meshID = meshID + model.meshes[meshIdx].name,
 			.mesh = mesh,
 			.materialID = materialID,
 			.material = material
 		};
-		childMeshes.push_back(childMesh);
+		childMeshInfos.push_back(childMesh);
 	}
 
 	/*
@@ -211,7 +239,7 @@ shaderio::BSDFMaterial loadMtlMaterial(aiMaterial* mtlMaterial) {
 
 	return material;
 }
-void FzbRenderer::Mesh::processMesh(aiMesh* meshData, const aiScene* sceneData) {
+void FzbRenderer::MeshSet::processMesh(aiMesh* meshData, const aiScene* sceneData) {
 	shaderio::Mesh mesh{};
 
 	uint32_t padding = 0;
@@ -363,15 +391,15 @@ void FzbRenderer::Mesh::processMesh(aiMesh* meshData, const aiScene* sceneData) 
 		material = loadMtlMaterial(mtlMaterial);
 	}
 
-	ChildMesh childMesh = {
+	MeshInfo childMeshInfo = {
 		.meshID = meshID + meshData->mName.C_Str(),
 		.mesh = mesh,
 		.materialID = materialID,
 		.material = material
 	};
-	childMeshes.emplace_back(childMesh);
+	childMeshInfos.emplace_back(childMeshInfo);
 }
-void FzbRenderer::Mesh::processNode(aiNode* node, const aiScene* sceneData) {
+void FzbRenderer::MeshSet::processNode(aiNode* node, const aiScene* sceneData) {
 	std::vector<shaderio::Mesh> meshes;
 	for (uint32_t i = 0; i < node->mNumMeshes; i++) {
 		aiMesh* meshData = sceneData->mMeshes[node->mMeshes[i]];
@@ -380,9 +408,9 @@ void FzbRenderer::Mesh::processNode(aiNode* node, const aiScene* sceneData) {
 
 	for (uint32_t i = 0; i < node->mNumChildren; i++) processNode(node->mChildren[i], sceneData);
 }
-void FzbRenderer::Mesh::loadObjData(std::filesystem::path meshPath) {
+void FzbRenderer::MeshSet::loadObjData(std::filesystem::path meshPath) {
 	Assimp::Importer import;
-	uint32_t needs = aiProcess_Triangulate;// |
+	uint32_t needs = aiProcess_Triangulate | aiProcess_GenSmoothNormals;// |
 		//(vertexFormat.useTexCoord ? aiProcess_FlipUVs : aiPostProcessSteps(0u)) |
 		//(vertexFormat.useNormal ? aiProcess_GenSmoothNormals : aiPostProcessSteps(0u)) |
 		//(vertexFormat.useTangent ? aiProcess_CalcTangentSpace : aiPostProcessSteps(0u));
@@ -394,7 +422,7 @@ void FzbRenderer::Mesh::loadObjData(std::filesystem::path meshPath) {
 	processNode(sceneData->mRootNode, sceneData);
 }
 
-FzbRenderer::Mesh::Mesh(std::string meshID, nvutils::PrimitiveMesh primitiveMesh)
+FzbRenderer::MeshSet::MeshSet(std::string meshID, nvutils::PrimitiveMesh primitiveMesh)
 {
 	this->meshID = meshID;
 	shaderio::Mesh mesh{};
@@ -458,14 +486,14 @@ FzbRenderer::Mesh::Mesh(std::string meshID, nvutils::PrimitiveMesh primitiveMesh
 	padding = addData(meshByteData, normalByteData, sizeof(glm::vec3));
 	mesh.triMesh.normals.offset += padding;
 
-	ChildMesh childMesh = {
+	MeshInfo childMeshInfo = {
 		.meshID = meshID,
 		.mesh = mesh,
 	};
-	childMeshes.emplace_back(childMesh);
+	childMeshInfos.emplace_back(childMeshInfo);
 }
 
-nvvk::Buffer FzbRenderer::Mesh::createMeshDataBuffer() {
+nvvk::Buffer FzbRenderer::MeshSet::createMeshDataBuffer() {
 	nvvk::Buffer bData;
 	nvvk::ResourceAllocator* allocator = Application::stagingUploader.getResourceAllocator();
 	NVVK_CHECK(allocator->createBuffer(bData, std::span<const unsigned char>(meshByteData).size_bytes(),
@@ -476,6 +504,23 @@ nvvk::Buffer FzbRenderer::Mesh::createMeshDataBuffer() {
 	return bData;
 }
 
+shaderio::AABB FzbRenderer::MeshSet::getAABB(glm::mat4 transformMatrix) {
+	glm::vec3 maxmum = { FLT_MAX, FLT_MAX, FLT_MAX };
+	if (aabb.minimum != maxmum && aabb.maximum != -maxmum) return aabb;
+
+	for (auto& childMeshInfo : childMeshInfos) {
+		shaderio::AABB childMeshAABB = childMeshInfo.getAABB(transformMatrix);
+
+		aabb.minimum.x = std::min(childMeshAABB.minimum.x, aabb.minimum.x);
+		aabb.minimum.y = std::min(childMeshAABB.minimum.y, aabb.minimum.y);
+		aabb.minimum.z = std::min(childMeshAABB.minimum.z, aabb.minimum.z);
+		aabb.maximum.x = std::max(childMeshAABB.maximum.x, aabb.maximum.x);
+		aabb.maximum.y = std::max(childMeshAABB.maximum.y, aabb.maximum.y);
+		aabb.maximum.z = std::max(childMeshAABB.maximum.z, aabb.maximum.z);
+	}
+
+	return aabb;
+}
 //-----------------------------------------------------生成图元----------------------------------------------------
 static uint32_t addPos(nvutils::PrimitiveMesh& mesh, glm::vec3 p)
 {
@@ -492,7 +537,7 @@ static void addTriangle(nvutils::PrimitiveMesh& mesh, glm::vec3 a, glm::vec3 b, 
 {
 	mesh.triangles.push_back({ {addPos(mesh, a), addPos(mesh, b), addPos(mesh, c)} });
 }
-nvutils::PrimitiveMesh FzbRenderer::Mesh::createPlane(int steps, float width, float height) {
+nvutils::PrimitiveMesh FzbRenderer::MeshSet::createPlane(int steps, float width, float height) {
 	nvutils::PrimitiveMesh mesh;
 
 	if (steps <= 0) return mesh;
@@ -533,6 +578,97 @@ nvutils::PrimitiveMesh FzbRenderer::Mesh::createPlane(int steps, float width, fl
 			addTriangle(mesh, a, b, d);
 		}
 	}
+
+	return mesh;
+}
+nvutils::PrimitiveMesh FzbRenderer::MeshSet::createCube(bool normal, bool texCoords,float width, float height , float depth)
+{
+	nvutils::PrimitiveMesh mesh;
+	if (normal == false && texCoords == false) {
+		std::vector<glm::vec3> pos = { {0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 0.0f}, {0.0f, 1.0f, 0.0f},
+									   {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 1.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f, 1.0f} };
+		for (int i = 0; i < 8; ++i) {
+			mesh.vertices.push_back({ pos[i] });
+		}
+		mesh.triangles = {
+			{{1, 0, 3}}, {{1, 3, 2}},
+			{{4, 5, 6}}, {{4, 6, 7}},
+			{{5, 1, 2}}, {{5, 2, 6}},
+			{{0, 4, 7}}, {{0, 7, 3}},
+			{{7, 6, 2}}, {{7, 2, 3}},
+			{{0, 1, 5}}, {{0, 5, 4}}
+		};
+	}
+	else {
+		// 每个面由四个原始顶点索引组成（按你原来的面顺序）
+		const uint32_t faces[6][4] = {
+			{1, 0, 3, 2}, // z = 0 面（back）
+			{4, 5, 6, 7}, // z = 1 面（front）
+			{5, 1, 2, 6}, // x = 1 面（right）
+			{0, 4, 7, 3}, // x = 0 面（left）
+			{7, 6, 2, 3}, // y = 1 面（top）
+			{0, 1, 5, 4}  // y = 0 面（bottom）
+		};
+		const glm::vec3 pos[8] = {
+				{0.0f, 0.0f, 0.0f}, // 0
+				{1.0f, 0.0f, 0.0f}, // 1
+				{1.0f, 1.0f, 0.0f}, // 2
+				{0.0f, 1.0f, 0.0f}, // 3
+				{0.0f, 0.0f, 1.0f}, // 4
+				{1.0f, 0.0f, 1.0f}, // 5
+				{1.0f, 1.0f, 1.0f}, // 6
+				{0.0f, 1.0f, 1.0f}  // 7
+		};
+		// 对应每个面的法线（与上面 faces 顺序一一对应）
+		const glm::vec3 normals[6] = {
+			{ 0.0f,  0.0f, -1.0f}, // back
+			{ 0.0f,  0.0f,  1.0f}, // front
+			{ 1.0f,  0.0f,  0.0f}, // right
+			{-1.0f,  0.0f,  0.0f}, // left
+			{ 0.0f,  1.0f,  0.0f}, // top
+			{ 0.0f, -1.0f,  0.0f}  // bottom
+		};
+		const glm::vec2 texcoords[4] = {
+			{0.0f, 0.0f},
+			{1.0f, 0.0f},
+			{1.0f, 1.0f},
+			{0.0f, 1.0f}
+		};
+		mesh.vertices.clear();
+		mesh.triangles.clear();
+
+		// 为每个面 push 4 个顶点
+		for (int f = 0; f < 6; ++f) {
+			for (int v = 0; v < 4; ++v) {
+				uint32_t pi = faces[f][v];
+				nvutils::PrimitiveVertex vertexData;
+				vertexData.pos = pos[pi];
+				if (normal) vertexData.nrm = normals[f];
+				if (texCoords) vertexData.tex = texcoords[v];
+				mesh.vertices.push_back(vertexData);
+			}
+			glm::uvec3 indices0 = glm::uvec3(faces[f][0], faces[f][1], faces[f][2]);
+			glm::uvec3 indices1 = glm::uvec3(faces[f][1], faces[f][2], faces[f][3]);
+			mesh.triangles.push_back({ indices0 });
+			mesh.triangles.push_back({ indices1 });
+		}
+	}
+
+	return mesh;
+}
+nvutils::PrimitiveMesh FzbRenderer::MeshSet::createWireframe(float width, float height, float depth) {
+	nvutils::PrimitiveMesh mesh;
+	std::vector<glm::vec3> pos = { {0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 0.0f}, {0.0f, 1.0f, 0.0f},
+									   {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 1.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f, 1.0f} };
+	for (int i = 0; i < 8; ++i) {
+		mesh.vertices.push_back({ pos[i] });
+	}
+	mesh.triangles = {
+		{{0, 1, 1}}, {{2, 2, 3}},
+		{{3, 0, 4}}, {{5, 5, 6}},
+		{{6, 7, 7}}, {{4, 0, 4}},
+		{{1, 5, 2}}, {{6, 3, 7}},
+	};
 
 	return mesh;
 }

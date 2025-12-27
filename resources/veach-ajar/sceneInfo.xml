@@ -35,7 +35,7 @@
 		<bsdf type="diffuse" id="DiffuseBSDF">
 			<albedo value="0.8, 0.8, 0.8, 1.0" />
 		</bsdf>
-		<bsdf type="roughconductor" id="FloorBSDF">
+		<bsdf type="roughConductor" id="FloorBSDF">
 			<roughness value="0.1" />
 			<albedoMap type="checkerboard">
 				<color1 value="0.2, 0.2, 0.2" />
@@ -53,12 +53,12 @@
 		<bsdf type="diffuse" id="PictureFrameBSDF">
 			<albedo value="0.258824, 0.207843, 0.145098" />
 		</bsdf>
-		<bsdf type="roughconductor" id="HingeBSDF">
+		<bsdf type="roughConductor" id="HingeBSDF">
 			<roughness value="0.1" />
 			<eta value="1.65746, 0.880369, 0.521229" />
 			<k value="9.22387, 6.26952, 4.837" />
 		</bsdf>
-		<bsdf type="roughconductor" id="Pot1BSDF">
+		<bsdf type="roughConductor" id="Pot1BSDF">
 			<roughness value="0.15" />
 			<eta value="1.65746, 0.880369, 0.521229" />
 			<k value="9.22387, 6.26952, 4.837" />
@@ -66,8 +66,8 @@
 		<bsdf type="diffuse" id="Pot2BSDF">
 			<albedo value="0.8, 0.8, 0.8" />
 		</bsdf>
-		<bsdf type="roughconductor" id="Pot3BSDF">
-			<roughness value="0.15" />
+		<bsdf type="roughConductor" id="Pot3BSDF">
+			<roughness value="0.01" />
 			<eta value="1.91, 1.31, 0.82" />
 			<k value="8.05, 6.93, 5.99" />
 		</bsdf>
@@ -85,6 +85,7 @@
 			</transform>
 			<emissive value = "1.0, 1.0, 1.0" />
 			<intensity value = "1000.0" />
+			<SphericalRectangleSample value="true" />
 		</light>
 	</lights>
 	<meshes>

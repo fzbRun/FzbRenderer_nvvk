@@ -1,11 +1,15 @@
 <rendererInfo>
 	<name value = "FzbRenderer" />
 	<resolution width = "1280" height = "720" />
-	<sceneXML path = "./veach-ajar" />	<!--开头不能加/，但可以是./或不加-->
+	<sceneXML path = "./dragon" />	<!--开头不能加/，但可以是./或不加-->
 
 	<renderer type = "PathTracing">  <!--PathTracing  Deferred-->
 		<maxDepth value = "6" />
 		<useNEE value = "true" />
+		<RasterVoxelization>
+			<resolution value = "2048, 2048" />
+			<voxelCount value="64" />
+		</RasterVoxelization>
 	</renderer>
 	
 </rendererInfo>

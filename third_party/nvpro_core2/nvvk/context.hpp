@@ -116,6 +116,12 @@ public:
   const VkPhysicalDeviceVulkan13Features& getPhysicalDeviceFeatures13() const { return m_deviceFeatures13; }
   const VkPhysicalDeviceVulkan14Features& getPhysicalDeviceFeatures14() const { return m_deviceFeatures14; }
 
+  VkPhysicalDeviceFeatures&         getPhysicalDeviceFeatures_notConst() { return m_deviceFeatures.features; }
+  VkPhysicalDeviceVulkan11Features& getPhysicalDeviceFeatures11_notConst() { return m_deviceFeatures11; }
+  VkPhysicalDeviceVulkan12Features& getPhysicalDeviceFeatures12_notConst() { return m_deviceFeatures12; }
+  VkPhysicalDeviceVulkan13Features& getPhysicalDeviceFeatures13_notConst() { return m_deviceFeatures13; }
+  VkPhysicalDeviceVulkan14Features& getPhysicalDeviceFeatures14_notConst() { return m_deviceFeatures14; }
+
 
 public:
   // Those functions are used internally to create the Vulkan context, but could be used externally if needed.

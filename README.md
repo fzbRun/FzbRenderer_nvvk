@@ -18,10 +18,13 @@
   - 反射、折射
   - BSDF 重要性采样
   - NEE（均匀采样和球面矩形采样）
+- **光栅体素化**
+  - 三视图、体素结果以及线框结果可视化（如图）
+    <img src="./result/rasterVoxelization_dragon.png" alt="FzbRenderer_nvvk" style="width:80%; border-radius:6px; display:block;" />
 
-## Quick Start
+## 快速开始
 
-### Prerequisites
+### 依赖
 
 - **[nvpro_core2](https://github.com/nvpro-samples/nvpro_core2)**：Vulkan helper classes and utilities
 - **[Vulkan 1.4+](https://vulkan.lunarg.com/sdk/home)**: Compatible GPU and drivers
@@ -31,8 +34,8 @@
 
 ### 注意事项
 
-如果没有指定地址，Cmake 编译时会自动下载 nvpro_core2 和 pugixml 到 thrid-party 文件夹下。
-但是 vulkan SDK 和 assimp 需要手动下载并在 CMake 编译时指定地址。
+如果没有指定地址，Cmake 编译时会自动下载 nvpro_core2 和 pugixml 到 thrid-party 文件夹下。（建议使用我上传的库，因为我对其可能有细微修改）
+但是 vulkan SDK 和 assimp （我未修改过）需要手动下载并在 CMake 编译时指定地址。
 推荐使用 VSCode 的 CMake Tool 插件。
 编译文件将会在\_bin 文件夹下。
 

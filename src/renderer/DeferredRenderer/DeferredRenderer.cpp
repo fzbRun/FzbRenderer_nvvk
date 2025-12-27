@@ -8,56 +8,10 @@
 #include <glm/gtc/type_ptr.hpp>
 #include "common/Shader/Shader.h"
 
-FzbRenderer::DeferredRenderer::DeferredRenderer(RendererCreateInfo& createInfo) {
+FzbRenderer::DeferredRenderer::DeferredRenderer(pugi::xml_node& rendererNode) {
 
 }
 
-void FzbRenderer::DeferredRenderer::createImage() {
-    VkSampler linearSampler{};
-    NVVK_CHECK(Application::samplerPool.acquireSampler(linearSampler));
-    NVVK_DBG_NAME(linearSampler);
-
-    nvvk::GBufferInitInfo gBufferInit{
-        .allocator = &Application::allocator,
-        .colorFormats = {VK_FORMAT_R32G32B32A32_SFLOAT, VK_FORMAT_R8G8B8A8_UNORM},
-        .depthFormat = nvvk::findDepthFormat(Application::app->getPhysicalDevice()),
-        .imageSampler = linearSampler,
-        .descriptorPool = Application::app->getTextureDescriptorPool(),
-    };
-    gBuffers.init(gBufferInit);
-}
-void FzbRenderer::DeferredRenderer::createGraphicsDescriptorSetLayout() {
-    nvvk::DescriptorBindings bindings;
-    bindings.addBinding({ .binding = shaderio::BindingPoints::eTextures,
-                         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                         .descriptorCount = 10,
-                         .stageFlags = VK_SHADER_STAGE_ALL },
-        VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
-        | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
-    descPack.init(bindings, Application::app->getDevice(), 1, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
-        VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT);
-
-    NVVK_DBG_NAME(descPack.getLayout());
-    NVVK_DBG_NAME(descPack.getPool());
-    NVVK_DBG_NAME(descPack.getSet(0));
-}
-void FzbRenderer::DeferredRenderer::createGraphicsPipelineLayout() {
-    const VkPushConstantRange pushConstantRange{
-        .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
-        .offset = 0,
-        .size = sizeof(shaderio::PushConstant)
-    };
-
-    const VkPipelineLayoutCreateInfo pipelineLayoutInfo{
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .setLayoutCount = 1,
-        .pSetLayouts = descPack.getLayoutPtr(),
-        .pushConstantRangeCount = 1,
-        .pPushConstantRanges = &pushConstantRange,
-    };
-    NVVK_CHECK(vkCreatePipelineLayout(Application::app->getDevice(), &pipelineLayoutInfo, nullptr, &graphicPipelineLayout));
-    NVVK_DBG_NAME(graphicPipelineLayout);
-}
 void FzbRenderer::DeferredRenderer::compileAndCreateShaders() {
     SCOPED_TIMER(__FUNCTION__);
 
@@ -72,7 +26,7 @@ void FzbRenderer::DeferredRenderer::compileAndCreateShaders() {
     const VkPushConstantRange pushConstantRange{
         .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
         .offset = 0,
-        .size = sizeof(shaderio::PushConstant),
+        .size = sizeof(shaderio::DefaultPushConstant),
     };
 
     VkShaderCreateInfoEXT shaderInfo{
@@ -101,34 +55,20 @@ void FzbRenderer::DeferredRenderer::compileAndCreateShaders() {
     vkCreateShadersEXT(Application::app->getDevice(), 1U, &shaderInfo, nullptr, &fragmentShader);
     NVVK_DBG_NAME(fragmentShader);
 }
-void FzbRenderer::DeferredRenderer::updateTextures() {
-    if (Application::sceneResource.textures.empty())
-        return;
-
-    nvvk::WriteSetContainer write{};
-    VkWriteDescriptorSet    allTextures =
-        descPack.makeWrite(shaderio::BindingPoints::eTextures, 0, 1, uint32_t(Application::sceneResource.textures.size()));
-    nvvk::Image* allImages = Application::sceneResource.textures.data();
-    write.append(allTextures, allImages);
-    vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
-}
 void FzbRenderer::DeferredRenderer::init() {
-    createImage();
-    createGraphicsDescriptorSetLayout();
-    createGraphicsPipelineLayout();
+    FzbRenderer::Renderer::createGBuffer(true);
+    Renderer::createDescriptorSetLayout();
+    Renderer::createPipelineLayout();
     compileAndCreateShaders();
-    updateTextures();
+    Renderer::addTextureArrayDescriptor();
 }
 
 void FzbRenderer::DeferredRenderer::clean() {
+    Renderer::clean();
     VkDevice device = Application::app->getDevice();
 
-    descPack.deinit();
-    vkDestroyPipelineLayout(device, graphicPipelineLayout, nullptr);
     vkDestroyShaderEXT(device, vertexShader, nullptr);
     vkDestroyShaderEXT(device, fragmentShader, nullptr);
-
-    gBuffers.deinit();
 }
 
 void FzbRenderer::DeferredRenderer::uiRender() {
@@ -144,17 +84,17 @@ void FzbRenderer::DeferredRenderer::resize(VkCommandBuffer cmd, const VkExtent2D
 
 void FzbRenderer::DeferredRenderer::render(VkCommandBuffer cmd) {
     NVVK_DBG_SCOPE(cmd);
-    shaderio::PushConstant pushValues{
+    shaderio::DefaultPushConstant pushValues{
         .sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address,
         //.metallicRoughnessOverride = metallicRoughnessOverride,
     };
 
     const VkPushConstantsInfo pushInfo{
         .sType = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
-        .layout = graphicPipelineLayout,
+        .layout = pipelineLayout,
         .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
         .offset = 0,
-        .size = sizeof(shaderio::PushConstant),
+        .size = sizeof(shaderio::DefaultPushConstant),
         .pValues = &pushValues,
     };
 
@@ -187,23 +127,23 @@ void FzbRenderer::DeferredRenderer::render(VkCommandBuffer cmd) {
     const VkBindDescriptorSetsInfo bindDescriptorSetsInfo{
         .sType = VK_STRUCTURE_TYPE_BIND_DESCRIPTOR_SETS_INFO,
         .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
-        .layout = graphicPipelineLayout,
+        .layout = pipelineLayout,
         .firstSet = 0,
         .descriptorSetCount = 1,
         .pDescriptorSets = descPack.getSetPtr(),
     };
     //vkCmdBindDescriptorSets2(cmd, &bindDescriptorSetsInfo);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicPipelineLayout, 0, 1,
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1,
         descPack.getSetPtr(), 0, nullptr);
 
     vkCmdBeginRendering(cmd, &renderingInfo);
 
     //使用VK_EXT_SHADER_OBJECT_EXTENSION_NAME后可以不需要pipeline，直接通过命令设置渲染设置和着色器
-    dynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;
-    dynamicPipeline.cmdApplyAllStates(cmd);
-    dynamicPipeline.cmdSetViewportAndScissor(cmd, Application::app->getViewportSize());
+    graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
+    graphicsDynamicPipeline.cmdApplyAllStates(cmd);
+    graphicsDynamicPipeline.cmdSetViewportAndScissor(cmd, Application::app->getViewportSize());
     vkCmdSetDepthTestEnable(cmd, VK_TRUE);
-    dynamicPipeline.cmdBindShaders(cmd, { .vertex = vertexShader, .fragment = fragmentShader });
+    graphicsDynamicPipeline.cmdBindShaders(cmd, { .vertex = vertexShader, .fragment = fragmentShader });
 
     VkVertexInputBindingDescription2EXT bindingDescription{};
     VkVertexInputAttributeDescription2EXT attributeDescription = {};
@@ -219,7 +159,7 @@ void FzbRenderer::DeferredRenderer::render(VkCommandBuffer cmd) {
         pushValues.instanceIndex = int(i);
         vkCmdPushConstants2(cmd, &pushInfo);
 
-        uint32_t bufferIndex = Application::sceneResource.meshToBufferIndex[meshIndex];
+        uint32_t bufferIndex = Application::sceneResource.getMeshBufferIndex(meshIndex);
         const nvvk::Buffer& v = Application::sceneResource.bDatas[bufferIndex];
 
         vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(mesh.indexType));
@@ -228,19 +168,8 @@ void FzbRenderer::DeferredRenderer::render(VkCommandBuffer cmd) {
     }
 
     vkCmdEndRendering(cmd);
+    //nvvk的cmdImageMemoryBarrier函数可以根据image的old和new layout判断前后的可能的所有stage和access
     nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(eImgRendered),
                                       VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
-
-    postProcess(cmd);
-}
-void FzbRenderer::DeferredRenderer::postProcess(VkCommandBuffer cmd) {
-    NVVK_DBG_SCOPE(cmd);
-    Application::tonemapper.runCompute(cmd, gBuffers.getSize(), Application::tonemapperData, gBuffers.getDescriptorImageInfo(eImgRendered),
-        gBuffers.getDescriptorImageInfo(eImgTonemapped));
-    nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
-}
-
-void FzbRenderer::DeferredRenderer::onLastHeadlessFrame() {
-    Application::app->saveImageToFile(gBuffers.getColorImage(eImgTonemapped), gBuffers.getSize(),
-        nvutils::getExecutablePath().replace_extension(".jpg").string());
+    Renderer::postProcess(cmd);
 }

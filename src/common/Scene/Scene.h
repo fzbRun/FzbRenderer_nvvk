@@ -27,18 +27,18 @@ public:
 	~Scene() = default;
 
 	void createSceneFromXML();
-	void createSceneInfBuffer();
+	void createSceneInfoBuffer();
 	void clean();
 
 	void UIRender();
 
 	std::filesystem::path scenePath;
 	std::shared_ptr<nvutils::CameraManipulator> cameraManip{ std::make_shared<nvutils::CameraManipulator>() };
-	std::unordered_map<std::filesystem::path, int> texturePathMap;
-	std::vector<nvvk::Image>     textures{};
-
-	std::vector<FzbRenderer::Mesh> meshSets;
+	
+	std::vector<FzbRenderer::MeshSet> meshSets;
 	uint32_t customPrimitiveCount = 0;
+	//---------------------------------------GPU使用数据---------------------------------------------------
+	std::vector<nvvk::Image>     textures{};
 
 	std::vector<shaderio::Mesh> meshes;
 	std::vector<shaderio::Instance> instances;
@@ -50,10 +50,25 @@ public:
 	nvvk::Buffer bInstances;
 	nvvk::Buffer bMaterials;
 	nvvk::Buffer bSceneInfo;
-
-	std::vector<uint32_t> meshToBufferIndex;	//meshToBufferIndex[meshIndex] = bufferIndex，前向或延时渲染时按mesh渲染时使用
-
+	//-----------------------------------------------------------------------------------------------------
 	int loadTexture(const std::filesystem::path& texturePath);
+	void addMeshSet(MeshSet& meshSet);
+
+	int getMeshSetIndex(std::string meshSetID) { return meshSetIDToIndex[meshSetID]; };
+	int getMaterialIndex(std::string materialID) { return uniqueMaterialIDToIndex[materialID]; };
+	int getTextureIndex(std::filesystem::path texturePath) { return texturePathToIndex[texturePath]; }
+	int getMeshBufferIndex(uint32_t meshIndex) { return meshToBufferIndex[meshIndex]; };
+	int getMeshSetIndex(uint32_t meshIndex) { return meshIndexToMeshSetIndex[meshIndex]; };
+
+	MeshInfo getMeshInfo(uint32_t meshIndex);
+
+private:
+	//映射
+	std::unordered_map<std::string, uint32_t> uniqueMaterialIDToIndex;
+	std::unordered_map<std::filesystem::path, int> texturePathToIndex;
+	std::map<std::string, uint32_t> meshSetIDToIndex;	//根据meshSetID获取meshSet数组的索引
+	std::vector<uint32_t> meshToBufferIndex;	//meshToBufferIndex[meshIndex] = bufferIndex，前向或延时渲染时按mesh渲染时使用
+	std::vector<uint32_t> meshIndexToMeshSetIndex;
 };
 
 }

@@ -17,12 +17,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "nvvk/Slang/pbr.h.slang"
+#include "common/Shader/nvvk/Slang/pbr.h.slang"
 #include <nvshaders/slang_types.h>
-#include "shaderStructType.h"
+#include "common/Shader/shaderStructType.h"
+#include "common/Shader/Slang/commonFunction.slang"
 
 // clang-format off
-[[vk::push_constant]]                       ConstantBuffer<PushConstant> pushConst;
+[[vk::push_constant]]                       ConstantBuffer<DefaultPushConstant> pushConst;
 [[vk::binding(BindingPoints::eTextures)]]   Sampler2D textures[];
 // clang-format on
 
@@ -81,7 +82,7 @@ VSout vertexMain(VSin input, uint vertexIndex: SV_VertexID)
   VSout output;
   output.sv_position   = mul(pos, sceneInfo.viewProjMatrix);
   output.worldPos      = pos.xyz;
-  output.worldNormal   = normalize(mul(normal, float3x3(pushConst.normalMatrix)));
+  output.worldNormal = normalize(mul(normal, float3x3(pushConst.normalMatrix)));
   output.worldTexCoord = texCoord;
 
   return output;

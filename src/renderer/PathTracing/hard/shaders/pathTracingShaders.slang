@@ -5,13 +5,13 @@ slang´óÀ¨ºÅµÄ×óÓÒ(°üÀ¨¿ªÊ¼´óÀ¨ºÅµÄÏÂÒ»ĞĞ¿ªÊ¼£¬ÒÔ¼°½áÊø´óÀ¨ºÅµÄÉÏĞĞ½áÎ²)²»ÄÜÓĞ×¢Ê
 #include "nvshaders/constants.h.slang"
 #include "nvshaders/random.h.slang"
 #include "nvshaders/sky_functions.h.slang"
-#include "nvvk/Slang/pbr.h.slang"
+#include "common/Shader/nvvk/Slang/pbr.h.slang"
 #include "nvshaders/ray_utils.h.slang"
-#include "shaderStructType.h"
+#include "renderer/PathTracing/hard/shaderio.h"
 
 // clang-format off
 //ScalarDataLayout
-[[vk::push_constant]]                           ConstantBuffer<PushConstant, ScalarDataLayout> pushConst;
+[[vk::push_constant]]                           ConstantBuffer<PathTracingPushConstant, ScalarDataLayout> pushConst;
 [[vk::binding(BindingPoints::eTextures, 0)]]    Sampler2D textures[];
 [[vk::binding(BindingPoints::eTlas, 1)]]        RaytracingAccelerationStructure topLevelAS;
 [[vk::binding(BindingPoints::eOutImage, 1)]]    RWTexture2D<float4> outImage;
@@ -145,6 +145,10 @@ void getTextueData(inout CallablePayload payload, float2 texCoords) {
 
     int albedoMapIndex = payload.material.materialMapIndex.y;
     if (albedoMapIndex == int(AlbedoMapType::Checkerboard)) {
+        float2 uv = float2(texCoords.x * 20.0f, texCoords.y * 80.0f) * 2.0f;
+        float2 checker = floor(uv) % 2.0f;
+        float pattern = (checker.x + checker.y) % 2.0f;
+        payload.material.albedo *= lerp(float3(0.8f), float3(0.2f), pattern);
     }
     else if (albedoMapIndex >= 0) payload.material.albedo *= textures[albedoMapIndex].SampleLevel(texCoords, 0).xyz;
 

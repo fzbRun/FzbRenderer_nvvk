@@ -1,0 +1,19 @@
+#pragma once
+
+#include <common/Shader/shaderStructType.h>
+
+#ifndef FZBRENDERER_PATHTRACING_SHADER_IO_H
+#define FZBRENDERER_PATHTRACING_SHADER_IO_H
+NAMESPACE_SHADERIO_BEGIN()
+
+struct PathTracingPushConstant
+{
+	float3x3       normalMatrix;
+	int NEEShaderIndex = -1;
+	int frameIndex = 0;
+	int maxDepth = 3;
+	SceneInfo* sceneInfoAddress;           // Address of the scene information buffer
+};
+
+NAMESPACE_SHADERIO_END()
+#endif

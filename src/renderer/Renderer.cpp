@@ -1,6 +1,8 @@
 #include "Renderer.h"
+#include <common/Application/Application.h>
 #include "DeferredRenderer/DeferredRenderer.h"
 #include "PathTracing/hard/PathTracingRenderer.h"
+#include <nvvk/formats.hpp>
 
 enum FzbRendererType {
 	FZB_RENDERER_FORWARD,
@@ -28,8 +30,8 @@ std::shared_ptr<FzbRenderer::Renderer> FzbRenderer::createRenderer(RendererCreat
 	if (RendererTypeMap.count(createInfo.rendererTypeStr)) {
 		rendererType = RendererTypeMap[createInfo.rendererTypeStr];
 		switch (rendererType) {
-			case FZB_RENDERER_DEFERRED: return std::make_shared<DeferredRenderer>(createInfo);
-			case FZB_RENDERER_PATH_TRACING: return std::make_shared<PathTracingRenderer>(createInfo);
+			case FZB_RENDERER_DEFERRED: return std::make_shared<DeferredRenderer>(createInfo.rendererNode);
+			case FZB_RENDERER_PATH_TRACING: return std::make_shared<PathTracingRenderer>(createInfo.rendererNode);
 		}
 		return nullptr;
 	}
@@ -37,7 +39,22 @@ std::shared_ptr<FzbRenderer::Renderer> FzbRenderer::createRenderer(RendererCreat
 	return nullptr;
 }
 
-void FzbRenderer::Renderer::addExtensions() {};
-void FzbRenderer::Renderer::compileAndCreateShaders() {};
-void FzbRenderer::Renderer::onLastHeadlessFrame() {};
-void FzbRenderer::Renderer::updateDataPerFrame(VkCommandBuffer cmd) {};
+void FzbRenderer::Renderer::init() {
+	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
+	Application::stagingUploader.cmdUploadAppended(cmd);
+	Application::app->submitAndWaitTempCmdBuffer(cmd);
+}
+void FzbRenderer::Renderer::clean() {
+	Feature::clean();
+}
+void FzbRenderer::Renderer::onLastHeadlessFrame() {
+	Application::app->saveImageToFile(gBuffers.getColorImage(eImgTonemapped), gBuffers.getSize(),
+		nvutils::getExecutablePath().replace_extension(".jpg").string());
+};
+
+void FzbRenderer::Renderer::postProcess(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
+	Application::tonemapper.runCompute(cmd, gBuffers.getSize(), Application::tonemapperData, gBuffers.getDescriptorImageInfo(eImgRendered),
+		gBuffers.getDescriptorImageInfo(eImgTonemapped));
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
+}

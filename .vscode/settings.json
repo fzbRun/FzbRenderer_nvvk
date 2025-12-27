@@ -2,9 +2,9 @@
   "cmake.configureArgs": [
     "-DENABLE_AFTERMATH=ON",
     "-DNsightAftermath_SDK=C:/Program Files/NVIDIA Corporation/Nsight Graphics 2025.4.1/SDKs/NsightAftermathSDK/2025.4.0.250729",
-    "-DSlang_ROOT=C:/Users/fangzanbo/Desktop/render/third_party/Slang-windows-x86_64-2025.13.1",
+    "-DSlang_ROOT=C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/third_party/Slang-windows-x86_64-2025.13.1",
     "-DSlang_VERSION=2025.13.1",
-    "-Dpugixml_ROOT=C:/Users/fangzanbo/Desktop/render/third_party/pugixml",
+    "-Dpugixml_ROOT=C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/third_party/pugixml",
     "-Dassimp_ROOT=C:/Users/fangzanbo/Desktop/render/third_party/assimp-master"
   ]
 }

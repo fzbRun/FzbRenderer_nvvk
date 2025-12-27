@@ -530,6 +530,10 @@ void nvapp::Application::drawFrame(VkCommandBuffer cmd)
   m_signalSemaphores.clear();
   m_commandBuffers.clear();
 
+  for(std::shared_ptr<IAppElement>& e : m_elements)
+  {
+    e->onPreRender();
+  }
 
   // Call UI rendering for each element
   for(std::shared_ptr<IAppElement>& e : m_elements)
@@ -541,10 +545,10 @@ void nvapp::Application::drawFrame(VkCommandBuffer cmd)
   ImGui::Render();
 
   // Call onPreRender for each element with the command buffer of the frame
-  for(std::shared_ptr<IAppElement>& e : m_elements)
-  {
-    e->onPreRender();
-  }
+  //for(std::shared_ptr<IAppElement>& e : m_elements)
+  //{
+  //  e->onPreRender();
+  //}
 
   // Call onRender for each element with the command buffer of the frame
   for(std::shared_ptr<IAppElement>& e : m_elements)
