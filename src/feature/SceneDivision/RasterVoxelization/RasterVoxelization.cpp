@@ -1,4 +1,4 @@
-#include <common/Application/Application.h>
+ï»¿#include <common/Application/Application.h>
 #include "./RasterVoxelization.h"
 #include "common/utils.hpp"
 #include <common/Shader/Shader.h>
@@ -38,7 +38,7 @@ FzbRenderer::RasterVoxelization::RasterVoxelization(pugi::xml_node& featureNode)
 }
 
 void FzbRenderer::RasterVoxelization::init() {
-	//³õÊ¼»¯VGBÉèÖÃ
+	//åˆå§‹åŒ–VGBè®¾ç½®
 	{
 		shaderio::AABB aabb;
 		aabb.minimum = { FLT_MAX, FLT_MAX, FLT_MAX };
@@ -57,7 +57,7 @@ void FzbRenderer::RasterVoxelization::init() {
 			aabb.maximum.z = std::max(meshAABB.maximum.z, aabb.maximum.z);
 		}
 
-		//·Å´óÒ»µã£¬·ÀÖ¹±ß½ç´¦µÄÊı¾İ´íÎó£¨±È·½Ëµ2¸övoxel£¬ÄÇÃ´ÓÒ±ß½çµÄË÷ÒıÊÇ2²»ÊÇ1;²»È»»áµ¼ÖÂ2->0£¬0voxel±¾Ã»ÓĞÊı¾İÏÈÓĞÁËÊı¾İ£©
+		//æ”¾å¤§ä¸€ç‚¹ï¼Œé˜²æ­¢è¾¹ç•Œå¤„çš„æ•°æ®é”™è¯¯ï¼ˆæ¯”æ–¹è¯´2ä¸ªvoxelï¼Œé‚£ä¹ˆå³è¾¹ç•Œçš„ç´¢å¼•æ˜¯2ä¸æ˜¯1;ä¸ç„¶ä¼šå¯¼è‡´2->0ï¼Œ0voxelæœ¬æ²¡æœ‰æ•°æ®å…ˆæœ‰äº†æ•°æ®ï¼‰
 		glm::vec3 distance = (aabb.maximum - aabb.minimum) * 1.1f;		
 		float maxDistance = std::max(distance.x, std::max(distance.y, distance.z));
 		glm::vec3 center = (aabb.maximum + aabb.minimum) * 0.5f;
@@ -65,19 +65,19 @@ void FzbRenderer::RasterVoxelization::init() {
 		glm::vec3 maximum = center + distance * 0.5f;
 
 		glm::mat4 VP[3];
-		//Ç°Ãæ
-		glm::vec3 viewPoint = glm::vec3(center.x, center.y, maximum.z + 0.1f);	//ÊÀ½ç×ø±êÓÒÊÖÂİĞı£¬¼´+z³¯ºó
+		//å‰é¢
+		glm::vec3 viewPoint = glm::vec3(center.x, center.y, maximum.z + 0.1f);	//ä¸–ç•Œåæ ‡å³æ‰‹èºæ—‹ï¼Œå³+zæœå
 		glm::mat4 viewMatrix = glm::lookAt(viewPoint, viewPoint + glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 		glm::mat4 orthoMatrix = glm::orthoRH_ZO(-0.5f * distance.x, 0.5f * distance.x, -0.5f * distance.y, 0.5f * distance.y, 0.1f, distance.z + 0.1f);
 		orthoMatrix[1][1] *= -1;
 		VP[0] = orthoMatrix * viewMatrix;
-		//×ó±ß
+		//å·¦è¾¹
 		viewPoint = glm::vec3(minimum.x - 0.1f, center.y, center.z);
 		viewMatrix = glm::lookAt(viewPoint, viewPoint + glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 		orthoMatrix = glm::orthoRH_ZO(-0.5f * distance.z, 0.5f * distance.z, -0.5f * distance.y, 0.5f * distance.y, 0.1f, distance.x + 0.1f);
 		orthoMatrix[1][1] *= -1;
 		VP[1] = orthoMatrix * viewMatrix;
-		//ÏÂÃæ
+		//ä¸‹é¢
 		viewPoint = glm::vec3(center.x, minimum.y - 0.1f, center.z);
 		viewMatrix = glm::lookAt(viewPoint, viewPoint + glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 		orthoMatrix = glm::orthoRH_ZO(-0.5f * distance.x, 0.5f * distance.x, -0.5f * distance.z, 0.5f * distance.z, 0.1f, distance.y + 0.1f);
@@ -89,9 +89,9 @@ void FzbRenderer::RasterVoxelization::init() {
 		setting.pushConstant.voxelSize_Count = glm::vec4(distance / setting.pushConstant.voxelSize_Count.w, setting.pushConstant.voxelSize_Count.w);
 	}
 	//---------------------------------------------------------------------------------------------
-	createDescriptorSetLayout();	//´´½¨ÃèÊö·û¼¯ºÏ²¼¾Ö
-	Feature::createPipelineLayout(sizeof(shaderio::RasterVoxelizationPushConstant));	//´´½¨¹ÜÏß²¼¾Ö£ºpushConstant+ÃèÊö·û¼¯ºÏ²¼¾Ö
-	compileAndCreateShaders();		//±àÒëshaderÒÔ¼°´´½¨¾²Ì¬pipeline
+	createDescriptorSetLayout();	//åˆ›å»ºæè¿°ç¬¦é›†åˆå¸ƒå±€
+	Feature::createPipelineLayout(sizeof(shaderio::RasterVoxelizationPushConstant));	//åˆ›å»ºç®¡çº¿å¸ƒå±€ï¼špushConstant+æè¿°ç¬¦é›†åˆå¸ƒå±€
+	compileAndCreateShaders();		//ç¼–è¯‘shaderä»¥åŠåˆ›å»ºé™æ€pipeline
 
 	uint32_t voxelTotalCount = std::pow(setting.pushConstant.voxelSize_Count.w, 3);
 	uint32_t VGBByteSize = voxelTotalCount * sizeof(shaderio::VGBVoxelData);
@@ -110,9 +110,9 @@ void FzbRenderer::RasterVoxelization::init() {
 	write.append(VGBWrite, VGB, 0, VGBByteSize);
 
 #ifndef NDEBUG
-	Feature::createGBuffer(true, false, 3);		//µÚÒ»ÕÅÍ¼£ºthreeView£¬¶àÊÓ¿Ú£»µÚ¶şÕÅÍ¼£ºCube£»µÚÈıÕÅÍ¼£ºwireframe
+	Feature::createGBuffer(true, true, 2);		//ç¬¬ä¸€å¼ å›¾ï¼šthreeViewï¼Œå¤šè§†å£ï¼›ç¬¬äºŒå¼ å›¾ï¼šCubeï¼›ç¬¬ä¸‰å¼ å›¾(åå¤„ç†å›¾)ï¼šwireframe
 	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
-	gBuffers.update(cmd, setting.resolution);	//²»Ëæ´°¿Ú·Ö±æÂÊ
+	gBuffers.update(cmd, setting.resolution);	//ä¸éšçª—å£åˆ†è¾¨ç‡
 	Application::app->submitAndWaitTempCmdBuffer(cmd);
 	//-------------------------------------------threeView----------------------------------------
 	{
@@ -130,18 +130,26 @@ void FzbRenderer::RasterVoxelization::init() {
 		NVVK_DBG_NAME(fragmentCountStageBuffer.buffer);
 	}
 
-	VkWriteDescriptorSet    fcWrite =
-		descPack.makeWrite(shaderio::RasterVoxelizationBindingPoints::eFragmentCountBuffer_RV, 0, 0, 1);
+	VkWriteDescriptorSet fcWrite = descPack.makeWrite(shaderio::RasterVoxelizationBindingPoints::eFragmentCountBuffer_RV, 0, 0, 1);
 	write.append(fcWrite, fragmentCountBuffer, 0, sizeof(uint32_t));
 	//---------------------------------------------cube----------------------------------------
 	nvutils::PrimitiveMesh primitive = FzbRenderer::MeshSet::createCube(false, false);
 	FzbRenderer::MeshSet mesh = FzbRenderer::MeshSet("Cube", primitive);
 	scene.addMeshSet(mesh);
+	//---------------------------------------------wireframe-----------------------------------
+	primitive = FzbRenderer::MeshSet::createWireframe();
+	mesh = FzbRenderer::MeshSet("Wireframe", primitive);
+	scene.addMeshSet(mesh);
+
 	scene.createSceneInfoBuffer();
+	//--------------------------------------------poseProcess---------------------------------
+	VkWriteDescriptorSet wireframeMapWrite = descPack.makeWrite(shaderio::RasterVoxelizationBindingPoints::eWireframeMap_RV, 0, 0, 1);
+	write.append(wireframeMapWrite, gBuffers.getColorImageView(RasterVoxelizationGBuffer::WireframeMap), VK_IMAGE_LAYOUT_GENERAL);
 #endif
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }
+
 void FzbRenderer::RasterVoxelization::createDescriptorSetLayout() {
 	nvvk::DescriptorBindings bindings;
 	bindings.addBinding({ .binding = shaderio::RasterVoxelizationBindingPoints::eTextures_RV,
@@ -157,10 +165,24 @@ void FzbRenderer::RasterVoxelization::createDescriptorSetLayout() {
 		VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
 		| VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
 #ifndef NDEBUG
-	bindings.addBinding({ .binding = 2,
+	bindings.addBinding({ .binding = shaderio::RasterVoxelizationBindingPoints::eFragmentCountBuffer_RV,
 					 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 					 .descriptorCount = 1,
 					 .stageFlags = VK_SHADER_STAGE_ALL },
+		VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
+		| VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
+
+	bindings.addBinding({ .binding = shaderio::RasterVoxelizationBindingPoints::eWireframeMap_RV,
+				 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+				 .descriptorCount = 1,
+				 .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT },
+		VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
+		| VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
+
+	bindings.addBinding({ .binding = shaderio::RasterVoxelizationBindingPoints::eBaseMap,
+			 .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+			 .descriptorCount = 1,
+			 .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT },
 		VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
 		| VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
 #endif
@@ -174,10 +196,13 @@ void FzbRenderer::RasterVoxelization::createDescriptorSetLayout() {
 void FzbRenderer::RasterVoxelization::compileAndCreateShaders() {
 	SCOPED_TIMER(__FUNCTION__);
 
-	//±àÒëºóµÄÊı¾İ·ÅÔÚÁËslangCompilerÖĞ
+	//ç¼–è¯‘åçš„æ•°æ®æ”¾åœ¨äº†slangCompilerä¸­
 	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
 	std::filesystem::path shaderSource = shaderPath / "rasterVoxelization.slang";
 	shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
+	std::filesystem::path spvPath = shaderPath / "rasterVoxelization.spv";
+	FzbRenderer::saveShaderToFile(shaderCode, spvPath);
+	FzbRenderer::validateSPIRVFile(spvPath);
 
 	const VkPushConstantRange pushConstantRange{
 		.stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS | VK_SHADER_STAGE_COMPUTE_BIT ,
@@ -254,6 +279,26 @@ void FzbRenderer::RasterVoxelization::compileAndCreateShaders() {
 	shaderInfo.pCode = shaderCode.pCode;
 	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &fragmentShader_Cube);
 	NVVK_DBG_NAME(fragmentShader_Cube);
+	//-------------------------------------------Wireframe--------------------------------------
+	vkDestroyShaderEXT(device, fragmentShader_Wireframe, nullptr);
+
+	shaderInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	shaderInfo.nextStage = 0;
+	shaderInfo.pName = "fragmentMain_Wireframe";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &fragmentShader_Wireframe);
+	NVVK_DBG_NAME(fragmentShader_Wireframe);
+	//-------------------------------------------PostProcess--------------------------------------
+	vkDestroyShaderEXT(device, computeShader_postProcess, nullptr);
+
+	shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	shaderInfo.nextStage = 0;
+	shaderInfo.pName = "computeMain_postProcess";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_postProcess);
+	NVVK_DBG_NAME(computeShader_postProcess);
 #else
 	vkDestroyShaderEXT(device, geometryShader, nullptr);
 	vkDestroyShaderEXT(device, fragmentShader, nullptr);
@@ -310,6 +355,10 @@ void FzbRenderer::RasterVoxelization::clean() {
 
 	vkDestroyShaderEXT(device, vertexShader_Cube, nullptr);
 	vkDestroyShaderEXT(device, fragmentShader_Cube, nullptr);
+
+	vkDestroyShaderEXT(device, fragmentShader_Wireframe, nullptr);
+
+	vkDestroyShaderEXT(device, computeShader_postProcess, nullptr);
 #endif
 }
 void FzbRenderer::RasterVoxelization::uiRender() {
@@ -318,6 +367,7 @@ void FzbRenderer::RasterVoxelization::uiRender() {
 
 	if (showThreeViewMap) Application::viewportImage = gBuffers.getDescriptorSet(RasterVoxelizationGBuffer::ThreeViewMap);
 	else if(showCubeMap) Application::viewportImage = gBuffers.getDescriptorSet(RasterVoxelizationGBuffer::CubeMap);
+	else if(showWireframeMap) Application::viewportImage = gBuffers.getDescriptorSet(RasterVoxelizationGBuffer::WireframeMap);
 
 	namespace PE = nvgui::PropertyEditor;
 	if (ImGui::Begin("RasterVoxelization")) {
@@ -334,7 +384,7 @@ void FzbRenderer::RasterVoxelization::uiRender() {
 				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(5, 5));
 		
 				bool result = ImGui::ImageButton("##but", (ImTextureID)gBuffers.getDescriptorSet(RasterVoxelizationGBuffer::ThreeViewMap),
-					ImVec2(100 * gBuffers.getAspectRatio(), 100));		//ÕâÀïÓ¦¸ÃÓĞÒ»¸ö½µ²ÉÑù
+					ImVec2(100 * gBuffers.getAspectRatio(), 100));		//è¿™é‡Œåº”è¯¥æœ‰ä¸€ä¸ªé™é‡‡æ ·
 		
 				ImGui::PopStyleColor(2);
 				ImGui::PopStyleVar();
@@ -342,6 +392,8 @@ void FzbRenderer::RasterVoxelization::uiRender() {
 				}))
 			{
 				showThreeViewMap = !showThreeViewMap;
+				showCubeMap = false;
+				showWireframeMap = false;
 			}
 		}
 		PE::end();
@@ -364,6 +416,32 @@ void FzbRenderer::RasterVoxelization::uiRender() {
 				}))
 			{
 				showCubeMap = !showCubeMap;
+				showThreeViewMap = false;
+				showWireframeMap = false;
+			}
+		}
+		PE::end();
+		//----------------------------------------wireframe------------------------------------------
+		if (PE::begin()) {
+			if (PE::entry("WireframeMap", [&] {
+				static const ImVec4 highlightColor = ImVec4(118.f / 255.f, 185.f / 255.f, 0.f, 1.f);
+				ImVec4 selectedColor = showWireframeMap ? highlightColor : ImGui::GetStyleColorVec4(ImGuiCol_Button);
+				ImVec4 hoveredColor = ImVec4(selectedColor.x * 1.2f, selectedColor.y * 1.2f, selectedColor.z * 1.2f, 1.f);
+				ImGui::PushStyleColor(ImGuiCol_Button, selectedColor);
+				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, hoveredColor);
+				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(5, 5));
+
+				bool result = ImGui::ImageButton("##but", (ImTextureID)gBuffers.getDescriptorSet(RasterVoxelizationGBuffer::WireframeMap),
+					ImVec2(100 * gBuffers.getAspectRatio(), 100));
+
+				ImGui::PopStyleColor(2);
+				ImGui::PopStyleVar();
+				return result;
+				}))
+			{
+				showWireframeMap = !showWireframeMap;
+				showThreeViewMap = false;
+				showCubeMap = false;
 			}
 		}
 		PE::end();
@@ -371,7 +449,8 @@ void FzbRenderer::RasterVoxelization::uiRender() {
 	ImGui::End();
 #endif
 }
-void FzbRenderer::RasterVoxelization::resize(VkCommandBuffer cmd, const VkExtent2D& size) {}
+void FzbRenderer::RasterVoxelization::resize(VkCommandBuffer cmd, const VkExtent2D& size) {};
+
 void FzbRenderer::RasterVoxelization::preRender() {
 #ifndef NDEBUG
 	if (Application::frameIndex != 1) return;
@@ -397,6 +476,8 @@ void FzbRenderer::RasterVoxelization::preRender() {
 #endif
 }
 void FzbRenderer::RasterVoxelization::render(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd, "RasterVoxelization_render");
+
 	bindDescriptorSetsInfo = {
 	.sType = VK_STRUCTURE_TYPE_BIND_DESCRIPTOR_SETS_INFO,
 		.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
@@ -424,16 +505,38 @@ void FzbRenderer::RasterVoxelization::render(VkCommandBuffer cmd) {
 	createVGB_ThreeView(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT);
 	debug_Cube(cmd);
-	//nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT);
-	//debug_Wireframe(cmd);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT);
+	debug_Wireframe(cmd);
 #else
 	createVGB(cmd);
 #endif
+}
+void FzbRenderer::RasterVoxelization::postProcess(VkCommandBuffer cmd) {
+#ifndef NDEBUG
+	NVVK_DBG_SCOPE(cmd);
 
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR);
+	//å°†wireframeMapä¸è°ƒç”¨è€…çš„tonemappingåçš„ç»“æœè¿›è¡Œç»“åˆ
+	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_postProcess);
+
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1,
+		descPack.getSetPtr(), 0, nullptr);
+
+	vkCmdPushConstants2(cmd, &pushInfo);
+
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(RasterVoxelizationGBuffer::WireframeMap), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL});
+
+	VkExtent2D groupSize = nvvk::getGroupCounts({ setting.resolution.width, setting.resolution.height }, VkExtent2D{ 32, 32 });
+	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
+
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
+	//nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(RasterVoxelizationGBuffer::WireframeMap) });
+#endif
 }
 
 void FzbRenderer::RasterVoxelization::clearVGB(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
+
 	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_clearVGB);
 
@@ -462,10 +565,10 @@ void FzbRenderer::RasterVoxelization::createVGB(VkCommandBuffer cmd) {
 
 	vkCmdBeginRendering(cmd, &renderingInfo);
 
-	//Ê¹ÓÃVK_EXT_SHADER_OBJECT_EXTENSION_NAMEºó¿ÉÒÔ²»ĞèÒªpipeline£¬Ö±½ÓÍ¨¹ıÃüÁîÉèÖÃäÖÈ¾ÉèÖÃºÍ×ÅÉ«Æ÷
+	//ä½¿ç”¨VK_EXT_SHADER_OBJECT_EXTENSION_NAMEåå¯ä»¥ä¸éœ€è¦pipelineï¼Œç›´æ¥é€šè¿‡å‘½ä»¤è®¾ç½®æ¸²æŸ“è®¾ç½®å’Œç€è‰²å™¨
 	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;
 	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_FALSE;
-	graphicsDynamicPipeline.depthStencilState.depthBoundsTestEnable = VK_FALSE;		//depthBoundsTestEnableÊÇ¸ù¾İmin¡¢max depth½øĞĞ²âÊÔ£¬Ïàµ±ÓÚ×Ô¶¨Òå²Ã¼ôµÄzµÄ·¶Î§
+	graphicsDynamicPipeline.depthStencilState.depthBoundsTestEnable = VK_FALSE;		//depthBoundsTestEnableæ˜¯æ ¹æ®minã€max depthè¿›è¡Œæµ‹è¯•ï¼Œç›¸å½“äºè‡ªå®šä¹‰è£å‰ªçš„zçš„èŒƒå›´
 	graphicsDynamicPipeline.cmdApplyAllStates(cmd);
 	vkCmdSetDepthBoundsTestEnable(cmd, VK_FALSE);
 	graphicsDynamicPipeline.cmdSetViewportAndScissor(cmd, setting.resolution);
@@ -496,8 +599,19 @@ void FzbRenderer::RasterVoxelization::createVGB(VkCommandBuffer cmd) {
 }
 
 #ifndef NDEBUG
+void FzbRenderer::RasterVoxelization::resize(
+	VkCommandBuffer cmd, const VkExtent2D& size,
+	nvvk::GBuffer& gBuffers_other, uint32_t baseMapIndex
+) {
+	nvvk::WriteSetContainer write{};
+	VkWriteDescriptorSet baseMapWrite = descPack.makeWrite(shaderio::RasterVoxelizationBindingPoints::eBaseMap, 0, 0, 1);
+	write.append(baseMapWrite, gBuffers_other.getColorImageView(baseMapIndex), VK_IMAGE_LAYOUT_GENERAL);
+	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
+}
+
 void FzbRenderer::RasterVoxelization::resetFragmentCount(VkCommandBuffer cmd) {
-#ifndef NDEBUG
+	NVVK_DBG_SCOPE(cmd);
+
 	int tempData = 0;
 	memcpy(fragmentCountStageBuffer.mapping, &tempData, sizeof(uint32_t));
 
@@ -516,13 +630,12 @@ void FzbRenderer::RasterVoxelization::resetFragmentCount(VkCommandBuffer cmd) {
 	};
 	vkCmdCopyBuffer2(cmd, &copyBufferInfo);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
-#endif
 }
 void FzbRenderer::RasterVoxelization::createVGB_ThreeView(VkCommandBuffer cmd) {
-	NVVK_DBG_SCOPE(cmd);
+	NVVK_DBG_SCOPE(cmd, "RasterVoxelization_createVGB_ThreeView");
 
 	VkRenderingAttachmentInfo colorAttachment = DEFAULT_VkRenderingAttachmentInfo;
-	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;		//ÕæÕıäÖÈ¾ĞèÒª¸ù¾İuseskyÅĞ¶ÏÊÇÒòÎªÌì¿ÕºĞ»á¸²¸ÇÉÏÒ»Ö¡ÄÚÈİ£¬ËùÒÔ²»ĞèÒªclear
+	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;		//çœŸæ­£æ¸²æŸ“éœ€è¦æ ¹æ®useskyåˆ¤æ–­æ˜¯å› ä¸ºå¤©ç©ºç›’ä¼šè¦†ç›–ä¸Šä¸€å¸§å†…å®¹ï¼Œæ‰€ä»¥ä¸éœ€è¦clear
 	colorAttachment.imageView = gBuffers.getColorImageView(0);
 	colorAttachment.clearValue = { .color = {Application::sceneResource.sceneInfo.backgroundColor.x,
 											Application::sceneResource.sceneInfo.backgroundColor.y,
@@ -539,11 +652,12 @@ void FzbRenderer::RasterVoxelization::createVGB_ThreeView(VkCommandBuffer cmd) {
 
 	vkCmdBeginRendering(cmd, &renderingInfo);
 
-	//Ê¹ÓÃVK_EXT_SHADER_OBJECT_EXTENSION_NAMEºó¿ÉÒÔ²»ĞèÒªpipeline£¬Ö±½ÓÍ¨¹ıÃüÁîÉèÖÃäÖÈ¾ÉèÖÃºÍ×ÅÉ«Æ÷
+	//ä½¿ç”¨VK_EXT_SHADER_OBJECT_EXTENSION_NAMEåå¯ä»¥ä¸éœ€è¦pipelineï¼Œç›´æ¥é€šè¿‡å‘½ä»¤è®¾ç½®æ¸²æŸ“è®¾ç½®å’Œç€è‰²å™¨
+	graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
 	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;
 	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_FALSE;
 	graphicsDynamicPipeline.cmdApplyAllStates(cmd);
-	vkCmdSetDepthBoundsTestEnable(cmd, VK_FALSE);	//depthBoundsTestEnableÊÇ¸ù¾İmin¡¢max depth½øĞĞ²âÊÔ£¬Ïàµ±ÓÚ×Ô¶¨Òå²Ã¼ôµÄzµÄ·¶Î§
+	vkCmdSetDepthBoundsTestEnable(cmd, VK_FALSE);	//depthBoundsTestEnableæ˜¯æ ¹æ®minã€max depthè¿›è¡Œæµ‹è¯•ï¼Œç›¸å½“äºè‡ªå®šä¹‰è£å‰ªçš„zçš„èŒƒå›´
 
 	float width = float(setting.resolution.width) * 0.5f;
 	float height = float(setting.resolution.height) * 0.5f;
@@ -607,7 +721,8 @@ void FzbRenderer::RasterVoxelization::debug_Cube(VkCommandBuffer cmd) {
 
 	vkCmdBeginRendering(cmd, &renderingInfo);
 
-	//Èç¹ûÃ»ÓĞÉî¶È²âÊÔ£¬ÎÒÃÇÊµÀı»¯ÊÇ´Ó0-n½øĞĞäÖÈ¾µÄ£¬ÄÇÃ´´Ó0ÄÇÒ»Ãæ¿´¹ıÈ¥»á±»nÄÇÒ»Ãæ¸²¸Çµô£»µ«´ÓnÄÇÒ»Ãæ¿´ÊÇÃ»ÓĞÎÊÌâµÄ
+	//å¦‚æœæ²¡æœ‰æ·±åº¦æµ‹è¯•ï¼Œæˆ‘ä»¬å®ä¾‹åŒ–æ˜¯ä»0-nè¿›è¡Œæ¸²æŸ“çš„ï¼Œé‚£ä¹ˆä»0é‚£ä¸€é¢çœ‹è¿‡å»ä¼šè¢«né‚£ä¸€é¢è¦†ç›–æ‰ï¼›ä½†ä»né‚£ä¸€é¢çœ‹æ˜¯æ²¡æœ‰é—®é¢˜çš„
+	graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
 	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
 	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_TRUE;
 	graphicsDynamicPipeline.cmdApplyAllStates(cmd);
@@ -635,14 +750,14 @@ void FzbRenderer::RasterVoxelization::debug_Cube(VkCommandBuffer cmd) {
 void FzbRenderer::RasterVoxelization::debug_Wireframe(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
 
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(RasterVoxelizationGBuffer::WireframeMap), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
+
 	VkRenderingAttachmentInfo colorAttachment = DEFAULT_VkRenderingAttachmentInfo;
 	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 	colorAttachment.imageView = gBuffers.getColorImageView(RasterVoxelizationGBuffer::WireframeMap);
-	colorAttachment.clearValue = { .color = {Application::sceneResource.sceneInfo.backgroundColor.x,
-											Application::sceneResource.sceneInfo.backgroundColor.y,
-											Application::sceneResource.sceneInfo.backgroundColor.z, 1.0f} };
+	colorAttachment.clearValue = { .color = {0.0f, 0.0f, 0.0f, 0.0f} };
 	VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
-	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;		//Ê¹ÓÃcubeµÄÉî¶È»º³å
+	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;		//ä½¿ç”¨cubeçš„æ·±åº¦ç¼“å†²
 	depthAttachment.imageView = gBuffers.getDepthImageView();
 
 	VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
@@ -656,24 +771,29 @@ void FzbRenderer::RasterVoxelization::debug_Wireframe(VkCommandBuffer cmd) {
 
 	vkCmdBeginRendering(cmd, &renderingInfo);
 
-	//Èç¹ûÃ»ÓĞÉî¶È²âÊÔ£¬ÎÒÃÇÊµÀı»¯ÊÇ´Ó0-n½øĞĞäÖÈ¾µÄ£¬ÄÇÃ´´Ó0ÄÇÒ»Ãæ¿´¹ıÈ¥»á±»nÄÇÒ»Ãæ¸²¸Çµô£»µ«´ÓnÄÇÒ»Ãæ¿´ÊÇÃ»ÓĞÎÊÌâµÄ
-	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
+	graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
+	graphicsDynamicPipeline.inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;		//å¦‚æœæƒ³ä½¿ç”¨è™šçº¿å¯ä»¥è®¾ç½®rasterizationLineState
+	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;
+	graphicsDynamicPipeline.rasterizationState.lineWidth = setting.lineWidth;
+	graphicsDynamicPipeline.rasterizationState.polygonMode = VK_POLYGON_MODE_LINE;
 	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_TRUE;
+	graphicsDynamicPipeline.depthStencilState.depthWriteEnable = VK_FALSE;	//å…¶å®å†™å…¥å†™å…¥éƒ½è¡Œï¼Œåªè¦ç‰‡å…ƒç€è‰²å™¨ä¸ä¿®æ”¹æ·±åº¦ï¼Œå°±èƒ½æå‰æ·±åº¦æµ‹è¯•
 	graphicsDynamicPipeline.cmdApplyAllStates(cmd);
 	graphicsDynamicPipeline.cmdSetViewportAndScissor(cmd, setting.resolution);
-	graphicsDynamicPipeline.cmdBindShaders(cmd, { .vertex = vertexShader_Cube, .fragment = fragmentShader_Cube });
+	graphicsDynamicPipeline.cmdBindShaders(cmd, { .vertex = vertexShader_Cube, .fragment = fragmentShader_Wireframe });
 
 	VkVertexInputBindingDescription2EXT bindingDescription{};
 	VkVertexInputAttributeDescription2EXT attributeDescription = {};
 	vkCmdSetVertexInputEXT(cmd, 0, nullptr, 0, nullptr);
 
-	const shaderio::Mesh& mesh = scene.meshes[0];
+	uint32_t wireframeMeshIndex = 1;
+	const shaderio::Mesh& mesh = scene.meshes[wireframeMeshIndex];
 	const shaderio::TriangleMesh& triMesh = mesh.triMesh;
 
 	setting.pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)scene.bSceneInfo.address;
 	vkCmdPushConstants2(cmd, &pushInfo);
 
-	uint32_t bufferIndex = scene.getMeshBufferIndex(0);
+	uint32_t bufferIndex = scene.getMeshBufferIndex(wireframeMeshIndex);
 	const nvvk::Buffer& v = scene.bDatas[bufferIndex];
 
 	vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(mesh.indexType));

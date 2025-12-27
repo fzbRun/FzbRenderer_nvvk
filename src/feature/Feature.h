@@ -21,6 +21,7 @@ public:
 	virtual void resize(VkCommandBuffer cmd, const VkExtent2D& size);
 	virtual void preRender();
 	virtual void render(VkCommandBuffer cmd) = 0;
+	virtual void postProcess(VkCommandBuffer cmd);
 
 	virtual void createGBuffer(bool useDepth = true, bool postProcess = true, uint32_t colorAttachmentCount = 1);
 	virtual void createDescriptorSetLayout();

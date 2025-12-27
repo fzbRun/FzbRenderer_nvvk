@@ -6,13 +6,17 @@
 [[vk::push_constant]] ConstantBuffer<RasterVoxelizationPushConstant> pushConst;
 [[vk::binding(RasterVoxelizationBindingPoints::eTextures_RV)]] Sampler2D textures[];
 [[vk::binding(RasterVoxelizationBindingPoints::eVGB_RV)]] globallycoherent volatile RWStructuredBuffer<VGBVoxelData, ScalarDataLayout> VGB;
+#ifndef NDEBUG
 [[vk::binding(RasterVoxelizationBindingPoints::eFragmentCountBuffer_RV)]] RWStructuredBuffer<uint32_t> fragmentCountBuffer;
+[[vk::binding(RasterVoxelizationBindingPoints::eWireframeMap_RV)]] RWTexture2D<float4> wireframeMap;
+[[vk::binding(RasterVoxelizationBindingPoints::eBaseMap)]] Texture2D<float4> baseMap;
+#endif
 
 //----------------------------------------------clearVGB--------------------------------------------
 [numthreads(512, 1, 1)]
 [shader("compute")]
 void computeMain_clearVGB(uint3 dispatchId: SV_DispatchThreadID) {
-    uint totalVoxelCount = pow(pushConst.voxelSize_Count.w, 3);
+    uint totalVoxelCount = uint(pow(pushConst.voxelSize_Count.w, 3));
     if (dispatchId.x >= totalVoxelCount) return;
 
     VGBVoxelData voxelData;
@@ -310,27 +314,32 @@ PSout_Cube fragmentMain_Cube(VSout_Cube input) {
     return { float4(input.color, 1.0f) };
 }
 //---------------------------------------------wireframe----------------------------------------
-struct VSout_Wireframe {
-    float4 sv_position : SV_Position;
-    float3 worldPos : POSITION;
+[shader("pixel")]
+PSout_Cube fragmentMain_Wireframe(VSout_Cube input) {
+    return { float4(1.0f, 0.0f, 0.0f, 1.0f) };
 }
-struct PSout_Wireframe
-{
-    float4 color : SV_Target;
-};
+//----------------------------------------------postProcess-------------------------------------
+[numthreads(32, 32, 1)]
+[shader("compute")]
+void computeMain_postProcess(uint3 dispatchId: SV_DispatchThreadID) {
+    uint2 wireframeMapSize;
+    wireframeMap.GetDimensions(wireframeMapSize.x, wireframeMapSize.y);
+    if (dispatchId.x >= wireframeMapSize.x || dispatchId.y >= wireframeMapSize.y) return;
 
-[shader("vertex")]
-VSout_Cube vertexMain_Wireframe(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID)
-{
-    VSout_Cube output;
-    VGBVoxelData voxelData = VGB[instanceIndex];
-    if (voxelData.sumNormal_G.w < 0.1f) output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
-    else {
-        SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
-        // Slightly reduce the depth to prevent depth conflicts in subsequent wireframes
-        output.sv_position = mul(float4(output.worldPos.xy, output.worldPos.z * 0.99f, 1.0f), sceneInfo.viewProjMatrix);
-        output.color = normalize(max(voxelData.sumNormal_G.xyz / voxelData.sumNormal_G.w, 0.0f));
+    float4 result = float4(1.0f);
+    float4 wireframeColor = wireframeMap[dispatchId.xy];
+    if (wireframeColor.w == 0.0f) {
+        uint2 baseMapSize;
+        baseMap.GetDimensions(baseMapSize.x, baseMapSize.y);
+
+        float2 texCoords = (float2)dispatchId.xy / wireframeMapSize;
+        uint2 baseMapTexCoords = uint2(texCoords * baseMapSize);
+
+        float4 baseColor = baseMap[baseMapTexCoords];
+        result = baseColor;
     }
-    return output;
+    else result = wireframeColor;
+
+    wireframeMap[dispatchId.xy] = result;
 }
 #endif

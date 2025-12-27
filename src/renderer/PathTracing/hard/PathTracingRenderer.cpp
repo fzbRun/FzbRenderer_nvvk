@@ -554,8 +554,6 @@ void FzbRenderer::PathTracingRenderer::rayTraceScene(VkCommandBuffer cmd) {
 	const nvvk::SBTGenerator::Regions& regions = sbtGenerator.getSBTRegions();
 	const VkExtent2D& size = Application::app->getViewportSize();
 	vkCmdTraceRaysKHR(cmd, &regions.raygen, &regions.miss, &regions.hit, &regions.callable, size.width, size.height, 1);
-
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 }
 
 void FzbRenderer::PathTracingRenderer::resetFrame() {
@@ -577,12 +575,12 @@ void FzbRenderer::PathTracingRenderer::init() {
 	prop2.pNext = &rtProperties;
 	vkGetPhysicalDeviceProperties2(Application::app->getPhysicalDevice(), &prop2);
 
-	rasterVoxelization->init();
-
 	std::string shaderioPath = (std::filesystem::path(__FILE__).parent_path() / "shaderio.h").string();
 	Application::slangCompiler.addOption({ .name = slang::CompilerOptionName::Include,
 		.value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = shaderioPath.c_str()}
 		});
+
+	rasterVoxelization->init();
 
 	Renderer::createGBuffer(false);
 	Renderer::createDescriptorSetLayout();
@@ -663,8 +661,8 @@ void FzbRenderer::PathTracingRenderer::uiRender() {
 	if(UIModified) resetFrame();
 };
 void FzbRenderer::PathTracingRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
-	rasterVoxelization->resize(cmd, size);
 	NVVK_CHECK(gBuffers.update(cmd, size));
+	rasterVoxelization->resize(cmd, size, gBuffers, eImgTonemapped);
 };
 void FzbRenderer::PathTracingRenderer::preRender() {
 	std::shared_ptr<nvutils::CameraManipulator> cameraManip = Application::sceneResource.cameraManip;
@@ -684,10 +682,16 @@ void FzbRenderer::PathTracingRenderer::preRender() {
 	rasterVoxelization->preRender();
 }
 void FzbRenderer::PathTracingRenderer::render(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
+
 	updateDataPerFrame(cmd);
 	rasterVoxelization->render(cmd);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR);
 	rayTraceScene(cmd);
-	postProcess(cmd);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	Renderer::postProcess(cmd);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	rasterVoxelization->postProcess(cmd);
 };
 
 void FzbRenderer::PathTracingRenderer::compileAndCreateShaders() {

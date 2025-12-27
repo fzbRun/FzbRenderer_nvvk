@@ -8,7 +8,7 @@
     printf((format), __VA_ARGS__);                                                                                     \
     printf("\n");                                                                                                      \
   }
-// #define USE_NSIGHT_AFTERMATH  (not always on, as it slows down the application)
+//#define USE_NSIGHT_AFTERMATH  (not always on, as it slows down the application)
 
 #include "./Application.h"
 #include "pugixml.hpp"
@@ -84,7 +84,7 @@ FzbRenderer::Application::Application(nvapp::ApplicationCreateInfo& appInfo, nvv
 #if defined(USE_NSIGHT_AFTERMATH)   //GPU崩溃之后的调试工具
 	auto& aftermath = AftermathCrashTracker::getInstance();
 	aftermath.initialize();
-	aftermath.addExtensions(vkSetup.deviceExtensions);
+	aftermath.addExtensions(vkContextInitInfo.deviceExtensions);
 	nvvk::CheckError::getInstance().setCallbackFunction([&](VkResult result) { aftermath.errorCallback(result); });
 #endif
 

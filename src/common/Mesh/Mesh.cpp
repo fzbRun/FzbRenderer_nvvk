@@ -656,3 +656,19 @@ nvutils::PrimitiveMesh FzbRenderer::MeshSet::createCube(bool normal, bool texCoo
 
 	return mesh;
 }
+nvutils::PrimitiveMesh FzbRenderer::MeshSet::createWireframe(float width, float height, float depth) {
+	nvutils::PrimitiveMesh mesh;
+	std::vector<glm::vec3> pos = { {0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 0.0f}, {0.0f, 1.0f, 0.0f},
+									   {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 1.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f, 1.0f} };
+	for (int i = 0; i < 8; ++i) {
+		mesh.vertices.push_back({ pos[i] });
+	}
+	mesh.triangles = {
+		{{0, 1, 1}}, {{2, 2, 3}},
+		{{3, 0, 4}}, {{5, 5, 6}},
+		{{6, 7, 7}}, {{4, 0, 4}},
+		{{1, 5, 2}}, {{6, 3, 7}},
+	};
+
+	return mesh;
+}

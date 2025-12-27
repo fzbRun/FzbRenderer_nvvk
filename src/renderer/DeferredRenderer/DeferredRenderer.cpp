@@ -171,6 +171,5 @@ void FzbRenderer::DeferredRenderer::render(VkCommandBuffer cmd) {
     //nvvk的cmdImageMemoryBarrier函数可以根据image的old和new layout判断前后的可能的所有stage和access
     nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(eImgRendered),
                                       VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
-
-    postProcess(cmd);
+    Renderer::postProcess(cmd);
 }

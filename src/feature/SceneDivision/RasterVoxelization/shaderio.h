@@ -11,6 +11,8 @@ enum RasterVoxelizationBindingPoints
 	eTextures_RV = 0,
 	eVGB_RV = 1,
 	eFragmentCountBuffer_RV = 2,
+	eWireframeMap_RV = 3,
+	eBaseMap = 4,
 };
 
 struct RasterVoxelizationPushConstant

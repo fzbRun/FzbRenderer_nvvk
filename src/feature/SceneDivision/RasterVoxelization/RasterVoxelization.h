@@ -38,9 +38,13 @@ public:
 	void init() override;
 	void clean() override;
 	void uiRender() override;
+#ifndef NDEBUG
+	void resize(VkCommandBuffer cmd, const VkExtent2D& size, nvvk::GBuffer& gBuffers_other, uint32_t baseMapIndex);
+#endif
 	void resize(VkCommandBuffer cmd, const VkExtent2D& size) override;
 	void preRender() override;
 	void render(VkCommandBuffer cmd) override;
+	void postProcess(VkCommandBuffer cmd);
 
 	void createDescriptorSetLayout() override;
 
@@ -73,6 +77,10 @@ public:
 
 	VkShaderEXT vertexShader_Cube{};
 	VkShaderEXT fragmentShader_Cube{};
+
+	VkShaderEXT fragmentShader_Wireframe{};
+
+	VkShaderEXT computeShader_postProcess{};
 private:
 	void resetFragmentCount(VkCommandBuffer cmd);
 	void createVGB_ThreeView(VkCommandBuffer cmd);
@@ -84,6 +92,7 @@ private:
 	nvvk::Buffer fragmentCountStageBuffer;
 	bool showThreeViewMap = false;
 	bool showCubeMap = false;
+	bool showWireframeMap = false;
 #endif
 };
 }
