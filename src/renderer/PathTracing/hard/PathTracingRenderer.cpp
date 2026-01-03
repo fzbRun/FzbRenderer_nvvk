@@ -7,8 +7,6 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <common/Shader/Shader.h>
 
-#define MAX_DEPTH 64U
-
 FzbRenderer::PathTracingRenderer::PathTracingRenderer(pugi::xml_node& rendererNode) {
 	Application::vkContextInitInfo.deviceExtensions.push_back( { VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, &accelFeature });
 	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, &rtPipelineFeature });
@@ -21,9 +19,6 @@ FzbRenderer::PathTracingRenderer::PathTracingRenderer(pugi::xml_node& rendererNo
 		pushValues.maxDepth = std::stoi(maxDepthNode.attribute("value").value());
 	if (pugi::xml_node useNEENode = rendererNode.child("useNEE"))
 		pushValues.NEEShaderIndex = std::string(useNEENode.attribute("value").value()) == "true";
-
-	if (pugi::xml_node rasterVoxelizationNode = rendererNode.child("RasterVoxelization"))
-		rasterVoxelization = std::make_shared<RasterVoxelization>(rasterVoxelizationNode);
 }
 //-----------------------------------------创建加速结构----------------------------------------------------------
 /*
@@ -295,14 +290,29 @@ void FzbRenderer::PathTracingRenderer::createBottomLevelAS() {
 
 	LOGI("Bottom-level acceleration structures built successfully\n");
 }
-void FzbRenderer::PathTracingRenderer::createToLevelAS() {
+void FzbRenderer::PathTracingRenderer::createTopLevelAS() {
 	SCOPED_TIMER(__FUNCTION__);
 
-	std::vector<VkAccelerationStructureInstanceKHR> tlasInstances;
-	tlasInstances.reserve(Application::sceneResource.instances.size());		//每个mesh一个顶层实例
-	const VkGeometryInstanceFlagsKHR flgas{ VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV };	//没有背面剔除
+	FzbRenderer::Scene& sceneResorce = Application::sceneResource;
 
+	std::vector<VkAccelerationStructureInstanceKHR> tlasInstances(0);
+	tlasInstances.reserve(sceneResorce.instances.size() + sceneResorce.dynamicInstances.size());
+
+	staticTlasInstances.reserve(Application::sceneResource.instances.size());		//每个mesh一个顶层实例
+	const VkGeometryInstanceFlagsKHR flgas{ VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV };	//没有背面剔除
 	for (const shaderio::Instance& instance : Application::sceneResource.instances) {
+		VkAccelerationStructureInstanceKHR asInstance{};
+		asInstance.transform = nvvk::toTransformMatrixKHR(instance.transform);
+		asInstance.instanceCustomIndex = instance.meshIndex;
+		asInstance.accelerationStructureReference = asBuilder.blasSet[instance.meshIndex].address;
+		asInstance.instanceShaderBindingTableRecordOffset = 0;		//实例用SBT中hitGroup中第i个条目（shader）
+		asInstance.flags = flgas;
+		asInstance.mask = 0xFF;
+		staticTlasInstances.emplace_back(asInstance);
+	}
+	tlasInstances.insert(tlasInstances.end(), staticTlasInstances.begin(), staticTlasInstances.end());
+
+	for (const shaderio::Instance& instance : Application::sceneResource.dynamicInstances) {
 		VkAccelerationStructureInstanceKHR asInstance{};
 		asInstance.transform = nvvk::toTransformMatrixKHR(instance.transform);
 		asInstance.instanceCustomIndex = instance.meshIndex;
@@ -312,12 +322,70 @@ void FzbRenderer::PathTracingRenderer::createToLevelAS() {
 		asInstance.mask = 0xFF;
 		tlasInstances.emplace_back(asInstance);
 	}
+
 	LOGI("Ready to build top-level acceleration structure with %zu instances\n", tlasInstances.size());
 
-	asBuilder.tlasSubmitBuildAndWait(tlasInstances, VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR);
+	VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+	if (Application::sceneResource.dynamicInstances.size() > 0) flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+	asBuilder.tlasSubmitBuildAndWait(tlasInstances, flags);
 
 	LOGI("Top-level accleration structures built successfully\n");
 }
+/*
+void FzbRenderer::PathTracingRenderer::updateTopLevelAS(VkCommandBuffer cmd) {
+	FzbRenderer::Scene& sceneResorce = Application::sceneResource;
+	if (sceneResorce.dynamicInstances.size() == 0) return;
+
+	std::vector<VkAccelerationStructureInstanceKHR> tlasInstances(0);
+	tlasInstances.reserve(sceneResorce.instances.size() + sceneResorce.dynamicInstances.size());
+	tlasInstances.insert(tlasInstances.end(), staticTlasInstances.begin(), staticTlasInstances.end());
+
+	const VkGeometryInstanceFlagsKHR flgas{ VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV };	//没有背面剔除
+	for (const shaderio::Instance& instance : Application::sceneResource.dynamicInstances) {
+		VkAccelerationStructureInstanceKHR asInstance{};
+		asInstance.transform = nvvk::toTransformMatrixKHR(instance.transform);
+		asInstance.instanceCustomIndex = instance.meshIndex;
+		asInstance.accelerationStructureReference = asBuilder.blasSet[instance.meshIndex].address;
+		asInstance.instanceShaderBindingTableRecordOffset = 0;		//实例用SBT中hitGroup中第i个条目（shader）
+		asInstance.flags = flgas;
+		asInstance.mask = 0xFF;
+		tlasInstances.emplace_back(asInstance);
+	}
+	
+	{
+		uint32_t dataSize = std::span(tlasInstances).size_bytes();
+		void* data = std::span(tlasInstances).data();
+		memcpy(tlasStagingBuffer.mapping, data, dataSize);
+
+		VkBufferCopy2 copyRegionInfo{
+			.sType = VK_STRUCTURE_TYPE_BUFFER_COPY_2,
+			.srcOffset = 0,
+			.dstOffset = 0,
+			.size = dataSize,
+		};
+
+		VkCopyBufferInfo2 copyBufferInfo{
+			.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_INFO_2,
+			.srcBuffer = tlasStagingBuffer.buffer,
+			.dstBuffer = asBuilder.tlasInstancesBuffer.buffer,
+			.regionCount = 1,
+			.pRegions = &copyRegionInfo,  // set when calling `cmdUploadAppended`
+		};
+		vkCmdCopyBuffer2(cmd, &copyBufferInfo);
+	}
+
+	nvvk::accelerationStructureBarrier(cmd, VK_ACCESS_TRANSFER_WRITE_BIT,
+		VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR | VK_ACCESS_2_SHADER_READ_BIT);
+
+	bool sizeChanged = (tlasInstances.size() != asBuilder.tlasSize);
+	if (sizeChanged)
+	{
+		asBuilder.tlasBuildData.cmdBuildAccelerationStructure(cmd, asBuilder.tlas.accel, asBuilder.tlasScratchBuffer.address);
+		asBuilder.tlasSize = tlasInstances.size();
+	}
+	else asBuilder.tlasBuildData.cmdUpdateAccelerationStructure(cmd, asBuilder.tlas.accel, asBuilder.tlasScratchBuffer.address);
+}
+*/
 //-----------------------------------------创造光追管线----------------------------------------------------------
 /*
 整个rtPipeline的逻辑应该是：
@@ -506,7 +574,7 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 	rtPipelineInfo.pGroups = shader_groups.data();
 	rtPipelineInfo.maxPipelineRayRecursionDepth = std::min(MAX_DEPTH, rtProperties.maxRayRecursionDepth);		//最大bounce数
 	rtPipelineInfo.layout = rtPipelineLayout;
-	vkCreateRayTracingPipelinesKHR(Application::app->getDevice(), {}, {}, 1, & rtPipelineInfo, nullptr, & rtPipeline);
+	vkCreateRayTracingPipelinesKHR(Application::app->getDevice(), {}, {}, 1, & rtPipelineInfo, nullptr, &rtPipeline);
 	NVVK_DBG_NAME(rtPipeline);
 
 	LOGI("Ray tracing pipeline layout created successfully\n");
@@ -540,8 +608,6 @@ void FzbRenderer::PathTracingRenderer::rayTraceScene(VkCommandBuffer cmd) {
 	write.append(rtDescPack.makeWrite(shaderio::BindingPoints::eOutImage), gBuffers.getColorImageView(eImgRendered), VK_IMAGE_LAYOUT_GENERAL);
 	vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipelineLayout, 1, write.size(), write.data());
 
-	pushValues.frameIndex = Application::frameIndex;
-	pushValues.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 	const VkPushConstantsInfo pushInfo{
 		.sType = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
 		.layout = rtPipelineLayout,
@@ -559,28 +625,15 @@ void FzbRenderer::PathTracingRenderer::rayTraceScene(VkCommandBuffer cmd) {
 void FzbRenderer::PathTracingRenderer::resetFrame() {
 	Application::frameIndex = 0;
 }
-void FzbRenderer::PathTracingRenderer::updateDataPerFrame(VkCommandBuffer cmd) {
-	rasterVoxelization->updateDataPerFrame(cmd);
-}
+void FzbRenderer::PathTracingRenderer::updateDataPerFrame(VkCommandBuffer cmd) {}
 //-----------------------------------------渲染器行为----------------------------------------------------------
 void FzbRenderer::PathTracingRenderer::init() {
-	//查询是否支持rtPosFetchFeature
-	VkPhysicalDeviceFeatures2 deviceFeatures2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
-	deviceFeatures2.pNext = &rtPosFetchFeature;
-	rtPosFetchFeature.pNext = nullptr;
-	rtPosFetchFeature.rayTracingPositionFetch = VK_FALSE;
-	vkGetPhysicalDeviceFeatures2(Application::app->getPhysicalDevice(), &deviceFeatures2);
-	//查询设备参数
-	VkPhysicalDeviceProperties2 prop2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
-	prop2.pNext = &rtProperties;
-	vkGetPhysicalDeviceProperties2(Application::app->getPhysicalDevice(), &prop2);
+	getRayTracingPropertiesAndFeature();
 
 	std::string shaderioPath = (std::filesystem::path(__FILE__).parent_path() / "shaderio.h").string();
 	Application::slangCompiler.addOption({ .name = slang::CompilerOptionName::Include,
 		.value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = shaderioPath.c_str()}
 		});
-
-	rasterVoxelization->init();
 
 	Renderer::createGBuffer(false);
 	Renderer::createDescriptorSetLayout();
@@ -591,7 +644,7 @@ void FzbRenderer::PathTracingRenderer::init() {
 	sbtGenerator.init(Application::app->getDevice(), rtProperties);
 
 	createBottomLevelAS();
-	createToLevelAS();
+	createTopLevelAS();
 
 	createRayTracingDescriptorLayout();
 	createRayTracingPipeline();
@@ -599,8 +652,6 @@ void FzbRenderer::PathTracingRenderer::init() {
 	Renderer::init();
 }
 void FzbRenderer::PathTracingRenderer::clean() {
-	rasterVoxelization->clean();
-
 	Renderer::clean();
 	VkDevice device = Application::app->getDevice();
 
@@ -622,8 +673,9 @@ void FzbRenderer::PathTracingRenderer::uiRender() {
 	if (ImGui::Begin("PathTracingSettings"))
 	{
 		ImGui::SeparatorText("Jitter");
-		UIModified |= ImGui::SliderInt("Max Frames", &Application::maxFrames, 1, 2 << 10);
-		ImGui::TextDisabled("Frame: %d", pushValues.frameIndex);
+		UIModified |= ImGui::SliderInt("Max Acc Frames", &maxFrames, 1, MAX_FRAME);
+		ImGui::TextDisabled("Current PathTracing Frame: %d", pushValues.frameIndex);
+		ImGui::TextDisabled("Current Renderer Frame: %d", Application::frameIndex);
 
 		ImGui::SeparatorText("Bounces");
 		{
@@ -656,13 +708,10 @@ void FzbRenderer::PathTracingRenderer::uiRender() {
 	}
 	ImGui::End();
 
-	rasterVoxelization->uiRender();
-
 	if(UIModified) resetFrame();
 };
 void FzbRenderer::PathTracingRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 	NVVK_CHECK(gBuffers.update(cmd, size));
-	rasterVoxelization->resize(cmd, size, gBuffers, eImgTonemapped);
 };
 void FzbRenderer::PathTracingRenderer::preRender() {
 	std::shared_ptr<nvutils::CameraManipulator> cameraManip = Application::sceneResource.cameraManip;
@@ -679,22 +728,36 @@ void FzbRenderer::PathTracingRenderer::preRender() {
 		refFov = fov;
 	}
 
-	rasterVoxelization->preRender();
+	Scene& scene = Application::sceneResource;
+	if (scene.dynamicInstances.size() > 0 || scene.hasDynamicLight) maxFrames = 1;
+	pushValues.frameIndex = std::min(Application::frameIndex, maxFrames - 1);
+	pushValues.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 }
 void FzbRenderer::PathTracingRenderer::render(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
 
+	//maxFrames等于1表示只要一帧，我们就每帧都替换
+	if (pushValues.frameIndex == maxFrames && maxFrames > 1) return;
+
 	updateDataPerFrame(cmd);
-	rasterVoxelization->render(cmd);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR);
 	rayTraceScene(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	Renderer::postProcess(cmd);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-	rasterVoxelization->postProcess(cmd);
 };
 
 void FzbRenderer::PathTracingRenderer::compileAndCreateShaders() {
 	createRayTracingPipeline();
-	rasterVoxelization->compileAndCreateShaders();
 };
+
+void FzbRenderer::PathTracingRenderer::getRayTracingPropertiesAndFeature() {
+	//查询是否支持rtPosFetchFeature
+	VkPhysicalDeviceFeatures2 deviceFeatures2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+	deviceFeatures2.pNext = &rtPosFetchFeature;
+	rtPosFetchFeature.pNext = nullptr;
+	rtPosFetchFeature.rayTracingPositionFetch = VK_FALSE;
+	vkGetPhysicalDeviceFeatures2(Application::app->getPhysicalDevice(), &deviceFeatures2);
+	//查询设备参数
+	VkPhysicalDeviceProperties2 prop2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+	prop2.pNext = &rtProperties;
+	vkGetPhysicalDeviceProperties2(Application::app->getPhysicalDevice(), &prop2);
+}

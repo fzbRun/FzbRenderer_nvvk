@@ -21,6 +21,17 @@ sceneManager主要有三个功能
 
 namespace FzbRenderer {
 
+struct DynamicInstanceInfo{
+	float speed = 10;
+	glm::mat4 startTransformMatrix = glm::mat4(1.0f);
+	glm::mat4 endTransformMatrix = glm::mat4(1.0f);
+};
+struct LightInfo : public DynamicInstanceInfo {
+	bool staticInstance = true;
+	glm::mat4 transformMatrix = glm::mat4(1.0f);
+	shaderio::Light light;
+};
+
 class Scene {
 public:
 	Scene() = default;
@@ -30,18 +41,24 @@ public:
 	void createSceneInfoBuffer();
 	void clean();
 
+	void preRender();
 	void UIRender();
+	void updateDataPerFrame(VkCommandBuffer cmd);
 
 	std::filesystem::path scenePath;
 	std::shared_ptr<nvutils::CameraManipulator> cameraManip{ std::make_shared<nvutils::CameraManipulator>() };
 	
 	std::vector<FzbRenderer::MeshSet> meshSets;
 	uint32_t customPrimitiveCount = 0;
+	std::vector<DynamicInstanceInfo> dynamicInstanceInfos;
+	bool hasDynamicLight = false;
+	std::vector<LightInfo> lightInfos;
 	//---------------------------------------GPU使用数据---------------------------------------------------
 	std::vector<nvvk::Image>     textures{};
 
 	std::vector<shaderio::Mesh> meshes;
 	std::vector<shaderio::Instance> instances;
+	std::vector<shaderio::Instance> dynamicInstances;
 	std::vector<shaderio::BSDFMaterial> materials;
 	shaderio::SceneInfo sceneInfo;
 

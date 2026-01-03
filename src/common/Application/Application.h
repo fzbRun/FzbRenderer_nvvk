@@ -20,6 +20,8 @@
 #ifndef FZB_APPLICATION_H
 #define FZB_APPLICATION_H
 
+#define MAX_FRAME 1 << 12
+
 namespace FzbRenderer {
 
 class Application : public nvapp::IAppElement {
@@ -67,7 +69,6 @@ public:
 	inline static nvshaders::Tonemapper tonemapper{};
 	inline static shaderio::TonemapperData tonemapperData{};
 
-	inline static int maxFrames = 2 << 9;
 	inline static int frameIndex = -1;
 	inline static bool UIModified = false;
 	inline static VkDescriptorSet viewportImage = nullptr;

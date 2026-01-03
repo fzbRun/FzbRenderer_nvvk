@@ -779,4 +779,5 @@ void AccelerationStructureHelper::tlasSubmitUpdateAndWait(const std::vector<VkAc
   m_uploader->releaseStaging();
 }
 
+
 }  // namespace nvvk

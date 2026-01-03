@@ -7,6 +7,7 @@
 #include <nvgui/sky.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <common/Material/Material.h>
+#include <glm/gtx/matrix_decompose.hpp>
 
 int FzbRenderer::Scene::loadTexture(const std::filesystem::path& texturePath) {
 	if (texturePathToIndex.count(texturePath)) return texturePathToIndex[texturePath];
@@ -45,6 +46,69 @@ void FzbRenderer::Scene::addMeshSet(MeshSet& meshSet) {
 
 	meshSetIDToIndex.insert({ meshSet.meshID, meshSets.size() });
 	meshSets.push_back(meshSet);
+}
+glm::mat4 getTransformMatrixFromXML(pugi::xml_node& transformNode, 
+	bool& staticInstance, FzbRenderer::DynamicInstanceInfo* instanceInfo = nullptr) {
+	glm::mat4 transformMatrix = glm::mat4(1.0f);
+	
+	if (pugi::xml_node matrixNode = transformNode.child("matrix"))
+		transformMatrix = FzbRenderer::getMat4FromString(matrixNode.attribute("value").value());
+	if (pugi::xml_node translateNode = transformNode.select_node("translate").node()) {
+		glm::vec3 translateValue = FzbRenderer::getRGBFromString(translateNode.attribute("value").value());
+		transformMatrix = glm::translate(transformMatrix, translateValue);
+	}
+	if (pugi::xml_node rotateNode = transformNode.child("rotate")) {
+		glm::vec3 rotateAngle = glm::radians(FzbRenderer::getRGBFromString(rotateNode.attribute("value").value()));
+		if (rotateAngle.x > 0.01f) transformMatrix = glm::rotate(transformMatrix, rotateAngle.x, glm::vec3(1, 0, 0));
+		if (rotateAngle.y > 0.01f) transformMatrix = glm::rotate(transformMatrix, rotateAngle.y, glm::vec3(0, 1, 0));
+		if (rotateAngle.z > 0.01f) transformMatrix = glm::rotate(transformMatrix, rotateAngle.z, glm::vec3(0, 0, 1));
+	}
+	if (pugi::xml_node scaleNode = transformNode.child("scale")) {
+		glm::vec3 scaleValue = FzbRenderer::getRGBFromString(scaleNode.attribute("value").value());
+		transformMatrix = glm::scale(transformMatrix, scaleValue);
+	}
+
+	if (instanceInfo != nullptr) {
+		if (pugi::xml_node dynamicNode = transformNode.child("dynamic")) {
+			staticInstance = false;
+			if (dynamicNode.attribute("speed")) instanceInfo->speed = std::stof(dynamicNode.attribute("speed").value());
+			if (pugi::xml_node translateNode = dynamicNode.child("translate")) {
+				if (pugi::xml_node translateStartNode = translateNode.child("start")) {
+					glm::vec3 translateValue = FzbRenderer::getRGBFromString(translateStartNode.attribute("value").value());
+					instanceInfo->startTransformMatrix = glm::translate(instanceInfo->startTransformMatrix, translateValue);
+				}
+				if (pugi::xml_node translateEndNode = translateNode.child("end")) {
+					glm::vec3 translateValue = FzbRenderer::getRGBFromString(translateEndNode.attribute("value").value());
+					instanceInfo->endTransformMatrix = glm::translate(instanceInfo->endTransformMatrix, translateValue);
+				}
+			}
+			if (pugi::xml_node rotateNode = dynamicNode.child("rotate")) {
+				if (pugi::xml_node rotateStartNode = rotateNode.child("start")) {
+					glm::vec3 rotateAngle = glm::radians(FzbRenderer::getRGBFromString(rotateStartNode.attribute("value").value()));
+					if (rotateAngle.x > 0.01f) instanceInfo->startTransformMatrix = glm::rotate(instanceInfo->startTransformMatrix, rotateAngle.x, glm::vec3(1, 0, 0));
+					if (rotateAngle.y > 0.01f) instanceInfo->startTransformMatrix = glm::rotate(instanceInfo->startTransformMatrix, rotateAngle.y, glm::vec3(0, 1, 0));
+					if (rotateAngle.z > 0.01f) instanceInfo->startTransformMatrix = glm::rotate(instanceInfo->startTransformMatrix, rotateAngle.z, glm::vec3(0, 0, 1));
+				}
+				if (pugi::xml_node rotateEndNode = rotateNode.child("end")) {
+					glm::vec3 rotateAngle = glm::radians(FzbRenderer::getRGBFromString(rotateEndNode.attribute("value").value()));
+					if (rotateAngle.x > 0.01f) instanceInfo->endTransformMatrix = glm::rotate(instanceInfo->endTransformMatrix, rotateAngle.x, glm::vec3(1, 0, 0));
+					if (rotateAngle.y > 0.01f) instanceInfo->endTransformMatrix = glm::rotate(instanceInfo->endTransformMatrix, rotateAngle.y, glm::vec3(0, 1, 0));
+					if (rotateAngle.z > 0.01f) instanceInfo->endTransformMatrix = glm::rotate(instanceInfo->endTransformMatrix, rotateAngle.z, glm::vec3(0, 0, 1));
+				}
+			}
+			if (pugi::xml_node scaleNode = dynamicNode.child("scale")) {
+				if (pugi::xml_node scaleStartNode = scaleNode.child("start")) {
+					glm::vec3 scaleValue = FzbRenderer::getRGBFromString(scaleStartNode.attribute("value").value());
+					instanceInfo->startTransformMatrix = glm::translate(instanceInfo->startTransformMatrix, scaleValue);
+				}
+				if (pugi::xml_node scaleEndNode = scaleNode.child("end")) {
+					glm::vec3 scaleValue = FzbRenderer::getRGBFromString(scaleEndNode.attribute("value").value());
+					instanceInfo->endTransformMatrix = glm::translate(instanceInfo->endTransformMatrix, scaleValue);
+				}
+			}
+		}
+	}
+	return transformMatrix;
 }
 void FzbRenderer::Scene::createSceneFromXML() {
 	scenePath = FzbRenderer::getProjectRootDir() / "resources" / scenePath;
@@ -121,21 +185,10 @@ void FzbRenderer::Scene::createSceneFromXML() {
 			std::string lightType = lightNode.attribute("type").value();
 			std::string lightID = lightNode.attribute("id").value();
 
-			glm::mat4 transformMatrix = glm::mat4(1.0f);
-			if (pugi::xml_node transformNode = lightNode.child("transform")) {
-				if (pugi::xml_node matrixNode = transformNode.select_node("matrix").node())
-					transformMatrix = FzbRenderer::getMat4FromString(matrixNode.attribute("value").value());
-				if (pugi::xml_node translateNode = transformNode.select_node("translate").node()) {
-					glm::vec3 translateValue = FzbRenderer::getRGBFromString(translateNode.attribute("value").value());
-					transformMatrix = glm::translate(transformMatrix, translateValue);
-				}
-				if (pugi::xml_node rotateNode = transformNode.select_node("rotate").node()) {
-					glm::vec3 rotateAngle = glm::radians(FzbRenderer::getRGBFromString(rotateNode.attribute("value").value()));
-					if (rotateAngle.x > 0.01f) transformMatrix = glm::rotate(transformMatrix, rotateAngle.x, glm::vec3(1, 0, 0));
-					if (rotateAngle.y > 0.01f) transformMatrix = glm::rotate(transformMatrix, rotateAngle.y, glm::vec3(0, 1, 0));
-					if (rotateAngle.z > 0.01f) transformMatrix = glm::rotate(transformMatrix, rotateAngle.z, glm::vec3(0, 0, 1));
-				}
-			}
+			LightInfo lightInfo;
+			if (pugi::xml_node transformNode = lightNode.child("transform")) 
+				lightInfo.transformMatrix = getTransformMatrixFromXML(transformNode, lightInfo.staticInstance, &lightInfo);
+			if (lightInfo.staticInstance) hasDynamicLight = true;
 
 			if(pugi::xml_node emissiveNode = lightNode.child("emissive"))
 				light.color = FzbRenderer::getRGBFromString(emissiveNode.attribute("value").value());
@@ -144,12 +197,14 @@ void FzbRenderer::Scene::createSceneFromXML() {
 
 			if (lightType == "point") {
 				light.type = shaderio::Point;
-				light.pos = glm::vec3(transformMatrix * glm::vec4(glm::vec3(0.0f), 1.0f));
+				lightInfo.light.pos = glm::vec3(0.0f);
+				light.pos = glm::vec3(lightInfo.transformMatrix * glm::vec4(lightInfo.light.pos, 1.0f));
 			}
 			else if (lightType == "spot") {
 				light.type = shaderio::Spot;
-				light.pos = glm::vec3(transformMatrix * glm::vec4(glm::vec3(0.0f), 1.0f));
-				light.direction = glm::normalize(glm::vec3(transformMatrix * glm::vec4(1.0f, 1.0f, 2.0f, 1.0f)) - light.pos);
+				lightInfo.light.pos = glm::vec3(0.0f);
+				light.pos = glm::vec3(lightInfo.transformMatrix * glm::vec4(lightInfo.light.pos, 1.0f));
+				light.direction = glm::normalize(glm::vec3(lightInfo.transformMatrix * glm::vec4(1.0f, 1.0f, 2.0f, 1.0f)) - light.pos);
 				light.coneAngle = 60.0f;
 				if (pugi::xml_node coneAngleNode = lightNode.child("coneAngle"))
 					light.coneAngle = std::stof(coneAngleNode.attribute("value").value());
@@ -171,18 +226,34 @@ void FzbRenderer::Scene::createSceneFromXML() {
 							uint32_t posIndex = posBufferView.offset + posBufferView.byteStride * i;
 							memcpy(lightMeshVertices.data() + i, lightMesh.meshByteData.data() + posIndex, sizeof(glm::vec3));
 						}
-
-						light.pos = glm::vec3(transformMatrix * glm::vec4(lightMeshVertices[0], 1.0f));
-						light.edge1 = glm::vec3(transformMatrix * glm::vec4(lightMeshVertices[1], 1.0f)) - light.pos;
-						light.edge2 = glm::vec3(transformMatrix * glm::vec4(lightMeshVertices[3], 1.0f)) - light.pos;
-						light.direction = glm::normalize(glm::cross(light.edge1, light.edge2));
+						
+						if (lightInfo.staticInstance) {
+							light.pos = glm::vec3(lightInfo.transformMatrix * glm::vec4(lightMeshVertices[0], 1.0f));
+							light.edge1 = glm::vec3(lightInfo.transformMatrix * glm::vec4(lightMeshVertices[1], 1.0f)) - light.pos;
+							light.edge2 = glm::vec3(lightInfo.transformMatrix * glm::vec4(lightMeshVertices[3], 1.0f)) - light.pos;
+							light.direction = glm::normalize(glm::cross(light.edge1, light.edge2));
+						}
+						else {
+							lightInfo.light.pos = glm::vec4(lightMeshVertices[0], 1.0f);
+							lightInfo.light.edge1 = lightMeshVertices[1] - lightInfo.light.pos;
+							lightInfo.light.edge2 = lightMeshVertices[3] - lightInfo.light.pos;
+							lightInfo.light.direction = glm::normalize(glm::cross(lightInfo.light.edge1, lightInfo.light.edge2));
+						}
 					}
 				}
 				else {
-					light.pos = glm::vec3(transformMatrix * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
-					light.edge1 = glm::vec3(transformMatrix * glm::vec4(1.0f, 0.0f, 0.0f, 1.0f)) - light.pos;
-					light.edge2 = glm::vec3(transformMatrix * glm::vec4(0.0f, 1.0f, 0.0f, 1.0f)) - light.pos;
-					light.direction = glm::normalize(glm::cross(light.edge1, light.edge2));
+					if (lightInfo.staticInstance) {
+						light.pos = glm::vec3(lightInfo.transformMatrix * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+						light.edge1 = glm::vec3(lightInfo.transformMatrix * glm::vec4(1.0f, 0.0f, 0.0f, 1.0f)) - light.pos;
+						light.edge2 = glm::vec3(lightInfo.transformMatrix * glm::vec4(0.0f, 1.0f, 0.0f, 1.0f)) - light.pos;
+						light.direction = glm::normalize(glm::cross(light.edge1, light.edge2));
+					}
+					else {
+						lightInfo.light.pos = glm::vec3(0.0f, 0.0f, 0.0f);
+						lightInfo.light.edge1 = glm::vec3(1.0f, 0.0f, 0.0f);
+						lightInfo.light.edge2 = glm::vec3(0.0f, 1.0f, 0.0f);
+						lightInfo.light.direction = glm::vec3(0.0f, 0.0f, 1.0f);
+					}
 				}
 
 				if (pugi::xml_node SRSNode = lightNode.child("SphericalRectangleSample"))
@@ -190,6 +261,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 			}
 
 			sceneInfo.lights[sceneInfo.numLights++] = light;
+			lightInfos.push_back(lightInfo);
 		}
 	}
 	//------------------------------------------------Mesh---------------------------------------------------------------
@@ -213,6 +285,8 @@ void FzbRenderer::Scene::createSceneFromXML() {
 	3. 根据materialID在uniqueMaterialIDToIndex找到索引
 	4. 记录meshes和materials的索引
 	*/
+	instances.resize(0);
+	dynamicInstances.resize(0);
 	pugi::xml_node instanceNode = sceneInfoNode.child("instances");
 	for (pugi::xml_node instanceNode : instanceNode.children("instance")) {
 		std::string meshSetID = instanceNode.child("meshRef").attribute("id").value();
@@ -225,6 +299,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 			meshSetID = "custom" + meshType + std::to_string(customPrimitiveCount++);
 			mesh = FzbRenderer::MeshSet(meshSetID, primitive);
 			addMeshSet(mesh);
+			childMeshInfos = mesh.childMeshInfos;
 		}
 		else {
 			if (!meshSetIDToIndex.count(meshSetID)) LOGW("实例没有对应的mesh：%s\n", meshSetID.c_str());
@@ -242,34 +317,21 @@ void FzbRenderer::Scene::createSceneFromXML() {
 			if (!uniqueMaterialIDToIndex.count(materialID)) materialID = "defaultMaterial";
 			instance.materialIndex = uniqueMaterialIDToIndex[materialID];
 
-			glm::mat4 transformMatrix(1.0f);
-			if (pugi::xml_node transformNode = instanceNode.select_node("transform").node()) {
-				if (pugi::xml_node matrixNode = transformNode.child("matrix"))
-					transformMatrix = FzbRenderer::getMat4FromString(matrixNode.attribute("value").value());
-				if (pugi::xml_node translateNode = transformNode.select_node("translate").node()) {
-					glm::vec3 translateValue = FzbRenderer::getRGBFromString(translateNode.attribute("value").value());
-					transformMatrix = glm::translate(transformMatrix, translateValue);
-				}
-				if (pugi::xml_node rotateNode = transformNode.select_node("rotate").node()) {
-					glm::vec3 rotateAngle = glm::radians(FzbRenderer::getRGBFromString(rotateNode.attribute("value").value()));
-					if (rotateAngle.x > 0.01f) transformMatrix = glm::rotate(transformMatrix, rotateAngle.x, glm::vec3(1, 0, 0));
-					if (rotateAngle.y > 0.01f) transformMatrix = glm::rotate(transformMatrix, rotateAngle.y, glm::vec3(0, 1, 0));
-					if (rotateAngle.z > 0.01f) transformMatrix = glm::rotate(transformMatrix, rotateAngle.z, glm::vec3(0, 0, 1));
-				}
+			instance.transform = glm::mat4(1.0f);
+			DynamicInstanceInfo instanceInfo; bool staticInstance = true;
+			if (pugi::xml_node transformNode = instanceNode.child("transform")) 
+				instance.transform = getTransformMatrixFromXML(transformNode, staticInstance, &instanceInfo);
+			if (staticInstance) instances.push_back(instance); 
+			else {
+				dynamicInstances.push_back(instance);
+				dynamicInstanceInfos.push_back(instanceInfo);
 			}
-			instance.transform = transformMatrix;
-
-			instances.push_back(instance);
 		}
 	}
 
 	doc.reset();
 
 	createSceneInfoBuffer();
-
-	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
-	Application::stagingUploader.cmdUploadAppended(cmd);
-	Application::app->submitAndWaitTempCmdBuffer(cmd);
 }
 /*
 在shader中获取顶点数据的流程是
@@ -299,7 +361,7 @@ void FzbRenderer::Scene::createSceneInfoBuffer() {
 
 	// Create all instance buffers
 	if (instances.size() > 0) {
-		allocator->createBuffer(bInstances, std::span(instances).size_bytes(),
+		allocator->createBuffer(bInstances, std::span(instances).size_bytes() + std::span(dynamicInstances).size_bytes(),
 			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 		NVVK_DBG_NAME(bInstances.buffer);
 		NVVK_CHECK(stagingUploader.appendBuffer(bInstances, 0,
@@ -322,6 +384,10 @@ void FzbRenderer::Scene::createSceneInfoBuffer() {
 	NVVK_DBG_NAME(bSceneInfo.buffer);
 	NVVK_CHECK(stagingUploader.appendBuffer(bSceneInfo, 0,
 		std::span<const shaderio::SceneInfo>(&sceneInfo, 1)));
+
+	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
+	Application::stagingUploader.cmdUploadAppended(cmd);
+	Application::app->submitAndWaitTempCmdBuffer(cmd);
 }
 
 void FzbRenderer::Scene::clean() {
@@ -337,11 +403,92 @@ void FzbRenderer::Scene::clean() {
 		allocator.destroyImage(texture);
 }
 
+glm::mat4 interpolateTransforms(const glm::mat4& a, const glm::mat4& b, float t) {
+	// 确保 t 在 [0, 1] 范围内
+	t = glm::clamp(t, 0.0f, 1.0f);
+
+	// 分解矩阵A
+	glm::vec3 scaleA, translationA, skewA;
+	glm::vec4 perspectiveA;
+	glm::quat rotationA;
+	glm::decompose(a, scaleA, rotationA, translationA, skewA, perspectiveA);
+
+	// 分解矩阵B
+	glm::vec3 scaleB, translationB, skewB;
+	glm::vec4 perspectiveB;
+	glm::quat rotationB;
+	glm::decompose(b, scaleB, rotationB, translationB, skewB, perspectiveB);
+
+	// 对各个分量进行插值
+	glm::vec3 scale = glm::mix(scaleA, scaleB, t);
+	glm::quat rotation = glm::slerp(rotationA, rotationB, t);  // 球面线性插值
+	glm::vec3 translation = glm::mix(translationA, translationB, t);
+
+	// 重新组合矩阵
+	glm::mat4 result = glm::translate(glm::mat4(1.0f), translation)
+		* glm::mat4_cast(rotation)
+		* glm::scale(glm::mat4(1.0f), scale);
+
+	return result;
+}
+void FzbRenderer::Scene::preRender() {
+	static int frameIndex = 0;
+	for (int i = 0; i < sceneInfo.numLights; ++i) {
+		LightInfo lightInfo = lightInfos[i];
+		if (lightInfo.staticInstance) continue;
+		shaderio::Light& light = sceneInfo.lights[i];
+		float interpolateValue = (float)frameIndex / lightInfo.speed;
+		interpolateValue = interpolateValue - std::floor(interpolateValue);
+		glm::mat4 interpolateTransformMatrix = interpolateTransforms(lightInfo.startTransformMatrix, lightInfo.endTransformMatrix, interpolateValue);
+		
+		light.pos = interpolateTransformMatrix * lightInfo.transformMatrix * glm::vec4(lightInfo.light.pos, 1.0f);
+		light.edge1 = interpolateTransformMatrix * lightInfo.transformMatrix * glm::vec4(lightInfo.light.edge1, 1.0f);
+		light.edge2 = interpolateTransformMatrix * lightInfo.transformMatrix * glm::vec4(lightInfo.light.edge2, 1.0f);
+		light.direction = lightInfo.light.direction * glm::inverse(glm::mat3(interpolateTransformMatrix * lightInfo.transformMatrix));
+	}
+
+	const glm::mat4& viewMatrix = cameraManip->getViewMatrix();
+	const glm::mat4& projMatrix = cameraManip->getPerspectiveMatrix();
+	sceneInfo.viewProjMatrix = projMatrix * viewMatrix;
+	sceneInfo.projInvMatrix = glm::inverse(projMatrix);
+	sceneInfo.viewInvMatrix = glm::inverse(viewMatrix);
+	sceneInfo.cameraPosition = cameraManip->getEye();
+	sceneInfo.instances = (shaderio::Instance*)bInstances.address;
+	sceneInfo.meshes = (shaderio::Mesh*)bMeshes.address;
+	sceneInfo.materials = (shaderio::BSDFMaterial*)bMaterials.address;
+
+	if (dynamicInstances.size() > 0) {
+		for (int i = 0; i < dynamicInstances.size(); ++i) {
+			DynamicInstanceInfo& instanceInfo = dynamicInstanceInfos[i];
+			shaderio::Instance& instance = dynamicInstances[i];
+			float interpolateValue = (float)frameIndex++ / instanceInfo.speed;
+			interpolateValue = interpolateValue - std::floor(interpolateValue);
+			glm::mat4 interpolateTransformMatrix = interpolateTransforms(instanceInfo.startTransformMatrix, instanceInfo.endTransformMatrix, interpolateValue);
+			instance.transform = interpolateTransformMatrix * instance.transform;
+		}
+	}
+}
 void FzbRenderer::Scene::UIRender() {
 	if (ImGui::Begin("Scene Resources")) {
 
 	}
 	ImGui::End();
+}
+
+void FzbRenderer::Scene::updateDataPerFrame(VkCommandBuffer cmd) {
+	nvvk::cmdBufferMemoryBarrier(cmd, { bSceneInfo.buffer, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+									   VK_PIPELINE_STAGE_2_TRANSFER_BIT });
+	vkCmdUpdateBuffer(cmd, bSceneInfo.buffer, 0, sizeof(shaderio::SceneInfo), &sceneInfo);
+	nvvk::cmdBufferMemoryBarrier(cmd, { bSceneInfo.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+									   VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT });
+
+	if (dynamicInstances.size() > 0) {
+		nvvk::cmdBufferMemoryBarrier(cmd, { bInstances.buffer, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+								   VK_PIPELINE_STAGE_2_TRANSFER_BIT });
+		vkCmdUpdateBuffer(cmd, bInstances.buffer, std::span(instances).size_bytes(), std::span(dynamicInstances).size_bytes(), dynamicInstances.data());
+		nvvk::cmdBufferMemoryBarrier(cmd, { bInstances.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+									   VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT });
+	}
 }
 
 FzbRenderer::MeshInfo FzbRenderer::Scene::getMeshInfo(uint32_t meshIndex) {
