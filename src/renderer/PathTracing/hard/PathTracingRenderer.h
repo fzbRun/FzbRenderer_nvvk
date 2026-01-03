@@ -10,6 +10,7 @@
 #include "./shaderio.h"
 #include <feature/SceneDivision/RasterVoxelization/RasterVoxelization.h>
 #include "common/Application/Application.h"
+#include "AccelerationStructure.h"
 
 #ifndef FZB_PATH_TRACING_RENDERER_H
 #define FZB_PATH_TRACING_RENDERER_H
@@ -56,7 +57,7 @@ public:
 
 	std::vector<VkAccelerationStructureInstanceKHR> staticTlasInstances;
 
-	nvvk::AccelerationStructureHelper asBuilder{};
+	AccelerationStructureManager asManager;
 	nvvk::SBTGenerator sbtGenerator;
 	nvvk::Buffer sbtBuffer;
 

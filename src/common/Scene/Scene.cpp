@@ -323,6 +323,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 				instance.transform = getTransformMatrixFromXML(transformNode, staticInstance, &instanceInfo);
 			if (staticInstance) instances.push_back(instance); 
 			else {
+				instanceInfo.transformMatrix = instance.transform;
 				dynamicInstances.push_back(instance);
 				dynamicInstanceInfos.push_back(instanceInfo);
 			}
@@ -464,7 +465,7 @@ void FzbRenderer::Scene::preRender() {
 			float interpolateValue = (float)frameIndex++ / instanceInfo.speed;
 			interpolateValue = interpolateValue - std::floor(interpolateValue);
 			glm::mat4 interpolateTransformMatrix = interpolateTransforms(instanceInfo.startTransformMatrix, instanceInfo.endTransformMatrix, interpolateValue);
-			instance.transform = interpolateTransformMatrix * instance.transform;
+			instance.transform = interpolateTransformMatrix * instanceInfo.transformMatrix;
 		}
 	}
 }

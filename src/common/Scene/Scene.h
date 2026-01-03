@@ -23,12 +23,12 @@ namespace FzbRenderer {
 
 struct DynamicInstanceInfo{
 	float speed = 10;
+	glm::mat4 transformMatrix = glm::mat4(1.0f);
 	glm::mat4 startTransformMatrix = glm::mat4(1.0f);
 	glm::mat4 endTransformMatrix = glm::mat4(1.0f);
 };
 struct LightInfo : public DynamicInstanceInfo {
 	bool staticInstance = true;
-	glm::mat4 transformMatrix = glm::mat4(1.0f);
 	shaderio::Light light;
 };
 

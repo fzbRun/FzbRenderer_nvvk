@@ -26,7 +26,7 @@ void FzbRenderer::SVOPathGuidingRenderer::init() {
 	createDescriptorSetLayout();
 	Renderer::addTextureArrayDescriptor(shaderio::SVOPGBindingPoints::eTextures_SVOPG, &rtDescPack);
 
-	asBuilder.init(&Application::allocator, &Application::stagingUploader, Application::app->getQueue(0));
+	asManager.asBuilder.init(&Application::allocator, &Application::stagingUploader, Application::app->getQueue(0));
 	sbtGenerator.init(Application::app->getDevice(), rtProperties);
 
 }
