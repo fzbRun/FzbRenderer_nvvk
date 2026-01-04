@@ -19,33 +19,6 @@ void AccelerationStructureManager::clean() {
 	asBuilder.deinit();
 }
 
-void AccelerationStructureManager::primitiveToGeometry(const shaderio::Mesh& mesh,
-	VkAccelerationStructureGeometryKHR& geometry, VkAccelerationStructureBuildRangeInfoKHR& rangeInfo) {
-
-	const shaderio::TriangleMesh triMesh = mesh.triMesh;
-	const auto triangleCount = static_cast<uint32_t>(triMesh.indices.count / 3U);
-
-	//从一个大的buffer中将顶点和索引找到，构成三角形的信息
-	VkAccelerationStructureGeometryTrianglesDataKHR triangles{
-		.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
-		.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT,
-		.vertexData = {.deviceAddress = VkDeviceAddress(mesh.dataBuffer) + triMesh.positions.offset},
-		.vertexStride = triMesh.positions.byteStride,
-		.maxVertex = triMesh.positions.count - 1,
-		.indexType = VkIndexType(mesh.indexType),
-		.indexData = {.deviceAddress = VkDeviceAddress(mesh.dataBuffer) + triMesh.indices.offset},
-	};
-
-	//然后使用三角形创建BVH
-	geometry = VkAccelerationStructureGeometryKHR{
-		.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
-		.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
-		.geometry = {.triangles = triangles},
-		.flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR | VK_GEOMETRY_OPAQUE_BIT_KHR,
-	};
-
-	rangeInfo = VkAccelerationStructureBuildRangeInfoKHR{ .primitiveCount = triangleCount };
-}
 nvvk::AccelerationStructureGeometryInfo AccelerationStructureManager::primitiveToGeometry_nvvk(const shaderio::Mesh& mesh) {
 	//这个函数就和我之前cuda实现BVH的思路一摸一样啊
 
@@ -77,7 +50,114 @@ nvvk::AccelerationStructureGeometryInfo AccelerationStructureManager::primitiveT
 
 	return result;
 }
+void AccelerationStructureManager::createBottomLevelAS_nvvk() {
+	SCOPED_TIMER(__FUNCTION__);
+	LOGI("Ready to build %zu bottom-level acceleration structures\n", Application::sceneResource.meshes.size());
 
+	std::vector<nvvk::AccelerationStructureGeometryInfo> geoInfos(Application::sceneResource.meshes.size());
+	for (uint32_t blasId = 0; blasId < Application::sceneResource.meshes.size(); ++blasId)
+		geoInfos[blasId] = primitiveToGeometry_nvvk(Application::sceneResource.meshes[blasId]);
+
+	asBuilder.blasSubmitBuildAndWait(geoInfos, VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+		VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DATA_ACCESS_KHR);
+
+	LOGI("Bottom-level acceleration structures built successfully\n");
+}
+void AccelerationStructureManager::createTopLevelAS_nvvk() {
+	SCOPED_TIMER(__FUNCTION__);
+
+	FzbRenderer::Scene& sceneResorce = Application::sceneResource;
+
+	std::vector<VkAccelerationStructureInstanceKHR> tlasInstances(0);
+	tlasInstances.reserve(sceneResorce.instances.size() + sceneResorce.dynamicInstances.size());
+
+	staticTlasInstances.resize(0);
+	staticTlasInstances.reserve(Application::sceneResource.instances.size());		//每个mesh一个顶层实例
+	const VkGeometryInstanceFlagsKHR flgas{ VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV };	//没有背面剔除
+	for (const shaderio::Instance& instance : Application::sceneResource.instances) {
+		VkAccelerationStructureInstanceKHR asInstance{};
+		asInstance.transform = nvvk::toTransformMatrixKHR(instance.transform);
+		asInstance.instanceCustomIndex = instance.meshIndex;
+		asInstance.accelerationStructureReference = asBuilder.blasSet[instance.meshIndex].address;
+		asInstance.instanceShaderBindingTableRecordOffset = 0;		//实例用SBT中hitGroup中第i个条目（shader）
+		asInstance.flags = flgas;
+		asInstance.mask = 0xFF;
+		staticTlasInstances.emplace_back(asInstance);
+	}
+	tlasInstances.insert(tlasInstances.end(), staticTlasInstances.begin(), staticTlasInstances.end());
+
+	for (const shaderio::Instance& instance : Application::sceneResource.dynamicInstances) {
+		VkAccelerationStructureInstanceKHR asInstance{};
+		asInstance.transform = nvvk::toTransformMatrixKHR(instance.transform);
+		asInstance.instanceCustomIndex = instance.meshIndex;
+		asInstance.accelerationStructureReference = asBuilder.blasSet[instance.meshIndex].address;
+		asInstance.instanceShaderBindingTableRecordOffset = 0;		//实例用SBT中hitGroup中第i个条目（shader）
+		asInstance.flags = flgas;
+		asInstance.mask = 0xFF;
+		tlasInstances.emplace_back(asInstance);
+	}
+
+	LOGI("Ready to build top-level acceleration structure with %zu instances\n", tlasInstances.size());
+
+	VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+	if (Application::sceneResource.dynamicInstances.size() > 0) flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+	asBuilder.tlasSubmitBuildAndWait(tlasInstances, flags);
+
+	LOGI("Top-level accleration structures built successfully\n");
+}
+void AccelerationStructureManager::updateTopLevelAS_nvvk() {
+	if (Application::sceneResource.dynamicInstances.size() == 0) return;
+
+	FzbRenderer::Scene& sceneResorce = Application::sceneResource;
+
+	std::vector<VkAccelerationStructureInstanceKHR> tlasInstances(0);
+	tlasInstances.reserve(sceneResorce.instances.size() + sceneResorce.dynamicInstances.size());
+	tlasInstances.insert(tlasInstances.end(), staticTlasInstances.begin(), staticTlasInstances.end());
+
+	const VkGeometryInstanceFlagsKHR flgas{ VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV };	//没有背面剔除
+	for (const shaderio::Instance& instance : Application::sceneResource.dynamicInstances) {
+		VkAccelerationStructureInstanceKHR asInstance{};
+		asInstance.transform = nvvk::toTransformMatrixKHR(instance.transform);
+		asInstance.instanceCustomIndex = instance.meshIndex;
+		asInstance.accelerationStructureReference = asBuilder.blasSet[instance.meshIndex].address;
+		asInstance.instanceShaderBindingTableRecordOffset = 0;		//实例用SBT中hitGroup中第i个条目（shader）
+		asInstance.flags = flgas;
+		asInstance.mask = 0xFF;
+		tlasInstances.emplace_back(asInstance);
+	}
+
+	NVVK_CHECK(vkDeviceWaitIdle(Application::app->getDevice()));	//等待GPU指令处理完成
+	asBuilder.tlasSubmitUpdateAndWait(tlasInstances);
+}
+
+
+void AccelerationStructureManager::primitiveToGeometry(const shaderio::Mesh& mesh,
+	VkAccelerationStructureGeometryKHR& geometry, VkAccelerationStructureBuildRangeInfoKHR& rangeInfo) {
+
+	const shaderio::TriangleMesh triMesh = mesh.triMesh;
+	const auto triangleCount = static_cast<uint32_t>(triMesh.indices.count / 3U);
+
+	//从一个大的buffer中将顶点和索引找到，构成三角形的信息
+	VkAccelerationStructureGeometryTrianglesDataKHR triangles{
+		.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
+		.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT,
+		.vertexData = {.deviceAddress = VkDeviceAddress(mesh.dataBuffer) + triMesh.positions.offset},
+		.vertexStride = triMesh.positions.byteStride,
+		.maxVertex = triMesh.positions.count - 1,
+		.indexType = VkIndexType(mesh.indexType),
+		.indexData = {.deviceAddress = VkDeviceAddress(mesh.dataBuffer) + triMesh.indices.offset},
+	};
+
+	//然后使用三角形创建BVH
+	geometry = VkAccelerationStructureGeometryKHR{
+		.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+		.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
+		.geometry = {.triangles = triangles},
+		.flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR | VK_GEOMETRY_OPAQUE_BIT_KHR,
+	};
+
+	rangeInfo = VkAccelerationStructureBuildRangeInfoKHR{ .primitiveCount = triangleCount };
+}
 void AccelerationStructureManager::createAccelerationStructure(VkAccelerationStructureTypeKHR asType, nvvk::AccelerationStructure& accelStruct,
 	VkAccelerationStructureGeometryKHR& asGeometry, VkAccelerationStructureBuildRangeInfoKHR& asBuildRangeInfo,
 	VkBuildAccelerationStructureFlagsKHR flags) {
@@ -135,7 +215,6 @@ void AccelerationStructureManager::createAccelerationStructure(VkAccelerationStr
 
 	Application::allocator.destroyBuffer(scratchBuffer);
 }
-
 void AccelerationStructureManager::createBottomLevelAS() {
 	SCOPED_TIMER(__FUNCTION__);
 	LOGI("Ready to build %zu bottom-level acceleration structures\n", Application::sceneResource.meshes.size());
@@ -154,29 +233,15 @@ void AccelerationStructureManager::createBottomLevelAS() {
 
 	LOGI("Bottom-level acceleration structures built successfully\n");
 }
-void AccelerationStructureManager::createBottomLevelAS_nvvk() {
-	SCOPED_TIMER(__FUNCTION__);
-	LOGI("Ready to build %zu bottom-level acceleration structures\n", Application::sceneResource.meshes.size());
-
-	std::vector<nvvk::AccelerationStructureGeometryInfo> geoInfos(Application::sceneResource.meshes.size());
-	for (uint32_t blasId = 0; blasId < Application::sceneResource.meshes.size(); ++blasId)
-		geoInfos[blasId] = primitiveToGeometry_nvvk(Application::sceneResource.meshes[blasId]);
-
-	asBuilder.blasSubmitBuildAndWait(geoInfos, VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
-		VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DATA_ACCESS_KHR);
-
-	LOGI("Bottom-level acceleration structures built successfully\n");
-}
-
 void AccelerationStructureManager::createTopLevelAS() {
 	SCOPED_TIMER(__FUNCTION__);
 
 	auto toTransformMatrixKHR = [](const glm::mat4& m) {
-			VkTransformMatrixKHR t;
-			//glm的矩阵是列矩阵，而VkTransformMatrixKHR是行矩阵，所以需要先转置
-			memcpy(&t, glm::value_ptr(glm::transpose(m)), sizeof(t));	
-			return t;
-	};
+		VkTransformMatrixKHR t;
+		//glm的矩阵是列矩阵，而VkTransformMatrixKHR是行矩阵，所以需要先转置
+		memcpy(&t, glm::value_ptr(glm::transpose(m)), sizeof(t));
+		return t;
+		};
 
 	std::vector<VkAccelerationStructureInstanceKHR> tlasInstances;
 	tlasInstances.reserve(Application::sceneResource.instances.size());		//每个mesh一个顶层实例
@@ -221,7 +286,7 @@ void AccelerationStructureManager::createTopLevelAS() {
 		asGeometry = {
 			.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
 			.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR,
-			.geometry = { .instances = geometryInstances }
+			.geometry = {.instances = geometryInstances }
 		};
 		asBuildRangeInfo = { .primitiveCount = static_cast<uint32_t>(Application::sceneResource.instances.size()) };
 
@@ -232,71 +297,4 @@ void AccelerationStructureManager::createTopLevelAS() {
 
 	LOGI("Top-level accleration structures built successfully\n");
 	Application::allocator.destroyBuffer(tlasInstancesBuffer);
-}
-void AccelerationStructureManager::createTopLevelAS_nvvk() {
-	SCOPED_TIMER(__FUNCTION__);
-
-	FzbRenderer::Scene& sceneResorce = Application::sceneResource;
-
-	std::vector<VkAccelerationStructureInstanceKHR> tlasInstances(0);
-	tlasInstances.reserve(sceneResorce.instances.size() + sceneResorce.dynamicInstances.size());
-
-	staticTlasInstances.resize(0);
-	staticTlasInstances.reserve(Application::sceneResource.instances.size());		//每个mesh一个顶层实例
-	const VkGeometryInstanceFlagsKHR flgas{ VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV };	//没有背面剔除
-	for (const shaderio::Instance& instance : Application::sceneResource.instances) {
-		VkAccelerationStructureInstanceKHR asInstance{};
-		asInstance.transform = nvvk::toTransformMatrixKHR(instance.transform);
-		asInstance.instanceCustomIndex = instance.meshIndex;
-		asInstance.accelerationStructureReference = asBuilder.blasSet[instance.meshIndex].address;
-		asInstance.instanceShaderBindingTableRecordOffset = 0;		//实例用SBT中hitGroup中第i个条目（shader）
-		asInstance.flags = flgas;
-		asInstance.mask = 0xFF;
-		staticTlasInstances.emplace_back(asInstance);
-	}
-	tlasInstances.insert(tlasInstances.end(), staticTlasInstances.begin(), staticTlasInstances.end());
-
-	for (const shaderio::Instance& instance : Application::sceneResource.dynamicInstances) {
-		VkAccelerationStructureInstanceKHR asInstance{};
-		asInstance.transform = nvvk::toTransformMatrixKHR(instance.transform);
-		asInstance.instanceCustomIndex = instance.meshIndex;
-		asInstance.accelerationStructureReference = asBuilder.blasSet[instance.meshIndex].address;
-		asInstance.instanceShaderBindingTableRecordOffset = 0;		//实例用SBT中hitGroup中第i个条目（shader）
-		asInstance.flags = flgas;
-		asInstance.mask = 0xFF;
-		tlasInstances.emplace_back(asInstance);
-	}
-
-	LOGI("Ready to build top-level acceleration structure with %zu instances\n", tlasInstances.size());
-
-	VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-	if (Application::sceneResource.dynamicInstances.size() > 0) flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
-	asBuilder.tlasSubmitBuildAndWait(tlasInstances, flags);
-
-	LOGI("Top-level accleration structures built successfully\n");
-}
-
-void AccelerationStructureManager::updateTopLevelAS_nvvk() {
-	if (Application::sceneResource.dynamicInstances.size() == 0) return;
-
-	FzbRenderer::Scene& sceneResorce = Application::sceneResource;
-
-	std::vector<VkAccelerationStructureInstanceKHR> tlasInstances(0);
-	tlasInstances.reserve(sceneResorce.instances.size() + sceneResorce.dynamicInstances.size());
-	tlasInstances.insert(tlasInstances.end(), staticTlasInstances.begin(), staticTlasInstances.end());
-
-	const VkGeometryInstanceFlagsKHR flgas{ VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV };	//没有背面剔除
-	for (const shaderio::Instance& instance : Application::sceneResource.dynamicInstances) {
-		VkAccelerationStructureInstanceKHR asInstance{};
-		asInstance.transform = nvvk::toTransformMatrixKHR(instance.transform);
-		asInstance.instanceCustomIndex = instance.meshIndex;
-		asInstance.accelerationStructureReference = asBuilder.blasSet[instance.meshIndex].address;
-		asInstance.instanceShaderBindingTableRecordOffset = 0;		//实例用SBT中hitGroup中第i个条目（shader）
-		asInstance.flags = flgas;
-		asInstance.mask = 0xFF;
-		tlasInstances.emplace_back(asInstance);
-	}
-
-	NVVK_CHECK(vkDeviceWaitIdle(Application::app->getDevice()));	//等待GPU指令处理完成
-	asBuilder.tlasSubmitUpdateAndWait(tlasInstances);
 }

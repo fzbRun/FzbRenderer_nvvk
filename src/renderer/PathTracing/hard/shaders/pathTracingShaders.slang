@@ -330,7 +330,7 @@ void raygenMain()
     // Initial state
     HitPayload payload;
     payload.randomSeed = seed;
-    //payload.radiance  = float3(0, 0, 0);
+    payload.radiance  = float3(0, 0, 0);
     payload.bsdf_cosine = float3(1.0f);
     payload.pdf = 1.0f;
     payload.bounceDepth = 0;

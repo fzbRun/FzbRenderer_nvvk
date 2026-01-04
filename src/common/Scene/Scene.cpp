@@ -47,69 +47,6 @@ void FzbRenderer::Scene::addMeshSet(MeshSet& meshSet) {
 	meshSetIDToIndex.insert({ meshSet.meshID, meshSets.size() });
 	meshSets.push_back(meshSet);
 }
-glm::mat4 getTransformMatrixFromXML(pugi::xml_node& transformNode, 
-	bool& staticInstance, FzbRenderer::DynamicInstanceInfo* instanceInfo = nullptr) {
-	glm::mat4 transformMatrix = glm::mat4(1.0f);
-	
-	if (pugi::xml_node matrixNode = transformNode.child("matrix"))
-		transformMatrix = FzbRenderer::getMat4FromString(matrixNode.attribute("value").value());
-	if (pugi::xml_node translateNode = transformNode.select_node("translate").node()) {
-		glm::vec3 translateValue = FzbRenderer::getRGBFromString(translateNode.attribute("value").value());
-		transformMatrix = glm::translate(transformMatrix, translateValue);
-	}
-	if (pugi::xml_node rotateNode = transformNode.child("rotate")) {
-		glm::vec3 rotateAngle = glm::radians(FzbRenderer::getRGBFromString(rotateNode.attribute("value").value()));
-		if (rotateAngle.x > 0.01f) transformMatrix = glm::rotate(transformMatrix, rotateAngle.x, glm::vec3(1, 0, 0));
-		if (rotateAngle.y > 0.01f) transformMatrix = glm::rotate(transformMatrix, rotateAngle.y, glm::vec3(0, 1, 0));
-		if (rotateAngle.z > 0.01f) transformMatrix = glm::rotate(transformMatrix, rotateAngle.z, glm::vec3(0, 0, 1));
-	}
-	if (pugi::xml_node scaleNode = transformNode.child("scale")) {
-		glm::vec3 scaleValue = FzbRenderer::getRGBFromString(scaleNode.attribute("value").value());
-		transformMatrix = glm::scale(transformMatrix, scaleValue);
-	}
-
-	if (instanceInfo != nullptr) {
-		if (pugi::xml_node dynamicNode = transformNode.child("dynamic")) {
-			staticInstance = false;
-			if (dynamicNode.attribute("speed")) instanceInfo->speed = std::stof(dynamicNode.attribute("speed").value());
-			if (pugi::xml_node translateNode = dynamicNode.child("translate")) {
-				if (pugi::xml_node translateStartNode = translateNode.child("start")) {
-					glm::vec3 translateValue = FzbRenderer::getRGBFromString(translateStartNode.attribute("value").value());
-					instanceInfo->startTransformMatrix = glm::translate(instanceInfo->startTransformMatrix, translateValue);
-				}
-				if (pugi::xml_node translateEndNode = translateNode.child("end")) {
-					glm::vec3 translateValue = FzbRenderer::getRGBFromString(translateEndNode.attribute("value").value());
-					instanceInfo->endTransformMatrix = glm::translate(instanceInfo->endTransformMatrix, translateValue);
-				}
-			}
-			if (pugi::xml_node rotateNode = dynamicNode.child("rotate")) {
-				if (pugi::xml_node rotateStartNode = rotateNode.child("start")) {
-					glm::vec3 rotateAngle = glm::radians(FzbRenderer::getRGBFromString(rotateStartNode.attribute("value").value()));
-					if (rotateAngle.x > 0.01f) instanceInfo->startTransformMatrix = glm::rotate(instanceInfo->startTransformMatrix, rotateAngle.x, glm::vec3(1, 0, 0));
-					if (rotateAngle.y > 0.01f) instanceInfo->startTransformMatrix = glm::rotate(instanceInfo->startTransformMatrix, rotateAngle.y, glm::vec3(0, 1, 0));
-					if (rotateAngle.z > 0.01f) instanceInfo->startTransformMatrix = glm::rotate(instanceInfo->startTransformMatrix, rotateAngle.z, glm::vec3(0, 0, 1));
-				}
-				if (pugi::xml_node rotateEndNode = rotateNode.child("end")) {
-					glm::vec3 rotateAngle = glm::radians(FzbRenderer::getRGBFromString(rotateEndNode.attribute("value").value()));
-					if (rotateAngle.x > 0.01f) instanceInfo->endTransformMatrix = glm::rotate(instanceInfo->endTransformMatrix, rotateAngle.x, glm::vec3(1, 0, 0));
-					if (rotateAngle.y > 0.01f) instanceInfo->endTransformMatrix = glm::rotate(instanceInfo->endTransformMatrix, rotateAngle.y, glm::vec3(0, 1, 0));
-					if (rotateAngle.z > 0.01f) instanceInfo->endTransformMatrix = glm::rotate(instanceInfo->endTransformMatrix, rotateAngle.z, glm::vec3(0, 0, 1));
-				}
-			}
-			if (pugi::xml_node scaleNode = dynamicNode.child("scale")) {
-				if (pugi::xml_node scaleStartNode = scaleNode.child("start")) {
-					glm::vec3 scaleValue = FzbRenderer::getRGBFromString(scaleStartNode.attribute("value").value());
-					instanceInfo->startTransformMatrix = glm::translate(instanceInfo->startTransformMatrix, scaleValue);
-				}
-				if (pugi::xml_node scaleEndNode = scaleNode.child("end")) {
-					glm::vec3 scaleValue = FzbRenderer::getRGBFromString(scaleEndNode.attribute("value").value());
-					instanceInfo->endTransformMatrix = glm::translate(instanceInfo->endTransformMatrix, scaleValue);
-				}
-			}
-		}
-	}
-	return transformMatrix;
-}
 void FzbRenderer::Scene::createSceneFromXML() {
 	scenePath = FzbRenderer::getProjectRootDir() / "resources" / scenePath;
 	std::filesystem::path sceneInfoXMLPath = scenePath / "sceneInfo.xml";
@@ -169,101 +106,6 @@ void FzbRenderer::Scene::createSceneFromXML() {
 		uniqueMaterialIDToIndex.insert({ materialID, materials.size() });
 		materials.push_back(material);
 	}
-	//------------------------------------------------光源---------------------------------------------------------------
-	if (pugi::xml_node lightsNode = sceneInfoNode.child("lights")) {
-		sceneInfo.useSky = false;
-		if (pugi::xml_node useSkyNode = lightsNode.child("useSky"))
-			sceneInfo.useSky = std::string(useSkyNode.attribute("value").value()) == "true";
-		sceneInfo.backgroundColor = glm::vec3(0.85f);
-		if (pugi::xml_node backgroudColorNode = lightsNode.child("backgroundColor"))
-			sceneInfo.backgroundColor = FzbRenderer::getRGBFromString(backgroudColorNode.attribute("value").value());
-
-		sceneInfo.numLights = 0;
-		for (pugi::xml_node lightNode : lightsNode.children("light")) {
-			shaderio::Light light;
-
-			std::string lightType = lightNode.attribute("type").value();
-			std::string lightID = lightNode.attribute("id").value();
-
-			LightInfo lightInfo;
-			if (pugi::xml_node transformNode = lightNode.child("transform")) 
-				lightInfo.transformMatrix = getTransformMatrixFromXML(transformNode, lightInfo.staticInstance, &lightInfo);
-			if (lightInfo.staticInstance) hasDynamicLight = true;
-
-			if(pugi::xml_node emissiveNode = lightNode.child("emissive"))
-				light.color = FzbRenderer::getRGBFromString(emissiveNode.attribute("value").value());
-			if (pugi::xml_node intensityNode = lightNode.child("intensity"))
-				light.intensity = std::stof(intensityNode.attribute("value").value());
-
-			if (lightType == "point") {
-				light.type = shaderio::Point;
-				lightInfo.light.pos = glm::vec3(0.0f);
-				light.pos = glm::vec3(lightInfo.transformMatrix * glm::vec4(lightInfo.light.pos, 1.0f));
-			}
-			else if (lightType == "spot") {
-				light.type = shaderio::Spot;
-				lightInfo.light.pos = glm::vec3(0.0f);
-				light.pos = glm::vec3(lightInfo.transformMatrix * glm::vec4(lightInfo.light.pos, 1.0f));
-				light.direction = glm::normalize(glm::vec3(lightInfo.transformMatrix * glm::vec4(1.0f, 1.0f, 2.0f, 1.0f)) - light.pos);
-				light.coneAngle = 60.0f;
-				if (pugi::xml_node coneAngleNode = lightNode.child("coneAngle"))
-					light.coneAngle = std::stof(coneAngleNode.attribute("value").value());
-			}
-			else if (lightType == "sun") {
-				light.type == shaderio::Directional;
-				sceneInfo.useSky = true;
-			}
-			else if (lightType == "area") {		//默认是矩形光源
-				light.type = shaderio::Area;
-				if (pugi::xml_node shapeNode = lightNode.child("shape")) {
-					if (std::string(shapeNode.attribute("type").value()) == "obj") {
-						std::filesystem::path lightMeshPath = scenePath / shapeNode.attribute("value").value();
-						FzbRenderer::MeshSet lightMesh("lightMesh", "obj", lightMeshPath);
-						shaderio::BufferView posBufferView = lightMesh.childMeshInfos[0].mesh.triMesh.positions;
-
-						std::vector<glm::vec3> lightMeshVertices(posBufferView.count);
-						for (int i = 0; i < posBufferView.count; ++i) {
-							uint32_t posIndex = posBufferView.offset + posBufferView.byteStride * i;
-							memcpy(lightMeshVertices.data() + i, lightMesh.meshByteData.data() + posIndex, sizeof(glm::vec3));
-						}
-						
-						if (lightInfo.staticInstance) {
-							light.pos = glm::vec3(lightInfo.transformMatrix * glm::vec4(lightMeshVertices[0], 1.0f));
-							light.edge1 = glm::vec3(lightInfo.transformMatrix * glm::vec4(lightMeshVertices[1], 1.0f)) - light.pos;
-							light.edge2 = glm::vec3(lightInfo.transformMatrix * glm::vec4(lightMeshVertices[3], 1.0f)) - light.pos;
-							light.direction = glm::normalize(glm::cross(light.edge1, light.edge2));
-						}
-						else {
-							lightInfo.light.pos = glm::vec4(lightMeshVertices[0], 1.0f);
-							lightInfo.light.edge1 = lightMeshVertices[1] - lightInfo.light.pos;
-							lightInfo.light.edge2 = lightMeshVertices[3] - lightInfo.light.pos;
-							lightInfo.light.direction = glm::normalize(glm::cross(lightInfo.light.edge1, lightInfo.light.edge2));
-						}
-					}
-				}
-				else {
-					if (lightInfo.staticInstance) {
-						light.pos = glm::vec3(lightInfo.transformMatrix * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
-						light.edge1 = glm::vec3(lightInfo.transformMatrix * glm::vec4(1.0f, 0.0f, 0.0f, 1.0f)) - light.pos;
-						light.edge2 = glm::vec3(lightInfo.transformMatrix * glm::vec4(0.0f, 1.0f, 0.0f, 1.0f)) - light.pos;
-						light.direction = glm::normalize(glm::cross(light.edge1, light.edge2));
-					}
-					else {
-						lightInfo.light.pos = glm::vec3(0.0f, 0.0f, 0.0f);
-						lightInfo.light.edge1 = glm::vec3(1.0f, 0.0f, 0.0f);
-						lightInfo.light.edge2 = glm::vec3(0.0f, 1.0f, 0.0f);
-						lightInfo.light.direction = glm::vec3(0.0f, 0.0f, 1.0f);
-					}
-				}
-
-				if (pugi::xml_node SRSNode = lightNode.child("SphericalRectangleSample"))
-					light.SphericalRectangleSample = std::string(SRSNode.attribute("value").value()) == "true";
-			}
-
-			sceneInfo.lights[sceneInfo.numLights++] = light;
-			lightInfos.push_back(lightInfo);
-		}
-	}
 	//------------------------------------------------Mesh---------------------------------------------------------------
 	meshSets.resize(0);
 	meshes.resize(0);
@@ -285,47 +127,99 @@ void FzbRenderer::Scene::createSceneFromXML() {
 	3. 根据materialID在uniqueMaterialIDToIndex找到索引
 	4. 记录meshes和materials的索引
 	*/
-	instances.resize(0);
-	dynamicInstances.resize(0);
-	pugi::xml_node instanceNode = sceneInfoNode.child("instances");
-	for (pugi::xml_node instanceNode : instanceNode.children("instance")) {
-		std::string meshSetID = instanceNode.child("meshRef").attribute("id").value();
-		std::vector<MeshInfo> childMeshInfos;
-		if (meshSetID == "custom") {
-			FzbRenderer::MeshSet mesh;
-			std::string meshType = instanceNode.child("meshRef").attribute("type").value();
-			nvutils::PrimitiveMesh primitive;
-			if (meshType == "plane") primitive = FzbRenderer::MeshSet::createPlane(1, 1.0f, 1.0f);
-			meshSetID = "custom" + meshType + std::to_string(customPrimitiveCount++);
-			mesh = FzbRenderer::MeshSet(meshSetID, primitive);
-			addMeshSet(mesh);
-			childMeshInfos = mesh.childMeshInfos;
-		}
-		else {
-			if (!meshSetIDToIndex.count(meshSetID)) LOGW("实例没有对应的mesh：%s\n", meshSetID.c_str());
-			FzbRenderer::MeshSet& meshSet = meshSets[meshSetIDToIndex[meshSetID]];
-			childMeshInfos = meshSet.childMeshInfos;
-		}
-		for (int i = 0; i < childMeshInfos.size(); i++) {
-			shaderio::Instance instance;
-			MeshInfo& childMesh = childMeshInfos[i];
-			instance.meshIndex = childMesh.meshIndex;
+	instanceInfos.resize(3); instanceInfos[0].resize(0); instanceInfos[1].resize(0); instanceInfos[2].resize(0);
+	pugi::xml_node instancesNode = sceneInfoNode.child("instances");
+	uint32_t staticInstaneCount = 0;
+	uint32_t dynamicInstaneCount = 0;
+	for (pugi::xml_node instanceNode : instancesNode.children("instance")) {
+		Instance instance = Instance(instanceNode);
+		if(instance.instanceID != "defaultInstanceID")
+			instanceIDToInstance.insert({instance.instanceID, {instance.type, instanceInfos[instance.type].size()}});
+		instanceInfos[instance.type].push_back(instance);
+		if(instance.type == InstanceType::Static) staticInstaneCount += instance.childInstances.size();
+		else dynamicInstaneCount += instance.childInstances.size();
+	}
 
-			std::string materialID = "defaultMaterial";
-			if (pugi::xml_node materialNode = instanceNode.child("materialRef")) materialID = materialNode.attribute("id").value();
-			else materialID = childMesh.materialID;
-			if (!uniqueMaterialIDToIndex.count(materialID)) materialID = "defaultMaterial";
-			instance.materialIndex = uniqueMaterialIDToIndex[materialID];
+	uint32_t offset = 0;
+	instances.resize(staticInstaneCount);
+	for (int i = 0; i < instanceInfos[0].size(); ++i) {
+		instanceInfos[0][i].getInstance(instances, offset, 0);
+		offset += instanceInfos[0][i].childInstances.size();
+	}
 
-			instance.transform = glm::mat4(1.0f);
-			DynamicInstanceInfo instanceInfo; bool staticInstance = true;
-			if (pugi::xml_node transformNode = instanceNode.child("transform")) 
-				instance.transform = getTransformMatrixFromXML(transformNode, staticInstance, &instanceInfo);
-			if (staticInstance) instances.push_back(instance); 
-			else {
-				instanceInfo.transformMatrix = instance.transform;
-				dynamicInstances.push_back(instance);
-				dynamicInstanceInfos.push_back(instanceInfo);
+	dynamicInstances.resize(dynamicInstaneCount);
+	//------------------------------------------------光源---------------------------------------------------------------
+	if (pugi::xml_node lightsNode = sceneInfoNode.child("lights")) {
+		sceneInfo.useSky = false;
+		if (pugi::xml_node useSkyNode = lightsNode.child("useSky"))
+			sceneInfo.useSky = std::string(useSkyNode.attribute("value").value()) == "true";
+		sceneInfo.backgroundColor = glm::vec3(0.85f);
+		if (pugi::xml_node backgroudColorNode = lightsNode.child("backgroundColor"))
+			sceneInfo.backgroundColor = FzbRenderer::getRGBFromString(backgroudColorNode.attribute("value").value());
+
+		sceneInfo.numLights = 0;
+		for (pugi::xml_node lightNode : lightsNode.children("light")) {
+			++sceneInfo.numLights;
+
+			LightInstance lightInstance = LightInstance(lightNode);
+			lightInstances.push_back(lightInstance);
+
+			shaderio::Light& light = lightInstances[lightInstances.size() - 1].light;
+
+			std::string lightType = lightNode.attribute("type").value();
+			std::string lightID = lightNode.attribute("id").value();
+
+			if (pugi::xml_node emissiveNode = lightNode.child("emissive"))
+				light.color = FzbRenderer::getRGBFromString(emissiveNode.attribute("value").value());
+			if (pugi::xml_node intensityNode = lightNode.child("intensity"))
+				light.intensity = std::stof(intensityNode.attribute("value").value());
+
+			if (lightType == "point") {
+				light.type = shaderio::Point;
+				light.pos = glm::vec3(lightInstance.baseMatrix * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+			}
+			else if (lightType == "spot") {
+				light.type = shaderio::Spot;
+				light.pos = glm::vec3(lightInstance.baseMatrix * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+				light.direction = glm::normalize(glm::vec3(lightInstance.baseMatrix * glm::vec4(1.0f, 1.0f, 2.0f, 1.0f)));
+				light.coneAngle = 60.0f;
+				if (pugi::xml_node coneAngleNode = lightNode.child("coneAngle"))
+					light.coneAngle = std::stof(coneAngleNode.attribute("value").value());
+			}
+			else if (lightType == "sun") {
+				light.type == shaderio::Directional;
+				sceneInfo.useSky = true;
+			}
+			else if (lightType == "area") {		//默认是矩形光源
+				light.type = shaderio::Area;
+				std::vector<glm::vec3> lightMeshVertices(4);
+				if (pugi::xml_node shapeNode = lightNode.child("shape")) {
+					if (std::string(shapeNode.attribute("type").value()) == "obj") {
+						std::filesystem::path lightMeshPath = scenePath / shapeNode.attribute("value").value();
+						FzbRenderer::MeshSet lightMesh("lightMesh", "obj", lightMeshPath);
+						shaderio::BufferView posBufferView = lightMesh.childMeshInfos[0].mesh.triMesh.positions;
+
+						for (int i = 0; i < 4; ++i) {
+							uint32_t posIndex = posBufferView.offset + posBufferView.byteStride * i;
+							memcpy(lightMeshVertices.data() + i, lightMesh.meshByteData.data() + posIndex, sizeof(glm::vec3));
+						}
+					}
+				}
+				else {
+					lightMeshVertices[0] = glm::vec3(0.0f, 0.0f, 0.0f);
+					lightMeshVertices[1] = glm::vec3(1.0f, 0.0f, 0.0f);
+					lightMeshVertices[2] = glm::vec3(1.0f, 1.0f, 0.0f);
+					lightMeshVertices[3] = glm::vec3(0.0f, 1.0f, 0.0f);
+				}
+
+				light.pos = glm::vec3(lightInstance.baseMatrix * glm::vec4(lightMeshVertices[0], 1.0f));
+				light.edge1 = glm::vec3(lightInstance.baseMatrix * glm::vec4(lightMeshVertices[1], 1.0f)) - light.pos;
+				light.edge2 = glm::vec3(lightInstance.baseMatrix * glm::vec4(lightMeshVertices[3], 1.0f)) - light.pos;
+				light.direction = glm::normalize(glm::cross(light.edge1, light.edge2));
+				if (lightInstance.type != InstanceType::Static) hasDynamicLight = true;
+
+				if (pugi::xml_node SRSNode = lightNode.child("SphericalRectangleSample"))
+					light.SphericalRectangleSample = std::string(SRSNode.attribute("value").value()) == "true";
 			}
 		}
 	}
@@ -404,48 +298,13 @@ void FzbRenderer::Scene::clean() {
 		allocator.destroyImage(texture);
 }
 
-glm::mat4 interpolateTransforms(const glm::mat4& a, const glm::mat4& b, float t) {
-	// 确保 t 在 [0, 1] 范围内
-	t = glm::clamp(t, 0.0f, 1.0f);
-
-	// 分解矩阵A
-	glm::vec3 scaleA, translationA, skewA;
-	glm::vec4 perspectiveA;
-	glm::quat rotationA;
-	glm::decompose(a, scaleA, rotationA, translationA, skewA, perspectiveA);
-
-	// 分解矩阵B
-	glm::vec3 scaleB, translationB, skewB;
-	glm::vec4 perspectiveB;
-	glm::quat rotationB;
-	glm::decompose(b, scaleB, rotationB, translationB, skewB, perspectiveB);
-
-	// 对各个分量进行插值
-	glm::vec3 scale = glm::mix(scaleA, scaleB, t);
-	glm::quat rotation = glm::slerp(rotationA, rotationB, t);  // 球面线性插值
-	glm::vec3 translation = glm::mix(translationA, translationB, t);
-
-	// 重新组合矩阵
-	glm::mat4 result = glm::translate(glm::mat4(1.0f), translation)
-		* glm::mat4_cast(rotation)
-		* glm::scale(glm::mat4(1.0f), scale);
-
-	return result;
-}
 void FzbRenderer::Scene::preRender() {
 	static int frameIndex = 0;
 	for (int i = 0; i < sceneInfo.numLights; ++i) {
-		LightInfo lightInfo = lightInfos[i];
-		if (lightInfo.staticInstance) continue;
-		shaderio::Light& light = sceneInfo.lights[i];
-		float interpolateValue = (float)frameIndex / lightInfo.speed;
-		interpolateValue = interpolateValue - std::floor(interpolateValue);
-		glm::mat4 interpolateTransformMatrix = interpolateTransforms(lightInfo.startTransformMatrix, lightInfo.endTransformMatrix, interpolateValue);
-		
-		light.pos = interpolateTransformMatrix * lightInfo.transformMatrix * glm::vec4(lightInfo.light.pos, 1.0f);
-		light.edge1 = interpolateTransformMatrix * lightInfo.transformMatrix * glm::vec4(lightInfo.light.edge1, 1.0f);
-		light.edge2 = interpolateTransformMatrix * lightInfo.transformMatrix * glm::vec4(lightInfo.light.edge2, 1.0f);
-		light.direction = lightInfo.light.direction * glm::inverse(glm::mat3(interpolateTransformMatrix * lightInfo.transformMatrix));
+		LightInstance lightInstanceInfo = lightInstances[i];		
+		float time = (float)frameIndex / lightInstanceInfo.time;
+		time -= std::floor(time);
+		sceneInfo.lights[i] = lightInstanceInfo.getLight(time);
 	}
 
 	const glm::mat4& viewMatrix = cameraManip->getViewMatrix();
@@ -458,16 +317,18 @@ void FzbRenderer::Scene::preRender() {
 	sceneInfo.meshes = (shaderio::Mesh*)bMeshes.address;
 	sceneInfo.materials = (shaderio::BSDFMaterial*)bMaterials.address;
 
-	if (dynamicInstances.size() > 0) {
-		for (int i = 0; i < dynamicInstances.size(); ++i) {
-			DynamicInstanceInfo& instanceInfo = dynamicInstanceInfos[i];
-			shaderio::Instance& instance = dynamicInstances[i];
-			float interpolateValue = (float)frameIndex++ / instanceInfo.speed;
-			interpolateValue = interpolateValue - std::floor(interpolateValue);
-			glm::mat4 interpolateTransformMatrix = interpolateTransforms(instanceInfo.startTransformMatrix, instanceInfo.endTransformMatrix, interpolateValue);
-			instance.transform = interpolateTransformMatrix * instanceInfo.transformMatrix;
+	uint32_t offset = 0;
+	for (int i = 1; i < instanceInfos.size(); ++i) {
+		for (int j = 0; j < instanceInfos[i].size(); ++j) {
+			Instance& instanceInfo = instanceInfos[i][j];
+			float time = (float)frameIndex / instanceInfo.time;
+			time -= std::floor(time);
+			instanceInfo.getInstance(dynamicInstances, offset, time);
+			offset += instanceInfo.childInstances.size();
 		}
 	}
+
+	++frameIndex;
 }
 void FzbRenderer::Scene::UIRender() {
 	if (ImGui::Begin("Scene Resources")) {

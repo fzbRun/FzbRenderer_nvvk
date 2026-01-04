@@ -432,7 +432,7 @@ void FzbRenderer::PathTracingRenderer::render(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
 
 	//maxFrames等于1表示只要一帧，我们就每帧都替换
-	if (pushValues.frameIndex == maxFrames && maxFrames > 1) return;
+	if (pushValues.frameIndex == maxFrames - 1 && maxFrames > 1) return;
 
 	updateDataPerFrame(cmd);
 	rayTraceScene(cmd);

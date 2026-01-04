@@ -76,24 +76,6 @@
 			<emissive value="1000, 1000, 1000" />
 		</bsdf>
 	</bsdfs>
-	<lights>
-		<useSky value = "false" />
-		<backgroundColor value = "0.0, 0.0, 0.0" />
-		<light type="area" id="Light">
-			<transform name="to_world">
-				<matrix value="0.730445 0 0 -4.4391 0 -1.32136 -1.42138e-007 1.50656 0 1.42138e-007 -1.93037 -4.44377 0 0 0 1" />
-				<dynamic speed="10">
-					<translate>
-						<start value = "0, 0, 0" />
-						<end value = "0, 0, 1" />
-					</translate>
-				</dynamic>
-			</transform>
-			<emissive value = "1.0, 1.0, 1.0" />
-			<intensity value = "1000.0" />
-			<SphericalRectangleSample value="true" />
-		</light>
-	</lights>
 	<meshes>
 		<mesh type="obj" id="PotLid">
 			<filename value = "models/Mesh000.obj" />
@@ -281,15 +263,15 @@
 			<meshRef id = "PotLid" />
 			<materialRef id = "Pot2BSDF" />
 		</instance>
-		<instance>
+		<instance type="periodMotion">
 			<transform name="to_world">
 				<matrix value="-0.0837611 0 0.0303939 -1.95645 0 0.0891049 0 0.651268 -0.0303939 0 -0.0837611 -3.57687 0 0 0 1"/>
-				<dynamic speed="100">
+				<period time="100">
 					<translate>
 						<start value = "0, 0, 0" />
 						<end value = "1, 0, 0" />
 					</translate>
-				</dynamic>
+				</period>
 			</transform>
 			<meshRef id = "Pot" />
 			<materialRef id = "Pot3BSDF" />
@@ -301,18 +283,29 @@
 			<meshRef id = "PotLid" />
 			<materialRef id = "Pot3BSDF" />
 		</instance>
-		<instance>
+		<instance id="Light" type="periodMotion">
 			<transform name="to_world">
 				<matrix value="0.730445 0 0 -4.4391 0 -1.32136 -1.42138e-007 1.50656 0 1.42138e-007 -1.93037 -4.44377 0 0 0 1" />
-				<dynamic speed="100">
+				<period time="100">
 					<translate>
 						<start value = "0, 0, 0" />
 						<end value = "0, 0, 1" />
 					</translate>
-				</dynamic>
+				</period>
 			</transform>
 			<meshRef id="custom" type="plane" />
 			<materialRef id="LightBSDF"/>
 		</instance>
 	</instances>
+
+	<lights>
+		<useSky value = "false" />
+		<backgroundColor value = "0.0, 0.0, 0.0" />
+		<light type="area" id="Light">
+			<emissive value = "1.0, 1.0, 1.0" />
+			<intensity value = "1000.0" />
+			<SphericalRectangleSample value="true" />
+			<instanceRef id="Light"/>
+		</light>
+	</lights>
 </scene>
