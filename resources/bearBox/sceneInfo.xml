@@ -13,8 +13,8 @@
 	</bsdfs>
 	
 	<lights>
-		<useSky value = "true" />
-		<backgroundColor value = "0.0, 0.0, 0.0" />
+		<useSky value = "false" />
+		<backgroundColor value = "0.85, 0.85, 0.85" />
 		<light type = "area" id = "light0">
 			<shape type = "obj" value="models/bear_box_light.obj" />
 			<emissive value = "27.0, 22.0, 14.0" />

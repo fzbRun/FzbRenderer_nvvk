@@ -327,7 +327,6 @@ public:
   // TLAS must have been built with the VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR flag.
   void tlasSubmitUpdateAndWait(const std::vector<VkAccelerationStructureInstanceKHR>& tlasInstances);
 
-private:
   nvvk::QueueInfo                                    m_queueInfo;
   nvvk::ResourceAllocator*                           m_alloc{nullptr};
   nvvk::StagingUploader*                             m_uploader{};

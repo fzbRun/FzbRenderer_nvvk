@@ -18,6 +18,7 @@ sceneManager主要有三个功能
 #include <nvutils/camera_manipulator.hpp>
 #include <common/Mesh/nvvk/gltf_utils.hpp>
 #include <common/Shader/shaderStructType.h>
+#include <common/Instance/Instance.h>
 
 namespace FzbRenderer {
 
@@ -30,18 +31,23 @@ public:
 	void createSceneInfoBuffer();
 	void clean();
 
+	void preRender();
 	void UIRender();
+	void updateDataPerFrame(VkCommandBuffer cmd);
 
 	std::filesystem::path scenePath;
 	std::shared_ptr<nvutils::CameraManipulator> cameraManip{ std::make_shared<nvutils::CameraManipulator>() };
 	
 	std::vector<FzbRenderer::MeshSet> meshSets;
-	uint32_t customPrimitiveCount = 0;
+	std::vector<std::vector<Instance>> instanceInfos;	//static period random
+	bool hasDynamicLight = false;
+	std::vector<LightInstance> lightInstances;
 	//---------------------------------------GPU使用数据---------------------------------------------------
 	std::vector<nvvk::Image>     textures{};
 
 	std::vector<shaderio::Mesh> meshes;
 	std::vector<shaderio::Instance> instances;
+	std::vector<shaderio::Instance> dynamicInstances;
 	std::vector<shaderio::BSDFMaterial> materials;
 	shaderio::SceneInfo sceneInfo;
 
@@ -62,13 +68,13 @@ public:
 
 	MeshInfo getMeshInfo(uint32_t meshIndex);
 
-private:
 	//映射
 	std::unordered_map<std::string, uint32_t> uniqueMaterialIDToIndex;
 	std::unordered_map<std::filesystem::path, int> texturePathToIndex;
 	std::map<std::string, uint32_t> meshSetIDToIndex;	//根据meshSetID获取meshSet数组的索引
 	std::vector<uint32_t> meshToBufferIndex;	//meshToBufferIndex[meshIndex] = bufferIndex，前向或延时渲染时按mesh渲染时使用
 	std::vector<uint32_t> meshIndexToMeshSetIndex;
+	std::map<std::string, std::pair<uint32_t, uint32_t>> instanceIDToInstance;
 };
 
 }

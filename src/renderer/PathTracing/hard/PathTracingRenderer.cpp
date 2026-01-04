@@ -7,8 +7,6 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <common/Shader/Shader.h>
 
-#define MAX_DEPTH 64U
-
 FzbRenderer::PathTracingRenderer::PathTracingRenderer(pugi::xml_node& rendererNode) {
 	Application::vkContextInitInfo.deviceExtensions.push_back( { VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, &accelFeature });
 	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, &rtPipelineFeature });
@@ -21,175 +19,9 @@ FzbRenderer::PathTracingRenderer::PathTracingRenderer(pugi::xml_node& rendererNo
 		pushValues.maxDepth = std::stoi(maxDepthNode.attribute("value").value());
 	if (pugi::xml_node useNEENode = rendererNode.child("useNEE"))
 		pushValues.NEEShaderIndex = std::string(useNEENode.attribute("value").value()) == "true";
-
-	if (pugi::xml_node rasterVoxelizationNode = rendererNode.child("RasterVoxelization"))
-		rasterVoxelization = std::make_shared<RasterVoxelization>(rasterVoxelizationNode);
-}
-//-----------------------------------------创建加速结构----------------------------------------------------------
-/*
-void FzbRenderer::PathTracingRenderer::primitiveToGeometry(const shaderio::GltfMesh& gltfMesh,
-	VkAccelerationStructureGeometryKHR& geometry, VkAccelerationStructureBuildRangeInfoKHR& rangeInfo) {
-	//这个函数就和我之前cuda实现BVH的思路一摸一样啊
-
-	const shaderio::TriangleMesh triMesh = gltfMesh.triMesh;
-	const auto triangleCount = static_cast<uint32_t>(triMesh.indices.count / 3U);
-
-	//从一个大的buffer中将顶点和索引找到，构成三角形的信息
-	VkAccelerationStructureGeometryTrianglesDataKHR triangles{
-		.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
-		.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT,
-		.vertexData = {.deviceAddress = VkDeviceAddress(gltfMesh.gltfBuffer) + triMesh.positions.offset},
-		.vertexStride = triMesh.positions.byteStride,
-		.maxVertex = triMesh.positions.count - 1,
-		.indexType = VkIndexType(gltfMesh.indexType),
-		.indexData = {.deviceAddress = VkDeviceAddress(gltfMesh.gltfBuffer) + triMesh.indices.offset},
-	};
-
-	//然后使用三角形创建BVH
-	geometry = VkAccelerationStructureGeometryKHR{
-		.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
-		.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
-		.geometry = {.triangles = triangles},
-		.flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR | VK_GEOMETRY_OPAQUE_BIT_KHR,
-	};
-
-	rangeInfo = VkAccelerationStructureBuildRangeInfoKHR{ .primitiveCount = triangleCount };
-}
-void FzbRenderer::PathTracingRenderer::createAccelerationStructure(VkAccelerationStructureTypeKHR asType, nvvk::AccelerationStructure& accelStruct,
-	VkAccelerationStructureGeometryKHR& asGeometry, VkAccelerationStructureBuildRangeInfoKHR& asBuildRangeInfo,
-	VkBuildAccelerationStructureFlagsKHR flags) {
-	VkDevice device = Application::app->getDevice();
-	//对齐函数，alignment一定会是2的幂次，所以~(alignment - 1)表示低位全为0，高位全为1；那么与之后就剩下向上对齐的上确界了
-	auto alignUp = [](auto value, size_t alignment) noexcept { return ((value + alignment - 1) & ~(alignment - 1)); };
-
-	VkAccelerationStructureBuildGeometryInfoKHR asBuildInfo{
-		.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
-		.type = asType,
-		.flags = flags,
-		.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
-		.geometryCount = 1,
-		.pGeometries = &asGeometry
-	};
-
-	std::vector<uint32_t> maxPrimCount(1);
-	maxPrimCount[0] = asBuildRangeInfo.primitiveCount;
-
-	//根据buildInfo计算出需要的存储空间大小(AS的存储空间以及创建AS所需要的临时空间）
-	VkAccelerationStructureBuildSizesInfoKHR asBuildSize{ .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR };
-	vkGetAccelerationStructureBuildSizesKHR(device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &asBuildInfo, maxPrimCount.data(), &asBuildSize);
-
-	//buildScratchSize是创建AS所需的临时空间，minAccelerationStructureScratchOffsetAlignment是硬件要求的最小对齐
-	VkDeviceSize scratchSize = alignUp(asBuildSize.buildScratchSize, asProperties.minAccelerationStructureScratchOffsetAlignment);
-
-	nvvk::Buffer scratchBuffer;
-	NVVK_CHECK(Application::allocator.createBuffer(scratchBuffer, scratchSize,
-		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_2_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR,
-		VMA_MEMORY_USAGE_AUTO, {}, asProperties.minAccelerationStructureScratchOffsetAlignment));
-
-	VkAccelerationStructureCreateInfoKHR createInfo{
-		.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
-		.size = asBuildSize.accelerationStructureSize,
-		.type = asType,
-	};
-	NVVK_CHECK(Application::allocator.createAcceleration(accelStruct, createInfo));		//申请空间
-
-	{
-		VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
-
-		asBuildInfo.dstAccelerationStructure = accelStruct.accel;
-		asBuildInfo.scratchData.deviceAddress = scratchBuffer.address;
-
-		VkAccelerationStructureBuildRangeInfoKHR* pBuildRangeInfo = &asBuildRangeInfo;
-		vkCmdBuildAccelerationStructuresKHR(cmd, 1, &asBuildInfo, &pBuildRangeInfo);	//创建AS
-
-		Application::app->submitAndWaitTempCmdBuffer(cmd);
-	}
-
-	Application::allocator.destroyBuffer(scratchBuffer);
-}
-void FzbRenderer::PathTracingRenderer::createBottomLevelAS() {
-	SCOPED_TIMER(__FUNCTION__);
-	LOGI("Ready to build %zu bottom-level acceleration structures\n", Application::sceneResource.meshes.size());
-
-	blasAccel.resize(Application::sceneResource.meshes.size());
-	for (uint32_t blasId = 0; blasId < Application::sceneResource.meshes.size(); ++blasId) {
-		VkAccelerationStructureGeometryKHR asGeometry{};
-		VkAccelerationStructureBuildRangeInfoKHR asBuildRangeInfo{};
-
-		primitiveToGeometry(Application::sceneResource.meshes[blasId], asGeometry, asBuildRangeInfo);
-
-		createAccelerationStructure(VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, blasAccel[blasId], asGeometry,
-			asBuildRangeInfo, VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR);
-		NVVK_DBG_NAME(blasAccel[blasId].accel);
-	}
-
-	LOGI("Bottom-level acceleration structures built successfully\n");
-}
-void FzbRenderer::PathTracingRenderer::createToLevelAS() {
-	SCOPED_TIMER(__FUNCTION__);
-
-	auto toTransformMatrixKHR = [](const glm::mat4& m) {
-		VkTransformMatrixKHR t;
-		memcpy(&t, glm::value_ptr(glm::transpose(m)), sizeof(t));	//glm的矩阵是列矩阵，而VkTransformMatrixKHR是行矩阵，所以需要先转置
-		return t;
-	};
-
-	std::vector<VkAccelerationStructureInstanceKHR> tlasInstances;
-	tlasInstances.reserve(Application::sceneResource.instances.size());		//每个mesh一个顶层实例
-	for (const shaderio::GltfInstance& instance : Application::sceneResource.instances) {
-		VkAccelerationStructureInstanceKHR asInstance{};
-		asInstance.transform = toTransformMatrixKHR(instance.transform);
-		asInstance.instanceCustomIndex = instance.meshIndex;
-		asInstance.accelerationStructureReference = blasAccel[instance.meshIndex].address;
-		asInstance.instanceShaderBindingTableRecordOffset = 0;		//所有的实例都用相同的(索引为0)的(rayGen、miss等)shader
-		asInstance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV;	//没有背面剔除
-		asInstance.mask = 0xFF;
-		tlasInstances.emplace_back(asInstance);
-	}
-	LOGI("Ready to build top-level acceleration structure with %zu instances\n", tlasInstances.size());
-
-	nvvk::Buffer tlasInstancesBuffer;
-	{
-		VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
-
-		NVVK_CHECK(Application::allocator.createBuffer(
-			tlasInstancesBuffer, std::span<VkAccelerationStructureInstanceKHR const>(tlasInstances).size_bytes(),
-			VK_BUFFER_USAGE_2_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_2_SHADER_DEVICE_ADDRESS_BIT
-		));
-		NVVK_CHECK(Application::stagingUploader.appendBuffer(
-			tlasInstancesBuffer, 0,
-			std::span<VkAccelerationStructureInstanceKHR const>(tlasInstances)
-		));
-
-		NVVK_DBG_NAME(tlasInstancesBuffer.buffer);
-		Application::stagingUploader.cmdUploadAppended(cmd);
-		Application::app->submitAndWaitTempCmdBuffer(cmd);
-	}
-
-	{
-		VkAccelerationStructureGeometryKHR asGeometry{};
-		VkAccelerationStructureBuildRangeInfoKHR asBuildRangeInfo{};
-
-		VkAccelerationStructureGeometryInstancesDataKHR geometryInstances{
-			.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR,
-			.data = { .deviceAddress = tlasInstancesBuffer.address },
-		};
-		asGeometry = {
-			.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
-			.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR,
-			.geometry = { .instances = geometryInstances }
-		};
-		asBuildRangeInfo = { .primitiveCount = static_cast<uint32_t>(Application::sceneResource.instances.size()) };
-
-		createAccelerationStructure(VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, tlasAccel, asGeometry,
-			asBuildRangeInfo, VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR);
-		NVVK_DBG_NAME(tlasAccel.accel);
-	}
-
-	LOGI("Top-level accleration structures built successfully\n");
-	Application::allocator.destroyBuffer(tlasInstancesBuffer);
 }
 //-----------------------------------------创造光追管线----------------------------------------------------------
+/*
 void FzbRenderer::PathTracingRenderer::createShaderBindingTable(const VkRayTracingPipelineCreateInfoKHR& rtPipelineInfo) {
 	//STB，顾名思义，就是shader大的绑定表；
 	//其将pipeline各个阶段的shader组进行绑定
@@ -251,73 +83,6 @@ callableRegion.size = 0;
 LOGI(" Shader binding table created and populated\n");
 }
 */
-nvvk::AccelerationStructureGeometryInfo FzbRenderer::PathTracingRenderer::primitiveToGeometry(const shaderio::Mesh& mesh) {
-	//这个函数就和我之前cuda实现BVH的思路一摸一样啊
-
-	nvvk::AccelerationStructureGeometryInfo result{};
-
-	const shaderio::TriangleMesh triMesh = mesh.triMesh;
-	const auto triangleCount = static_cast<uint32_t>(triMesh.indices.count / 3U);
-
-	//从一个大的buffer中将顶点和索引找到，构成三角形的信息
-	VkAccelerationStructureGeometryTrianglesDataKHR triangles{
-		.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
-		.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT,
-		.vertexData = {.deviceAddress = VkDeviceAddress(mesh.dataBuffer) + triMesh.positions.offset},
-		.vertexStride = triMesh.positions.byteStride,
-		.maxVertex = triMesh.positions.count - 1,
-		.indexType = VkIndexType(mesh.indexType),
-		.indexData = {.deviceAddress = VkDeviceAddress(mesh.dataBuffer) + triMesh.indices.offset},
-	};
-
-	//然后使用三角形创建BVH
-	result.geometry = VkAccelerationStructureGeometryKHR{
-		.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
-		.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
-		.geometry = {.triangles = triangles},
-		.flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR,	//这表明一个三角形不会被多次命中
-	};
-
-	result.rangeInfo = VkAccelerationStructureBuildRangeInfoKHR{ .primitiveCount = triangleCount };
-
-	return result;
-}
-void FzbRenderer::PathTracingRenderer::createBottomLevelAS() {
-	SCOPED_TIMER(__FUNCTION__);
-	LOGI("Ready to build %zu bottom-level acceleration structures\n", Application::sceneResource.meshes.size());
-
-	std::vector<nvvk::AccelerationStructureGeometryInfo> geoInfos(Application::sceneResource.meshes.size());
-	for (uint32_t blasId = 0; blasId < Application::sceneResource.meshes.size(); ++blasId)
-		geoInfos[blasId] = primitiveToGeometry(Application::sceneResource.meshes[blasId]);
-
-	asBuilder.blasSubmitBuildAndWait(geoInfos, VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
-												VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DATA_ACCESS_KHR);
-
-	LOGI("Bottom-level acceleration structures built successfully\n");
-}
-void FzbRenderer::PathTracingRenderer::createToLevelAS() {
-	SCOPED_TIMER(__FUNCTION__);
-
-	std::vector<VkAccelerationStructureInstanceKHR> tlasInstances;
-	tlasInstances.reserve(Application::sceneResource.instances.size());		//每个mesh一个顶层实例
-	const VkGeometryInstanceFlagsKHR flgas{ VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV };	//没有背面剔除
-
-	for (const shaderio::Instance& instance : Application::sceneResource.instances) {
-		VkAccelerationStructureInstanceKHR asInstance{};
-		asInstance.transform = nvvk::toTransformMatrixKHR(instance.transform);
-		asInstance.instanceCustomIndex = instance.meshIndex;
-		asInstance.accelerationStructureReference = asBuilder.blasSet[instance.meshIndex].address;
-		asInstance.instanceShaderBindingTableRecordOffset = 0;		//实例用SBT中hitGroup中第i个条目（shader）
-		asInstance.flags = flgas;
-		asInstance.mask = 0xFF;
-		tlasInstances.emplace_back(asInstance);
-	}
-	LOGI("Ready to build top-level acceleration structure with %zu instances\n", tlasInstances.size());
-
-	asBuilder.tlasSubmitBuildAndWait(tlasInstances, VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR);
-
-	LOGI("Top-level accleration structures built successfully\n");
-}
 //-----------------------------------------创造光追管线----------------------------------------------------------
 /*
 整个rtPipeline的逻辑应该是：
@@ -506,7 +271,7 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 	rtPipelineInfo.pGroups = shader_groups.data();
 	rtPipelineInfo.maxPipelineRayRecursionDepth = std::min(MAX_DEPTH, rtProperties.maxRayRecursionDepth);		//最大bounce数
 	rtPipelineInfo.layout = rtPipelineLayout;
-	vkCreateRayTracingPipelinesKHR(Application::app->getDevice(), {}, {}, 1, & rtPipelineInfo, nullptr, & rtPipeline);
+	vkCreateRayTracingPipelinesKHR(Application::app->getDevice(), {}, {}, 1, & rtPipelineInfo, nullptr, &rtPipeline);
 	NVVK_DBG_NAME(rtPipeline);
 
 	LOGI("Ray tracing pipeline layout created successfully\n");
@@ -536,12 +301,10 @@ void FzbRenderer::PathTracingRenderer::rayTraceScene(VkCommandBuffer cmd) {
 		descPack.getSetPtr(), 0, nullptr);
 
 	nvvk::WriteSetContainer write{};
-	write.append(rtDescPack.makeWrite(shaderio::BindingPoints::eTlas), asBuilder.tlas);
+	write.append(rtDescPack.makeWrite(shaderio::BindingPoints::eTlas), asManager.asBuilder.tlas);
 	write.append(rtDescPack.makeWrite(shaderio::BindingPoints::eOutImage), gBuffers.getColorImageView(eImgRendered), VK_IMAGE_LAYOUT_GENERAL);
 	vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipelineLayout, 1, write.size(), write.data());
 
-	pushValues.frameIndex = Application::frameIndex;
-	pushValues.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 	const VkPushConstantsInfo pushInfo{
 		.sType = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
 		.layout = rtPipelineLayout,
@@ -559,39 +322,23 @@ void FzbRenderer::PathTracingRenderer::rayTraceScene(VkCommandBuffer cmd) {
 void FzbRenderer::PathTracingRenderer::resetFrame() {
 	Application::frameIndex = 0;
 }
-void FzbRenderer::PathTracingRenderer::updateDataPerFrame(VkCommandBuffer cmd) {
-	rasterVoxelization->updateDataPerFrame(cmd);
-}
+void FzbRenderer::PathTracingRenderer::updateDataPerFrame(VkCommandBuffer cmd) {}
 //-----------------------------------------渲染器行为----------------------------------------------------------
 void FzbRenderer::PathTracingRenderer::init() {
-	//查询是否支持rtPosFetchFeature
-	VkPhysicalDeviceFeatures2 deviceFeatures2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
-	deviceFeatures2.pNext = &rtPosFetchFeature;
-	rtPosFetchFeature.pNext = nullptr;
-	rtPosFetchFeature.rayTracingPositionFetch = VK_FALSE;
-	vkGetPhysicalDeviceFeatures2(Application::app->getPhysicalDevice(), &deviceFeatures2);
-	//查询设备参数
-	VkPhysicalDeviceProperties2 prop2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
-	prop2.pNext = &rtProperties;
-	vkGetPhysicalDeviceProperties2(Application::app->getPhysicalDevice(), &prop2);
+	getRayTracingPropertiesAndFeature();
 
 	std::string shaderioPath = (std::filesystem::path(__FILE__).parent_path() / "shaderio.h").string();
 	Application::slangCompiler.addOption({ .name = slang::CompilerOptionName::Include,
 		.value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = shaderioPath.c_str()}
 		});
 
-	rasterVoxelization->init();
-
 	Renderer::createGBuffer(false);
 	Renderer::createDescriptorSetLayout();
 	Renderer::createPipelineLayout(sizeof(shaderio::PathTracingPushConstant));
 	Renderer::addTextureArrayDescriptor();
 
-	asBuilder.init(&Application::allocator, &Application::stagingUploader, Application::app->getQueue(0));
+	asManager.init();
 	sbtGenerator.init(Application::app->getDevice(), rtProperties);
-
-	createBottomLevelAS();
-	createToLevelAS();
 
 	createRayTracingDescriptorLayout();
 	createRayTracingPipeline();
@@ -599,13 +346,10 @@ void FzbRenderer::PathTracingRenderer::init() {
 	Renderer::init();
 }
 void FzbRenderer::PathTracingRenderer::clean() {
-	rasterVoxelization->clean();
-
 	Renderer::clean();
 	VkDevice device = Application::app->getDevice();
 
-	asBuilder.deinitAccelerationStructures();
-	asBuilder.deinit();
+	asManager.clean();
 	sbtGenerator.deinit();
 
 	vkDestroyPipelineLayout(device, rtPipelineLayout, nullptr);
@@ -622,8 +366,9 @@ void FzbRenderer::PathTracingRenderer::uiRender() {
 	if (ImGui::Begin("PathTracingSettings"))
 	{
 		ImGui::SeparatorText("Jitter");
-		UIModified |= ImGui::SliderInt("Max Frames", &Application::maxFrames, 1, 2 << 10);
-		ImGui::TextDisabled("Frame: %d", pushValues.frameIndex);
+		UIModified |= ImGui::SliderInt("Max Acc Frames", &maxFrames, 1, MAX_FRAME);
+		ImGui::TextDisabled("Current PathTracing Frame: %d", pushValues.frameIndex);
+		ImGui::TextDisabled("Current Renderer Frame: %d", Application::frameIndex);
 
 		ImGui::SeparatorText("Bounces");
 		{
@@ -656,13 +401,10 @@ void FzbRenderer::PathTracingRenderer::uiRender() {
 	}
 	ImGui::End();
 
-	rasterVoxelization->uiRender();
-
 	if(UIModified) resetFrame();
 };
 void FzbRenderer::PathTracingRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 	NVVK_CHECK(gBuffers.update(cmd, size));
-	rasterVoxelization->resize(cmd, size, gBuffers, eImgTonemapped);
 };
 void FzbRenderer::PathTracingRenderer::preRender() {
 	std::shared_ptr<nvutils::CameraManipulator> cameraManip = Application::sceneResource.cameraManip;
@@ -679,22 +421,38 @@ void FzbRenderer::PathTracingRenderer::preRender() {
 		refFov = fov;
 	}
 
-	rasterVoxelization->preRender();
+	Scene& scene = Application::sceneResource;
+	if (scene.dynamicInstances.size() > 0 || scene.hasDynamicLight) maxFrames = 1;
+	pushValues.frameIndex = std::min(Application::frameIndex, maxFrames - 1);
+	pushValues.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
+
+	asManager.updateTopLevelAS_nvvk();
 }
 void FzbRenderer::PathTracingRenderer::render(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
 
+	//maxFrames等于1表示只要一帧，我们就每帧都替换
+	if (pushValues.frameIndex == maxFrames - 1 && maxFrames > 1) return;
+
 	updateDataPerFrame(cmd);
-	rasterVoxelization->render(cmd);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR);
 	rayTraceScene(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	Renderer::postProcess(cmd);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-	rasterVoxelization->postProcess(cmd);
 };
 
 void FzbRenderer::PathTracingRenderer::compileAndCreateShaders() {
 	createRayTracingPipeline();
-	rasterVoxelization->compileAndCreateShaders();
 };
+
+void FzbRenderer::PathTracingRenderer::getRayTracingPropertiesAndFeature() {
+	//查询是否支持rtPosFetchFeature
+	VkPhysicalDeviceFeatures2 deviceFeatures2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+	deviceFeatures2.pNext = &rtPosFetchFeature;
+	rtPosFetchFeature.pNext = nullptr;
+	rtPosFetchFeature.rayTracingPositionFetch = VK_FALSE;
+	vkGetPhysicalDeviceFeatures2(Application::app->getPhysicalDevice(), &deviceFeatures2);
+	//查询设备参数
+	VkPhysicalDeviceProperties2 prop2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+	prop2.pNext = &rtProperties;
+	vkGetPhysicalDeviceProperties2(Application::app->getPhysicalDevice(), &prop2);
+}

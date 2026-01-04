@@ -1,10 +1,10 @@
 <rendererInfo>
 	<name value = "FzbRenderer" />
 	<resolution width = "1280" height = "720" />
-	<sceneXML path = "./dragon" />	<!--开头不能加/，但可以是./或不加-->
+	<sceneXML path = "./bearBox" />	<!--开头不能加/，但可以是./或不加-->
 
-	<renderer type = "PathTracing">  <!--PathTracing  Deferred-->
-		<maxDepth value = "6" />
+	<renderer type = "PathTracing">  <!--SVOPathGuiding PathTracing  Deferred-->
+		<maxDepth value = "1" />
 		<useNEE value = "true" />
 		<RasterVoxelization>
 			<resolution value = "2048, 2048" />

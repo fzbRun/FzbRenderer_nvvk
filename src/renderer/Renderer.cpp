@@ -2,6 +2,7 @@
 #include <common/Application/Application.h>
 #include "DeferredRenderer/DeferredRenderer.h"
 #include "PathTracing/hard/PathTracingRenderer.h"
+#include "SVOPathGuiding/hard/SVOPathGuiding.h"
 #include <nvvk/formats.hpp>
 
 enum FzbRendererType {
@@ -10,6 +11,7 @@ enum FzbRendererType {
 	FZB_RENDERER_PATH_TRACING,
 	FZB_RENDERER_PATH_TRACING_SOFT,
 	FZB_RENDERER_SVO_PATH_GUIDING,
+	FZB_RENDERER_SVO_PATH_GUIDING_SOFT,
 	FZB_FEATURE_COMPONENT_BVH_DEBUG,
 	FZB_FEATURE_COMPONENT_SVO_DEBUG,
 	FZB_FEATURE_COMPONENT_SVO_PG_DEBUG,
@@ -19,7 +21,8 @@ std::map<std::string, FzbRendererType> RendererTypeMap{
 	{ "Deferred", FZB_RENDERER_DEFERRED},
 	{ "PathTracing", FZB_RENDERER_PATH_TRACING },
 	{ "PathTracing_soft", FZB_RENDERER_PATH_TRACING_SOFT },
-	{ "SVOPathGuiding_soft", FZB_RENDERER_SVO_PATH_GUIDING },
+	{ "SVOPathGuiding", FZB_RENDERER_SVO_PATH_GUIDING },
+	{ "SVOPathGuiding_soft", FZB_RENDERER_SVO_PATH_GUIDING_SOFT },
 	{ "BVH_Debug", FZB_FEATURE_COMPONENT_BVH_DEBUG },
 	{ "SVO_Debug", FZB_FEATURE_COMPONENT_SVO_DEBUG },
 	{ "SVO_PG_Debug", FZB_FEATURE_COMPONENT_SVO_PG_DEBUG },
@@ -32,6 +35,7 @@ std::shared_ptr<FzbRenderer::Renderer> FzbRenderer::createRenderer(RendererCreat
 		switch (rendererType) {
 			case FZB_RENDERER_DEFERRED: return std::make_shared<DeferredRenderer>(createInfo.rendererNode);
 			case FZB_RENDERER_PATH_TRACING: return std::make_shared<PathTracingRenderer>(createInfo.rendererNode);
+			case FZB_RENDERER_SVO_PATH_GUIDING: return std::make_shared<SVOPathGuidingRenderer>(createInfo.rendererNode);
 		}
 		return nullptr;
 	}

@@ -67,13 +67,13 @@ void FzbRenderer::Feature::createPipelineLayout(uint32_t pushConstantSize) {
 	NVVK_CHECK(vkCreatePipelineLayout(Application::app->getDevice(), &pipelineLayoutInfo, nullptr, &pipelineLayout));
 	NVVK_DBG_NAME(pipelineLayout);
 }
-void FzbRenderer::Feature::addTextureArrayDescriptor(uint32_t textureBinding) {
+void FzbRenderer::Feature::addTextureArrayDescriptor(uint32_t textureBinding, nvvk::DescriptorPack* descPackPtr) {
 	if (Application::sceneResource.textures.empty())
 		return;
-
+	if (descPackPtr == nullptr) descPackPtr = &descPack;
 	nvvk::WriteSetContainer write{};
 	VkWriteDescriptorSet    allTextures =
-		descPack.makeWrite(textureBinding, 0, 0, uint32_t(Application::sceneResource.textures.size()));
+		descPackPtr->makeWrite(textureBinding, 0, 0, uint32_t(Application::sceneResource.textures.size()));
 	nvvk::Image* allImages = Application::sceneResource.textures.data();
 	write.append(allTextures, allImages);
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);

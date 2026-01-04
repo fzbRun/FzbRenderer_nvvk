@@ -26,7 +26,7 @@
 #include <stb/stb_image.h>
 
 #include "utils.hpp"
-
+#include <common/Application/Application.h>
 
 namespace nvsamples {
 
@@ -98,5 +98,45 @@ namespace FzbRenderer {
 		}
 		if (float4_array.size() == 3) return glm::vec4(float4_array[0], float4_array[1], float4_array[2], 1.0f);
 		return glm::vec4(float4_array[0], float4_array[1], float4_array[2], float4_array[3]);
+	}
+
+	void printfMat4(glm::mat4& matrix) {
+		printf("TLAS transform:\n%f %f %f %f\n%f %f %f %f\n%f %f %f %f\n%f %f %f %f\n",
+			matrix[0][0], matrix[0][1], matrix[0][2], matrix[0][3],
+			matrix[1][0], matrix[1][1], matrix[1][2], matrix[1][3],
+			matrix[2][0], matrix[2][1], matrix[2][2], matrix[2][3],
+			matrix[3][0], matrix[3][1], matrix[3][2], matrix[3][3]
+		);
+	}
+
+	nvvk::Buffer createStagingBuffer(size_t bufferSize, size_t dataSize, const void* data) {
+		nvvk::Buffer stagingBuffer;
+
+		VmaAllocationCreateInfo allocInfo = {
+			.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+			.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST,
+			.requiredFlags = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+		};
+
+		const VkBufferUsageFlags2CreateInfo bufferUsageFlags2CreateInfo{
+			.sType = VK_STRUCTURE_TYPE_BUFFER_USAGE_FLAGS_2_CREATE_INFO,
+			.usage = VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT_KHR | VK_BUFFER_USAGE_2_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT,
+		};
+
+		const VkBufferCreateInfo bufferInfo{
+			.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+			.pNext = &bufferUsageFlags2CreateInfo,
+			.size = bufferSize,
+			.usage = 0,
+			.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+		};
+
+		// Create a staging buffer
+		Application::allocator.createBuffer(stagingBuffer, bufferInfo, allocInfo);
+		NVVK_DBG_NAME(stagingBuffer.buffer);
+
+		memcpy(stagingBuffer.mapping, data, dataSize);
+
+		return stagingBuffer;
 	}
 }

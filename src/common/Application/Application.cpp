@@ -241,7 +241,8 @@ void FzbRenderer::Application::onResize(VkCommandBuffer cmd, const VkExtent2D& s
 	renderer->resize(cmd, size);	//这一步会初始化gBuffer
 }
 void FzbRenderer::Application::onPreRender() {
-	frameIndex = std::min(++frameIndex, maxFrames);
+	frameIndex = std::min(++frameIndex, MAX_FRAME);
+	sceneResource.preRender();
 	renderer->preRender();
 }
 void FzbRenderer::Application::onRender(VkCommandBuffer cmd) {
@@ -251,24 +252,8 @@ void FzbRenderer::Application::onRender(VkCommandBuffer cmd) {
 void FzbRenderer::Application::updateDataPerFrame(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
 
+	sceneResource.updateDataPerFrame(cmd);
 	renderer->updateDataPerFrame(cmd);
-
-	const glm::mat4& viewMatrix = sceneResource.cameraManip->getViewMatrix();
-	const glm::mat4& projMatrix = sceneResource.cameraManip->getPerspectiveMatrix();
-
-	sceneResource.sceneInfo.viewProjMatrix = projMatrix * viewMatrix;
-	sceneResource.sceneInfo.projInvMatrix = glm::inverse(projMatrix);
-	sceneResource.sceneInfo.viewInvMatrix = glm::inverse(viewMatrix);
-	sceneResource.sceneInfo.cameraPosition = sceneResource.cameraManip->getEye();
-	sceneResource.sceneInfo.instances = (shaderio::Instance*)sceneResource.bInstances.address;
-	sceneResource.sceneInfo.meshes = (shaderio::Mesh*)sceneResource.bMeshes.address;
-	sceneResource.sceneInfo.materials = (shaderio::BSDFMaterial*)sceneResource.bMaterials.address;
-
-	nvvk::cmdBufferMemoryBarrier(cmd, { sceneResource.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-									   VK_PIPELINE_STAGE_2_TRANSFER_BIT });
-	vkCmdUpdateBuffer(cmd, sceneResource.bSceneInfo.buffer, 0, sizeof(shaderio::SceneInfo), &sceneResource.sceneInfo);
-	nvvk::cmdBufferMemoryBarrier(cmd, { sceneResource.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-									   VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT });
 }
 
 void FzbRenderer::Application::onUIMenu() {

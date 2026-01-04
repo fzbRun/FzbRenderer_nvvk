@@ -5,12 +5,17 @@
 #include "common/Shader/nvvk/shaderio.h"
 #include <nvvk/acceleration_structures.hpp>
 #include <nvvk/sbt_generator.hpp>
+#include <nvvk/staging.hpp>
 #include "common/Shader/shaderStructType.h"
 #include "./shaderio.h"
 #include <feature/SceneDivision/RasterVoxelization/RasterVoxelization.h>
+#include "common/Application/Application.h"
+#include "AccelerationStructure.h"
 
 #ifndef FZB_PATH_TRACING_RENDERER_H
 #define FZB_PATH_TRACING_RENDERER_H
+
+#define MAX_DEPTH 64U
 
 namespace FzbRenderer {
 
@@ -30,10 +35,11 @@ public:
 
 	void compileAndCreateShaders() override;
 	void updateDataPerFrame(VkCommandBuffer cmd) override;
-private:
+
 	nvvk::AccelerationStructureGeometryInfo primitiveToGeometry(const shaderio::Mesh& mesh);
 	void createBottomLevelAS();
-	void createToLevelAS();
+	void createTopLevelAS();
+	void updateTopLevelAS(VkCommandBuffer cmd);
 	void createRayTracingDescriptorLayout();
 	void createShaderBindingTable(const VkRayTracingPipelineCreateInfoKHR& rtPipelineInfo);
 	void createRayTracingPipeline();
@@ -41,11 +47,17 @@ private:
 
 	void resetFrame();
 
+	void getRayTracingPropertiesAndFeature();
+
+	int maxFrames = MAX_FRAME / 2;
+
 	nvvk::DescriptorPack rtDescPack;
 	VkPipeline rtPipeline{};
 	VkPipelineLayout rtPipelineLayout{};
 
-	nvvk::AccelerationStructureHelper asBuilder{};
+	std::vector<VkAccelerationStructureInstanceKHR> staticTlasInstances;
+
+	AccelerationStructureManager asManager;
 	nvvk::SBTGenerator sbtGenerator;
 	nvvk::Buffer sbtBuffer;
 
@@ -57,8 +69,6 @@ private:
 	VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProperties{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR };
 
 	shaderio::PathTracingPushConstant pushValues{};
-
-	std::shared_ptr<FzbRenderer::RasterVoxelization> rasterVoxelization;
 };
 
 }

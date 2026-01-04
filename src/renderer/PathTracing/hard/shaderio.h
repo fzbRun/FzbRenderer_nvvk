@@ -8,7 +8,6 @@ NAMESPACE_SHADERIO_BEGIN()
 
 struct PathTracingPushConstant
 {
-	float3x3       normalMatrix;
 	int NEEShaderIndex = -1;
 	int frameIndex = 0;
 	int maxDepth = 3;
