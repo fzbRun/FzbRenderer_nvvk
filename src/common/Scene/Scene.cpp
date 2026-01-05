@@ -127,27 +127,38 @@ void FzbRenderer::Scene::createSceneFromXML() {
 	3. 根据materialID在uniqueMaterialIDToIndex找到索引
 	4. 记录meshes和materials的索引
 	*/
-	instanceInfos.resize(3); instanceInfos[0].resize(0); instanceInfos[1].resize(0); instanceInfos[2].resize(0);
+	staticInstanceSets.resize(0); periodInstanceSets.resize(0); randomInstanceSets.resize(0);
 	pugi::xml_node instancesNode = sceneInfoNode.child("instances");
-	uint32_t staticInstaneCount = 0;
-	uint32_t dynamicInstaneCount = 0;
 	for (pugi::xml_node instanceNode : instancesNode.children("instance")) {
-		Instance instance = Instance(instanceNode);
-		if(instance.instanceID != "defaultInstanceID")
-			instanceIDToInstance.insert({instance.instanceID, {instance.type, instanceInfos[instance.type].size()}});
-		instanceInfos[instance.type].push_back(instance);
-		if(instance.type == InstanceType::Static) staticInstaneCount += instance.childInstances.size();
-		else dynamicInstaneCount += instance.childInstances.size();
+		InstanceSet instanceSet = InstanceSet(instanceNode);
+		if(instanceSet.instanceID != "defaultInstanceID")
+			instanceIDToInstance.insert({ instanceSet.instanceID, {instanceSet.type, getInstanceSetSize(instanceSet.type)}});
+		addInstanceSet(instanceSet);
+		if(instanceSet.type == Static) staticInstanceCount += instanceSet.childInstances.size();
+		else if(instanceSet.type == PeriodMotion) periodInstanceCount += instanceSet.childInstances.size();
+		else if(instanceSet.type == RandomMotion) randomInstanceCount += instanceSet.childInstances.size();
 	}
 
 	uint32_t offset = 0;
-	instances.resize(staticInstaneCount);
-	for (int i = 0; i < instanceInfos[0].size(); ++i) {
-		instanceInfos[0][i].getInstance(instances, offset, 0);
-		offset += instanceInfos[0][i].childInstances.size();
+	instances.resize(staticInstanceCount + periodInstanceCount + randomInstanceCount);
+	for (int i = 0; i < staticInstanceSets.size(); ++i) {
+		staticInstanceSets[i].getInstance(instances, offset, 0);
+		offset += staticInstanceSets[i].childInstances.size();
 	}
+	for (int i = 0; i < periodInstanceSets.size(); ++i) {
+		InstanceSet& instanceSet = periodInstanceSets[i];
+		instanceSet.getInstance(instances, offset, 0);
 
-	dynamicInstances.resize(dynamicInstaneCount);
+		for (int j = 0; j < periodInstanceSets[i].childInstances.size(); ++j)
+			periodInstanceIndexToInstanceSetIndex.insert({ offset, i });
+
+		offset += instanceSet.childInstances.size();
+	}
+	for (int i = 0; i < randomInstanceSets.size(); ++i) {
+		InstanceSet& instanceSet = randomInstanceSets[i];
+		instanceSet.getInstance(instances, offset, 0);
+		offset += instanceSet.childInstances.size();
+	}
 	//------------------------------------------------光源---------------------------------------------------------------
 	if (pugi::xml_node lightsNode = sceneInfoNode.child("lights")) {
 		sceneInfo.useSky = false;
@@ -256,11 +267,11 @@ void FzbRenderer::Scene::createSceneInfoBuffer() {
 
 	// Create all instance buffers
 	if (instances.size() > 0) {
-		allocator->createBuffer(bInstances, std::span(instances).size_bytes() + std::span(dynamicInstances).size_bytes(),
+		allocator->createBuffer(bInstances, std::span(instances).size_bytes(),
 			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 		NVVK_DBG_NAME(bInstances.buffer);
-		NVVK_CHECK(stagingUploader.appendBuffer(bInstances, 0,
-			std::span<const shaderio::Instance>(instances)));
+		if(instances.size() == staticInstanceCount)
+			NVVK_CHECK(stagingUploader.appendBuffer(bInstances, 0, std::span<const shaderio::Instance>(instances)));
 	}
 
 	// Create all material buffers
@@ -299,11 +310,11 @@ void FzbRenderer::Scene::clean() {
 }
 
 void FzbRenderer::Scene::preRender() {
-	static int frameIndex = 0;
 	for (int i = 0; i < sceneInfo.numLights; ++i) {
 		LightInstance lightInstanceInfo = lightInstances[i];		
-		float time = (float)frameIndex / lightInstanceInfo.time;
-		time -= std::floor(time);
+		float time = frameIndex % (2 * lightInstanceInfo.time);
+		if (time < lightInstanceInfo.time) time /= lightInstanceInfo.time;
+		else time = 2.0f - (time / lightInstanceInfo.time);
 		sceneInfo.lights[i] = lightInstanceInfo.getLight(time);
 	}
 
@@ -317,15 +328,19 @@ void FzbRenderer::Scene::preRender() {
 	sceneInfo.meshes = (shaderio::Mesh*)bMeshes.address;
 	sceneInfo.materials = (shaderio::BSDFMaterial*)bMaterials.address;
 
-	uint32_t offset = 0;
-	for (int i = 1; i < instanceInfos.size(); ++i) {
-		for (int j = 0; j < instanceInfos[i].size(); ++j) {
-			Instance& instanceInfo = instanceInfos[i][j];
-			float time = (float)frameIndex / instanceInfo.time;
-			time -= std::floor(time);
-			instanceInfo.getInstance(dynamicInstances, offset, time);
-			offset += instanceInfo.childInstances.size();
-		}
+	uint32_t offset = staticInstanceCount;
+	for (int i = 0; i < periodInstanceSets.size(); ++i) {
+		InstanceSet& instanceSet = periodInstanceSets[i];
+		float time = frameIndex % (2 * instanceSet.time);
+		if (time < instanceSet.time) time /= instanceSet.time;
+		else time = 2.0f - (time / instanceSet.time);
+		instanceSet.getInstance(instances, offset, time);
+		offset += instanceSet.childInstances.size();
+	}
+	for (int i = 0; i < randomInstanceSets.size(); ++i) {
+		InstanceSet& instanceSet = randomInstanceSets[i];
+		instanceSet.getInstance(instances, offset, 0);
+		offset += instanceSet.childInstances.size();
 	}
 
 	++frameIndex;
@@ -344,10 +359,10 @@ void FzbRenderer::Scene::updateDataPerFrame(VkCommandBuffer cmd) {
 	nvvk::cmdBufferMemoryBarrier(cmd, { bSceneInfo.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
 									   VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT });
 
-	if (dynamicInstances.size() > 0) {
+	if (periodInstanceCount + randomInstanceCount > 0) {
 		nvvk::cmdBufferMemoryBarrier(cmd, { bInstances.buffer, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
 								   VK_PIPELINE_STAGE_2_TRANSFER_BIT });
-		vkCmdUpdateBuffer(cmd, bInstances.buffer, std::span(instances).size_bytes(), std::span(dynamicInstances).size_bytes(), dynamicInstances.data());
+		vkCmdUpdateBuffer(cmd, bInstances.buffer, 0, std::span(instances).size_bytes(), instances.data());
 		nvvk::cmdBufferMemoryBarrier(cmd, { bInstances.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
 									   VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT });
 	}
@@ -357,4 +372,31 @@ FzbRenderer::MeshInfo FzbRenderer::Scene::getMeshInfo(uint32_t meshIndex) {
 	uint32_t meshSetIndex = getMeshSetIndex(meshIndex);
 	MeshSet& meshSet = meshSets[meshSetIndex];
 	return meshSet.childMeshInfos[meshIndex - meshSet.meshOffset];
+}
+FzbRenderer::InstanceSet FzbRenderer::Scene::getInstanceSet(InstanceType type, uint32_t index) {
+	switch (type) {
+		case Static: return staticInstanceSets[index]; break;
+		case PeriodMotion: return periodInstanceSets[index]; break;
+		case RandomMotion: return randomInstanceSets[index]; break;
+		default: printf("实例没有相应类型或该类型没有%d索引", index);
+	}
+	return InstanceSet();
+}
+uint32_t FzbRenderer::Scene::getInstanceSetSize(InstanceType type) {
+	switch (type) {
+		case Static: return staticInstanceCount; break;
+		case PeriodMotion: return periodInstanceCount; break;
+		case RandomMotion: return randomInstanceCount; break;
+		default: printf("实例没有相应类型"); return 0;
+	}
+
+	return 0;
+}
+void FzbRenderer::Scene::addInstanceSet(InstanceSet& instanceSet) {
+	switch (instanceSet.type) {
+		case Static: return staticInstanceSets.push_back(instanceSet); break;
+		case PeriodMotion: return periodInstanceSets.push_back(instanceSet); break;
+		case RandomMotion: return randomInstanceSets.push_back(instanceSet); break;
+		default: printf("实例没有相应类型");
+	}
 }

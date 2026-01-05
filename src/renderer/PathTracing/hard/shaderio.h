@@ -11,6 +11,7 @@ struct PathTracingPushConstant
 	int NEEShaderIndex = -1;
 	int frameIndex = 0;
 	int maxDepth = 3;
+	float time = 0.0f;
 	SceneInfo* sceneInfoAddress;           // Address of the scene information buffer
 };
 

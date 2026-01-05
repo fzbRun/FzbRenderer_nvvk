@@ -42,7 +42,7 @@ glm::mat4 interpolateTransforms(const glm::mat4& a, const glm::mat4& b, float t)
 	return result;
 }
 
-void Instance::getTransformMatrixFromXML(pugi::xml_node& transformNode){
+void InstanceSet::getTransformMatrixFromXML(pugi::xml_node& transformNode){
 	if (pugi::xml_node matrixNode = transformNode.child("matrix"))
 		baseMatrix = FzbRenderer::getMat4FromString(matrixNode.attribute("value").value());
 	if (pugi::xml_node translateNode = transformNode.select_node("translate").node()) {
@@ -100,7 +100,7 @@ void Instance::getTransformMatrixFromXML(pugi::xml_node& transformNode){
 		}
 	}
 }
-Instance::Instance(pugi::xml_node& instanceNode) {
+InstanceSet::InstanceSet(pugi::xml_node& instanceNode) {
 	static int customMeshSetCount = 0;
 
 	Scene& scene = Application::sceneResource;
@@ -144,26 +144,24 @@ Instance::Instance(pugi::xml_node& instanceNode) {
 	}
 }
 
-void Instance::getInstance(std::vector<shaderio::Instance>& instances, int offset, float time) {
+void InstanceSet::getInstance(std::vector<shaderio::Instance>& instances, int offset, float time) {
 	if (type != InstanceType::PeriodMotion) {
 		memcpy(instances.data() + offset, childInstances.data(), sizeof(shaderio::Instance) * childInstances.size());
 		return;
 	}
 	for (int i = 0; i < childInstances.size(); ++i) {
 		shaderio::Instance instance;
-		instance.meshIndex = meshIndex;
-		instance.materialIndex = materialIndex;
+		instance.meshIndex = childInstances[i].meshIndex;
+		instance.materialIndex = childInstances[i].materialIndex;
 		instance.transform = ((1.0f - time) * startMatrix + time * endMatrix) * baseMatrix;	//interpolateTransforms(startMatrix, endMatrix, time);
 		instances[offset + i] = instance;
 	}
 }
 
-void LightInstance::copyInstanceInfo(const Instance& instance) {
+void LightInstance::copyInstanceInfo(const InstanceSet& instance) {
 	this->instanceID = instance.instanceID;
 	this->type = instance.type;
 	this->baseMatrix = instance.baseMatrix;
-	this->meshIndex = instance.meshIndex;
-	this->materialIndex = instance.materialIndex;
 	this->time = instance.time;
 	this->startMatrix = instance.startMatrix;
 	this->endMatrix = instance.endMatrix;
@@ -178,8 +176,8 @@ LightInstance::LightInstance(pugi::xml_node& lightNode) {
 		if (scene.instanceIDToInstance.count(instanceID)) {
 			std::pair<uint32_t, uint32_t> instanceTypeAndIndex = scene.instanceIDToInstance[instanceID];
 			type = (InstanceType)instanceTypeAndIndex.first;
-			Instance instance = scene.instanceInfos[type][instanceTypeAndIndex.second];
-			copyInstanceInfo(instance);
+			InstanceSet instanceSet = scene.getInstanceSet(type, instanceTypeAndIndex.second);
+			copyInstanceInfo(instanceSet);
 		}
 		else printf("光源没有相应的instanceID：%s\n", instanceID);
 	}
@@ -189,7 +187,7 @@ shaderio::Light LightInstance::getLight(float time) {
 	if (type != InstanceType::PeriodMotion) return light;
 
 	shaderio::Light light_transform = light;
-	glm::mat4 transformMatrix = (1.0f - time)* startMatrix + time * endMatrix;
+	glm::mat4 transformMatrix = (1.0f - time) * startMatrix + time * endMatrix;
 	light_transform.pos = transformMatrix * glm::vec4(light.pos, 1.0f);
 	light_transform.edge1 = glm::mat3(transformMatrix) * light.edge1;
 	light_transform.edge2 = glm::mat3(transformMatrix) * light.edge2;

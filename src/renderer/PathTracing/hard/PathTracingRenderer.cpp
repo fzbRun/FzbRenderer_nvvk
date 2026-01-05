@@ -11,6 +11,7 @@ FzbRenderer::PathTracingRenderer::PathTracingRenderer(pugi::xml_node& rendererNo
 	Application::vkContextInitInfo.deviceExtensions.push_back( { VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, &accelFeature });
 	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, &rtPipelineFeature });
 	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME });
+	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_NV_RAY_TRACING_MOTION_BLUR_EXTENSION_NAME, &rtMotionBlurFeatures });
 
 	rtPosFetchFeature.rayTracingPositionFetch = VK_TRUE;
 	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_KHR_RAY_TRACING_POSITION_FETCH_EXTENSION_NAME, &rtPosFetchFeature });
@@ -271,6 +272,7 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 	rtPipelineInfo.pGroups = shader_groups.data();
 	rtPipelineInfo.maxPipelineRayRecursionDepth = std::min(MAX_DEPTH, rtProperties.maxRayRecursionDepth);		//最大bounce数
 	rtPipelineInfo.layout = rtPipelineLayout;
+	rtPipelineInfo.flags = VK_PIPELINE_CREATE_RAY_TRACING_ALLOW_MOTION_BIT_NV;
 	vkCreateRayTracingPipelinesKHR(Application::app->getDevice(), {}, {}, 1, & rtPipelineInfo, nullptr, &rtPipeline);
 	NVVK_DBG_NAME(rtPipeline);
 
@@ -422,11 +424,20 @@ void FzbRenderer::PathTracingRenderer::preRender() {
 	}
 
 	Scene& scene = Application::sceneResource;
-	if (scene.dynamicInstances.size() > 0 || scene.hasDynamicLight) maxFrames = 1;
+	if (scene.periodInstanceCount + scene.randomInstanceCount > 0 || scene.hasDynamicLight) maxFrames = 1;
 	pushValues.frameIndex = std::min(Application::frameIndex, maxFrames - 1);
+
+	int sceneFrameIndex = Application::sceneResource.frameIndex - 1;
+	int period = 100;
+	float time = sceneFrameIndex % (2 * period);
+	if (time < period) time /= period;
+	else time = 2.0f - (time / period);
+	pushValues.time = time;
+
 	pushValues.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 
-	asManager.updateTopLevelAS_nvvk();
+	//asManager.updateTopLevelAS_nvvk();
+	asManager.updateTopLevelMotionAS_nvvk();
 }
 void FzbRenderer::PathTracingRenderer::render(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
