@@ -17,13 +17,16 @@ public:
 	nvvk::AccelerationStructureGeometryInfo primitiveToGeometry_nvvk(const shaderio::Mesh& mesh);
 	
 	void createBottomLevelAS_nvvk();
+	void createBottomLevelMotionAS_nvvk();		//mesh发生形变时有用
 
 	void createTopLevelAS_nvvk();
 	void createTopLevelMotionAS_nvvk();
 
 	void updateTopLevelAS_nvvk();
+	void updateTopLevelMotionAS_nvvk();
 
 	std::vector<VkAccelerationStructureInstanceKHR> staticTlasInstances;
+	std::vector<nvvk::VkAccelerationStructureMotionInstanceNVPad> motionInstances;
 
 	std::vector<nvvk::AccelerationStructure> blasAccel;
 	nvvk::AccelerationStructure              tlasAccel;

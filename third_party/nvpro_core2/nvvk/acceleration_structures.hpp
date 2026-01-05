@@ -268,6 +268,12 @@ private:
   Stats m_stats;  // Statistics about the compacted BLAS
 };
 
+struct VkAccelerationStructureMotionInstanceNVPad : VkAccelerationStructureMotionInstanceNV
+{
+  uint64_t _pad{0};
+};
+static_assert(sizeof(VkAccelerationStructureMotionInstanceNVPad) == 160);
+
 // Helper class for building both Bottom-Level Acceleration Structures (BLAS) and
 // Top-Level Acceleration Structures (TLAS). This utility
 // abstracts the complexity of acceleration structure generation while allowing
@@ -321,11 +327,14 @@ public:
   // add VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR to buildFlags if you intend to use tlasUpdate
   void tlasSubmitBuildAndWait(const std::vector<VkAccelerationStructureInstanceKHR>& tlasInstances,
                               VkBuildAccelerationStructureFlagsKHR                   buildFlags);
+  void tlasSubmitBuildAndWait(const std::vector<VkAccelerationStructureMotionInstanceNVPad>& tlasInstances,
+                              VkBuildAccelerationStructureFlagsKHR                   buildFlags);
 
   // Updates an existing TLAS with an updated list of instances.
   // If instance count differs from original, a rebuild is performed instead of an update.
   // TLAS must have been built with the VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR flag.
   void tlasSubmitUpdateAndWait(const std::vector<VkAccelerationStructureInstanceKHR>& tlasInstances);
+  void tlasSubmitUpdateAndWait(const std::vector<VkAccelerationStructureMotionInstanceNVPad>& tlasInstances);
 
   nvvk::QueueInfo                                    m_queueInfo;
   nvvk::ResourceAllocator*                           m_alloc{nullptr};

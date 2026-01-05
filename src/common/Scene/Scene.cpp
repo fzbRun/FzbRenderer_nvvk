@@ -148,6 +148,10 @@ void FzbRenderer::Scene::createSceneFromXML() {
 	for (int i = 0; i < periodInstanceSets.size(); ++i) {
 		InstanceSet& instanceSet = periodInstanceSets[i];
 		instanceSet.getInstance(instances, offset, 0);
+
+		for (int j = 0; j < periodInstanceSets[i].childInstances.size(); ++j)
+			periodInstanceIndexToInstanceSetIndex.insert({ offset, i });
+
 		offset += instanceSet.childInstances.size();
 	}
 	for (int i = 0; i < randomInstanceSets.size(); ++i) {
@@ -306,7 +310,6 @@ void FzbRenderer::Scene::clean() {
 }
 
 void FzbRenderer::Scene::preRender() {
-	static int frameIndex = 0;
 	for (int i = 0; i < sceneInfo.numLights; ++i) {
 		LightInstance lightInstanceInfo = lightInstances[i];		
 		float time = frameIndex % (2 * lightInstanceInfo.time);

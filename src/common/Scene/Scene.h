@@ -48,6 +48,8 @@ public:
 
 	bool hasDynamicLight = false;
 	std::vector<LightInstance> lightInstances;
+
+	inline static uint32_t frameIndex = 0;
 	//---------------------------------------GPU使用数据---------------------------------------------------
 	std::vector<nvvk::Image>     textures{};
 
@@ -70,7 +72,7 @@ public:
 	int getTextureIndex(std::filesystem::path texturePath) { return texturePathToIndex[texturePath]; }
 	int getMeshBufferIndex(uint32_t meshIndex) { return meshToBufferIndex[meshIndex]; };
 	int getMeshSetIndex(uint32_t meshIndex) { return meshIndexToMeshSetIndex[meshIndex]; };
-	InstanceSet getInstanceSet(InstanceType type, uint32_t index);
+	InstanceSet getInstanceSet(InstanceType type, uint32_t instanceSetIndex);
 	uint32_t getInstanceSetSize(InstanceType type);
 	void addInstanceSet(InstanceSet& instanceSet);
 
@@ -83,6 +85,7 @@ public:
 	std::vector<uint32_t> meshToBufferIndex;	//meshToBufferIndex[meshIndex] = bufferIndex，前向或延时渲染时按mesh渲染时使用
 	std::vector<uint32_t> meshIndexToMeshSetIndex;
 	std::map<std::string, std::pair<uint32_t, uint32_t>> instanceIDToInstance;
+	std::map<uint32_t, uint32_t> periodInstanceIndexToInstanceSetIndex;
 };
 
 }

@@ -737,6 +737,61 @@ void AccelerationStructureHelper::tlasSubmitBuildAndWait(const std::vector<VkAcc
 
   m_uploader->releaseStaging();
 }
+void AccelerationStructureHelper::tlasSubmitBuildAndWait(const std::vector<VkAccelerationStructureMotionInstanceNVPad>& tlasInstances,
+                                                         VkBuildAccelerationStructureFlagsKHR buildFlags)
+{
+  VkDevice device = m_alloc->getDevice();
+
+  assert((tlasInstancesBuffer.buffer == VK_NULL_HANDLE)
+         && "Do not invoke build if already built. build with VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR, then use tlasUpdate");
+
+  VkCommandBuffer cmd = createSingleTimeCommands(device, m_transientPool);
+
+  constexpr VmaAllocationCreateFlags instanceAllocFlags   = 0;
+  constexpr VkDeviceSize             instanceMinAlignment = 16;
+  NVVK_CHECK(m_alloc->createBuffer(
+      tlasInstancesBuffer, std::span<VkAccelerationStructureMotionInstanceNVPad const>(tlasInstances).size_bytes(),
+      VK_BUFFER_USAGE_2_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_2_SHADER_DEVICE_ADDRESS_BIT,
+      VMA_MEMORY_USAGE_AUTO, instanceAllocFlags, instanceAllocFlags));
+  NVVK_CHECK(m_uploader->appendBuffer(tlasInstancesBuffer, 0,
+                                      std::span<VkAccelerationStructureMotionInstanceNVPad const>(tlasInstances)));
+  NVVK_DBG_NAME(tlasInstancesBuffer.buffer);
+  m_uploader->cmdUploadAppended(cmd);
+
+  accelerationStructureBarrier(cmd, VK_ACCESS_TRANSFER_WRITE_BIT,
+                               VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR | VK_ACCESS_2_SHADER_READ_BIT);
+
+
+  tlasBuildData = {VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR};
+  AccelerationStructureGeometryInfo geometryInfo =
+      tlasBuildData.makeInstanceGeometry(tlasInstances.size(), tlasInstancesBuffer.address);
+  tlasBuildData.addGeometry(geometryInfo);
+
+  auto sizeInfo = tlasBuildData.finalizeGeometry(m_alloc->getDevice(), buildFlags);
+
+  NVVK_CHECK(m_alloc->createBuffer(tlasScratchBuffer, sizeInfo.buildScratchSize,
+                                   VK_BUFFER_USAGE_2_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT
+                                       | VK_BUFFER_USAGE_2_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR,
+                                   VMA_MEMORY_USAGE_AUTO, {}, m_accelStructProps.minAccelerationStructureScratchOffsetAlignment));
+  NVVK_DBG_NAME(tlasScratchBuffer.buffer);
+
+// Create the TLAS with motion blur support
+  VkAccelerationStructureCreateInfoKHR createInfo = tlasBuildData.makeCreateInfo();
+  VkAccelerationStructureMotionInfoNV  motionInfo{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_MOTION_INFO_NV};
+  motionInfo.maxInstances = uint32_t(tlasInstances.size());
+  createInfo.createFlags  = VK_ACCELERATION_STRUCTURE_CREATE_MOTION_BIT_NV;
+  createInfo.pNext        = &motionInfo;
+
+  NVVK_CHECK(m_alloc->createAcceleration(tlas, createInfo));
+  NVVK_DBG_NAME(tlas.accel);
+  tlasBuildData.cmdBuildAccelerationStructure(cmd, tlas.accel, tlasScratchBuffer.address);
+
+  tlasSize = tlasInstances.size();
+
+  NVVK_CHECK(endSingleTimeCommands(cmd, device, m_transientPool, m_queueInfo.queue));
+
+  m_uploader->releaseStaging();
+}
 
 void AccelerationStructureHelper::tlasSubmitUpdateAndWait(const std::vector<VkAccelerationStructureInstanceKHR>& tlasInstances)
 {
@@ -778,6 +833,45 @@ void AccelerationStructureHelper::tlasSubmitUpdateAndWait(const std::vector<VkAc
 
   m_uploader->releaseStaging();
 }
+void AccelerationStructureHelper::tlasSubmitUpdateAndWait(const std::vector<VkAccelerationStructureMotionInstanceNVPad>& tlasInstances)
+{
+  VkDevice device = m_alloc->getDevice();
 
+  bool sizeChanged = (tlasInstances.size() != tlasSize);
+
+  VkCommandBuffer cmd = createSingleTimeCommands(device, m_transientPool);
+
+  // Update the instance buffer
+  m_uploader->appendBuffer(tlasInstancesBuffer, 0, std::span(tlasInstances));
+  m_uploader->cmdUploadAppended(cmd);
+
+  // Make sure the copy of the instance buffer are copied before triggering the acceleration structure build
+  accelerationStructureBarrier(cmd, VK_ACCESS_TRANSFER_WRITE_BIT,
+                               VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR | VK_ACCESS_2_SHADER_READ_BIT);
+
+  if(tlasScratchBuffer.buffer == VK_NULL_HANDLE)
+  {
+    NVVK_CHECK(m_alloc->createBuffer(tlasScratchBuffer, tlasBuildData.sizeInfo.buildScratchSize,
+                                     VK_BUFFER_USAGE_2_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT,
+                                     VMA_MEMORY_USAGE_AUTO, {}, m_accelStructProps.minAccelerationStructureScratchOffsetAlignment));
+    NVVK_DBG_NAME(tlasScratchBuffer.buffer);
+  }
+
+  // Building or updating the top-level acceleration structure
+  if(sizeChanged)
+  {
+    tlasBuildData.cmdBuildAccelerationStructure(cmd, tlas.accel, tlasScratchBuffer.address);
+    tlasSize = tlasInstances.size();
+  }
+  else
+  {
+    tlasBuildData.cmdUpdateAccelerationStructure(cmd, tlas.accel, tlasScratchBuffer.address);
+  }
+
+  // Make sure to have the TLAS ready before using it
+  NVVK_CHECK(endSingleTimeCommands(cmd, device, m_transientPool, m_queueInfo.queue));
+
+  m_uploader->releaseStaging();
+}
 
 }  // namespace nvvk
