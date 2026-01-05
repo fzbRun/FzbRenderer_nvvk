@@ -16,13 +16,11 @@ enum InstanceType {
 };
 InstanceType getTypeFromString(std::string typeStr);
 
-class Instance {
+class InstanceSet {
 public:
 	std::string instanceID = "defaultInstanceID";
 	InstanceType type = Static;
 	glm::mat4 baseMatrix = glm::mat4(1.0f);
-	uint32_t meshIndex;
-	uint32_t materialIndex;
 
 	uint32_t time = 100;
 	glm::mat4 startMatrix = glm::mat4(1.0f);
@@ -33,17 +31,17 @@ public:
 
 	std::vector<shaderio::Instance> childInstances;
 
-	Instance() = default;
-	Instance(pugi::xml_node& instanceNode);
+	InstanceSet() = default;
+	InstanceSet(pugi::xml_node& instanceNode);
 
 	void getTransformMatrixFromXML(pugi::xml_node& transformNode);
 	void getInstance(std::vector<shaderio::Instance>& instance, int offset, float time);
 };
 
-class LightInstance : public Instance{
+class LightInstance : public InstanceSet {
 public:
 	LightInstance(pugi::xml_node& lightNode);
-	void copyInstanceInfo(const Instance& instance);
+	void copyInstanceInfo(const InstanceSet& instance);
 	shaderio::Light getLight(float time);
 
 	shaderio::Light light;

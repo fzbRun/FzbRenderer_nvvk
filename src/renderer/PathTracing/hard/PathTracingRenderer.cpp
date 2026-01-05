@@ -422,7 +422,7 @@ void FzbRenderer::PathTracingRenderer::preRender() {
 	}
 
 	Scene& scene = Application::sceneResource;
-	if (scene.dynamicInstances.size() > 0 || scene.hasDynamicLight) maxFrames = 1;
+	if (scene.periodInstanceCount + scene.randomInstanceCount > 0 || scene.hasDynamicLight) maxFrames = 1;
 	pushValues.frameIndex = std::min(Application::frameIndex, maxFrames - 1);
 	pushValues.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 

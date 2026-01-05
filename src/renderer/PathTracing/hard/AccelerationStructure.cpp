@@ -66,15 +66,16 @@ void AccelerationStructureManager::createBottomLevelAS_nvvk() {
 void AccelerationStructureManager::createTopLevelAS_nvvk() {
 	SCOPED_TIMER(__FUNCTION__);
 
-	FzbRenderer::Scene& sceneResorce = Application::sceneResource;
+	FzbRenderer::Scene& sceneResource = Application::sceneResource;
 
 	std::vector<VkAccelerationStructureInstanceKHR> tlasInstances(0);
-	tlasInstances.reserve(sceneResorce.instances.size() + sceneResorce.dynamicInstances.size());
+	tlasInstances.reserve(sceneResource.instances.size());
 
 	staticTlasInstances.resize(0);
-	staticTlasInstances.reserve(Application::sceneResource.instances.size());		//每个mesh一个顶层实例
+	staticTlasInstances.reserve(sceneResource.staticInstanceCount);		//每个mesh一个顶层实例
 	const VkGeometryInstanceFlagsKHR flgas{ VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV };	//没有背面剔除
-	for (const shaderio::Instance& instance : Application::sceneResource.instances) {
+	for (int i = 0; i < sceneResource.staticInstanceCount; ++i) {
+		const shaderio::Instance& instance = sceneResource.instances[i];
 		VkAccelerationStructureInstanceKHR asInstance{};
 		asInstance.transform = nvvk::toTransformMatrixKHR(instance.transform);
 		asInstance.instanceCustomIndex = instance.meshIndex;
@@ -86,7 +87,22 @@ void AccelerationStructureManager::createTopLevelAS_nvvk() {
 	}
 	tlasInstances.insert(tlasInstances.end(), staticTlasInstances.begin(), staticTlasInstances.end());
 
-	for (const shaderio::Instance& instance : Application::sceneResource.dynamicInstances) {
+	uint32_t offset = sceneResource.staticInstanceCount;
+	for (int i = 0; i < sceneResource.periodInstanceCount; ++i) {
+		const shaderio::Instance& instance = sceneResource.instances[i + offset];
+		VkAccelerationStructureInstanceKHR asInstance{};
+		asInstance.transform = nvvk::toTransformMatrixKHR(instance.transform);
+		asInstance.instanceCustomIndex = instance.meshIndex;
+		asInstance.accelerationStructureReference = asBuilder.blasSet[instance.meshIndex].address;
+		asInstance.instanceShaderBindingTableRecordOffset = 0;		//实例用SBT中hitGroup中第i个条目（shader）
+		asInstance.flags = flgas;
+		asInstance.mask = 0xFF;
+		tlasInstances.emplace_back(asInstance);
+	}
+
+	offset += sceneResource.periodInstanceCount;
+	for (int i = 0; i < sceneResource.randomInstanceCount; ++i) {
+		const shaderio::Instance& instance = sceneResource.instances[i + offset];
 		VkAccelerationStructureInstanceKHR asInstance{};
 		asInstance.transform = nvvk::toTransformMatrixKHR(instance.transform);
 		asInstance.instanceCustomIndex = instance.meshIndex;
@@ -100,22 +116,94 @@ void AccelerationStructureManager::createTopLevelAS_nvvk() {
 	LOGI("Ready to build top-level acceleration structure with %zu instances\n", tlasInstances.size());
 
 	VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-	if (Application::sceneResource.dynamicInstances.size() > 0) flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+	if (sceneResource.instances.size() > sceneResource.staticInstanceCount) flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
 	asBuilder.tlasSubmitBuildAndWait(tlasInstances, flags);
 
 	LOGI("Top-level accleration structures built successfully\n");
 }
-void AccelerationStructureManager::updateTopLevelAS_nvvk() {
-	if (Application::sceneResource.dynamicInstances.size() == 0) return;
+void AccelerationStructureManager::createTopLevelMotionAS_nvvk() {
+	FzbRenderer::Scene& sceneResource = Application::sceneResource;
 
-	FzbRenderer::Scene& sceneResorce = Application::sceneResource;
+	struct VkAccelerationStructureMotionInstanceNVPad : VkAccelerationStructureMotionInstanceNV
+	{
+		uint64_t _pad{ 0 };
+	};
+	static_assert(sizeof(VkAccelerationStructureMotionInstanceNVPad) == 160);
+
+	std::vector<VkAccelerationStructureMotionInstanceNVPad> motionInstances;
+	motionInstances.reserve(sceneResource.instances.size());
+
+	int instanceIndex = 0;
+	const VkGeometryInstanceFlagsKHR flags{ VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV };
+	for (int i = 0; i < sceneResource.staticInstanceSets.size(); ++i) {	//静态实例
+		VkAccelerationStructureInstanceKHR staticInst{};
+		staticInst.transform = nvvk::toTransformMatrixKHR(sceneResource.instances[instanceIndex].transform);
+		staticInst.instanceCustomIndex = sceneResource.instances[instanceIndex].meshIndex;
+		staticInst.accelerationStructureReference =
+			asBuilder.blasSet[sceneResource.instances[instanceIndex].meshIndex].address;
+		staticInst.instanceShaderBindingTableRecordOffset = 0;
+		staticInst.flags = flags;
+		staticInst.mask = 0xFF;
+
+		VkAccelerationStructureMotionInstanceNVPad motionInst;
+		motionInst.type = VK_ACCELERATION_STRUCTURE_MOTION_INSTANCE_TYPE_STATIC_NV;
+		motionInst.data.staticInstance = staticInst;
+		motionInstances.emplace_back(motionInst);
+
+		++instanceIndex;
+	}
+
+	for (int i = 0; i < sceneResource.periodInstanceSets.size(); ++i) {
+		InstanceSet& instanceSet = sceneResource.periodInstanceSets[i];
+
+		glm::mat4 matT0 = instanceSet.startMatrix * instanceSet.baseMatrix;                 // Original position
+		glm::mat4 matT1 = instanceSet.endMatrix * instanceSet.baseMatrix;  // Translated position
+
+		VkAccelerationStructureMatrixMotionInstanceNV matrixData{};
+		matrixData.transformT0 = nvvk::toTransformMatrixKHR(matT0);
+		matrixData.transformT1 = nvvk::toTransformMatrixKHR(matT1);
+		matrixData.instanceCustomIndex = sceneResource.instances[instanceIndex].meshIndex;
+		matrixData.accelerationStructureReference =
+			asBuilder.blasSet[sceneResource.instances[instanceIndex].meshIndex].address;
+		matrixData.instanceShaderBindingTableRecordOffset = 0;
+		matrixData.flags = flags;
+		matrixData.mask = 0xFF;
+
+		VkAccelerationStructureMotionInstanceNVPad motionInst;
+		motionInst.type = VK_ACCELERATION_STRUCTURE_MOTION_INSTANCE_TYPE_MATRIX_MOTION_NV;
+		motionInst.data.matrixMotionInstance = matrixData;
+		motionInstances.emplace_back(motionInst);
+
+		++instanceIndex;
+	}
+}
+
+void AccelerationStructureManager::updateTopLevelAS_nvvk() {
+	if (Application::sceneResource.instances.size() == Application::sceneResource.staticInstanceCount) return;
+
+	FzbRenderer::Scene& sceneResource = Application::sceneResource;
 
 	std::vector<VkAccelerationStructureInstanceKHR> tlasInstances(0);
-	tlasInstances.reserve(sceneResorce.instances.size() + sceneResorce.dynamicInstances.size());
+	tlasInstances.reserve(sceneResource.instances.size());
 	tlasInstances.insert(tlasInstances.end(), staticTlasInstances.begin(), staticTlasInstances.end());
 
 	const VkGeometryInstanceFlagsKHR flgas{ VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV };	//没有背面剔除
-	for (const shaderio::Instance& instance : Application::sceneResource.dynamicInstances) {
+	uint32_t offset = sceneResource.staticInstanceCount;
+	for (int i = 0; i < sceneResource.periodInstanceCount; ++i) {
+		const shaderio::Instance& instance = sceneResource.instances[i + offset];
+		VkAccelerationStructureInstanceKHR asInstance{};
+		asInstance.transform = nvvk::toTransformMatrixKHR(instance.transform);
+		asInstance.instanceCustomIndex = instance.meshIndex;
+		asInstance.accelerationStructureReference = asBuilder.blasSet[instance.meshIndex].address;
+		asInstance.instanceShaderBindingTableRecordOffset = 0;		//实例用SBT中hitGroup中第i个条目（shader）
+		asInstance.flags = flgas;
+		asInstance.mask = 0xFF;
+		tlasInstances.emplace_back(asInstance);
+	}
+
+	offset += sceneResource.periodInstanceCount;
+	for (int i = 0; i < sceneResource.randomInstanceCount; ++i) {
+		const shaderio::Instance& instance = sceneResource.instances[i + offset];
 		VkAccelerationStructureInstanceKHR asInstance{};
 		asInstance.transform = nvvk::toTransformMatrixKHR(instance.transform);
 		asInstance.instanceCustomIndex = instance.meshIndex;
