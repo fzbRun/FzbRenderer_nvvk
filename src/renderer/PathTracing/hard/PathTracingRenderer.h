@@ -36,13 +36,16 @@ public:
 	void compileAndCreateShaders() override;
 	void updateDataPerFrame(VkCommandBuffer cmd) override;
 
+	void setContextInfo();
+
 	nvvk::AccelerationStructureGeometryInfo primitiveToGeometry(const shaderio::Mesh& mesh);
 	void createBottomLevelAS();
 	void createTopLevelAS();
 	void updateTopLevelAS(VkCommandBuffer cmd);
-	void createRayTracingDescriptorLayout();
+	virtual void createRayTracingDescriptorLayout();
+	virtual void createRayTracingDescriptor();
 	void createShaderBindingTable(const VkRayTracingPipelineCreateInfoKHR& rtPipelineInfo);
-	void createRayTracingPipeline();
+	virtual void createRayTracingPipeline();
 	void rayTraceScene(VkCommandBuffer cmd);
 
 	void resetFrame();
@@ -51,9 +54,7 @@ public:
 
 	int maxFrames = MAX_FRAME / 2;
 
-	nvvk::DescriptorPack rtDescPack;
 	VkPipeline rtPipeline{};
-	VkPipelineLayout rtPipelineLayout{};
 
 	std::vector<VkAccelerationStructureInstanceKHR> staticTlasInstances;
 

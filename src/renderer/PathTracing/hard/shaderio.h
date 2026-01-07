@@ -6,6 +6,14 @@
 #define FZBRENDERER_PATHTRACING_SHADER_IO_H
 NAMESPACE_SHADERIO_BEGIN()
 
+enum StaticSetBindingPoints_PT {
+	eTextures_PT = 0,
+	eOutImage_PT
+};
+enum DynamicSetBindingPoints_PT {
+	eTlas_PT = 0
+};
+
 struct PathTracingPushConstant
 {
 	int NEEShaderIndex = -1;

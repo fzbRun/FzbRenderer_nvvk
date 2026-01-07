@@ -21,7 +21,8 @@ public:
 	void preRender();
 	void render(VkCommandBuffer cmd) override;
 
-	void createDescriptorSetLayout() override;
+	void createRayTracingDescriptorLayout() override;
+	void createRayTracingPipeline() override;
 	void compileAndCreateShaders() override;
 	void updateDataPerFrame(VkCommandBuffer cmd) override;
 

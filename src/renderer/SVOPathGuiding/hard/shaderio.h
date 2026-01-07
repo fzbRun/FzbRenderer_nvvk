@@ -8,19 +8,20 @@ NAMESPACE_SHADERIO_BEGIN()
 
 struct SVOPathGuidingPushConstant
 {
-	float3x3 normalMatrix;
 	int NEEShaderIndex = -1;
 	int frameIndex = 0;
 	int maxDepth = 3;
+	float time;
+	float3x3 normalMatrix;
 	SceneInfo* sceneInfoAddress;
 };
 
 enum SVOPGBindingPoints
 {
-	eTextures_SVOPG = 0,
-	eTlas_SVOPG,
-	eVGB_SVOPG,
-	eOutImage_SVOPG,		//First save the result of lightInject, and finally MIS
+	//eTextures = 0,
+	//eTlas_SVOPG = 1,
+	//eOutImage = 2,	//First save the result of lightInject, and finally MIS
+	eVGB_SVOPG = 3,		
 	eOctree_G_SVOPG,
 	eOctree_E_SVOPG,
 	eSVO_G_SVOPG,

@@ -34,7 +34,7 @@ void FzbRenderer::DeferredRenderer::compileAndCreateShaders() {
         .codeType = VK_SHADER_CODE_TYPE_SPIRV_EXT,
         .pName = "main",
         .setLayoutCount = 1,
-        .pSetLayouts = descPack.getLayoutPtr(),
+        .pSetLayouts = staticDescPack.getLayoutPtr(),
         .pushConstantRangeCount = 1,
         .pPushConstantRanges = &pushConstantRange,
     };
@@ -92,7 +92,7 @@ void FzbRenderer::DeferredRenderer::render(VkCommandBuffer cmd) {
     const VkPushConstantsInfo pushInfo{
         .sType = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
         .layout = pipelineLayout,
-        .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
+        .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS | VK_SHADER_STAGE_COMPUTE_BIT,
         .offset = 0,
         .size = sizeof(shaderio::DefaultPushConstant),
         .pValues = &pushValues,
@@ -126,15 +126,15 @@ void FzbRenderer::DeferredRenderer::render(VkCommandBuffer cmd) {
                                       VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
     const VkBindDescriptorSetsInfo bindDescriptorSetsInfo{
         .sType = VK_STRUCTURE_TYPE_BIND_DESCRIPTOR_SETS_INFO,
-        .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
+        .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS | VK_SHADER_STAGE_COMPUTE_BIT,
         .layout = pipelineLayout,
         .firstSet = 0,
         .descriptorSetCount = 1,
-        .pDescriptorSets = descPack.getSetPtr(),
+        .pDescriptorSets = staticDescPack.getSetPtr(),
     };
     //vkCmdBindDescriptorSets2(cmd, &bindDescriptorSetsInfo);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1,
-        descPack.getSetPtr(), 0, nullptr);
+        staticDescPack.getSetPtr(), 0, nullptr);
 
     vkCmdBeginRendering(cmd, &renderingInfo);
 
