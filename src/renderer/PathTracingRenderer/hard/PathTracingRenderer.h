@@ -11,11 +11,10 @@
 #include <feature/SceneDivision/RasterVoxelization/RasterVoxelization.h>
 #include "common/Application/Application.h"
 #include "AccelerationStructure.h"
+#include <feature/PathTracing/PathTracing.h>
 
 #ifndef FZB_PATH_TRACING_RENDERER_H
 #define FZB_PATH_TRACING_RENDERER_H
-
-#define MAX_DEPTH 64U
 
 namespace FzbRenderer {
 
@@ -30,29 +29,22 @@ public:
 	void clean() override;
 	void uiRender() override;
 	void resize(VkCommandBuffer cmd, const VkExtent2D& size) override;
-	void preRender();
+	void preRender() override;
 	void render(VkCommandBuffer cmd) override;
 
 	void compileAndCreateShaders() override;
 	void updateDataPerFrame(VkCommandBuffer cmd) override;
 
-	void setContextInfo();
-
-	nvvk::AccelerationStructureGeometryInfo primitiveToGeometry(const shaderio::Mesh& mesh);
-	void createBottomLevelAS();
-	void createTopLevelAS();
-	void updateTopLevelAS(VkCommandBuffer cmd);
 	virtual void createRayTracingDescriptorLayout();
 	virtual void createRayTracingDescriptor();
-	void createShaderBindingTable(const VkRayTracingPipelineCreateInfoKHR& rtPipelineInfo);
 	virtual void createRayTracingPipeline();
 	void rayTraceScene(VkCommandBuffer cmd);
 
-	void resetFrame();
-
-	void getRayTracingPropertiesAndFeature();
+	void resetFrame() { Application::frameIndex = 0; };
 
 	int maxFrames = MAX_FRAME / 2;
+
+	PathTracingContext ptContext;
 
 	VkPipeline rtPipeline{};
 
@@ -61,15 +53,7 @@ public:
 	AccelerationStructureManager asManager;
 	nvvk::SBTGenerator sbtGenerator;
 	nvvk::Buffer sbtBuffer;
-
-	VkPhysicalDeviceAccelerationStructureFeaturesKHR accelFeature{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR };
-	VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeature{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR };
-	//设置rtPosFetchFeature后，顶点位置数据以某种优化的形式与BLAS结构紧密关联；并且这些pos数据在创建blas时自动创建，因此无需顶点位置数据缓冲区
-	VkPhysicalDeviceRayTracingPositionFetchFeaturesKHR rtPosFetchFeature{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_POSITION_FETCH_FEATURES_KHR };
-	VkPhysicalDeviceRayTracingMotionBlurFeaturesNV rtMotionBlurFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_MOTION_BLUR_FEATURES_NV };
-
-	VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProperties{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR };
-
+private:
 	shaderio::PathTracingPushConstant pushValues{};
 };
 

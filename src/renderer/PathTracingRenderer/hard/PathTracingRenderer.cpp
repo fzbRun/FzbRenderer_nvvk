@@ -8,17 +8,8 @@
 #include <common/Shader/Shader.h>
 #include <nvgui/sky.hpp>
 
-void FzbRenderer::PathTracingRenderer::setContextInfo() {
-	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, &accelFeature });
-	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, &rtPipelineFeature });
-	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME });
-	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_NV_RAY_TRACING_MOTION_BLUR_EXTENSION_NAME, &rtMotionBlurFeatures });
-
-	rtPosFetchFeature.rayTracingPositionFetch = VK_TRUE;
-	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_KHR_RAY_TRACING_POSITION_FETCH_EXTENSION_NAME, &rtPosFetchFeature });
-}
 FzbRenderer::PathTracingRenderer::PathTracingRenderer(pugi::xml_node& rendererNode) {
-	setContextInfo();
+	ptContext.setContextInfo();
 
 	if (pugi::xml_node maxDepthNode = rendererNode.child("maxDepth")) 
 		pushValues.maxDepth = std::stoi(maxDepthNode.attribute("value").value());
@@ -140,25 +131,6 @@ void FzbRenderer::PathTracingRenderer::createRayTracingDescriptor() {
 	write.append(OutImageWrite, gBuffers.getColorImageView(eImgRendered), VK_IMAGE_LAYOUT_GENERAL);
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
-}
-void FzbRenderer::PathTracingRenderer::createShaderBindingTable(const VkRayTracingPipelineCreateInfoKHR& rtPipelineInfo) {
-	/*
-	STB，顾名思义，就是shader大的绑定表；
-	其将pipeline各个阶段的shader组进行绑定
-	每个实例只能用每个阶段的shader组中的一个条目
-	每个组和条目都需要对齐
-	*/
-	SCOPED_TIMER(__FUNCTION__);
-	Application::allocator.destroyBuffer(sbtBuffer);
-
-	size_t bufferSize = sbtGenerator.calculateSBTBufferSize(rtPipeline, rtPipelineInfo);
-	NVVK_CHECK(Application::allocator.createBuffer(sbtBuffer, bufferSize, VK_BUFFER_USAGE_2_SHADER_BINDING_TABLE_BIT_KHR,
-		VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT,
-		sbtGenerator.getBufferAlignment()));
-	NVVK_DBG_NAME(sbtBuffer.buffer);
-	NVVK_CHECK(sbtGenerator.populateSBTBuffer(sbtBuffer.address, bufferSize, sbtBuffer.mapping));
-
-	LOGI(" Shader binding table created and populated\n");
 }
 void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 	SCOPED_TIMER(__FUNCTION__);
@@ -299,7 +271,7 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 	rtPipelineInfo.pStages = stages.data();
 	rtPipelineInfo.groupCount = static_cast<uint32_t>(shader_groups.size());
 	rtPipelineInfo.pGroups = shader_groups.data();
-	rtPipelineInfo.maxPipelineRayRecursionDepth = std::min(MAX_DEPTH, rtProperties.maxRayRecursionDepth);		//最大bounce数
+	rtPipelineInfo.maxPipelineRayRecursionDepth = std::min(MAX_DEPTH, ptContext.rtProperties.maxRayRecursionDepth);		//最大bounce数
 	rtPipelineInfo.layout = pipelineLayout;
 	rtPipelineInfo.flags = VK_PIPELINE_CREATE_RAY_TRACING_ALLOW_MOTION_BIT_NV;
 	vkCreateRayTracingPipelinesKHR(Application::app->getDevice(), {}, {}, 1, & rtPipelineInfo, nullptr, &rtPipeline);
@@ -311,7 +283,8 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 	//如可以通过PrimitiveIndex函数获得三角形索引
 	//sbtGenerator.addData(nvvk::SBTGenerator::eHit, 1, hitShaderRecord[0]);		//data会与group中的条目（shader描述符）放在一起，需要一起对齐
 	//sbtGenerator.addData(nvvk::SBTGenerator::eHit, 2, hitShaderRecord[1]);
-	createShaderBindingTable(rtPipelineInfo);
+	//createShaderBindingTable(rtPipelineInfo);
+	FzbRenderer::createShaderBindingTable(rtPipelineInfo, rtPipeline, sbtGenerator, sbtBuffer);
 }
 //-----------------------------------------光追函数----------------------------------------------------------
 void FzbRenderer::PathTracingRenderer::rayTraceScene(VkCommandBuffer cmd) {
@@ -349,16 +322,13 @@ void FzbRenderer::PathTracingRenderer::rayTraceScene(VkCommandBuffer cmd) {
 	vkCmdTraceRaysKHR(cmd, &regions.raygen, &regions.miss, &regions.hit, &regions.callable, size.width, size.height, 1);
 }
 
-void FzbRenderer::PathTracingRenderer::resetFrame() {
-	Application::frameIndex = 0;
-}
 void FzbRenderer::PathTracingRenderer::updateDataPerFrame(VkCommandBuffer cmd) {}
 //-----------------------------------------渲染器行为----------------------------------------------------------
 void FzbRenderer::PathTracingRenderer::init() {
-	getRayTracingPropertiesAndFeature();
+	ptContext.getRayTracingPropertiesAndFeature();
 
 	asManager.init();	//建立AS
-	sbtGenerator.init(Application::app->getDevice(), rtProperties);
+	sbtGenerator.init(Application::app->getDevice(), ptContext.rtProperties);
 
 	Renderer::createGBuffer(false, true, 1, {1, 1});
 
@@ -395,7 +365,7 @@ void FzbRenderer::PathTracingRenderer::uiRender() {
 		ImGui::SeparatorText("Bounces");
 		{
 			PE::begin();
-			PE::SliderInt("Bounces Depth", &pushValues.maxDepth, 1, std::min(MAX_DEPTH, rtProperties.maxRayRecursionDepth), "%d", ImGuiSliderFlags_AlwaysClamp,
+			PE::SliderInt("Bounces Depth", &pushValues.maxDepth, 1, std::min(MAX_DEPTH, ptContext.rtProperties.maxRayRecursionDepth), "%d", ImGuiSliderFlags_AlwaysClamp,
 				"Maximum Bounces depth");
 			PE::end();
 		}
@@ -408,7 +378,7 @@ void FzbRenderer::PathTracingRenderer::uiRender() {
 			UIModified |= NEEChange;
 		}
 
-		if (rtPosFetchFeature.rayTracingPositionFetch == VK_FALSE)
+		if (ptContext.rtPosFetchFeature.rayTracingPositionFetch == VK_FALSE)
 		{
 			ImGui::TextColored({ 1, 0, 0, 1 }, "ERROR: Position Fetch not supported!");
 			ImGui::Text("This hardware does not support");
@@ -436,30 +406,14 @@ void FzbRenderer::PathTracingRenderer::resize(VkCommandBuffer cmd, const VkExten
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 };
 void FzbRenderer::PathTracingRenderer::preRender() {
-	std::shared_ptr<nvutils::CameraManipulator> cameraManip = Application::sceneResource.cameraManip;
-
-	static glm::mat4 refCamMatrix;
-	static float refFov{ cameraManip->getFov() };
-
-	const auto& m = cameraManip->getViewMatrix();
-	const auto& fov = cameraManip->getFov();
-
-	if (refCamMatrix != m || refFov != fov) {	//如果相机参数变化，则从新累计帧
-		resetFrame();
-		refCamMatrix = m;
-		refFov = fov;
-	}
-
 	Scene& scene = Application::sceneResource;
+
+	if (scene.cameraChange) resetFrame();	//如果相机参数变化，则从新累计帧
+
 	if (scene.periodInstanceCount + scene.randomInstanceCount > 0 || scene.hasDynamicLight) maxFrames = 1;
 	pushValues.frameIndex = std::min(Application::frameIndex, maxFrames - 1);
 
-	int sceneFrameIndex = Application::sceneResource.frameIndex - 1;
-	int period = 100;
-	float time = sceneFrameIndex % (2 * period);
-	if (time < period) time /= period;
-	else time = 2.0f - (time / period);
-	pushValues.time = time;
+	pushValues.time = Application::sceneResource.time;
 
 	pushValues.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 
@@ -481,16 +435,3 @@ void FzbRenderer::PathTracingRenderer::render(VkCommandBuffer cmd) {
 void FzbRenderer::PathTracingRenderer::compileAndCreateShaders() {
 	createRayTracingPipeline();
 };
-
-void FzbRenderer::PathTracingRenderer::getRayTracingPropertiesAndFeature() {
-	//查询是否支持rtPosFetchFeature
-	VkPhysicalDeviceFeatures2 deviceFeatures2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
-	deviceFeatures2.pNext = &rtPosFetchFeature;
-	rtPosFetchFeature.pNext = nullptr;
-	rtPosFetchFeature.rayTracingPositionFetch = VK_FALSE;
-	vkGetPhysicalDeviceFeatures2(Application::app->getPhysicalDevice(), &deviceFeatures2);
-	//查询设备参数
-	VkPhysicalDeviceProperties2 prop2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
-	prop2.pNext = &rtProperties;
-	vkGetPhysicalDeviceProperties2(Application::app->getPhysicalDevice(), &prop2);
-}

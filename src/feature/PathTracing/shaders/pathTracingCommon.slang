@@ -3,7 +3,7 @@
 #include "nvshaders/random.h.slang"
 #include "nvshaders/ray_utils.h.slang"
 #include "nvshaders/sky_functions.h.slang"
-#include "renderer/PathTracing/hard/shaderio.h"
+#include "feature/PathTracing/shaderio.h"
 
 [[vk::binding(StaticSetBindingPoints_PT::eTextures_PT, 0)]] Sampler2D textures[];
 [[vk::binding(StaticSetBindingPoints_PT::eOutImage_PT, 0)]] RWTexture2D<float4> outImage;
@@ -26,7 +26,6 @@ struct HitPayload {
     float3 rayDirection;
 
     uint bounceDepth;
-    uint meshIndex;
 
     bool isExt;
 };
@@ -290,5 +289,44 @@ void initNEE(inout CallablePayload payload, SceneInfo sceneInfo, int NEEShaderIn
             }
         }
         payload.sampleDir_nee[lightIndex] = normalize(sampleDir);
+    }
+}
+
+//------------------------------------------Material BSDF---------------------------------------------------
+float3 sampleIncidence_DiffuseMaterial(inout uint randomSeed, float3x3 TBN) {
+    float randomNumber1 = rand(randomSeed);
+    float randomNumber2 = rand(randomSeed);
+    float cosTheta = sqrt(randomNumber1);
+    float sinTheta = sqrt(1.0f - randomNumber1);
+    float phi = M_TWO_PI * randomNumber2;
+    float3 incidence;
+    incidence.x = sinTheta * cos(phi);
+    incidence.y = sinTheta * sin(phi);
+    incidence.z = cosTheta;
+    incidence = mul(incidence, TBN);
+    incidence = normalize(incidence);
+    return incidence;
+}
+
+void PopulateCallablePayload_DielectricMaterial(inout CallablePayload payload) {
+    payload.bsdf = 1.0f;
+
+    float cosineOH = dot(payload.outgoing, payload.hitNormal);
+    float3 F = schlickFresnel(payload.material.albedo, float3(1.0F), cosineOH);
+    float F_oneChanel = 0.299 * F.x + 0.587 * F.y + 0.114 * F.z;
+
+    float randomNumber = rand(payload.randomSeed);
+    if (randomNumber < F_oneChanel) {
+        payload.incidence = reflect(-payload.outgoing, payload.hitNormal);
+        payload.pdf = F_oneChanel;
+    }
+    else {
+        float eta = payload.material.eta.x;
+        if (!payload.isExt) eta = 1.0f / eta;
+
+        bool totalInternalReflection = false;
+        payload.incidence = refract(payload.outgoing, payload.hitNormal, eta, cosineOH, totalInternalReflection);
+        payload.pdf = 1.0f - F_oneChanel;
+        if (!totalInternalReflection) payload.isExt = !payload.isExt;
     }
 }

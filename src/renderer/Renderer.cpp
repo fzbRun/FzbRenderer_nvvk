@@ -1,8 +1,8 @@
 #include "Renderer.h"
 #include <common/Application/Application.h>
 #include "DeferredRenderer/DeferredRenderer.h"
-#include "PathTracing/hard/PathTracingRenderer.h"
-#include "SVOPathGuiding/hard/SVOPathGuiding.h"
+#include "PathTracingRenderer/hard/PathTracingRenderer.h"
+#include "SVOPathGuidingRenderer/hard/SVOPathGuiding.h"
 #include <nvvk/formats.hpp>
 
 enum FzbRendererType {

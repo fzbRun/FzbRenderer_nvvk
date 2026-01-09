@@ -22,7 +22,7 @@ void computeMain_clearVGB(uint3 dispatchId: SV_DispatchThreadID) {
     VGBVoxelData voxelData;
     voxelData.aabbU.minimum = uint3(asuint(3.402823466e+38F));
     voxelData.aabbU.maximum = uint3(asuint(-3.402823466e+38F));
-    voxelData.radiance = float4(0.0f);
+    voxelData.irradiance = float4(0.0f);
     voxelData.sumNormal_G = float4(0.0f);
     voxelData.sumNormal_E = float4(0.0f);
 

@@ -1,7 +1,7 @@
 /*
 slang大括号的左右(包括开始大括号的下一行开始，以及结束大括号的上行结尾)不能有注释，或者说中文注释
 */
-#include "renderer/PathTracing/hard/shaders/pathTracingCommon.slang"
+#include "feature/PathTracing/shaders/pathTracingCommon.slang"
 
 // clang-format off
 //ScalarDataLayout
