@@ -173,9 +173,8 @@ void diffuseMaterialMain(inout CallablePayload payload) {
         for (int i = 0; i < payload.lightNum; ++i) {
             if(payload.radiance_nee[i].x + payload.radiance_nee[i].y + payload.radiance_nee[i].z < 0.001f) continue;
 
-            float cosineON = dot(payload.outgoing, payload.hitNormal);
-            float3 bsdf = M_1_PI * cosineON * payload.material.albedo;
-            payload.radianceSum_nee += payload.radiance_nee[i] * bsdf * abs(dot(payload.sampleDir_nee[i], payload.hitNormal));
+            float3 bsdf = M_1_PI * payload.material.albedo;
+            payload.radianceSum_nee += payload.radiance_nee[i] * bsdf * max(dot(payload.sampleDir_nee[i], payload.hitNormal), 0.0f);
         }
     }
 }
@@ -195,7 +194,7 @@ void conductorMaterialMain(inout CallablePayload payload) {
             float3 bsdf = float3(1.0f);
             if (abs(dot(h, payload.hitNormal)) < 0.95f) bsdf = float3(0.0f);
 
-            payload.radianceSum_nee += payload.radiance_nee[i] * bsdf * abs(dot(sampleDir, payload.hitNormal));
+            payload.radianceSum_nee += payload.radiance_nee[i] * bsdf * max(dot(sampleDir, payload.hitNormal), 0.0f);
         }
     }
 }
@@ -298,7 +297,7 @@ void roughConductorMaterialMain(inout CallablePayload payload) {
             );
 
             float3 bsdf = (D * G2 * F) / (4.0f * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 0.001f);
-            payload.radianceSum_nee += payload.radiance_nee[i] * bsdf * abs(dot(sampleDir, payload.hitNormal));
+            payload.radianceSum_nee += payload.radiance_nee[i] * bsdf * max(dot(sampleDir, payload.hitNormal), 0.0f);
         }
     }
 }

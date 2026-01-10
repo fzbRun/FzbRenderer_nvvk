@@ -61,7 +61,7 @@ void FzbRenderer::Feature::createDescriptorSetLayout() {
 }
 void FzbRenderer::Feature::createPipelineLayout(uint32_t pushConstantSize) {
 	const VkPushConstantRange pushConstantRange{
-		.stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS | VK_SHADER_STAGE_COMPUTE_BIT,
+		.stageFlags = VK_SHADER_STAGE_ALL,
 		.offset = 0,
 		.size = pushConstantSize
 	};

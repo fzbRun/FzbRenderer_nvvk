@@ -202,7 +202,7 @@ void FzbRenderer::RasterVoxelization::compileAndCreateShaders() {
 	FzbRenderer::validateSPIRVFile(spvPath);
 
 	const VkPushConstantRange pushConstantRange{
-		.stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS | VK_SHADER_STAGE_COMPUTE_BIT ,
+		.stageFlags = VK_SHADER_STAGE_ALL ,
 		.offset = 0,
 		.size = sizeof(shaderio::RasterVoxelizationPushConstant),
 	};
@@ -487,7 +487,7 @@ void FzbRenderer::RasterVoxelization::render(VkCommandBuffer cmd) {
 	pushInfo = {
 		.sType = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
 		.layout = pipelineLayout,
-		.stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS | VK_SHADER_STAGE_COMPUTE_BIT,
+		.stageFlags = VK_SHADER_STAGE_ALL,
 		.offset = 0,
 		.size = sizeof(shaderio::RasterVoxelizationPushConstant),
 		.pValues = &setting.pushConstant,
@@ -626,10 +626,11 @@ void FzbRenderer::RasterVoxelization::resetFragmentCount(VkCommandBuffer cmd) {
 		.pRegions = &copyRegionInfo,
 	};
 	vkCmdCopyBuffer2(cmd, &copyBufferInfo);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
 }
 void FzbRenderer::RasterVoxelization::createVGB_ThreeView(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd, "RasterVoxelization_createVGB_ThreeView");
+
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(RasterVoxelizationGBuffer::ThreeViewMap), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
 
 	VkRenderingAttachmentInfo colorAttachment = DEFAULT_VkRenderingAttachmentInfo;
 	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;		//真正渲染需要根据usesky判断是因为天空盒会覆盖上一帧内容，所以不需要clear
@@ -647,6 +648,7 @@ void FzbRenderer::RasterVoxelization::createVGB_ThreeView(VkCommandBuffer cmd) {
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1,
 		staticDescPack.getSetPtr(), 0, nullptr);
 
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);	//clearVGB和resetFragmentCount
 	vkCmdBeginRendering(cmd, &renderingInfo);
 
 	//使用VK_EXT_SHADER_OBJECT_EXTENSION_NAME后可以不需要pipeline，直接通过命令设置渲染设置和着色器
@@ -693,9 +695,13 @@ void FzbRenderer::RasterVoxelization::createVGB_ThreeView(VkCommandBuffer cmd) {
 	}
 
 	vkCmdEndRendering(cmd);
+
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(RasterVoxelizationGBuffer::ThreeViewMap), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
 }
 void FzbRenderer::RasterVoxelization::debug_Cube(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
+
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(RasterVoxelizationGBuffer::CubeMap), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
 
 	VkRenderingAttachmentInfo colorAttachment = DEFAULT_VkRenderingAttachmentInfo;
 	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -743,6 +749,8 @@ void FzbRenderer::RasterVoxelization::debug_Cube(VkCommandBuffer cmd) {
 	vkCmdDrawIndexed(cmd, triMesh.indices.count, pow(setting.pushConstant.voxelSize_Count.w, 3), 0, 0, 0);
 
 	vkCmdEndRendering(cmd);
+
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(RasterVoxelizationGBuffer::CubeMap), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
 }
 void FzbRenderer::RasterVoxelization::debug_Wireframe(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
@@ -766,6 +774,7 @@ void FzbRenderer::RasterVoxelization::debug_Wireframe(VkCommandBuffer cmd) {
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1,
 		staticDescPack.getSetPtr(), 0, nullptr);
 
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT);	//等待debug_Cube完成
 	vkCmdBeginRendering(cmd, &renderingInfo);
 
 	graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
@@ -797,5 +806,7 @@ void FzbRenderer::RasterVoxelization::debug_Wireframe(VkCommandBuffer cmd) {
 	vkCmdDrawIndexed(cmd, triMesh.indices.count, pow(setting.pushConstant.voxelSize_Count.w, 3), 0, 0, 0);
 
 	vkCmdEndRendering(cmd);
+
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(RasterVoxelizationGBuffer::WireframeMap), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
 }
 #endif

@@ -92,7 +92,7 @@ void FzbRenderer::DeferredRenderer::render(VkCommandBuffer cmd) {
     const VkPushConstantsInfo pushInfo{
         .sType = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
         .layout = pipelineLayout,
-        .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS | VK_SHADER_STAGE_COMPUTE_BIT,
+        .stageFlags = VK_SHADER_STAGE_ALL,
         .offset = 0,
         .size = sizeof(shaderio::DefaultPushConstant),
         .pValues = &pushValues,

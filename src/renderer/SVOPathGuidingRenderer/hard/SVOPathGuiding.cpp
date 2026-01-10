@@ -25,8 +25,9 @@ void FzbRenderer::SVOPathGuidingRenderer::init() {
 
 	LightInjectSetting lightInjectSetting{
 		.VGB = rasterVoxelization->VGB,
-		.VGBStartPos_Size = 
-		glm::vec4(rasterVoxelization->setting.pushConstant.voxelGroupStartPos, rasterVoxelization->setting.pushConstant.voxelSize_Count.w),
+		.VGBStartPos = rasterVoxelization->setting.pushConstant.voxelGroupStartPos,
+		.VGBVoxelSize = glm::vec3(rasterVoxelization->setting.pushConstant.voxelSize_Count),
+		.VGBSize = rasterVoxelization->setting.pushConstant.voxelSize_Count.w,
 		.ptContext = &ptContext,
 		.asManager = &asManager
 	};
@@ -120,9 +121,7 @@ void FzbRenderer::SVOPathGuidingRenderer::render(VkCommandBuffer cmd) {
 	//Renderer::postProcess(cmd);
 	//nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	//rasterVoxelization->postProcess(cmd);
-
-	nvvk::cmdImageMemoryBarrier(cmd, { rasterVoxelization->gBuffers.getColorImage(RasterVoxelizationGBuffer::WireframeMap), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
 };
 
 void FzbRenderer::SVOPathGuidingRenderer::createDescriptorSetLayout() {

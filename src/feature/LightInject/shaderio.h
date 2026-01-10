@@ -8,6 +8,7 @@
 NAMESPACE_SHADERIO_BEGIN()
 
 struct LightInjectPushConstant {
+	float4 VGBVoxelSize;
 	float4 VGBStartPos_Size;
 	int frameIndex = 0;
 	float time;

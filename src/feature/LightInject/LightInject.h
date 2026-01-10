@@ -9,9 +9,16 @@
 namespace FzbRenderer {
 struct LightInjectSetting{
 	nvvk::Buffer VGB;
-	glm::vec4 VGBStartPos_Size;
+	glm::vec3 VGBStartPos;
+	glm::vec3 VGBVoxelSize;
+	float VGBSize;
 	PathTracingContext* ptContext;
 	AccelerationStructureManager* asManager;
+};
+
+enum LightInjectGBuffer {
+	LightInjectResult = 0,
+	CubeMap_LightInject,
 };
 
 class LightInject : public PathTracing {
@@ -34,13 +41,22 @@ public:
 	void compileAndCreateShaders() override;
 	void updateDataPerFrame(VkCommandBuffer cmd) override;
 
+#ifndef NDEBUG
 	void debug_Cube(VkCommandBuffer cmd);
+
+	VkShaderEXT vertexShader_Cube{};
+	VkShaderEXT fragmentShader_Cube{};
+	bool showLightInjectResult = false;
+	bool showCubeMap = false;
+#endif
 
 	LightInjectSetting setting;
 	VkPipeline rtPipeline{};
+	VkPipelineLayout rtPipelineLayout{};
 
 private:
 	shaderio::LightInjectPushConstant pushConstant;
+	VkShaderModuleCreateInfo shaderCode;
 };
 }
 

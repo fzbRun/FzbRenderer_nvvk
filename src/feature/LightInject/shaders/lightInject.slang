@@ -28,7 +28,6 @@ struct LightInjectHitPayload {
 [shader("raygeneration")]
 void raygenMain()
 {
-    return;
     float2 launchID = (float2)DispatchRaysIndex().xy;
     float2 launchSize = (float2)DispatchRaysDimensions().xy;
 
@@ -62,7 +61,7 @@ void raygenMain()
     payload.rayDirection = ray.Direction;
     payload.isExt = true;
 
-    const uint maxPathDepth = 3;
+    const uint maxPathDepth = 1;
     float3 voxelIrradiances[maxPathDepth];
     int voxelIndices[maxPathDepth];
     float3 radiances[maxPathDepth];
@@ -104,7 +103,7 @@ void raygenMain()
             continue;
         }
 
-        float3 irradiance = voxelIrradiances[i] + radiance * cosines[i] / pdfs[i];  //
+        float3 irradiance = voxelIrradiances[i] + radiance * cosines[i] / pdfs[i];
         InterlockedAdd<float>(VGB[voxelIndex].irradiance.w, 1.0f);
         InterlockedAdd<float>(VGB[voxelIndex].irradiance.x, irradiance.x);
         InterlockedAdd<float>(VGB[voxelIndex].irradiance.y, irradiance.y);
@@ -123,10 +122,10 @@ void raygenMain()
 }
 
 int getVGBVoxelIndex(float3 hitPos) {
-    int voxelCount = pushConst.VGBStartPos_Size.w;
+    int voxelCount = int(pushConst.VGBStartPos_Size.w);
     int voxelTotalCount = voxelCount * voxelCount * voxelCount;
 
-    int3 voxelIndexXYZ = (hitPos - pushConst.VGBStartPos_Size.xyz) / pushConst.VGBStartPos_Size.w;
+    int3 voxelIndexXYZ = int3((hitPos - pushConst.VGBStartPos_Size.xyz) / pushConst.VGBVoxelSize.xyz);
 
     int voxelIndexU = 0;
     while (voxelTotalCount > 1) {
@@ -192,7 +191,7 @@ void rayClosestHitMain(inout LightInjectHitPayload payload, in BuiltInTriangleIn
     CallShader<CallablePayload>(uint(material.type), callablePayload);
 
     payload.randomSeed = callablePayload.randomSeed;
-    payload.irradiance = callablePayload.hitPos;    //sotre irradiance in hitPos
+    payload.irradiance = callablePayload.hitPos + emissive;    //sotre irradiance in hitPos
     payload.voxelIndex = getVGBVoxelIndex(hitState.pos);
     payload.radiance = callablePayload.radianceSum_nee + emissive;
     payload.rayDirection = callablePayload.incidence;
@@ -232,10 +231,9 @@ void diffuseMaterialMain(inout CallablePayload payload) {
     for (int i = 0; i < payload.lightNum; ++i) {
         if (payload.radiance_nee[i].x + payload.radiance_nee[i].y + payload.radiance_nee[i].z < 0.001f) continue;
 
-        float cosineON = dot(payload.outgoing, payload.hitNormal);
-        float3 bsdf = M_1_PI * cosineON * payload.material.albedo;
+        float3 bsdf = M_1_PI * payload.material.albedo;
 
-        float3 cosine = abs(dot(payload.sampleDir_nee[i], payload.hitNormal));
+        float3 cosine = max(dot(payload.sampleDir_nee[i], payload.hitNormal), 0.0f);
         float3 radiance = payload.radiance_nee[i] * cosine;
         payload.radianceSum_nee += radiance * bsdf;
 
@@ -259,7 +257,7 @@ void conductorMaterialMain(inout CallablePayload payload) {
         float3 bsdf = float3(1.0f);
         if (abs(dot(h, payload.hitNormal)) < 0.95f) bsdf = float3(0.0f);
 
-        float3 cosine = abs(dot(sampleDir, payload.hitNormal));
+        float3 cosine = max(dot(sampleDir, payload.hitNormal), 0.0f);
         float3 radiance = payload.radiance_nee[i] * cosine;
         payload.radianceSum_nee += radiance * bsdf;
 
@@ -370,7 +368,7 @@ void roughConductorMaterialMain(inout CallablePayload payload) {
             );
 
         float3 bsdf = (D * G2 * F) / (4.0f * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 0.001f);
-        float3 cosine = abs(dot(sampleDir, payload.hitNormal));
+        float3 cosine = max(dot(sampleDir, payload.hitNormal), 0.0f);
         float3 radiance = payload.radiance_nee[i] * cosine;
         payload.radianceSum_nee += radiance * bsdf;
         irradiance += radiance;
@@ -477,4 +475,36 @@ void roughDielectricMaterialMain(inout CallablePayload payload) {
         irradiance += radiance;
     }
     payload.hitPos = irradiance;
+}
+
+//------------------------------------------------debug---------------------------------------------------------
+struct VSout_Cube {
+    float4 sv_position : SV_Position;
+    float3 worldPos : POSITION;
+    float3 color;
+}
+struct PSout_Cube
+{
+    float4 color : SV_Target;
+};
+[shader("vertex")]
+VSout_Cube vertexMain_Cube(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID)
+{
+    VGBVoxelData voxelData = VGB[instanceIndex];
+    VSout_Cube output;
+    if (voxelData.irradiance.w == 0.0f) output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
+    else {
+        output.worldPos.x = ((vertexIndex & 3) * 2) % 6 == 0 ? asfloat(voxelData.aabbU.minimum.x) : asfloat(voxelData.aabbU.maximum.x);
+        output.worldPos.y = (vertexIndex & 3) <= 1 ? asfloat(voxelData.aabbU.minimum.y) : asfloat(voxelData.aabbU.maximum.y);
+        output.worldPos.z = vertexIndex / 4 == 0 ? asfloat(voxelData.aabbU.minimum.z) : asfloat(voxelData.aabbU.maximum.z);
+    
+        SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+        output.sv_position = mul(float4(output.worldPos.xyz, 1.0f), sceneInfo.viewProjMatrix);
+        output.color = voxelData.irradiance.xyz / voxelData.irradiance.w;
+    }
+    return output;
+}
+[shader("pixel")]
+PSout_Cube fragmentMain_Cube(VSout_Cube input) {
+    return { float4(input.color, 1.0f) };
 }

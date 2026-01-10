@@ -264,7 +264,7 @@ void initNEE(inout CallablePayload payload, SceneInfo sceneInfo, int NEEShaderIn
                 float pdf = 1.0f;
                 sampleDir = sphereRectangleSample(quad, payload.hitPos, randomNumber1, randomNumber2, pdf);
 
-                if (dot(-sampleDir, light.direction) <= 0.001f) continue;
+                if (dot(-sampleDir, light.direction) <= 0.0f) continue;
 
                 float distance = length(sampleDir);
                 if (!hitTest(distance, sampleDir, payload.hitPos, payload.hitNormal, NEEShaderIndex, time)) continue; // ÕÚµ²
