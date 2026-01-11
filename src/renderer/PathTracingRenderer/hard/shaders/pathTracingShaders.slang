@@ -97,11 +97,16 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
     // hitState.TBN = float3x3(tangent, bitangent, hitState.normal);
 
     float cosineON = dot(hitState.normal, -payload.rayDirection);
-    float3 emissive = material.emissive;
-    if (material.type == uint(MaterialType::Deielectric) || material.type == uint(MaterialType::RoughDeielectric)) {
-        if (cosineON < 0) hitState.normal = -hitState.normal;
-        cosineON = abs(cosineON);
-    } else emissive *= max(cosineON, 0.0f);
+    if (cosineON < 0) hitState.normal = -hitState.normal;
+    cosineON = abs(cosineON);
+    float3 emissive = material.emissive * cosineON;
+
+    //float cosineON = dot(hitState.normal, -payload.rayDirection);
+    //float3 emissive = material.emissive;
+    //if (material.type == uint(MaterialType::Deielectric) || material.type == uint(MaterialType::RoughDeielectric)) {
+    //    if (cosineON < 0) hitState.normal = -hitState.normal;
+    //    cosineON = abs(cosineON);
+    //} else emissive *= max(cosineON, 0.0f);
 
     CallablePayload callablePayload;
     callablePayload.material = material;
@@ -154,16 +159,7 @@ void rayMissMain(inout HitPayload payload)
 //-------------------------------------------------callableShader--------------------------------------------------
 [shader("callable")]
 void diffuseMaterialMain(inout CallablePayload payload) {
-    float randomNumber1 = rand(payload.randomSeed);
-    float randomNumber2 = rand(payload.randomSeed);
-    float cosTheta = sqrt(randomNumber1);
-    float sinTheta = sqrt(1.0f - randomNumber1);
-    float phi = M_TWO_PI * randomNumber2;
-    payload.incidence.x = sinTheta * cos(phi);
-    payload.incidence.y = sinTheta * sin(phi);
-    payload.incidence.z = cosTheta;
-    payload.incidence = mul(payload.incidence, payload.TBN);
-    payload.incidence = normalize(payload.incidence);
+    payload.incidence = sampleIncidence_DiffuseMaterial(payload.randomSeed, payload.TBN);
 
     float cosine = dot(payload.incidence, payload.hitNormal);
     payload.pdf = M_1_PI * cosine;
@@ -173,7 +169,8 @@ void diffuseMaterialMain(inout CallablePayload payload) {
         for (int i = 0; i < payload.lightNum; ++i) {
             if(payload.radiance_nee[i].x + payload.radiance_nee[i].y + payload.radiance_nee[i].z < 0.001f) continue;
 
-            float3 bsdf = M_1_PI * payload.material.albedo;
+            cosine = dot(payload.hitNormal, payload.outgoing);
+            float3 bsdf = M_1_PI * payload.material.albedo * cosine;
             payload.radianceSum_nee += payload.radiance_nee[i] * bsdf * max(dot(payload.sampleDir_nee[i], payload.hitNormal), 0.0f);
         }
     }
@@ -201,26 +198,8 @@ void conductorMaterialMain(inout CallablePayload payload) {
 
 [shader("callable")]
 void dielectricMaterialMain(inout CallablePayload payload) {
-    payload.bsdf = 1.0f;
-
-    float cosineOH = dot(payload.outgoing, payload.hitNormal);
-    float3 F = schlickFresnel(payload.material.albedo, float3(1.0F), cosineOH);
-    float F_oneChanel = 0.299 * F.x + 0.587 * F.y + 0.114 * F.z;
-
-    float randomNumber = rand(payload.randomSeed);
-    if (randomNumber < F_oneChanel) {
-        payload.incidence = reflect(-payload.outgoing, payload.hitNormal);
-        payload.pdf = F_oneChanel;
-    }
-    else {
-        float eta = payload.material.eta.x;
-        if (!payload.isExt) eta = 1.0f / eta;
-
-        bool totalInternalReflection = false;
-        payload.incidence = refract(payload.outgoing, payload.hitNormal, eta, cosineOH, totalInternalReflection);
-        payload.pdf = 1.0f - F_oneChanel;
-        if(!totalInternalReflection) payload.isExt = !payload.isExt; 
-    }
+    float3 F;
+    PopulateCallablePayload_DielectricMaterial(payload, F);
 
     if (pushConst.NEEShaderIndex > 0) {
         for (int i = 0; i < payload.lightNum; ++i) {
@@ -246,32 +225,11 @@ void dielectricMaterialMain(inout CallablePayload payload) {
 
 [shader("callable")]
 void roughConductorMaterialMain(inout CallablePayload payload) {
-    float randomNumber1 = rand(payload.randomSeed);
-    float randomNumber2 = rand(payload.randomSeed);
+    float3 outgoing_tangentSpace;
+    PopulateCallablePayload_RoughConductorMaterial(payload, outgoing_tangentSpace);
+
     float roughness = payload.material.roughness;
-
-    float3 outgoing_tangentSpace = mul(payload.TBN, payload.outgoing);
-    float3 h_tangentSpace = hvd_ggx_sample_vndf(outgoing_tangentSpace, float2(roughness), float2(randomNumber1, randomNumber2));
-
-    float3 incidence_tangentSpace = reflect(-outgoing_tangentSpace, h_tangentSpace);
-    //If h is particularly biased towards n, the incident vector may appear in the negative normal hemisphere
-    payload.incidence = mul(incidence_tangentSpace, payload.TBN);
-
-    float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h_tangentSpace); // h需要在切线空间中
-    float D = D_costhetaNH / h_tangentSpace.z;                                   // max(h.z, 1e-6f);
-    float cosineOH = abs(dot(outgoing_tangentSpace, h_tangentSpace));
-    payload.pdf = D_costhetaNH / max(4.0f * cosineOH, 0.001f);
-
     float G1_outgoing, G1_incidence;
-    float G2 = ggx_smith_shadow_mask(
-        G1_outgoing, 
-        G1_incidence,
-        outgoing_tangentSpace,
-        incidence_tangentSpace,
-        float2(roughness)
-    );
-    float3 F = schlickFresnel(payload.material.albedo, float3(1.0F), cosineOH);
-    payload.bsdf = (D * G2 * F) / (4.0f * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 0.001f);
 
     if (pushConst.NEEShaderIndex > 0) {
         for (int i = 0; i < payload.lightNum; ++i) {
@@ -280,15 +238,18 @@ void roughConductorMaterialMain(inout CallablePayload payload) {
             float3 sampleDir = payload.sampleDir_nee[i];
 
             float3 h = normalize(sampleDir + payload.outgoing);
-            h_tangentSpace = mul(payload.TBN, h); // h需要在切线空间中
+            float3 h_tangentSpace = mul(payload.TBN, h); // h需要在切线空间中
             // 因为TBN可能不准，导致出现细微的小于0的z，导致出错。上面的h不用这样是因为hvd_ggx_sample_vndf必然生成z大于0的h
             if (h_tangentSpace.z <= 0.001f) continue;
-            D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h_tangentSpace);
-            D = D_costhetaNH / h_tangentSpace.z;
+            float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h_tangentSpace);
+            float D = D_costhetaNH / h_tangentSpace.z;
 
-            incidence_tangentSpace = mul(payload.TBN, sampleDir);
+            float cosineOH = max(dot(outgoing_tangentSpace, h_tangentSpace), 0.001f);
+            float3 F = schlickFresnel(payload.material.albedo, float3(1.0F), cosineOH);
 
-            G2 = ggx_smith_shadow_mask(
+            float3 incidence_tangentSpace = mul(payload.TBN, sampleDir);
+
+            float G2 = ggx_smith_shadow_mask(
                 G1_outgoing,
                 G1_incidence,
                 outgoing_tangentSpace,
@@ -304,58 +265,12 @@ void roughConductorMaterialMain(inout CallablePayload payload) {
 
 [shader("callable")]
 void roughDielectricMaterialMain(inout CallablePayload payload) {
-    float randomNumber1 = rand(payload.randomSeed);
-    float randomNumber2 = rand(payload.randomSeed);
+    float3 outgoing_tangentSpace;
+    float eta;
+    PopulateCallablePayload_RoughDielectricMaterial(payload, outgoing_tangentSpace, eta);
+
     float roughness = payload.material.roughness;
-
-    float3 outgoing_tangentSpace = mul(payload.TBN, payload.outgoing);
-    float3 h_tangentSpace = hvd_ggx_sample_vndf(outgoing_tangentSpace, float2(roughness), float2(randomNumber1, randomNumber2));
-    float cosineOH = abs(dot(outgoing_tangentSpace, h_tangentSpace));
-
-    float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h_tangentSpace); // h需要在切线空间中
-    float D = D_costhetaNH / max(h_tangentSpace.z, 0.001f);
-
-    float3 F = schlickFresnel(payload.material.albedo, float3(1.0F), cosineOH);
-    float F_oneChanel = 0.299 * F.x + 0.587 * F.y + 0.114 * F.z;
-
-    float eta = payload.material.eta.x;
-    if (!payload.isExt) eta = 1.0f / eta;
-
-    float randomNumber = rand(payload.randomSeed);
-    float3 incidence_tangentSpace;
-    bool refraction = false;
-    if (randomNumber < F_oneChanel) incidence_tangentSpace = reflect(-outgoing_tangentSpace, h_tangentSpace);
-    else {
-        bool totalInternalReflection = false;
-        incidence_tangentSpace = refract(outgoing_tangentSpace, h_tangentSpace, eta, cosineOH, totalInternalReflection);
-
-        if (!totalInternalReflection) {
-            payload.isExt = !payload.isExt;
-            refraction = true;
-        }
-    }
-    payload.incidence = mul(incidence_tangentSpace, payload.TBN);
-
     float G1_outgoing, G1_incidence;
-    float G2 = ggx_smith_shadow_mask(
-        G1_outgoing, 
-        G1_incidence,
-        outgoing_tangentSpace,
-        incidence_tangentSpace,
-        float2(roughness)
-    );
-
-    if (refraction) {
-        float weight = dot(incidence_tangentSpace, h_tangentSpace) / eta + cosineOH;
-        payload.pdf = (1.0f - F_oneChanel) * D_costhetaNH * cosineOH / (weight * weight);
-
-        payload.bsdf = D * G2 * (1.0f - F) * abs(dot(incidence_tangentSpace, h_tangentSpace)) * cosineOH
-                        / (weight * weight * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 0.001f);
-    }else {
-        payload.pdf = F_oneChanel * D_costhetaNH / max(4.0f * cosineOH, 0.001f);
-
-        payload.bsdf = D * G2 * F / (4.0f * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 0.001f);
-    }
 
     if (pushConst.NEEShaderIndex > 0) {
         for (int i = 0; i < payload.lightNum; ++i) {
@@ -363,22 +278,25 @@ void roughDielectricMaterialMain(inout CallablePayload payload) {
 
             float3 sampleDir = payload.sampleDir_nee[i];
 
-            refraction = dot(sampleDir, payload.hitNormal) < 0.0f;
+            bool refraction = dot(sampleDir, payload.hitNormal) < 0.0f;
             float3 h;
             if (refraction) h = normalize(sampleDir + payload.outgoing * eta);
             else h = normalize(sampleDir + payload.outgoing);
 
             // 这里与roughConductor不同，h需要与法线同侧  h需要在切线空间中
-            h_tangentSpace = mul(payload.TBN, h);
+            float3 h_tangentSpace = mul(payload.TBN, h);
             if (h_tangentSpace.z < 0.0f) h_tangentSpace = -h_tangentSpace;
-            D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h_tangentSpace);
-            D = D_costhetaNH / max(h_tangentSpace.z, 0.001f);
+            float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h_tangentSpace);
+            float D = D_costhetaNH / max(h_tangentSpace.z, 0.001f);
+
+            float cosineOH = max(dot(outgoing_tangentSpace, h_tangentSpace), 0.001f);
+            float3 F = schlickFresnel(payload.material.albedo, float3(1.0F), cosineOH);
 
             h_tangentSpace = faceforward(h_tangentSpace, outgoing_tangentSpace, -h_tangentSpace); // dot(I, nerf) < 0 return n;else return -n
 
-            incidence_tangentSpace = mul(payload.TBN, sampleDir);
+            float3 incidence_tangentSpace = mul(payload.TBN, sampleDir);
 
-            G2 = ggx_smith_shadow_mask(
+            float G2 = ggx_smith_shadow_mask(
                 G1_outgoing,
                 G1_incidence,
                 outgoing_tangentSpace,

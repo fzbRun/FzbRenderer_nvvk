@@ -47,7 +47,7 @@ void FzbRenderer::RasterVoxelization::init() {
 		for (int i = 0; i < sceneResource.instances.size(); ++i) {
 			uint32_t meshIndex = sceneResource.instances[i].meshIndex;
 			MeshInfo meshInfo = sceneResource.getMeshInfo(meshIndex);
-			shaderio::AABB meshAABB = meshInfo.getAABB(sceneResource.instances[i].transform);
+			shaderio::AABB meshAABB = meshInfo.getAABB(sceneResource.instances[i].transform);	//对于动态物体，这里需要修改
 
 			aabb.minimum.x = std::min(meshAABB.minimum.x, aabb.minimum.x);
 			aabb.minimum.y = std::min(meshAABB.minimum.y, aabb.minimum.y);

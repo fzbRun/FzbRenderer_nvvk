@@ -20,7 +20,7 @@
 #ifndef FZB_APPLICATION_H
 #define FZB_APPLICATION_H
 
-#define MAX_FRAME 1 << 12
+#define MAX_FRAME 1 << 14
 
 namespace FzbRenderer {
 

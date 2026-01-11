@@ -223,13 +223,6 @@
 		</instance>
 		<instance>
 			<transform name="to_world">
-				<matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" />
-			</transform>
-			<meshRef id = "Table" />
-			<materialRef id = "TableBSDF" />
-		</instance>
-		<instance>
-			<transform name="to_world">
 				<matrix value="1.8 0 0 2.3 0 1 0 0 0 0 1 0 0 0 0 1" />
 			</transform>
 			<meshRef id = "Diffuse_0005" />
@@ -237,6 +230,13 @@
 		</instance>
 		<instance>
 			<transform name="to_world">
+				<matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" />
+			</transform>
+			<meshRef id = "Table" />
+			<materialRef id = "TableBSDF" />
+		</instance>
+		<instance>
+			<transform name="to_world">
 				<matrix value="-0.0757886 0 -0.0468591 -1.95645 0 0.0891049 0 0.648205 0.0468591 0 -0.0757886 -1.77687 0 0 0 1"/>
 			</transform>
 			<meshRef id = "Pot" />
@@ -263,6 +263,15 @@
 			<meshRef id = "PotLid" />
 			<materialRef id = "Pot2BSDF" />
 		</instance>
+
+		<instance>
+			<transform name="to_world">
+				<matrix value="-0.0837611 0 0.0303939 -1.95645 0 0.0891049 0 0.651268 -0.0303939 0 -0.0837611 -3.57687 0 0 0 1"/>
+			</transform>
+			<meshRef id = "Pot" />
+			<materialRef id = "Pot3BSDF" />
+		</instance>
+		<!--
 		<instance type="periodMotion">
 			<transform name="to_world">
 				<matrix value="-0.0837611 0 0.0303939 -1.95645 0 0.0891049 0 0.651268 -0.0303939 0 -0.0837611 -3.57687 0 0 0 1"/>
@@ -276,6 +285,8 @@
 			<meshRef id = "Pot" />
 			<materialRef id = "Pot3BSDF" />
 		</instance>
+		-->
+		
 		<instance>
 			<transform name="to_world">
 				<matrix value="-0.083761 0 0.0303938 -1.95645 0 0.0891049 0 0.651268 -0.0303938 0 -0.083761 -3.57687 0 0 0 1"/>
@@ -305,6 +316,7 @@
 			<meshRef id="custom" type="plane" />
 			<materialRef id="LightBSDF"/>
 		</instance>
+		
 	</instances>
 
 	<lights>

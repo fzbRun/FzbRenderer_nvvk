@@ -8,25 +8,23 @@
 #include <common/Material/Material.h>
 
 shaderio::AABB FzbRenderer::MeshInfo::getAABB(glm::mat4 transformMatrix) {
-	glm::vec3 maxmum = { FLT_MAX, FLT_MAX, FLT_MAX };
-	if (aabb.minimum != maxmum && aabb.maximum != -maxmum) return aabb;
+	glm::vec3 maximum = { FLT_MAX, FLT_MAX, FLT_MAX };
+	if (aabb.minimum != maximum && aabb.maximum != -maximum) return aabb;
 
 	Scene& sceneRsource = Application::sceneResource;
 	std::vector<uint8_t>& meshByteData = sceneRsource.meshSets[sceneRsource.getMeshSetIndex(meshIndex)].meshByteData;
 	const auto& positions = mesh.triMesh.positions;
-	const glm::vec3* vertexData = reinterpret_cast<const glm::vec3*>(
-		meshByteData.data() + positions.offset
-		);
+	const glm::vec3* vertexData = reinterpret_cast<const glm::vec3*>(meshByteData.data() + positions.offset);
 
 	for (uint32_t i = 0; i < positions.count; ++i) {
 		const glm::vec3& pos = vertexData[i];
 		glm::vec3 pos_transform = transformMatrix * glm::vec4(pos, 1.0f);
-		aabb.minimum.x = std::min(pos.x, aabb.minimum.x);
-		aabb.minimum.y = std::min(pos.y, aabb.minimum.y);
-		aabb.minimum.z = std::min(pos.z, aabb.minimum.z);
-		aabb.maximum.x = std::max(pos.x, aabb.maximum.x);
-		aabb.maximum.y = std::max(pos.y, aabb.maximum.y);
-		aabb.maximum.z = std::max(pos.z, aabb.maximum.z);
+		aabb.minimum.x = std::min(pos_transform.x, aabb.minimum.x);
+		aabb.minimum.y = std::min(pos_transform.y, aabb.minimum.y);
+		aabb.minimum.z = std::min(pos_transform.z, aabb.minimum.z);
+		aabb.maximum.x = std::max(pos_transform.x, aabb.maximum.x);
+		aabb.maximum.y = std::max(pos_transform.y, aabb.maximum.y);
+		aabb.maximum.z = std::max(pos_transform.z, aabb.maximum.z);
 	}
 
 	return aabb;
