@@ -46,7 +46,7 @@ void Octree::resize(VkCommandBuffer cmd, const VkExtent2D& size, nvvk::GBuffer& 
 	rasterVoxelization->resize(cmd, size, gBuffers_other, baseMapIndex);
 };
 #endif
-void FzbRenderer::RasterVoxelization::resize(VkCommandBuffer cmd, const VkExtent2D& size) {};
+void Octree::resize(VkCommandBuffer cmd, const VkExtent2D& size) {};
 void Octree::preRender() {
 	rasterVoxelization->preRender();
 }
@@ -128,11 +128,11 @@ void Octree::createOctreeArray() {
 	for (int depth = 0; depth < setting.OctreeDepth; ++depth) {
 		allocator->createBuffer(OctreeArray_G[depth], bufferSize,
 			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-		NVVK_DBG_NAME(OctreeArray_G[depth]);
+		//NVVK_DBG_NAME(OctreeArray_G[depth]);
 
 		allocator->createBuffer(OctreeArray_E[depth], bufferSize,
 			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-		NVVK_DBG_NAME(OctreeArray_E[depth]);
+		//NVVK_DBG_NAME(OctreeArray_E[depth]);
 
 		bufferSize *= 8;
 	}

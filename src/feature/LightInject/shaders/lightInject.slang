@@ -1,3 +1,5 @@
+#define NEE
+
 #include "feature/PathTracing/shaders/pathTracingCommon.slang"
 #include "feature/LightInject/shaderio.h"
 #include "feature/SceneDivision/RasterVoxelization/shaderio.h"
@@ -10,12 +12,13 @@ struct LightInjectHitPayload {
     uint randomSeed;
 
     float3 irradiance;
+
     float3 radiance;
+    float pdf_bsdfSample;
+
     uint voxelIndex;
-    float3 bsdf_cosine;
-    float cosine;
+    float3 bsdf;
     float3 normal;
-    float pdf;
 
     float3 rayOrigin;
     float3 rayDirection;
@@ -52,10 +55,9 @@ void raygenMain()
     payload.irradiance = float3(0, 0, 0);
     payload.voxelIndex = 0;
     payload.radiance = float3(0, 0, 0);
-    payload.bsdf_cosine = float3(1.0f);
-    payload.cosine = 1.0f;
+    payload.pdf_bsdfSample = 1.0f;
+    payload.bsdf = float3(1.0f);
     payload.normal = float3(0.0f);
-    payload.pdf = 1.0f;
     payload.bounceDepth = 0;
     payload.rayOrigin = ray.Origin;
     payload.rayDirection = ray.Direction;
@@ -66,30 +68,48 @@ void raygenMain()
     int voxelIndices[maxPathDepth];
     float3 radiances[maxPathDepth];
     float3 normals[maxPathDepth];
-    float3 bsdf_cosines[maxPathDepth];
+    float3 bsdfs[maxPathDepth];
     float cosines[maxPathDepth];
-    float pdfs[maxPathDepth];
+    float pdfs_bsdfSample[maxPathDepth];
+
+    float weights_bsdfSample[maxPathDepth]; weights_bsdfSample[maxPathDepth - 1] = 1.0f;
+    float3 lastRayOrigin = payload.rayOrigin;
+    float3 lastRayDirection = payload.rayDirection;
+    uint lightNum = min(sceneInfo.numLights, NEE_MAX_SAMPLE_NUM);
 
     float RR = 0.8f;
 
     uint32_t pathCount = 0;
-    while (payload.bounceDepth < maxPathDepth && (payload.bsdf_cosine.x + payload.bsdf_cosine.y + payload.bsdf_cosine.z > 0.0f))
+    while (payload.bounceDepth < maxPathDepth && (payload.bsdf.x + payload.bsdf.y + payload.bsdf.z > 0.0f))
     {
-        //TraceRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, payload);
         TraceMotionRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, pushConst.time, payload);
- 
-        voxelIrradiances[pathCount] = payload.irradiance;
+
+        if (payload.bounceDepth == MISS_DEPTH) weights_bsdfSample[pathCount] = 1.0f;
+        else if (pathCount > 0) {
+            float pdf_directLightSample = 0.0f;
+            for (int i = 0; i < lightNum; ++i) {
+                Light light = sceneInfo.lights[i];
+                if (!isPosInDirectionLight(payload.rayOrigin, light)) continue;
+                pdf_directLightSample = getPdf_directionLightSample(lastRayOrigin, lastRayDirection, light);
+                break;
+            }
+            weights_bsdfSample[pathCount - 1] = pdfs_bsdfSample[pathCount - 1] / (pdfs_bsdfSample[pathCount - 1] + pdf_directLightSample);
+        }
+        lastRayOrigin = payload.rayOrigin;
+        lastRayDirection = payload.rayDirection;
+
+        voxelIrradiances[pathCount] = payload.irradiance;       //directLightSamle + emissive
         voxelIndices[pathCount] = payload.bounceDepth == MISS_DEPTH ? -1 : payload.voxelIndex;
-        radiances[pathCount] = payload.radiance;
+        radiances[pathCount] = payload.radiance;    // directLightSamle(* bsdf) + emissive
         normals[pathCount] = payload.normal;
-        bsdf_cosines[pathCount] = payload.bsdf_cosine;
-        cosines[pathCount] = payload.cosine;
-        pdfs[pathCount] = payload.pdf;
+        bsdfs[pathCount] = payload.bsdf;
+        cosines[pathCount] = abs(dot(payload.normal, payload.rayDirection));
+        pdfs_bsdfSample[pathCount] = payload.pdf_bsdfSample;
         ++pathCount;
 
         float randomNumber = rand(payload.randomSeed);
         if (randomNumber >= RR) break;
-        payload.pdf *= RR;
+        payload.pdf_bsdfSample = RR;
 
         ray.Origin = payload.rayOrigin;
         ray.Direction = payload.rayDirection;
@@ -103,21 +123,21 @@ void raygenMain()
             continue;
         }
 
-        // Dividing by pdf will result in a lot of noise; however, not dividing by pdf will lead to indirect light
-        // not being an estimate of the entire hemisphere, resulting in smaller indirect light values
-        float3 irradiance = voxelIrradiances[i] + radiance * cosines[i];    // / pdfs[i];
+        radiance = radiance * weights_bsdfSample[i] * cosines[i] / pdfs_bsdfSample[i];
+
+        float3 irradiance = voxelIrradiances[i] + radiance;
         InterlockedAdd<float>(VGB[voxelIndex].irradiance.w, 1.0f);
         InterlockedAdd<float>(VGB[voxelIndex].irradiance.x, irradiance.x);
         InterlockedAdd<float>(VGB[voxelIndex].irradiance.y, irradiance.y);
         InterlockedAdd<float>(VGB[voxelIndex].irradiance.z, irradiance.z);
-
-        radiance = radiance * bsdf_cosines[i] / pdfs[i] + radiances[i];
 
         float3 normal = length(irradiance) * normals[i];
         InterlockedAdd<float>(VGB[voxelIndex].sumNormal_E.w, 1.0f);
         InterlockedAdd<float>(VGB[voxelIndex].sumNormal_E.x, normal.x);
         InterlockedAdd<float>(VGB[voxelIndex].sumNormal_E.y, normal.y);
         InterlockedAdd<float>(VGB[voxelIndex].sumNormal_E.z, normal.z);
+
+        radiance = radiance * bsdfs[i] + radiances[i];
     }
 
     outImage[int2(launchID)] = float4(radiance, 1.0f);
@@ -164,12 +184,6 @@ void rayClosestHitMain(inout LightInjectHitPayload payload, in BuiltInTriangleIn
 
     float cosineON = dot(hitState.normal, -payload.rayDirection);
     if (cosineON < 0) hitState.normal = -hitState.normal;
-    cosineON = abs(cosineON);
-    float3 emissive = material.emissive * cosineON;
-    //if (material.type == uint(MaterialType::Deielectric) || material.type == uint(MaterialType::RoughDeielectric)) {
-    //    if (cosineON < 0) hitState.normal = -hitState.normal;
-    //    cosineON = abs(cosineON);
-    //} else emissive *= max(cosineON, 0.0f);
 
     CallablePayload callablePayload;
     callablePayload.material = material;
@@ -195,15 +209,14 @@ void rayClosestHitMain(inout LightInjectHitPayload payload, in BuiltInTriangleIn
     CallShader<CallablePayload>(uint(material.type), callablePayload);
 
     payload.randomSeed = callablePayload.randomSeed;
-    payload.irradiance = callablePayload.hitPos + emissive;    //sotre irradiance in hitPos
+    payload.irradiance = callablePayload.hitPos + material.emissive;    //sotre irradiance in hitPos
     payload.voxelIndex = getVGBVoxelIndex(hitState.pos);
-    payload.radiance = callablePayload.radianceSum_nee + emissive;
+    payload.radiance = callablePayload.radianceSum_nee + material.emissive;
     payload.rayDirection = callablePayload.incidence;
     payload.rayOrigin = offsetRay(hitState.pos, hitState.normal); // hitState.pos + 0.001f * payload.rayDirection;
-    payload.bsdf_cosine = callablePayload.bsdf * cosineON;
-    payload.cosine = cosineON;
+    payload.bsdf = callablePayload.bsdf;
     payload.normal = hitState.normal;
-    payload.pdf = callablePayload.pdf;
+    payload.pdf_bsdfSample *= callablePayload.pdf;
     payload.isExt = callablePayload.isExt;
 
     payload.bounceDepth++;
@@ -225,26 +238,30 @@ void rayMissMain(inout LightInjectHitPayload payload)
 
 [shader("callable")]
 void diffuseMaterialMain(inout CallablePayload payload) {
-    payload.incidence = sampleIncidence_DiffuseMaterial(payload.randomSeed, payload.TBN);
-
-    float cosine = dot(payload.incidence, payload.hitNormal);
-    payload.pdf = M_1_PI * cosine;
-    payload.bsdf = payload.material.albedo * payload.pdf;
+    PopulateCallablePayload_DiffuseMaterial(payload);
 
     float3 irradiance = float3(0.0f);
-    for (int i = 0; i < payload.lightNum; ++i) {
-        if (payload.radiance_nee[i].x + payload.radiance_nee[i].y + payload.radiance_nee[i].z < 0.001f) continue;
+    uint lightNum = min(pushConst.sceneInfoAddress[0].numLights, NEE_MAX_SAMPLE_NUM);
+    for (int i = 0; i < lightNum; ++i) {
+        float3 radiance_nee = payload.radiance_nee[i];
+        if (radiance_nee.x + radiance_nee.y + radiance_nee.z < 0.001f) continue;
 
-        cosine = dot(payload.hitNormal, payload.outgoing);
+        float3 sampleDir = payload.sampleDir_nee[i];
+
+        float cosine = dot(payload.hitNormal, payload.outgoing);
         float3 bsdf = M_1_PI * payload.material.albedo * cosine;
-        
-        cosine = dot(payload.sampleDir_nee[i], payload.hitNormal); // coine must > 0
-        float3 radiance = payload.radiance_nee[i] * cosine;
+
+        float pdf_directLightSample = payload.radiancePdf_nee[i];
+        float pdf_bsdfSample = pdf_DiffuseMaterial(sampleDir, payload.hitNormal);
+        float weight_directLightSample = pdf_directLightSample / (pdf_directLightSample + pdf_bsdfSample + 0.0001f);
+
+        cosine = dot(sampleDir, payload.hitNormal);                         // coine must > 0
+        float3 radiance = radiance_nee * cosine * weight_directLightSample;     //has divided by pdf
         payload.radianceSum_nee += radiance * bsdf;
 
-        irradiance += radiance; // payload.pdf;
+        irradiance += radiance;
     }
-    payload.hitPos = irradiance;    // / lightCount; //1/n acc((L * cosTheta) / p)
+    payload.hitPos = irradiance;
 }
 
 [shader("callable")]
@@ -254,16 +271,21 @@ void conductorMaterialMain(inout CallablePayload payload) {
     payload.incidence = reflect(-payload.outgoing, payload.hitNormal);
 
     float3 irradiance = float3(0.0f);
-    for (int i = 0; i < payload.lightNum; ++i) {
-        if (payload.radiance_nee[i].x + payload.radiance_nee[i].y + payload.radiance_nee[i].z < 0.001f) continue;
+    uint lightNum = min(pushConst.sceneInfoAddress[0].numLights, NEE_MAX_SAMPLE_NUM);
+    for (int i = 0; i < lightNum; ++i) {
+        float3 radiance_nee = payload.radiance_nee[i];
+        if (radiance_nee.x + radiance_nee.y + radiance_nee.z < 0.001f) continue;
 
         float3 sampleDir = payload.sampleDir_nee[i];
         float3 h = normalize(sampleDir + payload.outgoing);
         float3 bsdf = float3(1.0f);
         if (abs(dot(h, payload.hitNormal)) < 0.95f) bsdf = float3(0.0f);
 
-        float3 cosine = dot(sampleDir, payload.hitNormal);
-        float3 radiance = payload.radiance_nee[i] * cosine;
+        float pdf_directLightSample = payload.radiancePdf_nee[i];
+        float pdf_bsdfSample = abs(dot(sampleDir, payload.hitNormal)) > 0.99f ? 1.0f : 0.0f;
+        float weight_directLightSample = pdf_directLightSample / (pdf_directLightSample + pdf_bsdfSample + 0.0001f);
+
+        float3 radiance = radiance_nee * max(dot(sampleDir, payload.hitNormal), 0.0f) * weight_directLightSample;
         payload.radianceSum_nee += radiance * bsdf;
 
         irradiance += radiance;
@@ -273,28 +295,37 @@ void conductorMaterialMain(inout CallablePayload payload) {
 
 [shader("callable")]
 void dielectricMaterialMain(inout CallablePayload payload) {
-    float3 F;
-    PopulateCallablePayload_DielectricMaterial(payload, F);
+    float eta; float3 F;
+    PopulateCallablePayload_DielectricMaterial(payload, F, eta);
 
     float3 irradiance = float3(0.0f);
-    for (int i = 0; i < payload.lightNum; ++i) {
-        if (payload.radiance_nee[i].x + payload.radiance_nee[i].y + payload.radiance_nee[i].z < 0.001f) continue;
+    uint lightNum = min(pushConst.sceneInfoAddress[0].numLights, NEE_MAX_SAMPLE_NUM);
+    for (int i = 0; i < lightNum; ++i) {
+        float3 radiance_nee = payload.radiance_nee[i];
+        if (radiance_nee.x + radiance_nee.y + radiance_nee.z < 0.001f) continue;
+
+        float pdf_bsdfSample = 0.0f;
 
         float3 sampleDir = payload.sampleDir_nee[i];
-        float3 bsdf = float3(1.0f);
+        float3 bsdf = float3(0.0f);
         if (dot(sampleDir, payload.hitNormal) > 0.0f) {
             float3 h = normalize(sampleDir + payload.outgoing);
-            if (abs(dot(h, payload.hitNormal)) < 0.99f) bsdf = F;
+            if (abs(dot(h, payload.hitNormal)) > 0.99f) {
+                bsdf = F;
+                pdf_bsdfSample = 1.0f;
+            }
         } else {
-            float eta = payload.material.eta.x;
-            if (!payload.isExt) eta = 1.0f / eta; // 所以NEE要在找到incidence之前
-
             float3 h = normalize(eta * payload.outgoing + sampleDir);
-            if (abs(dot(h, payload.hitNormal)) < 0.99f) bsdf = 1.0f - F;
+            if (abs(dot(h, payload.hitNormal)) > 0.99f) {
+                bsdf = 1.0f - F;
+                pdf_bsdfSample = 1.0f;
+            }
         }
 
-        float3 cosine = abs(dot(sampleDir, payload.hitNormal));
-        float3 radiance = payload.radiance_nee[i] * cosine;
+        float pdf_directLightSample = payload.radiancePdf_nee[i];
+        float weight_directLightSample = pdf_directLightSample / (pdf_directLightSample + pdf_bsdfSample + 0.0001f);
+
+        float3 radiance = radiance_nee * abs(dot(sampleDir, payload.hitNormal)) * weight_directLightSample;
         payload.radianceSum_nee += radiance * bsdf;
 
         irradiance += radiance;
@@ -311,8 +342,10 @@ void roughConductorMaterialMain(inout CallablePayload payload) {
     float G1_outgoing, G1_incidence;
 
     float3 irradiance = float3(0.0f);
-    for (int i = 0; i < payload.lightNum; ++i) {
-        if (payload.radiance_nee[i].x + payload.radiance_nee[i].y + payload.radiance_nee[i].z < 0.001f) continue;
+    uint lightNum = min(pushConst.sceneInfoAddress[0].numLights, NEE_MAX_SAMPLE_NUM);
+    for (int i = 0; i < lightNum; ++i) {
+        float3 radiance_nee = payload.radiance_nee[i];
+        if (radiance_nee.x + radiance_nee.y + radiance_nee.z < 0.001f) continue;
 
         float3 sampleDir = payload.sampleDir_nee[i];
 
@@ -337,9 +370,15 @@ void roughConductorMaterialMain(inout CallablePayload payload) {
             );
 
         float3 bsdf = (D * G2 * F) / (4.0f * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 0.001f);
+
+        float pdf_directLightSample = payload.radiancePdf_nee[i];
+        float pdf_bsdfSample = max(D_costhetaNH / (4.0f * cosineOH), 0.001f);
+        float weight_directLightSample = pdf_directLightSample / (pdf_directLightSample + pdf_bsdfSample + 0.0001f);
+
         float3 cosine = dot(sampleDir, payload.hitNormal);
-        float3 radiance = payload.radiance_nee[i] * cosine;
+        float3 radiance = radiance_nee * cosine * weight_directLightSample;
         payload.radianceSum_nee += radiance * bsdf;
+
         irradiance += radiance;
     }
     payload.hitPos = irradiance;
@@ -347,16 +386,17 @@ void roughConductorMaterialMain(inout CallablePayload payload) {
 
 [shader("callable")]
 void roughDielectricMaterialMain(inout CallablePayload payload) {
-    float3 outgoing_tangentSpace;
-    float eta;
+    float3 outgoing_tangentSpace; float eta;
     PopulateCallablePayload_RoughDielectricMaterial(payload, outgoing_tangentSpace, eta);
 
     float roughness = payload.material.roughness;
     float G1_outgoing, G1_incidence;
 
     float3 irradiance = float3(0.0f);
-    for (int i = 0; i < payload.lightNum; ++i) {
-        if (payload.radiance_nee[i].x + payload.radiance_nee[i].y + payload.radiance_nee[i].z < 0.001f) continue;
+    uint lightNum = min(pushConst.sceneInfoAddress[0].numLights, NEE_MAX_SAMPLE_NUM);
+    for (int i = 0; i < lightNum; ++i) {
+        float3 radiance_nee = payload.radiance_nee[i];
+        if (radiance_nee.x + radiance_nee.y + radiance_nee.z < 0.001f) continue;
 
         float3 sampleDir = payload.sampleDir_nee[i];
 
@@ -386,16 +426,24 @@ void roughDielectricMaterialMain(inout CallablePayload payload) {
                 float2(roughness)
             );
 
+        float pdf_bsdfSample;
         float3 bsdf = float3(1.0f);
         if (refraction) {
             float weight = dot(incidence_tangentSpace, h_tangentSpace) / eta + cosineOH;
+            pdf_bsdfSample = max(D_costhetaNH * cosineOH / (weight * weight), 0.001f);
+
             payload.bsdf = D * G2 * (1.0f - F) * abs(dot(incidence_tangentSpace, h_tangentSpace)) * cosineOH
                         / (weight * weight * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 0.001f);
-        } else
+        } else {
+            pdf_bsdfSample = max(D_costhetaNH / (4.0f * cosineOH), 0.001f);
             bsdf = (D * G2 * F) / (4.0f * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 0.001f);
+        }
+
+        float pdf_directLightSample = payload.radiancePdf_nee[i];
+        float weight_directLightSample = pdf_directLightSample / (pdf_directLightSample + pdf_bsdfSample + 0.0001f);
 
         float3 cosine = abs(dot(sampleDir, payload.hitNormal));
-        float3 radiance = payload.radiance_nee[i] * cosine;
+        float3 radiance = radiance_nee * cosine * weight_directLightSample;
         payload.radianceSum_nee += radiance * bsdf;
 
         irradiance += radiance;

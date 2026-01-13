@@ -15,6 +15,7 @@ FzbRenderer::PathTracingRenderer::PathTracingRenderer(pugi::xml_node& rendererNo
 		pushValues.maxDepth = std::stoi(maxDepthNode.attribute("value").value());
 	if (pugi::xml_node useNEENode = rendererNode.child("useNEE"))
 		pushValues.NEEShaderIndex = std::string(useNEENode.attribute("value").value()) == "true";
+		
 }
 //-----------------------------------------创造光追管线----------------------------------------------------------
 /*
@@ -161,9 +162,25 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 	for(auto& s : stages)
 		s.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 
+	//if (pushValues.NEEShaderIndex == 1) {
+	//	Application::slangCompiler.addMacro({
+	//		.name = "NEE",
+	//		.value = "1"
+	//		});
+	//}else{
+	//	std::vector<slang::PreprocessorMacroDesc> macros = Application::slangCompiler.macros();
+	//	Application::slangCompiler.clearMacros();
+	//	for (slang::PreprocessorMacroDesc& macro : macros) {
+	//		if (macro.name != "NEE") Application::slangCompiler.addMacro(macro);
+	//	}
+	//}
+	std::string shaderSlangName;
+	if(pushValues.NEEShaderIndex == 1) shaderSlangName = "pathTracingNEEShaders.slang";
+	else shaderSlangName = "pathTracingShaders.slang";
+
 	//VkShaderModuleCreateInfo shaderCode = compileSlangShader("pathTracingShaders.slang", {});
 	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
-	std::filesystem::path shaderSource = shaderPath / "pathTracingShaders.slang";
+	std::filesystem::path shaderSource = shaderPath / shaderSlangName;
 	VkShaderModuleCreateInfo shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
 
 	stages[eRaygen].pNext = &shaderCode;

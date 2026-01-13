@@ -9,7 +9,6 @@
 [[vk::binding(StaticSetBindingPoints_PT::eOutImage_PT, 0)]] RWTexture2D<float4> outImage;
 [[vk::binding(DynamicSetBindingPoints_PT::eTlas_PT, 1)]] RaytracingAccelerationStructure topLevelAS;
 
-
 #define MISS_DEPTH 1000
 #define MISS_DISTANCE 10000000.0f
 #define NEE_MAX_SAMPLE_NUM 2
@@ -50,11 +49,12 @@ struct CallablePayload {
 
     bool isExt;
 
-    // NEE
-    uint lightNum = NEE_MAX_SAMPLE_NUM;
+#ifdef NEE
     float3 sampleDir_nee[NEE_MAX_SAMPLE_NUM];
     float3 radiance_nee[NEE_MAX_SAMPLE_NUM];
+    float radiancePdf_nee[NEE_MAX_SAMPLE_NUM];
     float3 radianceSum_nee;
+#endif
 };
 
 struct NEEPayload {
@@ -150,6 +150,7 @@ void getTextueData(inout CallablePayload payload, float2 texCoords) {
     }
 }
 //-------------------------------------------------直接光采样--------------------------------------------------
+#ifdef NEE
 bool hitTest(float distance, float3 sampleDir, float3 hitPos, float3 hitNormal, int NEEShaderIndex, float time) {
     const uint rayFlags = 0;
     RayDesc tempRay;
@@ -239,8 +240,8 @@ void initNEE(inout CallablePayload payload, SceneInfo sceneInfo, int NEEShaderIn
     bool isDielectric = payload.material.type == uint(MaterialType::Deielectric) ||
                         payload.material.type == uint(MaterialType::RoughDeielectric);
 
-    payload.lightNum = min(sceneInfo.numLights, NEE_MAX_SAMPLE_NUM);
-    for (int lightIndex = 0; lightIndex < payload.lightNum; ++lightIndex) {
+    uint lightNum = min(sceneInfo.numLights, NEE_MAX_SAMPLE_NUM);
+    for (int lightIndex = 0; lightIndex < lightNum; ++lightIndex) {
         payload.radiance_nee[lightIndex] = float3(0.0f);
         Light light = sceneInfo.lights[lightIndex];
         float3 flux = light.color * light.intensity;
@@ -274,7 +275,9 @@ void initNEE(inout CallablePayload payload, SceneInfo sceneInfo, int NEEShaderIn
                 float distance = length(sampleDir);
                 if (!hitTest(distance, sampleDir, payload.hitPos, payload.hitNormal, NEEShaderIndex, time)) continue; // 遮挡
 
+                // L = dPhi / (dA * cosTheta * domega) * (bsdf * cosTheta2) / pdf
                 payload.radiance_nee[lightIndex] = flux / (M_TWO_PI * length(light.edge1) * length(light.edge2) * pdf);
+                payload.radiancePdf_nee[lightIndex] = pdf;
             } else {
                 float3 samplePos = light.pos + light.edge1 * randomNumber1 + light.edge2 * randomNumber2;
                 sampleDir = samplePos - payload.hitPos;
@@ -285,97 +288,208 @@ void initNEE(inout CallablePayload payload, SceneInfo sceneInfo, int NEEShaderIn
                 float distance = length(sampleDir);
                 if (!(hitTest(distance, sampleDir, payload.hitPos, payload.hitNormal, NEEShaderIndex, time))) continue; // 遮挡
 
+                // L = dPhi / (dA * cosTheta1 * domega) * (cosTheta1 / distance * distance) * (bsdf * cosTheta2) / pdf
                 // 分母有一个cos和面积，雅可比有一个cos，pdf有一个面积，抵消了
                 distance = max(distance, 0.001f);
                 payload.radiance_nee[lightIndex] = flux / (M_TWO_PI * distance * distance);
+                payload.radiancePdf_nee[lightIndex] = 1.0f / (sqrt(dot(light.edge1, light.edge1) * dot(light.edge2, light.edge2))); // 1 / area
             }
         }
         payload.sampleDir_nee[lightIndex] = normalize(sampleDir);
     }
 }
 
-bool isPosInDirectionLight(float3 pos, SceneInfo sceneInfo) {
-    int lightNum = min(sceneInfo.numLights, NEE_MAX_SAMPLE_NUM);
+#endif
+
+bool isPosInDirectionLight(float3 pos, Light light) {
     const float EPSILON = 0.001f;
-    for (int lightIndex = 0; lightIndex < lightNum; ++lightIndex) {
-        Light light = sceneInfo.lights[lightIndex];
-        if (light.type == uint(LightType::Point) || light.type == uint(LightType::Spot)) {
-            if (dot(pos - light.pos, pos - light.pos) < EPSILON) return true;
-        }
-        else if (light.type == uint(LightType::Directional)) {} //directional light's judge in missShader
-        else if (light.type == uint(LightType::Area)) {
-            float3 w = pos - light.pos;
-            float3 e1 = light.edge1;
-            float3 e2 = light.edge2;
+    if (light.type == uint(LightType::Point) || light.type == uint(LightType::Spot)) {
+        if (dot(pos - light.pos, pos - light.pos) < EPSILON) return true;
+    }
+    else if (light.type == uint(LightType::Directional)) {} // directional light's judge in missShader
+    else if (light.type == uint(LightType::Area)) {
+        float3 w = pos - light.pos;
+        float3 e1 = light.edge1;
+        float3 e2 = light.edge2;
 
-            float dist = dot(w, light.direction);
-            if (abs(dist) > EPSILON) continue;
+        float dist = dot(w, light.direction);
+        if (abs(dist) > EPSILON) return false;
 
-            float dot_e1e1 = dot(e1, e1);
-            float dot_e1e2 = dot(e1, e2);
-            float dot_e2e2 = dot(e2, e2);
-            float dot_we1 = dot(w, e1);
-            float dot_we2 = dot(w, e2);
+        float dot_e1e1 = dot(e1, e1);
+        float dot_e1e2 = dot(e1, e2);
+        float dot_e2e2 = dot(e2, e2);
+        float dot_we1 = dot(w, e1);
+        float dot_we2 = dot(w, e2);
 
-            float det = dot_e1e1 * dot_e2e2 - dot_e1e2 * dot_e1e2;
-            if (det < EPSILON) continue;
+        float det = dot_e1e1 * dot_e2e2 - dot_e1e2 * dot_e1e2;
+        if (det < EPSILON) return false;
 
-            float invDet = 1.0f / det;
-            float u = (dot_e2e2 * dot_we1 - dot_e1e2 * dot_we2) * invDet;
-            float v = (dot_e1e1 * dot_we2 - dot_e1e2 * dot_we1) * invDet;
+        float invDet = 1.0f / det;
+        float u = (dot_e2e2 * dot_we1 - dot_e1e2 * dot_we2) * invDet;
+        float v = (dot_e1e1 * dot_we2 - dot_e1e2 * dot_we1) * invDet;
 
-            if ((u >= -EPSILON) & (u <= 1.0f + EPSILON) & (v >= -EPSILON) & (v <= 1.0f + EPSILON)) return true;
-        }
+        if ((u >= -EPSILON) & (u <= 1.0f + EPSILON) & (v >= -EPSILON) & (v <= 1.0f + EPSILON)) return true;
     }
     return false;
 }
 
-float getPdf_directionLight(float3 sampleDir, Light light) {
-    if (light.type == LightType::Area) {
+bool hitRectangle(inout float3 hitPos, float3 rayOrigin, float3 rayDirection, float3 rectanglePos, float3 E1, float3 E2) {
+    float3 S = rayOrigin - rectanglePos;
+    float3 S1 = cross(rayDirection, E2);
+    float3 S2 = cross(S, E1);
+    float3 tbb = 1 / dot(S1, E1) * float3(dot(S2, E2), dot(S1, S), dot(S2, rayDirection));
+    if (tbb.x > 0 && (1.0f - tbb.y - tbb.z) > 0 && tbb.y > 0 && tbb.z > 0) {
+        hitPos = tbb.x * rayDirection + rayOrigin;
+        return true;
+    }
 
+    rectanglePos += E1 + E2;
+    E1 = -E1;
+    E2 = -E2;
+
+    S = rayOrigin - rectanglePos;
+    S1 = -S1;   //cross(rayDirection, E2);
+    S2 = cross(S, E1);
+    tbb = 1 / dot(S1, E1) * float3(dot(S2, E2), dot(S1, S), dot(S2, rayDirection));
+    if (tbb.x > 0 && (1.0f - tbb.y - tbb.z) > 0 && tbb.y > 0 && tbb.z > 0) {
+        hitPos = tbb.x * rayDirection + rayOrigin;
+        return true;
+    }
+
+    return false;
+}
+float getPdf_directionLightSample(float3 pos, float3 sampleDir, Light light) {
+    if (light.type == LightType::Area) {
+        if (light.SphericalRectangleSample == 1) {
+            float exl = length(light.edge1);
+            float eyl = length(light.edge2);
+            float3 axisX = light.edge1 / exl;
+            float3 axisY = light.edge2 / eyl;
+            float3 axisZ = light.direction;
+
+            float3 d = light.pos - pos;
+            float z0 = dot(d, axisZ);
+            if (z0 > 0) {
+                axisZ *= -1.0f;
+                z0 *= -1.0f;
+            }
+            float z0sq = z0 * z0;
+
+            float x0 = dot(d, axisX);
+            float y0 = dot(d, axisY);
+            float x1 = x0 + exl;
+            float y1 = y0 + eyl;
+            float y0sq = y0 * y0;
+            float y1sq = y1 * y1;
+
+            float3 v00 = float3(x0, y0, z0);
+            float3 v01 = float3(x0, y1, z0);
+            float3 v10 = float3(x1, y0, z0);
+            float3 v11 = float3(x1, y1, z0);
+
+            float3 n0 = float3(0.0f, z0, -y0); // normalize(cross(v00, v10));
+            n0.z /= sqrt(z0sq + y0sq);         // 后续只有z需要被用到，x，y会乘以0，不用管
+            float3 n1 = float3(-z0, 0.0f, x1); // normalize(cross(v10, v11));
+            n1.z /= sqrt(z0sq + x1 * x1);
+            float3 n2 = float3(0.0f, -z0, y1); // normalize(cross(v11, v01));
+            n2.z /= sqrt(z0sq + y1sq);
+            float3 n3 = float3(z0, 0.0f, -x0); // normalize(cross(v01, v00));
+            n3.z /= sqrt(z0sq + x0 * x0);
+
+            float g0 = acos(-n0.z * n1.z); // acos(-dot(n0, n1));
+            float g1 = acos(-n1.z * n2.z); // acos(-dot(n1, n2));
+            float g2 = acos(-n2.z * n3.z); // acos(-dot(n2, n3));
+            float g3 = acos(-n3.z * n0.z); // acos(-dot(n3, n0));
+
+            float b0 = n0.z;
+            float b1 = n2.z;
+            float b0sq = b0 * b0;
+            float k = 2 * M_PI - g2 - g3;
+            float S = g0 + g1 - k;
+
+            return 1.0f / S;
+        } else {
+            float3 hitPos;
+            if (!hitRectangle(hitPos, pos, sampleDir, light.pos, light.edge1, light.edge2)) return 0.0f;
+
+            float area = sqrt(dot(light.edge1, light.edge1) * dot(light.edge2, light.edge2));
+            float cosine = dot(light.direction, -sampleDir);
+            float distanceSq = dot(pos - hitPos, pos - hitPos);
+            return cosine / (area * distanceSq);
+        }
     }
     else return 1;
 }
 
 //------------------------------------------Material BSDF---------------------------------------------------
-float3 sampleIncidence_DiffuseMaterial(inout uint randomSeed, float3x3 TBN) {
-    float randomNumber1 = rand(randomSeed);
-    float randomNumber2 = rand(randomSeed);
+float pdf_DiffuseMaterial(float3 incidence, float3 normal) {
+    float cosine = dot(incidence, normal);
+    return M_1_PI * cosine;
+}
+void PopulateCallablePayload_DiffuseMaterial(inout CallablePayload payload) {
+    float randomNumber1 = rand(payload.randomSeed);
+    float randomNumber2 = rand(payload.randomSeed);
     float cosTheta = sqrt(randomNumber1);
     float sinTheta = sqrt(1.0f - randomNumber1);
     float phi = M_TWO_PI * randomNumber2;
-    float3 incidence;
-    incidence.x = sinTheta * cos(phi);
-    incidence.y = sinTheta * sin(phi);
-    incidence.z = cosTheta;
-    incidence = mul(incidence, TBN);
-    incidence = normalize(incidence);
-    return incidence;
+    payload.incidence.x = sinTheta * cos(phi);
+    payload.incidence.y = sinTheta * sin(phi);
+    payload.incidence.z = cosTheta;
+    payload.incidence = mul(payload.incidence, payload.TBN);
+    payload.incidence = normalize(payload.incidence);
+
+    payload.pdf = M_1_PI * dot(payload.incidence, payload.hitNormal);
+    payload.bsdf = payload.material.albedo * payload.pdf;
 }
 
-void PopulateCallablePayload_DielectricMaterial(inout CallablePayload payload, inout float3 F) {
+float pdf_DielectricMaterial(float cosineOH, float3 F0, inout uint randomSeed, float eta) {
+    float3 F = schlickFresnel(F0, float3(1.0F), cosineOH);
+    float F_oneChanel = 0.299 * F.x + 0.587 * F.y + 0.114 * F.z;
+
+    const float refraction = eta * eta * (1.0f - cosineOH * cosineOH);
+    bool totalInternalReflection = (1.0f <= refraction);
+    if (totalInternalReflection) return 1.0f;
+
+    float randomNumber = rand(randomSeed);
+    if (randomNumber < F_oneChanel) return F_oneChanel;
+    else return 1.0f - F_oneChanel;
+}
+void PopulateCallablePayload_DielectricMaterial(inout CallablePayload payload, inout float3 F, inout float eta) {
     payload.bsdf = 1.0f;
 
     float cosineOH = dot(payload.outgoing, payload.hitNormal);
     F = schlickFresnel(payload.material.albedo, float3(1.0F), cosineOH);
     float F_oneChanel = 0.299 * F.x + 0.587 * F.y + 0.114 * F.z;
 
-    float randomNumber = rand(payload.randomSeed);
-    if (randomNumber < F_oneChanel) {
-        payload.incidence = reflect(-payload.outgoing, payload.hitNormal);
-        payload.pdf = F_oneChanel;
-    }
-    else {
-        float eta = payload.material.eta.x;
-        if (!payload.isExt) eta = 1.0f / eta;
+    eta = payload.material.eta.x;
+    if (!payload.isExt) eta = 1.0f / eta;
 
-        bool totalInternalReflection = false;
-        payload.incidence = refract(payload.outgoing, payload.hitNormal, eta, cosineOH, totalInternalReflection);
-        payload.pdf = 1.0f - F_oneChanel;
-        if (!totalInternalReflection) payload.isExt = !payload.isExt;
+    // total internal reflection
+    const float refraction = eta * eta * (1.0f - cosineOH * cosineOH);
+    bool totalInternalReflection = (1.0f <= refraction);
+    if (totalInternalReflection) {
+        payload.incidence = reflect(-payload.outgoing, payload.hitNormal);
+        payload.pdf = 1;
+    } else {
+        float randomNumber = rand(payload.randomSeed);
+        if (randomNumber < F_oneChanel) {
+            payload.incidence = reflect(-payload.outgoing, payload.hitNormal);
+            payload.pdf = F_oneChanel;
+        }
+        else {
+            // refract(payload.outgoing, payload.hitNormal, eta, cosineOH, totalInternalReflection);
+            payload.incidence = normalize((-payload.outgoing * eta + payload.hitNormal * (eta * cosineOH - sqrt(1.0f - refraction))));
+            payload.pdf = 1.0f - F_oneChanel;
+            if (!totalInternalReflection) payload.isExt = !payload.isExt;
+        }
     }
 }
 
+float pdf_RoughConductorMaterial(float3 h_tangentSpace, float roughness, float cosineOH) {
+    float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h_tangentSpace); // h需要在切线空间中
+    float D = D_costhetaNH / h_tangentSpace.z;                                   // max(h.z, 1e-6f);
+    return max(D_costhetaNH / (4.0f * cosineOH), 0.001f);
+}
 void PopulateCallablePayload_RoughConductorMaterial(inout CallablePayload payload, inout float3 outgoing_tangentSpace) {
     float randomNumber1 = rand(payload.randomSeed);
     float randomNumber2 = rand(payload.randomSeed);
@@ -405,6 +519,37 @@ void PopulateCallablePayload_RoughConductorMaterial(inout CallablePayload payloa
     payload.bsdf = (D * G2 * F) / (4.0f * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 0.001f);
 }
 
+float pdf_RoughDielectricMaterial(
+    float3 h_tangentSpace, float cosIH,
+    float roughness, float cosineOH, float3 F0, inout uint randomSeed, float eta
+) {
+    float pdf = 1.0f;    
+
+    float3 F = schlickFresnel(F0, float3(1.0F), cosineOH);
+    float F_oneChanel = 0.299 * F.x + 0.587 * F.y + 0.114 * F.z;
+
+    const float refraction = eta * eta * (1.0f - cosineOH * cosineOH);
+    bool totalInternalReflection = (1.0f <= refraction);
+    bool isRefraction = false;
+    if (!totalInternalReflection) {
+        float randomNumber = rand(randomSeed);
+        if (randomNumber < F_oneChanel) pdf = F_oneChanel;
+        else {
+            pdf = 1.0f - F_oneChanel;
+            isRefraction = true;
+        }
+    }
+
+    float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h_tangentSpace); // h需要在切线空间中
+    float D = D_costhetaNH / h_tangentSpace.z;                                   // max(h.z, 1e-6f);
+
+    if (isRefraction) {
+        float weight = cosIH / eta + cosineOH;
+        pdf *= max(D_costhetaNH * cosineOH / (weight * weight), 0.001f);
+    } else pdf *= max(D_costhetaNH / (4.0f * cosineOH), 0.001f);
+
+    return pdf;
+}
 void PopulateCallablePayload_RoughDielectricMaterial(inout CallablePayload payload, inout float3 outgoing_tangentSpace, inout float eta) {
     float randomNumber1 = rand(payload.randomSeed);
     float randomNumber2 = rand(payload.randomSeed);
