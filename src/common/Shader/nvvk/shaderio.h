@@ -9,8 +9,6 @@ enum BindingPoints
 	eTextures = 0,
 	eTlas = 1,
 	eOutImage = 2,
-	eHeatmap = 3,
-	eHeatStates = 4
 };
 
 enum ImplicitObjectKind {

@@ -1,7 +1,8 @@
 #pragma once
 
-#include "renderer/PathTracing/hard/PathTracingRenderer.h"
+#include "renderer/PathTracingRenderer/hard/PathTracingRenderer.h"
 #include "./shaderio.h"
+#include <feature/LightInject/LightInject.h>
 
 #ifndef FZBRENDERER_SVO_PATHGUIDING_H
 #define FZBRENDERER_SVO_PATHGUIDING_H
@@ -21,16 +22,15 @@ public:
 	void preRender();
 	void render(VkCommandBuffer cmd) override;
 
-	void createDescriptorSetLayout() override;
+	void createDescriptorSetLayout();
+	void createDescriptorSet();
+	void createPipeline();
 	void compileAndCreateShaders() override;
 	void updateDataPerFrame(VkCommandBuffer cmd) override;
 
-	void createOctree(VkCommandBuffer cmd);
-	void createSVO(VkCommandBuffer cmd);
-	void createWeights(VkCommandBuffer cmd);
-
 	shaderio::SVOPathGuidingPushConstant pushValues{};
 	std::shared_ptr<FzbRenderer::RasterVoxelization> rasterVoxelization;
+	std::shared_ptr<FzbRenderer::LightInject> lightInject;
 };
 }
 

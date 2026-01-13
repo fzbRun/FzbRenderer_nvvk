@@ -310,11 +310,12 @@ void FzbRenderer::Scene::clean() {
 }
 
 void FzbRenderer::Scene::preRender() {
+	time = frameIndex % (2 * periodFrameIndex);
+	if (time < periodFrameIndex) time /= periodFrameIndex;
+	else time = 2.0f - (time / periodFrameIndex);
+
 	for (int i = 0; i < sceneInfo.numLights; ++i) {
 		LightInstance lightInstanceInfo = lightInstances[i];		
-		float time = frameIndex % (2 * lightInstanceInfo.time);
-		if (time < lightInstanceInfo.time) time /= lightInstanceInfo.time;
-		else time = 2.0f - (time / lightInstanceInfo.time);
 		sceneInfo.lights[i] = lightInstanceInfo.getLight(time);
 	}
 
@@ -331,9 +332,6 @@ void FzbRenderer::Scene::preRender() {
 	uint32_t offset = staticInstanceCount;
 	for (int i = 0; i < periodInstanceSets.size(); ++i) {
 		InstanceSet& instanceSet = periodInstanceSets[i];
-		float time = frameIndex % (2 * instanceSet.time);
-		if (time < instanceSet.time) time /= instanceSet.time;
-		else time = 2.0f - (time / instanceSet.time);
 		instanceSet.getInstance(instances, offset, time);
 		offset += instanceSet.childInstances.size();
 	}
@@ -342,8 +340,22 @@ void FzbRenderer::Scene::preRender() {
 		instanceSet.getInstance(instances, offset, 0);
 		offset += instanceSet.childInstances.size();
 	}
-
 	++frameIndex;
+
+	{
+		static glm::mat4 refCamMatrix;
+		static float refFov{ cameraManip->getFov() };
+
+		const auto& m = cameraManip->getViewMatrix();
+		const auto& fov = cameraManip->getFov();
+		if (refCamMatrix != m || refFov != fov) {	//如果相机参数变化，则从新累计帧
+			cameraChange = true;
+			refCamMatrix = m;
+			refFov = fov;
+		}
+		else cameraChange = false;
+	}
+
 }
 void FzbRenderer::Scene::UIRender() {
 	if (ImGui::Begin("Scene Resources")) {

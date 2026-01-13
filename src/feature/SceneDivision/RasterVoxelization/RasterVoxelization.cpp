@@ -47,7 +47,7 @@ void FzbRenderer::RasterVoxelization::init() {
 		for (int i = 0; i < sceneResource.instances.size(); ++i) {
 			uint32_t meshIndex = sceneResource.instances[i].meshIndex;
 			MeshInfo meshInfo = sceneResource.getMeshInfo(meshIndex);
-			shaderio::AABB meshAABB = meshInfo.getAABB(sceneResource.instances[i].transform);
+			shaderio::AABB meshAABB = meshInfo.getAABB(sceneResource.instances[i].transform);	//对于动态物体，这里需要修改
 
 			aabb.minimum.x = std::min(meshAABB.minimum.x, aabb.minimum.x);
 			aabb.minimum.y = std::min(meshAABB.minimum.y, aabb.minimum.y);
@@ -106,14 +106,11 @@ void FzbRenderer::RasterVoxelization::init() {
 	Feature::addTextureArrayDescriptor(shaderio::RasterVoxelizationBindingPoints::eTextures_RV);
 	nvvk::WriteSetContainer write{};
 	VkWriteDescriptorSet    VGBWrite =
-		descPack.makeWrite(shaderio::RasterVoxelizationBindingPoints::eVGB_RV, 0, 0, 1);
+		staticDescPack.makeWrite(shaderio::RasterVoxelizationBindingPoints::eVGB_RV, 0, 0, 1);
 	write.append(VGBWrite, VGB, 0, VGBByteSize);
 
 #ifndef NDEBUG
-	Feature::createGBuffer(true, true, 2);		//第一张图：threeView，多视口；第二张图：Cube；第三张图(后处理图)：wireframe
-	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
-	gBuffers.update(cmd, setting.resolution);	//不随窗口分辨率
-	Application::app->submitAndWaitTempCmdBuffer(cmd);
+	Feature::createGBuffer(true, true, 2, setting.resolution);		//第一张图：threeView，多视口；第二张图：Cube；第三张图(后处理图)：wireframe	//不随窗口分辨率
 	//-------------------------------------------threeView----------------------------------------
 	{
 		nvvk::StagingUploader& stagingUploader = Application::stagingUploader;
@@ -130,7 +127,7 @@ void FzbRenderer::RasterVoxelization::init() {
 		NVVK_DBG_NAME(fragmentCountStageBuffer.buffer);
 	}
 
-	VkWriteDescriptorSet fcWrite = descPack.makeWrite(shaderio::RasterVoxelizationBindingPoints::eFragmentCountBuffer_RV, 0, 0, 1);
+	VkWriteDescriptorSet fcWrite = staticDescPack.makeWrite(shaderio::RasterVoxelizationBindingPoints::eFragmentCountBuffer_RV, 0, 0, 1);
 	write.append(fcWrite, fragmentCountBuffer, 0, sizeof(uint32_t));
 	//---------------------------------------------cube----------------------------------------
 	nvutils::PrimitiveMesh primitive = FzbRenderer::MeshSet::createCube(false, false);
@@ -143,7 +140,7 @@ void FzbRenderer::RasterVoxelization::init() {
 
 	scene.createSceneInfoBuffer();
 	//--------------------------------------------poseProcess---------------------------------
-	VkWriteDescriptorSet wireframeMapWrite = descPack.makeWrite(shaderio::RasterVoxelizationBindingPoints::eWireframeMap_RV, 0, 0, 1);
+	VkWriteDescriptorSet wireframeMapWrite = staticDescPack.makeWrite(shaderio::RasterVoxelizationBindingPoints::eWireframeMap_RV, 0, 0, 1);
 	write.append(wireframeMapWrite, gBuffers.getColorImageView(RasterVoxelizationGBuffer::WireframeMap), VK_IMAGE_LAYOUT_GENERAL);
 #endif
 
@@ -186,12 +183,12 @@ void FzbRenderer::RasterVoxelization::createDescriptorSetLayout() {
 		VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
 		| VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
 #endif
-	descPack.init(bindings, Application::app->getDevice(), 1, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
+	staticDescPack.init(bindings, Application::app->getDevice(), 1, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
 		VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT);
 
-	NVVK_DBG_NAME(descPack.getLayout());
-	NVVK_DBG_NAME(descPack.getPool());
-	NVVK_DBG_NAME(descPack.getSet(0));
+	NVVK_DBG_NAME(staticDescPack.getLayout());
+	NVVK_DBG_NAME(staticDescPack.getPool());
+	NVVK_DBG_NAME(staticDescPack.getSet(0));
 }
 void FzbRenderer::RasterVoxelization::compileAndCreateShaders() {
 	SCOPED_TIMER(__FUNCTION__);
@@ -205,7 +202,7 @@ void FzbRenderer::RasterVoxelization::compileAndCreateShaders() {
 	FzbRenderer::validateSPIRVFile(spvPath);
 
 	const VkPushConstantRange pushConstantRange{
-		.stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS | VK_SHADER_STAGE_COMPUTE_BIT ,
+		.stageFlags = VK_SHADER_STAGE_ALL ,
 		.offset = 0,
 		.size = sizeof(shaderio::RasterVoxelizationPushConstant),
 	};
@@ -215,7 +212,7 @@ void FzbRenderer::RasterVoxelization::compileAndCreateShaders() {
 		.codeType = VK_SHADER_CODE_TYPE_SPIRV_EXT,
 		.pName = "main",
 		.setLayoutCount = 1,
-		.pSetLayouts = descPack.getLayoutPtr(),
+		.pSetLayouts = staticDescPack.getLayoutPtr(),
 		.pushConstantRangeCount = 1,
 		.pPushConstantRanges = &pushConstantRange,
 	};
@@ -484,13 +481,13 @@ void FzbRenderer::RasterVoxelization::render(VkCommandBuffer cmd) {
 		.layout = pipelineLayout,
 		.firstSet = 0,
 		.descriptorSetCount = 1,
-		.pDescriptorSets = descPack.getSetPtr(),
+		.pDescriptorSets = staticDescPack.getSetPtr(),
 	};
 
 	pushInfo = {
 		.sType = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
 		.layout = pipelineLayout,
-		.stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS | VK_SHADER_STAGE_COMPUTE_BIT,
+		.stageFlags = VK_SHADER_STAGE_ALL,
 		.offset = 0,
 		.size = sizeof(shaderio::RasterVoxelizationPushConstant),
 		.pValues = &setting.pushConstant,
@@ -520,7 +517,7 @@ void FzbRenderer::RasterVoxelization::postProcess(VkCommandBuffer cmd) {
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_postProcess);
 
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1,
-		descPack.getSetPtr(), 0, nullptr);
+		staticDescPack.getSetPtr(), 0, nullptr);
 
 	vkCmdPushConstants2(cmd, &pushInfo);
 
@@ -541,7 +538,7 @@ void FzbRenderer::RasterVoxelization::clearVGB(VkCommandBuffer cmd) {
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_clearVGB);
 
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1,
-		descPack.getSetPtr(), 0, nullptr);
+		staticDescPack.getSetPtr(), 0, nullptr);
 
 	vkCmdPushConstants2(cmd, &pushInfo);
 
@@ -561,7 +558,7 @@ void FzbRenderer::RasterVoxelization::createVGB(VkCommandBuffer cmd) {
 	renderingInfo.pDepthAttachment = nullptr;
 
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1,
-		descPack.getSetPtr(), 0, nullptr);
+		staticDescPack.getSetPtr(), 0, nullptr);
 
 	vkCmdBeginRendering(cmd, &renderingInfo);
 
@@ -604,7 +601,7 @@ void FzbRenderer::RasterVoxelization::resize(
 	nvvk::GBuffer& gBuffers_other, uint32_t baseMapIndex
 ) {
 	nvvk::WriteSetContainer write{};
-	VkWriteDescriptorSet baseMapWrite = descPack.makeWrite(shaderio::RasterVoxelizationBindingPoints::eBaseMap, 0, 0, 1);
+	VkWriteDescriptorSet baseMapWrite = staticDescPack.makeWrite(shaderio::RasterVoxelizationBindingPoints::eBaseMap, 0, 0, 1);
 	write.append(baseMapWrite, gBuffers_other.getColorImageView(baseMapIndex), VK_IMAGE_LAYOUT_GENERAL);
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }
@@ -629,10 +626,11 @@ void FzbRenderer::RasterVoxelization::resetFragmentCount(VkCommandBuffer cmd) {
 		.pRegions = &copyRegionInfo,
 	};
 	vkCmdCopyBuffer2(cmd, &copyBufferInfo);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
 }
 void FzbRenderer::RasterVoxelization::createVGB_ThreeView(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd, "RasterVoxelization_createVGB_ThreeView");
+
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(RasterVoxelizationGBuffer::ThreeViewMap), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
 
 	VkRenderingAttachmentInfo colorAttachment = DEFAULT_VkRenderingAttachmentInfo;
 	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;		//真正渲染需要根据usesky判断是因为天空盒会覆盖上一帧内容，所以不需要clear
@@ -648,8 +646,9 @@ void FzbRenderer::RasterVoxelization::createVGB_ThreeView(VkCommandBuffer cmd) {
 	renderingInfo.pDepthAttachment = nullptr;
 
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1,
-		descPack.getSetPtr(), 0, nullptr);
+		staticDescPack.getSetPtr(), 0, nullptr);
 
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);	//clearVGB和resetFragmentCount
 	vkCmdBeginRendering(cmd, &renderingInfo);
 
 	//使用VK_EXT_SHADER_OBJECT_EXTENSION_NAME后可以不需要pipeline，直接通过命令设置渲染设置和着色器
@@ -696,9 +695,13 @@ void FzbRenderer::RasterVoxelization::createVGB_ThreeView(VkCommandBuffer cmd) {
 	}
 
 	vkCmdEndRendering(cmd);
+
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(RasterVoxelizationGBuffer::ThreeViewMap), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
 }
 void FzbRenderer::RasterVoxelization::debug_Cube(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
+
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(RasterVoxelizationGBuffer::CubeMap), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
 
 	VkRenderingAttachmentInfo colorAttachment = DEFAULT_VkRenderingAttachmentInfo;
 	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -717,7 +720,7 @@ void FzbRenderer::RasterVoxelization::debug_Cube(VkCommandBuffer cmd) {
 	renderingInfo.pDepthAttachment = &depthAttachment;
 
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1,
-		descPack.getSetPtr(), 0, nullptr);
+		staticDescPack.getSetPtr(), 0, nullptr);
 
 	vkCmdBeginRendering(cmd, &renderingInfo);
 
@@ -746,6 +749,8 @@ void FzbRenderer::RasterVoxelization::debug_Cube(VkCommandBuffer cmd) {
 	vkCmdDrawIndexed(cmd, triMesh.indices.count, pow(setting.pushConstant.voxelSize_Count.w, 3), 0, 0, 0);
 
 	vkCmdEndRendering(cmd);
+
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(RasterVoxelizationGBuffer::CubeMap), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
 }
 void FzbRenderer::RasterVoxelization::debug_Wireframe(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
@@ -767,8 +772,9 @@ void FzbRenderer::RasterVoxelization::debug_Wireframe(VkCommandBuffer cmd) {
 	renderingInfo.pDepthAttachment = &depthAttachment;
 
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1,
-		descPack.getSetPtr(), 0, nullptr);
+		staticDescPack.getSetPtr(), 0, nullptr);
 
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT);	//等待debug_Cube完成
 	vkCmdBeginRendering(cmd, &renderingInfo);
 
 	graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
@@ -800,5 +806,7 @@ void FzbRenderer::RasterVoxelization::debug_Wireframe(VkCommandBuffer cmd) {
 	vkCmdDrawIndexed(cmd, triMesh.indices.count, pow(setting.pushConstant.voxelSize_Count.w, 3), 0, 0, 0);
 
 	vkCmdEndRendering(cmd);
+
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(RasterVoxelizationGBuffer::WireframeMap), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
 }
 #endif

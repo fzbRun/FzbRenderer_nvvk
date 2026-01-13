@@ -37,19 +37,22 @@ public:
 
 	std::filesystem::path scenePath;
 	std::shared_ptr<nvutils::CameraManipulator> cameraManip{ std::make_shared<nvutils::CameraManipulator>() };
+	bool cameraChange = false;
 	
 	std::vector<FzbRenderer::MeshSet> meshSets;
 	uint32_t staticInstanceCount = 0;
 	std::vector<InstanceSet> staticInstanceSets;
 	uint32_t periodInstanceCount = 0;
 	std::vector<InstanceSet> periodInstanceSets;
+	uint32_t frameIndex = 0;
+	uint32_t periodFrameIndex = 100;
+	float time = 0.0f;
+
 	uint32_t randomInstanceCount = 0;
 	std::vector<InstanceSet> randomInstanceSets;
 
 	bool hasDynamicLight = false;
 	std::vector<LightInstance> lightInstances;
-
-	inline static uint32_t frameIndex = 0;
 	//---------------------------------------GPU使用数据---------------------------------------------------
 	std::vector<nvvk::Image>     textures{};
 

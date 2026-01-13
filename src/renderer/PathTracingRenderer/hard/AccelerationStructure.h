@@ -32,7 +32,6 @@ public:
 	nvvk::AccelerationStructure              tlasAccel;
 
 	nvvk::AccelerationStructureHelper asBuilder{};
-
 private:
 	/*
 	1. 获取mesh的顶点数据，放入VkAccelerationStructureGeometryTrianglesDataKHR，得到一个几何数据

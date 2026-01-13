@@ -3,13 +3,20 @@
 	<resolution width = "1280" height = "720" />
 	<sceneXML path = "./veach-ajar" />	<!--开头不能加/，但可以是./或不加-->
 
-	<renderer type = "PathTracing">  <!--SVOPathGuiding PathTracing  Deferred-->
+	<renderer type = "SVOPathGuiding">  <!--SVOPathGuiding PathTracing  Deferred-->
 		<maxDepth value = "6" />
 		<useNEE value = "true" />
 		<RasterVoxelization>
 			<resolution value = "2048, 2048" />
 			<voxelCount value="64" />
 		</RasterVoxelization>
+		<LightInject>
+		</LightInject>
+		<Octree>
+			<entropyThreshold value="0.5, 0.8" />
+			<irradianceRelRatioThreshold value="0.75" />
+			<clusteringLevel value="2" />
+		</Octree>
 	</renderer>
 	
 </rendererInfo>
