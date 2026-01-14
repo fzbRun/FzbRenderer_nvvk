@@ -9,10 +9,6 @@ NAMESPACE_SHADERIO_BEGIN()
 struct SVOPathGuidingPushConstant
 {
 	float4 VGBStartPos_Size;
-
-
-	int LightInjectShaderIndex = -1;
-	int NEEShaderIndex = -1;
 	int frameIndex = 0;
 	int maxDepth = 3;
 	float time;
@@ -32,7 +28,7 @@ enum StaticBindingPoints_SVOPG
 };
 enum DynamicBindingPoints_SVOPG {
 	//eTlas_SVOPG = 0,
-	eSVOTlas_SVOPG,
+	eSVOTlas_SVOPG = 1,
 };
 
 NAMESPACE_SHADERIO_END()

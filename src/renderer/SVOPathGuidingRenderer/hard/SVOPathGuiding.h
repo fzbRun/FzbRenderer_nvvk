@@ -3,6 +3,7 @@
 #include "renderer/PathTracingRenderer/hard/PathTracingRenderer.h"
 #include "./shaderio.h"
 #include <feature/LightInject/LightInject.h>
+#include <feature/SceneDivision/Octree/Octree.h>
 
 #ifndef FZBRENDERER_SVO_PATHGUIDING_H
 #define FZBRENDERER_SVO_PATHGUIDING_H
@@ -28,9 +29,12 @@ public:
 	void compileAndCreateShaders() override;
 	void updateDataPerFrame(VkCommandBuffer cmd) override;
 
-	shaderio::SVOPathGuidingPushConstant pushValues{};
+	void pathGuiding(VkCommandBuffer cmd);
+
+	shaderio::SVOPathGuidingPushConstant pushConstant{};
 	std::shared_ptr<FzbRenderer::RasterVoxelization> rasterVoxelization;
 	std::shared_ptr<FzbRenderer::LightInject> lightInject;
+	std::shared_ptr<FzbRenderer::Octree> octree;
 };
 }
 
