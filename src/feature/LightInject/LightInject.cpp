@@ -7,7 +7,13 @@
 #include <nvgui/property_editor.hpp>
 #include <nvvk/compute_pipeline.hpp>
 
-FzbRenderer::LightInject::LightInject(pugi::xml_node& featureNode) {}
+FzbRenderer::LightInject::LightInject(pugi::xml_node& featureNode) {
+#ifndef NDEBUG
+	Application::vkContext->getPhysicalDeviceFeatures_notConst().geometryShader = VK_TRUE;
+	Application::vkContext->getPhysicalDeviceFeatures_notConst().fillModeNonSolid = VK_TRUE;
+	Application::vkContext->getPhysicalDeviceFeatures_notConst().wideLines = VK_TRUE;
+#endif
+}
 void FzbRenderer::LightInject::init(LightInjectSetting setting) {
 	this->setting = setting;
 	sbtGenerator.init(Application::app->getDevice(), setting.ptContext->rtProperties);
@@ -148,9 +154,9 @@ void FzbRenderer::LightInject::render(VkCommandBuffer cmd) {
 		const VkExtent2D& size = Application::app->getViewportSize();
 		vkCmdTraceRaysKHR(cmd, &regions.raygen, &regions.miss, &regions.hit, &regions.callable, size.width, size.height, 1);
 	}
-
+}
+void FzbRenderer::LightInject::postProcess(VkCommandBuffer cmd) {
 #ifndef NDEBUG
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT);
 	debug_Cube(cmd);
 #endif
 }
@@ -395,15 +401,7 @@ void FzbRenderer::LightInject::compileAndCreateShaders() {
 #endif
 }
 void FzbRenderer::LightInject::updateDataPerFrame(VkCommandBuffer cmd) {
-	const glm::mat4& viewMatrix = Application::sceneResource.cameraManip->getViewMatrix();
-	const glm::mat4& projMatrix = Application::sceneResource.cameraManip->getPerspectiveMatrix();
-
-	scene.sceneInfo.viewProjMatrix = projMatrix * viewMatrix;
-	scene.sceneInfo.projInvMatrix = glm::inverse(projMatrix);
-	scene.sceneInfo.viewInvMatrix = glm::inverse(viewMatrix);
-	scene.sceneInfo.cameraPosition = Application::sceneResource.cameraManip->getEye();
-	scene.sceneInfo.meshes = (shaderio::Mesh*)scene.bMeshes.address;
-
+	scene.sceneInfo = Application::sceneResource.sceneInfo;
 	nvvk::cmdBufferMemoryBarrier(cmd, { scene.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
 								   VK_PIPELINE_STAGE_2_TRANSFER_BIT });
 	vkCmdUpdateBuffer(cmd, scene.bSceneInfo.buffer, 0, sizeof(shaderio::SceneInfo), &scene.sceneInfo);

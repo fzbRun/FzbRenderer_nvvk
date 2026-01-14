@@ -25,7 +25,7 @@ struct RasterVoxelizationSetting{
 	VkExtent2D resolution;
 	shaderio::RasterVoxelizationPushConstant pushConstant;
 	DebugMode debugMode = DebugMode::None;
-	float lineWidth = 1.0f;
+	float lineWidth = 2.0f;
 };
 
 class RasterVoxelization : public Feature {
@@ -86,6 +86,7 @@ private:
 	void createVGB_ThreeView(VkCommandBuffer cmd);
 	void debug_Cube(VkCommandBuffer cmd);
 	void debug_Wireframe(VkCommandBuffer cmd);
+	void debug_MergeWireframe(VkCommandBuffer cmd);
 
 	uint32_t fragmentCount_host = 0;
 	nvvk::Buffer fragmentCountBuffer;

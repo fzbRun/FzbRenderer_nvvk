@@ -16,9 +16,14 @@ struct OctreePushConstant {
 	uint32_t maxDepth;
 	uint32_t currentDepth;
 	float2 entropyThreshold;
-
-	float3 padding;
 	float irradianceRelRatioThreshold;
+	SceneInfo* sceneInfoAddress;
+#ifndef NDEBUG
+	float frameIndex;
+	uint32_t clusteringLevel;
+	uint32_t showOctreeNodeTotalCount;
+	float4 VGBStartPos_Size;
+#endif
 };
 
 struct OctreeNodeData_G {

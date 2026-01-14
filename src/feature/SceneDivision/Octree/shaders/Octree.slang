@@ -10,10 +10,10 @@
 //----------------------------------------------clearOctreeArray--------------------------------------------
 [numthreads(512, 1, 1)]
 [shader("compute")]
-void computeMain_initOctreeArray(uint3 dispatchId: SV_DispatchThreadID) {
-    uint nodeTotalCount = uint(pow(2, pushConst.maxDepth));
-    if (dispatchId.x >= nodeTotalCount) return;
-    VGBVoxelData voxelData = VGB[dispatchId.x];
+void computeMain_initOctreeArray(uint threadIndex: SV_DispatchThreadID) {
+    uint nodeTotalCount = uint(pow(8, pushConst.maxDepth));
+    if (threadIndex >= nodeTotalCount) return;
+    VGBVoxelData voxelData = VGB[threadIndex];
 
     AABB aabb;
     aabb.minimum.x = asfloat(voxelData.aabbU.minimum.x);
@@ -24,20 +24,22 @@ void computeMain_initOctreeArray(uint3 dispatchId: SV_DispatchThreadID) {
     aabb.maximum.z = asfloat(voxelData.aabbU.maximum.z);
 
     OctreeNodeData_G nodeData_G;
-    nodeData_G.meanNormal = voxelData.sumNormal_G.w > 0.0f ? float4(voxelData.sumNormal_G.xyz / voxelData.sumNormal_G.w, 1.0f) : float4(0.0f);
+    bool hasNormal = voxelData.sumNormal_G.x != 0.0f || voxelData.sumNormal_G.y != 0.0f || voxelData.sumNormal_G.z != 0.0f; // voxelData.sumNormal_G.w > 0.0f;
+    nodeData_G.meanNormal = hasNormal ? float4(normalize(voxelData.sumNormal_G.xyz), 1.0f) : float4(0.0f);
     nodeData_G.aabb = aabb;
     nodeData_G.indivisible = 1;
     nodeData_G.label = 0;
-    OctreeArray_G[pushConst.maxDepth][dispatchId.x] = nodeData_G;
+    OctreeArray_G[pushConst.maxDepth][threadIndex] = nodeData_G;
 
     OctreeNodeData_E nodeData_E;
     nodeData_E.irradiance = voxelData.irradiance.w > 0.0f ? voxelData.irradiance.xyz / voxelData.irradiance.w : float3(0.0f);
     nodeData_E.notIgnoreRatio = 1.0f;
-    nodeData_E.meanNormal = voxelData.sumNormal_E.w > 0.0f ? float4(normalize(voxelData.sumNormal_E.xyz), 1.0f) : float4(0.0f);
+    hasNormal = voxelData.sumNormal_E.x != 0.0f || voxelData.sumNormal_E.y != 0.0f || voxelData.sumNormal_E.z != 0.0f;
+    nodeData_E.meanNormal = hasNormal ? float4(normalize(voxelData.sumNormal_E.xyz), 1.0f) : float4(0.0f);
     nodeData_E.aabb = aabb;
     nodeData_E.indivisible = 1;
     nodeData_E.label = 0;
-    OctreeArray_E[pushConst.maxDepth][dispatchId.x] = nodeData_E;
+    OctreeArray_E[pushConst.maxDepth][threadIndex] = nodeData_E;
 
     aabb.minimum.x = 3.402823466e+38F;
     aabb.minimum.y = 3.402823466e+38F;
@@ -53,10 +55,10 @@ void computeMain_initOctreeArray(uint3 dispatchId: SV_DispatchThreadID) {
     nodeData_E.aabb = aabb;
     for (int i = pushConst.maxDepth - 1; i > 0; --i) {
         nodeTotalCount /= 8;
-        if (dispatchId.x >= nodeTotalCount) return;
+        if (threadIndex >= nodeTotalCount) return;
 
-        OctreeArray_G[i][dispatchId.x] = nodeData_G;
-        OctreeArray_E[i][dispatchId.x] = nodeData_E;
+        OctreeArray_G[i][threadIndex] = nodeData_G;
+        OctreeArray_E[i][threadIndex] = nodeData_E;
     }
 }
 
@@ -104,13 +106,11 @@ void atomicMergeAABB(inout AABB aabb) {
 [numthreads(256, 1, 1)]
 [shader("compute")]
 void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint groupThreadIndex: SV_GroupThreadID) {
-    uint nodeTotalCount = uint(pow(2, pushConst.currentDepth));
+    uint nodeTotalCount = uint(pow(8, pushConst.currentDepth));
     if (threadIndex >= nodeTotalCount) return;
 
-    uint warpSize = WaveGetLaneCount();
-
-    uint32_t warpIndex = groupThreadIndex / warpSize;
-    uint32_t warpLane = groupThreadIndex & (warpSize - 1);
+    uint32_t warpIndex = groupThreadIndex / 32;
+    uint32_t warpLane = groupThreadIndex & 31;
 
     uint32_t indexInBlock = threadIndex & 7;            // index of eight brothers
     uint32_t blockIndex = threadIndex / 8;              // blockIndex of global = fatherNodeIndex
@@ -119,7 +119,7 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
     uint32_t blockIndexInGroup = groupThreadIndex / 8;
     //----------------------------------------getOctree_G-------------------------------------------
     OctreeNodeData_G nodeData_G = OctreeArray_G[pushConst.currentDepth][threadIndex];
-    bool hasGeometry = nodeData_G.aabb.minimum.x > 10000.0f;
+    bool hasGeometry = nodeData_G.aabb.minimum.x < 10000.0f;
     uint32_t warpHasGeometryMask = WaveActiveBallot(hasGeometry).x;
     uint32_t blockHasGeometryNodeCount = countbits(warpHasGeometryMask & blockNodeMask);
     //Geometry injection is not 100% effective. It may not be injected completely. 
@@ -215,7 +215,7 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
             }
         }
         maxEIrradianceValue = WaveReadLaneAt(maxEIrradianceValue, blockFirstWarpLane);
-        //--------------------------------judge ignore node---------------------------------------------------
+        //--------------------------------judge ignore node-----------------------------------------------
         uint32_t ignore = 0;
         float relIrradianceRatio = irradianceValue / maxEIrradianceValue;
         if (relIrradianceRatio <= pushConst.irradianceRelRatioThreshold) ignore = 1;
@@ -235,7 +235,7 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
         }
         //--------------------------------calc mergeNode data------------------------------------------
         // calc not ignore node's mergeNormal
-        float3 meanNormal = ignore ? float3(0.0f) : nodeData_E.meanNormal.xyz;
+        float3 meanNormal = ignore == 1 ? float3(0.0f) : nodeData_E.meanNormal.xyz;
         for (int offset = 4; offset > 0; offset /= 2) {
             uint targetLane = warpLane + offset;
             meanNormal.x += WaveReadLaneAt(meanNormal.x, targetLane);
@@ -263,7 +263,7 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
             mergeIrradiance.y += WaveReadLaneAt(mergeIrradiance.y, targetLane);
             mergeIrradiance.z += WaveReadLaneAt(mergeIrradiance.z, targetLane);
         }
-        float notIgnoreRatio = ignore ? 0.0f : irradianceValue;
+        float notIgnoreRatio = ignore == 1 ? 0.0f : irradianceValue;
         for (int offset = 4; offset > 0; offset /= 2) {
             uint targetLane = warpLane + offset;
             notIgnoreRatio += WaveReadLaneAt(notIgnoreRatio, targetLane);
@@ -284,13 +284,11 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
 [numthreads(512, 1, 1)]
 [shader("compute")]
 void computeMain_createOctreeArray2(uint threadIndex: SV_DispatchThreadID, uint groupThreadIndex: SV_GroupThreadID) {
-    uint nodeTotalCount = uint(pow(2, pushConst.currentDepth));
+    uint nodeTotalCount = uint(pow(8, pushConst.currentDepth));
     if (threadIndex >= nodeTotalCount) return;
 
-    uint warpSize = WaveGetLaneCount();
-
-    uint32_t warpIndex = groupThreadIndex / warpSize;
-    uint32_t warpLane = groupThreadIndex & (warpSize - 1);
+    uint32_t warpIndex = groupThreadIndex / 32;
+    uint32_t warpLane = groupThreadIndex & 31;
 
     uint32_t indexInBlock = threadIndex & 7;            // index of eight brothers
     uint32_t blockIndex = threadIndex / 8;              // blockIndex of global = fatherNodeIndex
@@ -335,4 +333,169 @@ void computeMain_createOctreeArray2(uint threadIndex: SV_DispatchThreadID, uint 
             OctreeArray_E[pushConst.currentDepth - 1][blockIndex] = nodeData_E;
         }
     }
+}
+
+//------------------------------------------------debug---------------------------------------------------------
+struct VSout_Wireframe {
+    float4 sv_position : SV_Position;
+    uint renderTargetIndex;
+};
+struct PSout_Wireframe
+{
+    float4 color0 : SV_Target0;
+    #if WireframeMapCount > 1
+        float4 color1 : SV_Target1;
+    #endif
+    #if WireframeMapCount > 2
+        float4 color2 : SV_Target2;
+    #endif
+    #if WireframeMapCount > 3
+        float4 color3 : SV_Target3;
+    #endif
+    #if WireframeMapCount > 4
+        float4 color4 : SV_Target4;
+    #endif
+    #if WireframeMapCount > 5
+        float4 color5 : SV_Target5;
+    #endif
+    #if WireframeMapCount > 6
+        float4 color6 : SV_Target6;     //max VGBSize = 128x128x128
+    #endif
+    #if WireframeMapCount > 7
+        float4 color7 : SV_Target7;
+    #endif
+    #if WireframeMapCount > 8
+        float4 color8 : SV_Target8;
+    #endif
+    #if WireframeMapCount > 9
+        float4 color9 : SV_Target9;
+    #endif
+    #if WireframeMapCount > 10
+        float4 color10 : SV_Target10;
+    #endif
+    #if WireframeMapCount > 11
+        float4 color11 : SV_Target11;
+    #endif
+    #if WireframeMapCount > 12
+        float4 color12 : SV_Target12;
+    #endif
+    #if WireframeMapCount > 13
+        float4 color13 : SV_Target13;     //max VGBSize = 128x128x128
+    #endif
+};
+
+int3 getVoxelIndexXYZ(int voxelIndex) {
+    int voxelCount = int(pushConst.VGBStartPos_Size.w);
+    int voxelGroupTotalCount = voxelCount * voxelCount * voxelCount;
+    int3 voxelIndexXYZ = int3(0, 0, 0);
+    while (voxelIndex > 0) {
+        voxelGroupTotalCount /= 8;
+        voxelCount /= 2;
+        int groupIndex = voxelIndex / voxelGroupTotalCount;
+        int3 groupIndexXYZ = int3(groupIndex & 1, (groupIndex & 2) >> 1, (groupIndex & 4) >> 2);
+        voxelIndexXYZ += groupIndexXYZ * voxelCount;
+
+        voxelIndex -= groupIndexXYZ.x * voxelGroupTotalCount + 
+                      groupIndexXYZ.y * voxelGroupTotalCount * 2 +
+                      groupIndexXYZ.z * voxelGroupTotalCount * 4;
+    }
+    return voxelIndexXYZ;
+}
+[shader("vertex")]
+VSout_Wireframe vertexMain_Wireframe(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID)
+{
+    VSout_Wireframe output;
+    output.renderTargetIndex = 0;
+
+    bool isG = true;
+    if (instanceIndex > pushConst.showOctreeNodeTotalCount) {
+        instanceIndex -= pushConst.showOctreeNodeTotalCount;
+        isG = false;
+        output.renderTargetIndex += pushConst.maxDepth - pushConst.clusteringLevel;
+    }
+
+    uint nodeIndex = instanceIndex;
+    uint level = pushConst.clusteringLevel;
+    uint levelTotalNodeCount = uint(pow(8, level));
+    for (; level < pushConst.maxDepth && nodeIndex >= levelTotalNodeCount; ++level) {
+        nodeIndex -= levelTotalNodeCount;
+        levelTotalNodeCount *= 8;
+    }
+    AABB nodeAABB; uint invisible = 1;
+    if (isG) {
+        OctreeNodeData_G octreeData_G = OctreeArray_G[level][nodeIndex];
+        nodeAABB = octreeData_G.aabb;
+        invisible = octreeData_G.indivisible;
+    } else {
+        OctreeNodeData_E octreeData_E = OctreeArray_E[level][nodeIndex];
+        nodeAABB = octreeData_E.aabb;
+        invisible = octreeData_E.indivisible;
+    }
+
+    if (nodeAABB.minimum.x > 10000.0f || invisible == 0) output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
+    else {
+        float3 aabbSize = nodeAABB.maximum - nodeAABB.minimum;
+
+        output.sv_position.x = ((vertexIndex & 3) * 2) % 6 == 0 ? 0.0f : aabbSize.x;
+        output.sv_position.y = (vertexIndex & 3) <= 1 ? 0.0f : aabbSize.y;
+        output.sv_position.z = vertexIndex / 4 == 0 ? 0.0f : aabbSize.z;
+        output.sv_position.xyz += nodeAABB.minimum;
+
+        output.sv_position = mul(float4(output.sv_position.xyz, 1.0f), pushConst.sceneInfoAddress[0].viewProjMatrix);
+    }
+    output.renderTargetIndex += level - pushConst.clusteringLevel;
+
+    return output;
+}
+[shader("pixel")]
+PSout_Wireframe fragmentMain_Wireframe(VSout_Wireframe input) {
+    PSout_Wireframe output;
+    float4 colors[WireframeMapCount];
+    for (int i = 0; i < WireframeMapCount; ++i) colors[i] = float4(0.0f);
+    colors[input.renderTargetIndex] = float4(1.0f, 0.0f, 0.0f, 1.0f);
+
+    #if WireframeMapCount > 0
+    output.color0 = colors[0]; 
+    #endif
+    #if WireframeMapCount > 1
+    output.color1 = colors[1];
+    #endif
+    #if WireframeMapCount > 2
+    output.color2 = colors[2];
+    #endif
+    #if WireframeMapCount > 3
+    output.color3 = colors[3];
+    #endif
+    #if WireframeMapCount > 4
+    output.color4 = colors[4];
+    #endif
+    #if WireframeMapCount > 5
+    output.color5 = colors[5];
+    #endif
+    #if WireframeMapCount > 6
+    output.color6 = colors[6];
+    #endif
+    #if WireframeMapCount > 7
+    output.color7 = colors[7]; 
+    #endif
+    #if WireframeMapCount > 8
+    output.color8 = colors[81];
+    #endif
+    #if WireframeMapCount > 9
+    output.color9 = colors[9];
+    #endif
+    #if WireframeMapCount > 10
+    output.color10 = colors[10];
+    #endif
+    #if WireframeMapCount > 11
+    output.color11 = colors[11];
+    #endif
+    #if WireframeMapCount > 12
+    output.color12 = colors[12];
+    #endif
+    #if WireframeMapCount > 13
+    output.color13 = colors[13];
+    #endif
+
+    return output;
 }

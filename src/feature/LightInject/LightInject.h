@@ -34,6 +34,7 @@ public:
 	void resize(VkCommandBuffer cmd, const VkExtent2D& size) override;
 	void preRender();
 	void render(VkCommandBuffer cmd) override;
+	void postProcess(VkCommandBuffer cmd) override;
 
 	void createDescriptorSetLayout();
 	void createDescriptorSet();

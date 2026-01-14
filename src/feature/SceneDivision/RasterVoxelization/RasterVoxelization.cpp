@@ -318,15 +318,7 @@ void FzbRenderer::RasterVoxelization::compileAndCreateShaders() {
 #endif
 }
 void FzbRenderer::RasterVoxelization::updateDataPerFrame(VkCommandBuffer cmd) {
-	const glm::mat4& viewMatrix = Application::sceneResource.cameraManip->getViewMatrix();
-	const glm::mat4& projMatrix = Application::sceneResource.cameraManip->getPerspectiveMatrix();
-
-	scene.sceneInfo.viewProjMatrix = projMatrix * viewMatrix;
-	scene.sceneInfo.projInvMatrix = glm::inverse(projMatrix);
-	scene.sceneInfo.viewInvMatrix = glm::inverse(viewMatrix);
-	scene.sceneInfo.cameraPosition = Application::sceneResource.cameraManip->getEye();
-	scene.sceneInfo.meshes = (shaderio::Mesh*)scene.bMeshes.address;
-
+	scene.sceneInfo = Application::sceneResource.sceneInfo;
 	nvvk::cmdBufferMemoryBarrier(cmd, { scene.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
 								   VK_PIPELINE_STAGE_2_TRANSFER_BIT });
 	vkCmdUpdateBuffer(cmd, scene.bSceneInfo.buffer, 0, sizeof(shaderio::SceneInfo), &scene.sceneInfo);
@@ -362,6 +354,7 @@ void FzbRenderer::RasterVoxelization::uiRender() {
 #ifndef NDEBUG
 	bool& UIModified = Application::UIModified;
 
+	//先进行uiRender再进行render，所以这一帧点击后，应该要下一帧来显示，所以放在前面
 	if (showThreeViewMap) Application::viewportImage = gBuffers.getDescriptorSet(RasterVoxelizationGBuffer::ThreeViewMap);
 	else if(showCubeMap) Application::viewportImage = gBuffers.getDescriptorSet(RasterVoxelizationGBuffer::CubeMap);
 	else if(showWireframeMap) Application::viewportImage = gBuffers.getDescriptorSet(RasterVoxelizationGBuffer::WireframeMap);
@@ -500,34 +493,17 @@ void FzbRenderer::RasterVoxelization::render(VkCommandBuffer cmd) {
 #ifndef NDEBUG
 	resetFragmentCount(cmd);
 	createVGB_ThreeView(cmd);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT);
-	debug_Cube(cmd);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT);
-	debug_Wireframe(cmd);
 #else
 	createVGB(cmd);
 #endif
 }
 void FzbRenderer::RasterVoxelization::postProcess(VkCommandBuffer cmd) {
 #ifndef NDEBUG
-	NVVK_DBG_SCOPE(cmd);
-
-	//将wireframeMap与调用者的tonemapping后的结果进行结合
-	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
-	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_postProcess);
-
-	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1,
-		staticDescPack.getSetPtr(), 0, nullptr);
-
-	vkCmdPushConstants2(cmd, &pushInfo);
-
-	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(RasterVoxelizationGBuffer::WireframeMap), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL});
-
-	VkExtent2D groupSize = nvvk::getGroupCounts({ setting.resolution.width, setting.resolution.height }, VkExtent2D{ 32, 32 });
-	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
-
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
-	//nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(RasterVoxelizationGBuffer::WireframeMap) });
+	debug_Cube(cmd);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT);
+	debug_Wireframe(cmd);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	debug_MergeWireframe(cmd);
 #endif
 }
 
@@ -774,7 +750,6 @@ void FzbRenderer::RasterVoxelization::debug_Wireframe(VkCommandBuffer cmd) {
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1,
 		staticDescPack.getSetPtr(), 0, nullptr);
 
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT);	//等待debug_Cube完成
 	vkCmdBeginRendering(cmd, &renderingInfo);
 
 	graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
@@ -808,5 +783,20 @@ void FzbRenderer::RasterVoxelization::debug_Wireframe(VkCommandBuffer cmd) {
 	vkCmdEndRendering(cmd);
 
 	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(RasterVoxelizationGBuffer::WireframeMap), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
+}
+void FzbRenderer::RasterVoxelization::debug_MergeWireframe(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
+
+	//将wireframeMap与调用者的tonemapping后的结果进行结合
+	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_postProcess);
+
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1,
+		staticDescPack.getSetPtr(), 0, nullptr);
+
+	vkCmdPushConstants2(cmd, &pushInfo);
+
+	VkExtent2D groupSize = nvvk::getGroupCounts({ setting.resolution.width, setting.resolution.height }, VkExtent2D{ 32, 32 });
+	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
 }
 #endif

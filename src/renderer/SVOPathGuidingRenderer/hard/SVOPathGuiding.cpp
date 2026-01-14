@@ -7,14 +7,13 @@ FzbRenderer::SVOPathGuidingRenderer::SVOPathGuidingRenderer(pugi::xml_node& rend
 	ptContext.setContextInfo();
 
 	if (pugi::xml_node maxDepthNode = rendererNode.child("maxDepth"))
-		pushValues.maxDepth = std::stoi(maxDepthNode.attribute("value").value());
-	if (pugi::xml_node useNEENode = rendererNode.child("useNEE"))
-		pushValues.NEEShaderIndex = std::string(useNEENode.attribute("value").value()) == "true";
-
+		pushConstant.maxDepth = std::stoi(maxDepthNode.attribute("value").value());
 	if (pugi::xml_node rasterVoxelizationNode = rendererNode.child("RasterVoxelization"))
 		rasterVoxelization = std::make_shared<FzbRenderer::RasterVoxelization>(rasterVoxelizationNode);
 	if (pugi::xml_node lightInjectNode = rendererNode.child("LightInject"))
 		lightInject = std::make_shared<FzbRenderer::LightInject>(lightInjectNode);
+	if (pugi::xml_node octreeNode = rendererNode.child("Octree"))
+		octree = std::make_shared<FzbRenderer::Octree>(octreeNode);
 }
 void FzbRenderer::SVOPathGuidingRenderer::init() {
 	ptContext.getRayTracingPropertiesAndFeature();
@@ -33,16 +32,26 @@ void FzbRenderer::SVOPathGuidingRenderer::init() {
 	};
 	lightInject->init(lightInjectSetting);
 
-	Feature::createGBuffer(false, true, 2, {1, 1});
+	OctreeSetting octreeSetting{
+		.VGB = rasterVoxelization->VGB,
+		.VGBStartPos = lightInjectSetting.VGBStartPos,
+		.VGBVoxelSize = lightInjectSetting.VGBVoxelSize,
+		.VGBSize = lightInjectSetting.VGBSize
+	};
+	octree->init(octreeSetting);
+
+	Feature::createGBuffer(false, true, 1, {1, 1});
 	createDescriptorSetLayout();
+	Renderer::createPipelineLayout(sizeof(shaderio::SVOPathGuidingPushConstant));
 	createDescriptorSet();
-	//createPipeline();
+	createPipeline();
 
 	Renderer::init();
 }
 void FzbRenderer::SVOPathGuidingRenderer::clean() {
 	rasterVoxelization->clean();
 	lightInject->clean();
+	octree->clean();
 	PathTracingRenderer::clean();
 };
 void FzbRenderer::SVOPathGuidingRenderer::uiRender() {
@@ -55,22 +64,14 @@ void FzbRenderer::SVOPathGuidingRenderer::uiRender() {
 	{
 		ImGui::SeparatorText("Jitter");
 		UIModified |= ImGui::SliderInt("Max Frames", &maxFrames, 1, MAX_FRAME);
-		ImGui::TextDisabled("Frame: %d", pushValues.frameIndex);
+		ImGui::TextDisabled("Frame: %d", pushConstant.frameIndex);
 
 		ImGui::SeparatorText("Bounces");
 		{
 			PE::begin();
-			PE::SliderInt("Bounces Depth", &pushValues.maxDepth, 1, std::min(MAX_DEPTH, ptContext.rtProperties.maxRayRecursionDepth), "%d", ImGuiSliderFlags_AlwaysClamp,
+			PE::SliderInt("Bounces Depth", &pushConstant.maxDepth, 1, std::min(MAX_DEPTH, ptContext.rtProperties.maxRayRecursionDepth), "%d", ImGuiSliderFlags_AlwaysClamp,
 				"Maximum Bounces depth");
 			PE::end();
-		}
-
-		bool NEEChange = ImGui::Checkbox("USE NEE", (bool*)&pushValues.NEEShaderIndex);
-		if (NEEChange) {
-			vkQueueWaitIdle(Application::app->getQueue(0).queue);
-			createRayTracingPipeline();
-
-			UIModified |= NEEChange;
 		}
 
 		if (ptContext.rtPosFetchFeature.rayTracingPositionFetch == VK_FALSE)
@@ -90,6 +91,7 @@ void FzbRenderer::SVOPathGuidingRenderer::uiRender() {
 
 	rasterVoxelization->uiRender();
 	lightInject->uiRender();
+	octree->uiRender();
 
 	if (UIModified) resetFrame();
 };
@@ -101,12 +103,20 @@ void FzbRenderer::SVOPathGuidingRenderer::resize(VkCommandBuffer cmd, const VkEx
 	rasterVoxelization->resize(cmd, size);
 #endif
 	lightInject->resize(cmd, size);
+	octree->resize(cmd, size);
 };
 void FzbRenderer::SVOPathGuidingRenderer::preRender() {
-	PathTracingRenderer::preRender();
+	Scene& scene = Application::sceneResource;
+	if (scene.cameraChange) resetFrame();	//如果相机参数变化，则从新累计帧
+	if (scene.periodInstanceCount + scene.randomInstanceCount > 0 || scene.hasDynamicLight) maxFrames = 1;
+	pushConstant.frameIndex = std::min(Application::frameIndex, maxFrames - 1);
+	pushConstant.time = Application::sceneResource.time;
+	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
+	asManager.updateTopLevelMotionAS_nvvk();
+
 	rasterVoxelization->preRender();
 	lightInject->preRender();
-	
+	octree->preRender();
 }
 void FzbRenderer::SVOPathGuidingRenderer::render(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
@@ -115,12 +125,21 @@ void FzbRenderer::SVOPathGuidingRenderer::render(VkCommandBuffer cmd) {
 	rasterVoxelization->render(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR);
 	lightInject->render(cmd);
-	//nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR);
-	//PathTracingRenderer::rayTraceScene(cmd);
-	//nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-	//Renderer::postProcess(cmd);
-	//nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-	//rasterVoxelization->postProcess(cmd);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_NV, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	octree->render(cmd);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_NV);
+
+	pathGuiding(cmd);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	Renderer::postProcess(cmd);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT);
+
+	rasterVoxelization->postProcess(cmd);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT);
+	lightInject->postProcess(cmd);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_GEOMETRY_SHADER_BIT);
+	octree->postProcess(cmd);
+
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
 };
 
@@ -145,10 +164,21 @@ void FzbRenderer::SVOPathGuidingRenderer::createDescriptorSetLayout() {
 	staticDescPack.init(bindings, Application::app->getDevice(), 1, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
 		VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT);
 
-	LOGI("Ray tracing descriptor layout created\n");
+	LOGI("SVO PathGuiding static descriptor layout created\n");
 	NVVK_DBG_NAME(staticDescPack.getLayout());
 	NVVK_DBG_NAME(staticDescPack.getPool());
 	NVVK_DBG_NAME(staticDescPack.getSet(0));
+
+	bindings.clear();
+	bindings.addBinding({
+			.binding = shaderio::DynamicSetBindingPoints_PT::eTlas_PT,
+			.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL
+		});
+	dynamicDescPack.init(bindings, Application::app->getDevice(), 0, VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT);
+
+	LOGI("SVO PathGuiding dynamic descriptor layout created\n");
 }
 void FzbRenderer::SVOPathGuidingRenderer::createDescriptorSet() {
 	nvvk::WriteSetContainer write{};
@@ -170,27 +200,24 @@ void FzbRenderer::SVOPathGuidingRenderer::createDescriptorSet() {
 }
 void FzbRenderer::SVOPathGuidingRenderer::createPipeline() {
 	SCOPED_TIMER(__FUNCTION__);
-	LOGI(" Creating ray tracing pipeline Structure\n");
+	LOGI(" Creating SVO PathGuiding pipeline Structure\n");
 
 	Application::allocator.destroyBuffer(sbtBuffer);
 	vkDestroyPipeline(Application::app->getDevice(), rtPipeline, nullptr);
 	vkDestroyPipelineLayout(Application::app->getDevice(), pipelineLayout, nullptr);
 
+	Application::slangCompiler.clearMacros();
+
 	//VkShaderModuleCreateInfo shaderCode = compileSlangShader("pathTracingShaders.slang", {});
 	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
-	std::filesystem::path shaderSource = shaderPath / "SVOPathTracingShaders.slang";
+	std::filesystem::path shaderSource = shaderPath / "SVOPathGuidingShaders.slang";
 	VkShaderModuleCreateInfo shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
 
 	enum StageIndices {
 		eRaygen,
-		eLightInjectRaygen,
-
 		eMiss,
-
 		eClosestHit,
-		eClosetHit_LightInject,
-		eClosestHit_NEE,
-
+		
 		eCallable_DiffuseMaterial,
 		eCallable_ConductorMaterial,
 		eCallable_DielectricMaterial,
@@ -207,10 +234,6 @@ void FzbRenderer::SVOPathGuidingRenderer::createPipeline() {
 		stages[eRaygen].pNext = &shaderCode;
 		stages[eRaygen].pName = "raygenMain";
 		stages[eRaygen].stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
-
-		stages[eLightInjectRaygen].pNext = &shaderCode;
-		stages[eLightInjectRaygen].pName = "lightInjectRaygenMain";
-		stages[eLightInjectRaygen].stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
 		//----------------------------------------miss----------------------------------------
 		stages[eMiss].pNext = &shaderCode;
 		stages[eMiss].pName = "rayMissMain";
@@ -223,14 +246,6 @@ void FzbRenderer::SVOPathGuidingRenderer::createPipeline() {
 		//stages[eAnyHit].pNext = &shaderCode;
 		//stages[eAnyHit].pName = "rayAnyHitMain";
 		//stages[eAnyHit].stage = VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
-
-		stages[eClosetHit_LightInject].pNext = &shaderCode;
-		stages[eClosetHit_LightInject].pName = "lightInjectClosestHitMain";
-		stages[eClosetHit_LightInject].stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
-
-		stages[eClosestHit_NEE].pNext = &shaderCode;
-		stages[eClosestHit_NEE].pName = "NEEClosestHitMain";
-		stages[eClosestHit_NEE].stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
 		//----------------------------------------callable----------------------------------------
 		stages[eCallable_DiffuseMaterial].pNext = &shaderCode;
 		stages[eCallable_DiffuseMaterial].pName = "diffuseMaterialMain";
@@ -266,9 +281,6 @@ void FzbRenderer::SVOPathGuidingRenderer::createPipeline() {
 		group.generalShader = eRaygen;
 		shader_groups.push_back(group);
 
-		group.generalShader = eLightInjectRaygen;
-		shader_groups.push_back(group);
-
 		//光线没打中shader组，此时只有一个条目（shader）
 		group.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
 		group.generalShader = eMiss;
@@ -280,16 +292,6 @@ void FzbRenderer::SVOPathGuidingRenderer::createPipeline() {
 		group.closestHitShader = eClosestHit;
 		//group.anyHitShader = eAnyHit;
 		shader_groups.push_back(group);
-
-		group.closestHitShader = eClosetHit_LightInject;
-		shader_groups.push_back(group);
-		pushValues.LightInjectShaderIndex = eClosetHit_LightInject - eClosestHit;
-
-		if (pushValues.NEEShaderIndex == 1) {		//使用NEE
-			group.closestHitShader = eClosestHit_NEE;
-			shader_groups.push_back(group);
-			pushValues.NEEShaderIndex = eClosestHit_NEE - eClosestHit;
-		}
 
 		group.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
 		group.closestHitShader = VK_SHADER_UNUSED_KHR;
@@ -310,7 +312,7 @@ void FzbRenderer::SVOPathGuidingRenderer::createPipeline() {
 		shader_groups.push_back(group);
 	}
 	
-	const VkPushConstantRange push_constant{ VK_SHADER_STAGE_ALL, 0, sizeof(shaderio::PathTracingPushConstant) };
+	const VkPushConstantRange push_constant{ VK_SHADER_STAGE_ALL, 0, sizeof(shaderio::SVOPathGuidingPushConstant) };
 
 	VkPipelineLayoutCreateInfo pipeline_layout_create_info{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
 	pipeline_layout_create_info.pushConstantRangeCount = 1;
@@ -338,11 +340,39 @@ void FzbRenderer::SVOPathGuidingRenderer::createPipeline() {
 	FzbRenderer::createShaderBindingTable(rtPipelineInfo, rtPipeline, sbtGenerator, sbtBuffer);
 }
 void FzbRenderer::SVOPathGuidingRenderer::compileAndCreateShaders() {
-	PathTracingRenderer::compileAndCreateShaders();
+	createPipeline();
 	rasterVoxelization->compileAndCreateShaders();
 	lightInject->compileAndCreateShaders();
+	octree->compileAndCreateShaders();
 };
 void FzbRenderer::SVOPathGuidingRenderer::updateDataPerFrame(VkCommandBuffer cmd) {
 	rasterVoxelization->updateDataPerFrame(cmd);
 	lightInject->updateDataPerFrame(cmd);
+	octree->updateDataPerFrame(cmd);
+}
+
+void FzbRenderer::SVOPathGuidingRenderer::pathGuiding(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
+
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipeline);
+
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, pipelineLayout, 0, 1,
+		staticDescPack.getSetPtr(), 0, nullptr);
+
+	nvvk::WriteSetContainer write{};
+	write.append(dynamicDescPack.makeWrite(shaderio::DynamicSetBindingPoints_PT::eTlas_PT), asManager.asBuilder.tlas);
+	vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, pipelineLayout, 1, write.size(), write.data());
+
+	const VkPushConstantsInfo pushInfo{
+		.sType = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
+		.layout = pipelineLayout,
+		.stageFlags = VK_SHADER_STAGE_ALL,
+		.size = sizeof(shaderio::SVOPathGuidingPushConstant),
+		.pValues = &pushConstant
+	};
+	vkCmdPushConstants2(cmd, &pushInfo);
+
+	const nvvk::SBTGenerator::Regions& regions = sbtGenerator.getSBTRegions();
+	const VkExtent2D& size = Application::app->getViewportSize();
+	vkCmdTraceRaysKHR(cmd, &regions.raygen, &regions.miss, &regions.hit, &regions.callable, size.width, size.height, 1);
 }
