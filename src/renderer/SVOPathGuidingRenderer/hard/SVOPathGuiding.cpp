@@ -40,7 +40,7 @@ void FzbRenderer::SVOPathGuidingRenderer::init() {
 	};
 	octree->init(octreeSetting);
 
-	Feature::createGBuffer(false, true, 1, {1, 1});
+	IF_DEBUG(Feature::createGBuffer(true, true, 1), Feature::createGBuffer(false, true, 1));
 	createDescriptorSetLayout();
 	Renderer::createPipelineLayout(sizeof(shaderio::SVOPathGuidingPushConstant));
 	createDescriptorSet();
@@ -96,14 +96,23 @@ void FzbRenderer::SVOPathGuidingRenderer::uiRender() {
 	if (UIModified) resetFrame();
 };
 void FzbRenderer::SVOPathGuidingRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
-	PathTracingRenderer::resize(cmd, size);
-#ifndef NDEBUG
-	rasterVoxelization->resize(cmd, size, gBuffers, eImgTonemapped);
-#else
-	rasterVoxelization->resize(cmd, size);
-#endif
+	NVVK_CHECK(gBuffers.update(cmd, size));
+
+	nvvk::WriteSetContainer write{};
+	VkWriteDescriptorSet    OutImageWrite =
+		staticDescPack.makeWrite(shaderio::StaticSetBindingPoints_PT::eOutImage_PT, 0, 0, 1);
+	write.append(OutImageWrite, gBuffers.getColorImageView(eImgRendered), VK_IMAGE_LAYOUT_GENERAL);
+
+	VkWriteDescriptorSet    depthImageWrite =
+		staticDescPack.makeWrite(shaderio::StaticBindingPoints_SVOPG::eDepthImage_SVOPG, 0, 0, 1);
+	write.append(depthImageWrite, gBuffers.getDepthImageView(), VK_IMAGE_LAYOUT_GENERAL);
+
+	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
+
+	IF_DEBUG(rasterVoxelization->resize(cmd, size, gBuffers, eImgTonemapped), rasterVoxelization->resize(cmd, size));
 	lightInject->resize(cmd, size);
-	octree->resize(cmd, size);
+	IF_DEBUG(octree->resize(cmd, size, gBuffers, eImgTonemapped), octree->resize(cmd, size));
+	
 };
 void FzbRenderer::SVOPathGuidingRenderer::preRender() {
 	Scene& scene = Application::sceneResource;
@@ -112,7 +121,7 @@ void FzbRenderer::SVOPathGuidingRenderer::preRender() {
 	pushConstant.frameIndex = std::min(Application::frameIndex, maxFrames - 1);
 	pushConstant.time = Application::sceneResource.time;
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
-	asManager.updateTopLevelMotionAS_nvvk();
+	asManager.updateToplevelAS();
 
 	rasterVoxelization->preRender();
 	lightInject->preRender();
@@ -160,6 +169,13 @@ void FzbRenderer::SVOPathGuidingRenderer::createDescriptorSetLayout() {
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
+#ifndef NDEBUG
+	bindings.addBinding({
+		.binding = shaderio::StaticBindingPoints_SVOPG::eDepthImage_SVOPG,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+#endif
 
 	staticDescPack.init(bindings, Application::app->getDevice(), 1, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
 		VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT);
@@ -188,9 +204,6 @@ void FzbRenderer::SVOPathGuidingRenderer::createDescriptorSet() {
 		nvvk::Image* allImages = Application::sceneResource.textures.data();
 		write.append(allTextures, allImages);
 	}
-	VkWriteDescriptorSet    OutImageWrite =
-		staticDescPack.makeWrite(shaderio::StaticSetBindingPoints_PT::eOutImage_PT, 0, 0, 1);
-	write.append(OutImageWrite, gBuffers.getColorImageView(eImgRendered), VK_IMAGE_LAYOUT_GENERAL);
 
 	VkWriteDescriptorSet    VGBWrite =
 		staticDescPack.makeWrite(shaderio::StaticBindingPoints_SVOPG::eVGB_SVOPG, 0, 0, 1);
@@ -208,7 +221,7 @@ void FzbRenderer::SVOPathGuidingRenderer::createPipeline() {
 
 	Application::slangCompiler.clearMacros();
 
-	//VkShaderModuleCreateInfo shaderCode = compileSlangShader("pathTracingShaders.slang", {});
+	addPathTracingSlangMacro();
 	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
 	std::filesystem::path shaderSource = shaderPath / "SVOPathGuidingShaders.slang";
 	VkShaderModuleCreateInfo shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
@@ -331,7 +344,9 @@ void FzbRenderer::SVOPathGuidingRenderer::createPipeline() {
 	rtPipelineInfo.pGroups = shader_groups.data();
 	rtPipelineInfo.maxPipelineRayRecursionDepth = std::min(MAX_DEPTH, ptContext.rtProperties.maxRayRecursionDepth);		//×î´óbounceÊý
 	rtPipelineInfo.layout = pipelineLayout;
+#ifdef PathTracingMotionBlur
 	rtPipelineInfo.flags = VK_PIPELINE_CREATE_RAY_TRACING_ALLOW_MOTION_BIT_NV;
+#endif
 	vkCreateRayTracingPipelinesKHR(Application::app->getDevice(), {}, {}, 1, &rtPipelineInfo, nullptr, &rtPipeline);
 	NVVK_DBG_NAME(rtPipeline);
 
@@ -358,6 +373,8 @@ void FzbRenderer::SVOPathGuidingRenderer::pathGuiding(VkCommandBuffer cmd) {
 
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, pipelineLayout, 0, 1,
 		staticDescPack.getSetPtr(), 0, nullptr);
+
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getDepthImage(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
 
 	nvvk::WriteSetContainer write{};
 	write.append(dynamicDescPack.makeWrite(shaderio::DynamicSetBindingPoints_PT::eTlas_PT), asManager.asBuilder.tlas);

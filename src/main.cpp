@@ -18,8 +18,6 @@ int main(int argc, char** argv) {
     nvvk::Context vkContext;
     auto fzbRenderer_nvvk = std::make_shared<FzbRenderer::Application>(appInfo, vkContext);
 
-    appInfo.vSync = false;
-
     nvapp::Application application;
     application.init(appInfo);
 

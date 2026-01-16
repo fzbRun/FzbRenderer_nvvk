@@ -6,7 +6,6 @@
 #include <nvvk/default_structs.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <common/Shader/Shader.h>
-#include <nvgui/sky.hpp>
 
 FzbRenderer::PathTracingRenderer::PathTracingRenderer(pugi::xml_node& rendererNode) {
 	ptContext.setContextInfo();
@@ -162,18 +161,7 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 	for(auto& s : stages)
 		s.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 
-	//if (pushValues.NEEShaderIndex == 1) {
-	//	Application::slangCompiler.addMacro({
-	//		.name = "NEE",
-	//		.value = "1"
-	//		});
-	//}else{
-	//	std::vector<slang::PreprocessorMacroDesc> macros = Application::slangCompiler.macros();
-	//	Application::slangCompiler.clearMacros();
-	//	for (slang::PreprocessorMacroDesc& macro : macros) {
-	//		if (macro.name != "NEE") Application::slangCompiler.addMacro(macro);
-	//	}
-	//}
+	addPathTracingSlangMacro();
 	std::string shaderSlangName;
 	if(pushValues.NEEShaderIndex == 1) shaderSlangName = "pathTracingNEEShaders.slang";
 	else shaderSlangName = "pathTracingShaders.slang";
@@ -290,7 +278,9 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 	rtPipelineInfo.pGroups = shader_groups.data();
 	rtPipelineInfo.maxPipelineRayRecursionDepth = std::min(MAX_DEPTH, ptContext.rtProperties.maxRayRecursionDepth);		//最大bounce数
 	rtPipelineInfo.layout = pipelineLayout;
+#ifdef PathTracingMotionBlur
 	rtPipelineInfo.flags = VK_PIPELINE_CREATE_RAY_TRACING_ALLOW_MOTION_BIT_NV;
+#endif
 	vkCreateRayTracingPipelinesKHR(Application::app->getDevice(), {}, {}, 1, & rtPipelineInfo, nullptr, &rtPipeline);
 	NVVK_DBG_NAME(rtPipeline);
 
@@ -434,8 +424,7 @@ void FzbRenderer::PathTracingRenderer::preRender() {
 
 	pushValues.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 
-	//asManager.updateTopLevelAS_nvvk();
-	asManager.updateTopLevelMotionAS_nvvk();
+	asManager.updateToplevelAS();
 }
 void FzbRenderer::PathTracingRenderer::render(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);

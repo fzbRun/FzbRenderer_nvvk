@@ -24,7 +24,8 @@ enum StaticBindingPoints_SVOPG
 	eSVO_G_SVOPG,
 	eSVO_E_SVOPG,
 	eWeights_SVOPG,
-	eOutImage_MIS_SVOPG
+	eOutImage_MIS_SVOPG,
+	eDepthImage_SVOPG,
 };
 enum DynamicBindingPoints_SVOPG {
 	//eTlas_SVOPG = 0,

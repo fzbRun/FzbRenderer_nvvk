@@ -354,11 +354,6 @@ void FzbRenderer::RasterVoxelization::uiRender() {
 #ifndef NDEBUG
 	bool& UIModified = Application::UIModified;
 
-	//先进行uiRender再进行render，所以这一帧点击后，应该要下一帧来显示，所以放在前面
-	if (showThreeViewMap) Application::viewportImage = gBuffers.getDescriptorSet(RasterVoxelizationGBuffer::ThreeViewMap);
-	else if(showCubeMap) Application::viewportImage = gBuffers.getDescriptorSet(RasterVoxelizationGBuffer::CubeMap);
-	else if(showWireframeMap) Application::viewportImage = gBuffers.getDescriptorSet(RasterVoxelizationGBuffer::WireframeMap);
-
 	namespace PE = nvgui::PropertyEditor;
 	if (ImGui::Begin("RasterVoxelization")) {
 		//---------------------------------------threeView-------------------------------------------
@@ -437,6 +432,11 @@ void FzbRenderer::RasterVoxelization::uiRender() {
 		PE::end();
 	}
 	ImGui::End();
+
+	//先进行uiRender再进行render，所以这一帧点击后，应该要下一帧来显示，所以放在前面
+	if (showThreeViewMap) Application::viewportImage = gBuffers.getDescriptorSet(RasterVoxelizationGBuffer::ThreeViewMap);
+	else if (showCubeMap) Application::viewportImage = gBuffers.getDescriptorSet(RasterVoxelizationGBuffer::CubeMap);
+	else if (showWireframeMap) Application::viewportImage = gBuffers.getDescriptorSet(RasterVoxelizationGBuffer::WireframeMap);
 #endif
 }
 void FzbRenderer::RasterVoxelization::resize(VkCommandBuffer cmd, const VkExtent2D& size) {};

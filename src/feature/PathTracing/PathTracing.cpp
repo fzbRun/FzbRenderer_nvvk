@@ -7,7 +7,9 @@ void PathTracingContext::setContextInfo() {
 	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, &accelFeature });
 	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, &rtPipelineFeature });
 	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME });
+#ifdef PathTracingMotionBlur
 	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_NV_RAY_TRACING_MOTION_BLUR_EXTENSION_NAME, &rtMotionBlurFeatures });
+#endif
 
 	rtPosFetchFeature.rayTracingPositionFetch = VK_TRUE;
 	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_KHR_RAY_TRACING_POSITION_FETCH_EXTENSION_NAME, &rtPosFetchFeature });
@@ -35,6 +37,15 @@ void PathTracing::clean() {
 	Application::allocator.destroyBuffer(sbtBuffer);
 }
 
+void FzbRenderer::addPathTracingSlangMacro() {
+#ifdef PathTracingMotionBlur
+	static std::string macroName = "PathTracingMotionBlur";
+	Application::slangCompiler.addMacro({
+		.name = macroName.c_str(),
+		.value = ""
+		});
+#endif
+}
 void FzbRenderer::createShaderBindingTable(
 	const VkRayTracingPipelineCreateInfoKHR& rtPipelineInfo, VkPipeline& rtPipeline,
 	nvvk::SBTGenerator& sbtGenerator, nvvk::Buffer& sbtBuffer) {
