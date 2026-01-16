@@ -7,11 +7,14 @@ using namespace FzbRenderer;
 
 void AccelerationStructureManager::init() {
 	asBuilder.init(&Application::allocator, &Application::stagingUploader, Application::app->getQueue(0));
-	createBottomLevelAS_nvvk();
+#ifdef PathTracingMotionBlur
 	//createBottomLevelMotionAS_nvvk();
-
-	//createTopLevelAS_nvvk();
+	createBottomLevelAS_nvvk();
 	createTopLevelMotionAS_nvvk();
+#else
+	createBottomLevelAS_nvvk();
+	createTopLevelAS_nvvk();
+#endif
 }
 void AccelerationStructureManager::clean() {
 	VkDevice device = Application::app->getDevice();
@@ -224,6 +227,13 @@ void AccelerationStructureManager::createTopLevelMotionAS_nvvk() {
 	LOGI("Top-level accleration motion structures built successfully\n");
 }
 
+void AccelerationStructureManager::updateToplevelAS() {
+#ifdef PathTracingMotionBlur
+	updateTopLevelMotionAS_nvvk();
+#else
+	updateTopLevelAS_nvvk();
+#endif
+}
 void AccelerationStructureManager::updateTopLevelAS_nvvk() {
 	if (Application::sceneResource.instances.size() == Application::sceneResource.staticInstanceCount) return;
 

@@ -2,7 +2,9 @@
 #include "renderer/SVOPathGuidingRenderer/hard/shaderio.h"
 
 [[vk::push_constant]] ConstantBuffer<SVOPathGuidingPushConstant, ScalarDataLayout> pushConst;
-
+#ifndef NDEBUG
+[[vk::binding(StaticBindingPoints_SVOPG::eDepthImage_SVOPG, 0)]] RWTexture2D<float> depthImage; // VK_FORMAT_D32_SFLOAT
+#endif
 //-------------------------------------------------Ö÷Shader-------------------------------------------------
 [shader("raygeneration")]
 void raygenMain()
@@ -45,13 +47,25 @@ void raygenMain()
     // Iterative reflection loop
     while (payload.bounceDepth < pushConst.maxDepth && (payload.bsdf_cosine.x + payload.bsdf_cosine.y + payload.bsdf_cosine.z > 0.0f))
     {
-        // TraceRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, payload);
+#ifdef PathTracingMotionBlur
         TraceMotionRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, pushConst.time, payload);
+#else
+        TraceRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, payload);
+#endif
         accumulatedRadiance += payload.radiance;
 
         float randomNumber = rand(payload.randomSeed);
         if (randomNumber >= RR) break;
         payload.pdf *= RR;
+
+#ifndef NDEBUG
+        if (payload.bounceDepth == 1) {
+            float3 hitPos = payload.rayOrigin + 0.01f * ray.Direction;
+            float4 clipPos = mul(float4(hitPos, 1.0f), sceneInfo.viewProjMatrix);
+            float depth = clipPos.z / clipPos.w; // any hitPoint must in our cameraView
+            depthImage[int2(launchID)] = depth;
+        } else if (payload.bounceDepth == MISS_DEPTH) depthImage[int2(launchID)] = 1.0f;
+#endif
 
         ray.Origin = payload.rayOrigin;
         ray.Direction = payload.rayDirection;

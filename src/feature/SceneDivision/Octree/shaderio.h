@@ -10,6 +10,8 @@ enum BindingPoints_Octree {
 	eVGB_Octree = 0,
 	eOctreeArray_G_Octree,
 	eOctreeArray_E_Octree,
+	eWireframeMap_Octree,
+	eBaseMap_Octree,
 };
 
 struct OctreePushConstant {
@@ -31,6 +33,7 @@ struct OctreeNodeData_G {
 	AABB aabb;
 	uint32_t indivisible;
 	uint32_t label;
+	uint32_t materialIndex;
 };
 struct OctreeNodeData_E {
 	float3 irradiance;

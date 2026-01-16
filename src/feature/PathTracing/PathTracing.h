@@ -41,6 +41,7 @@ public:
 	nvvk::Buffer sbtBuffer;
 };
 
+void addPathTracingSlangMacro();
 void createShaderBindingTable(
 	const VkRayTracingPipelineCreateInfoKHR& rtPipelineInfo, VkPipeline& rtPipeline,
 	nvvk::SBTGenerator& sbtGenerator, nvvk::Buffer& sbtBuffer);

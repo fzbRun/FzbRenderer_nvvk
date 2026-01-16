@@ -30,6 +30,7 @@ public:
 	void init(OctreeSetting setting);
 	void clean();
 	void uiRender();
+	void resize(VkCommandBuffer cmd, const VkExtent2D& size, nvvk::GBuffer& gBuffers_other, uint32_t baseMapIndex);
 	void resize(VkCommandBuffer cmd, const VkExtent2D& size) override;
 	void preRender();
 	void render(VkCommandBuffer cmd);
@@ -60,9 +61,14 @@ public:
 	VkPushConstantsInfo pushInfo;
 
 #ifndef NDEBUG
-	void debug_cube(VkCommandBuffer cmd);
+	void debug_wirefame(VkCommandBuffer cmd);
+	void debug_mergeResult(VkCommandBuffer cmd);
+
 	VkShaderEXT vertexShader_Wireframe{};
 	VkShaderEXT fragmentShader_Wireframe{};
+	VkShaderEXT computeShader_MergeResult{};
+
+	VkImageView depthImageView;
 
 	uint32_t clusterLevelCount = 1;
 	bool showWireframeMap_G = false;

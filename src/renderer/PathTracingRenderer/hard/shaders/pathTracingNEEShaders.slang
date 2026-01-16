@@ -68,8 +68,11 @@ void raygenMain()
     uint lightNum = min(sceneInfo.numLights, NEE_MAX_SAMPLE_NUM);
     while (payload.bounceDepth < pushConst.maxDepth && (payload.bsdf_cosine.x + payload.bsdf_cosine.y + payload.bsdf_cosine.z > 0.0f))
     {
-        //TraceRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, payload);
+#ifdef PathTracingMotionBlur
         TraceMotionRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, pushConst.time, payload);
+#else
+        TraceRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, payload);
+#endif
 
         if (payload.bounceDepth == MISS_DEPTH) {}
         else if (payload.bounceDepth > 1) { //except first boucne

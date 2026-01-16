@@ -315,7 +315,7 @@ PSout_Cube fragmentMain_Cube(VSout_Cube input) {
 }
 //---------------------------------------------wireframe----------------------------------------
 [shader("pixel")]
-PSout_Cube fragmentMain_Wireframe(VSout_Cube input) {
+PSout_Cube fragmentMain_Wireframe(VSout_Cube input, float4 position: SV_Position) {
     return { float4(1.0f, 0.0f, 0.0f, 1.0f) };
 }
 //----------------------------------------------postProcess-------------------------------------
@@ -339,7 +339,6 @@ void computeMain_postProcess(uint3 dispatchId: SV_DispatchThreadID) {
         result = baseColor;
     }
     else result = wireframeColor;
-
     wireframeMap[dispatchId.xy] = result;
 }
 #endif

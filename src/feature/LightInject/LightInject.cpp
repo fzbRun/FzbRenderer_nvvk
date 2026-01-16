@@ -47,9 +47,6 @@ void FzbRenderer::LightInject::uiRender() {
 #ifndef NDEBUG
 	bool& UIModified = Application::UIModified;
 
-	if (showLightInjectResult) Application::viewportImage = gBuffers.getDescriptorSet(LightInjectGBuffer::LightInjectResult);
-	else if (showCubeMap) Application::viewportImage = gBuffers.getDescriptorSet(LightInjectGBuffer::CubeMap_LightInject);
-
 	namespace PE = nvgui::PropertyEditor;
 	if (ImGui::Begin("LightInject")) {
 		if (PE::begin()) {
@@ -99,6 +96,9 @@ void FzbRenderer::LightInject::uiRender() {
 		PE::end();
 	}
 	ImGui::End();
+
+	if (showLightInjectResult) Application::viewportImage = gBuffers.getDescriptorSet(LightInjectGBuffer::LightInjectResult);
+	else if (showCubeMap) Application::viewportImage = gBuffers.getDescriptorSet(LightInjectGBuffer::CubeMap_LightInject);
 #endif
 }
 void FzbRenderer::LightInject::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
@@ -224,6 +224,7 @@ void FzbRenderer::LightInject::createPipeline() {
 	vkDestroyPipeline(Application::app->getDevice(), rtPipeline, nullptr);
 	vkDestroyPipelineLayout(Application::app->getDevice(), rtPipelineLayout, nullptr);
 
+	addPathTracingSlangMacro();
 	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
 	std::filesystem::path shaderSource = shaderPath / "lightInject.slang";
 	shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
@@ -350,7 +351,9 @@ void FzbRenderer::LightInject::createPipeline() {
 	rtPipelineInfo.pGroups = shader_groups.data();
 	rtPipelineInfo.maxPipelineRayRecursionDepth = std::min(MAX_DEPTH, setting.ptContext->rtProperties.maxRayRecursionDepth);		//×î´óbounceÊý
 	rtPipelineInfo.layout = rtPipelineLayout;
+#ifdef PathTracingMotionBlur
 	rtPipelineInfo.flags = VK_PIPELINE_CREATE_RAY_TRACING_ALLOW_MOTION_BIT_NV;
+#endif
 	vkCreateRayTracingPipelinesKHR(Application::app->getDevice(), {}, {}, 1, & rtPipelineInfo, nullptr, &rtPipeline);
 	NVVK_DBG_NAME(rtPipeline);
 

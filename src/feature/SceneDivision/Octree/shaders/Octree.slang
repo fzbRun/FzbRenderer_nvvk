@@ -6,6 +6,10 @@
 [[vk::binding(BindingPoints_Octree::eVGB_Octree)]] RWStructuredBuffer<VGBVoxelData, ScalarDataLayout> VGB;
 [[vk::binding(BindingPoints_Octree::eOctreeArray_G_Octree)]] RWStructuredBuffer<OctreeNodeData_G, ScalarDataLayout> OctreeArray_G[];
 [[vk::binding(BindingPoints_Octree::eOctreeArray_E_Octree)]] RWStructuredBuffer<OctreeNodeData_E, ScalarDataLayout> OctreeArray_E[];
+#ifndef NDEBUG
+[[vk::binding(BindingPoints_Octree::eWireframeMap_Octree)]] RWTexture2D<float4> wireframeMap[];
+[[vk::binding(BindingPoints_Octree::eBaseMap_Octree)]] Texture2D<float4> baseMap;
+#endif
 
 //----------------------------------------------clearOctreeArray--------------------------------------------
 [numthreads(512, 1, 1)]
@@ -335,6 +339,7 @@ void computeMain_createOctreeArray2(uint threadIndex: SV_DispatchThreadID, uint 
     }
 }
 
+#ifndef NDEBUG
 //------------------------------------------------debug---------------------------------------------------------
 struct VSout_Wireframe {
     float4 sv_position : SV_Position;
@@ -499,3 +504,26 @@ PSout_Wireframe fragmentMain_Wireframe(VSout_Wireframe input) {
 
     return output;
 }
+
+[numthreads(32, 32, 1)]
+[shader("compute")]
+void computeMain_MergeResult(uint3 dispatchId: SV_DispatchThreadID) {
+    uint2 wireframeMapSize;
+    wireframeMap[0].GetDimensions(wireframeMapSize.x, wireframeMapSize.y);
+    if (dispatchId.x >= wireframeMapSize.x || dispatchId.y >= wireframeMapSize.y) return;
+
+    uint2 baseMapSize;
+    baseMap.GetDimensions(baseMapSize.x, baseMapSize.y);
+    float2 texCoords = (float2)dispatchId.xy / wireframeMapSize;
+    uint2 baseMapTexCoords = uint2(texCoords * baseMapSize);
+    float4 baseColor = baseMap[baseMapTexCoords];
+
+    for (int i = 0; i < WireframeMapCount; ++i) {
+        float4 result = float4(1.0f);
+        float4 wireframeColor = wireframeMap[i][dispatchId.xy];
+        if (wireframeColor.w == 0.0f) result = baseColor;
+        else result = wireframeColor;
+        wireframeMap[i][dispatchId.xy] = result;
+    }
+}
+#endif

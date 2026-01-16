@@ -21,6 +21,13 @@
 #define FZB_APPLICATION_H
 
 #define MAX_FRAME 1 << 14
+//#define PathTracingMotionBlur
+
+#ifdef NDEBUG
+#define IF_DEBUG(debug, release) do { release; } while (0)
+#else
+#define IF_DEBUG(debug, release) do { debug; } while (0)
+#endif
 
 namespace FzbRenderer {
 

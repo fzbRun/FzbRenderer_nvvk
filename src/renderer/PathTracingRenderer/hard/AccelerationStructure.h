@@ -22,6 +22,7 @@ public:
 	void createTopLevelAS_nvvk();
 	void createTopLevelMotionAS_nvvk();
 
+	void updateToplevelAS();
 	void updateTopLevelAS_nvvk();
 	void updateTopLevelMotionAS_nvvk();
 

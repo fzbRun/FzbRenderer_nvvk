@@ -160,8 +160,11 @@ bool hitTest(float distance, float3 sampleDir, float3 hitPos, float3 hitNormal, 
     tempRay.TMax = distance + 0.001f;
     NEEPayload tempPayload;
     tempPayload.distance = MISS_DISTANCE;
-    // TraceRay(topLevelAS, rayFlags, 0xff, pushConst.NEEShaderIndex, 0, 0, temRay, tempPayload);
+#ifdef PathTracingMotionBlur
     TraceMotionRay(topLevelAS, rayFlags, 0xff, NEEShaderIndex, 0, 0, tempRay, time, tempPayload);
+#else
+    TraceRay(topLevelAS, rayFlags, 0xff, NEEShaderIndex, 0, 0, tempRay, tempPayload);
+#endif
 
     if (tempPayload.distance + 0.002f < distance) return false;
     return true;
