@@ -6,7 +6,7 @@
 void FzbRenderer::DielectricMaterial::getMaterialInfoFromSceneInfoXML(
 	pugi::xml_node& bsdfNode,
 	shaderio::BSDFMaterial& material) {
-	material.type = shaderio::Deielectric;
+	material.type = shaderio::Dielectric;
 
 	if (pugi::xml_node etaNode = bsdfNode.child("eta"))
 		material.eta = FzbRenderer::getRGBFromString(etaNode.attribute("value").value());

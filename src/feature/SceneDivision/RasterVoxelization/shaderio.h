@@ -45,6 +45,7 @@ struct VGBVoxelData {
 	float4 sumNormal_G;
 	float4 sumNormal_E;
 	AABBU aabbU;
+	uint32_t materialType_Count;	//first 27 bite is materialCount, last five bite is materialType(assume max 16 material)
 };
 
 NAMESPACE_SHADERIO_END()

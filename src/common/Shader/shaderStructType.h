@@ -29,9 +29,9 @@ enum AlbedoMapType {
 enum MaterialType {
 	Diffuse = 0,
 	Conductor = 1,
-	Deielectric = 2,
+	Dielectric = 2,
 	RoughConductor = 3,
-	RoughDeielectric = 4
+	RoughDielectric = 4
 };
 struct BSDFMaterial {
 	MaterialType type;

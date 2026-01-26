@@ -82,11 +82,11 @@ void raygenMain()
     uint32_t pathCount = 0;
     while (payload.bounceDepth < maxPathDepth && (payload.bsdf.x + payload.bsdf.y + payload.bsdf.z > 0.0f))
     {
-#ifdef PathTracingMotionBlur
+    #ifdef PathTracingMotionBlur
         TraceMotionRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, pushConst.time, payload);
-#else
+    #else
         TraceRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, payload);
-#endif
+    #endif
 
         if (payload.bounceDepth == MISS_DEPTH) weights_bsdfSample[pathCount] = 1.0f;
         else if (pathCount > 0) {
@@ -188,6 +188,8 @@ void rayClosestHitMain(inout LightInjectHitPayload payload, in BuiltInTriangleIn
 
     float cosineON = dot(hitState.normal, -payload.rayDirection);
     if (cosineON < 0) hitState.normal = -hitState.normal;
+    if (material.type != MaterialType::Dielectric && material.type != MaterialType::RoughDielectric)
+        material.emissive *= max(cosineON, 0.0f);
 
     CallablePayload callablePayload;
     callablePayload.material = material;

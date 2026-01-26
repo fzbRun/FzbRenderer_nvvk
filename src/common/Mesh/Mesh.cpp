@@ -57,7 +57,7 @@ gltf的material采用金属-粗糙度模型，因此很难知道是不是diffuse的，还是别的什么材质
 shaderio::BSDFMaterial loadGltfMaterial(const tinygltf::Material& gltfMaterial) {
 	glm::vec3 albedo = glm::make_vec3(gltfMaterial.pbrMetallicRoughness.baseColorFactor.data());
 	return {
-		.type = gltfMaterial.alphaMode == "OPAQUE" ? shaderio::MaterialType::Conductor : shaderio::MaterialType::Deielectric,
+		.type = gltfMaterial.alphaMode == "OPAQUE" ? shaderio::MaterialType::Conductor : shaderio::MaterialType::Dielectric,
 		.albedo = albedo,
 		.emissive = glm::make_vec3(gltfMaterial.emissiveFactor.data()),
 		.eta = (glm::vec3(1.0f) + albedo) / (glm::vec3(1.0f) - albedo),

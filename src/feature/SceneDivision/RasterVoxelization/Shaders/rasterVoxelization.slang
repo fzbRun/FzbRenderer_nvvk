@@ -25,6 +25,7 @@ void computeMain_clearVGB(uint3 dispatchId: SV_DispatchThreadID) {
     voxelData.irradiance = float4(0.0f);
     voxelData.sumNormal_G = float4(0.0f);
     voxelData.sumNormal_E = float4(0.0f);
+    voxelData.materialType_Count = 0;
 
     VGB[dispatchId.x] = voxelData;
 }
@@ -213,12 +214,40 @@ void atomicNormalG(float3 normal, int voxelIndexU) {
     InterlockedAdd<float>(VGB[voxelIndexU].sumNormal_G.y, normal_G.y);
     InterlockedAdd<float>(VGB[voxelIndexU].sumNormal_G.z, normal_G.z);
 }
+void atomicMaterialTypeCount(MaterialType materialType, int voxelIndexU) {
+    uint preVal = 0;
+    uint newVal = uint(materialType) << 27; ++newVal;
+    uint curVal;
+    InterlockedCompareExchange(VGB[voxelIndexU].materialType_Count, preVal, newVal, curVal);
+    while (curVal != preVal) {
+        preVal = curVal;
+
+        MaterialType voxelMaterialType = MaterialType(preVal >> 27);
+        uint voxelMaterialCount = preVal & 0x07FFFFFF;
+        newVal = preVal;
+        if (materialType == voxelMaterialType) ++newVal;
+        else {
+            if (voxelMaterialCount == 0) {
+                newVal = uint(materialType) << 27;
+                ++newVal;       //2^27 is too big to exceed
+            }
+            else --newVal;
+        }
+
+        InterlockedCompareExchange(VGB[voxelIndexU].materialType_Count, preVal, newVal, curVal);
+    }
+}
 
 [shader("pixel")]
 void fragmentMain(GSout input) {
     int voxelIndexU = getVoxelIndex(input.worldPos);
     atomicAABB(input.worldPos, voxelIndexU);
     atomicNormalG(input.worldNormal, voxelIndexU);
+
+    SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+    Instance instanceInfo = sceneInfo.instances[pushConst.instanceIndex];
+    MaterialType instanceMaterialType = sceneInfo.materials[instanceInfo.materialIndex].type;
+    atomicMaterialTypeCount(instanceMaterialType, voxelIndexU);
 }
 
 #ifndef NDEBUG
@@ -273,6 +302,11 @@ PSout_ThreeView fragmentMain_ThreeView(GSout_ThreeView input) {
 
     atomicAABB(input.worldPos, voxelIndexU);
     atomicNormalG(input.worldNormal, voxelIndexU);
+
+    SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+    Instance instanceInfo = sceneInfo.instances[pushConst.instanceIndex];
+    MaterialType instanceMaterialType = sceneInfo.materials[instanceInfo.materialIndex].type;
+    atomicMaterialTypeCount(instanceMaterialType, voxelIndexU);
 
     if (pushConst.frameIndex == 0) InterlockedAdd<uint>(fragmentCountBuffer[0], 1);
 

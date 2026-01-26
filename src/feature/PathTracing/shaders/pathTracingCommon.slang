@@ -149,6 +149,51 @@ void getTextueData(inout CallablePayload payload, float2 texCoords) {
         payload.material.roughness = bsdfParam.w;
     }
 }
+//---------------------------------------------closethit variable setting------------------------------------
+void initCallableShader(inout CallablePayload callablePayload, 
+    HitPayload payload, float3 barycentrics, SceneInfo sceneInfo) 
+{
+    uint instanceID = InstanceIndex();
+    uint meshID = InstanceID();
+    uint triID = PrimitiveIndex();
+
+    Instance instance = sceneInfo.instances[instanceID];
+    Mesh mesh = sceneInfo.meshes[instance.meshIndex];
+    BSDFMaterial material = sceneInfo.materials[instance.materialIndex];
+
+    HitState hitState = getHitStateWithPositionFetch(barycentrics);
+
+    // int3 indices = getTriangleIndices(mesh.dataBuffer, mesh.triMesh, triID);
+    // float3 pos = getTriangleAttribute<float3>(mesh.dataBuffer, mesh.triMesh.positions, indices, barycentrics);
+    // float3 normal = getTriangleAttribute<float3>(mesh.dataBuffer, mesh.triMesh.normals, indices, barycentrics);
+    // hitState.pos = float3(mul(float4(pos, 1.0), ObjectToWorld4x3()));
+    // hitState.normal = normalize(mul(WorldToObject4x3(), normal).xyz);
+    // float3 tangent, bitangent;
+    // orthonormalBasis(hitState.normal, tangent, bitangent);
+    // hitState.TBN = float3x3(tangent, bitangent, hitState.normal);
+
+    float cosineON = dot(hitState.normal, -payload.rayDirection);
+    if (cosineON < 0) hitState.normal = -hitState.normal;
+    if (material.type != MaterialType::Dielectric && material.type != MaterialType::RoughDielectric) 
+        material.emissive *= max(cosineON, 0.0f);
+
+    callablePayload.material = material;
+    callablePayload.TBN = hitState.TBN;
+    callablePayload.randomSeed = payload.randomSeed;
+    callablePayload.bsdf = float3(0.0f);
+    callablePayload.pdf = 1.0f;
+    callablePayload.hitPos = hitState.pos;
+    callablePayload.hitNormal = hitState.normal;
+    callablePayload.outgoing = -payload.rayDirection;
+    callablePayload.isExt = payload.isExt;
+
+    if (material.materialMapIndex.x >= 0 || material.materialMapIndex.y >= 0 || material.materialMapIndex.z >= 0) {
+        int3 indices = getTriangleIndices(mesh.dataBuffer, mesh.triMesh, triID);
+        float2 texCoords = getTriangleAttribute<float2>(mesh.dataBuffer, mesh.triMesh.texCoords, indices, barycentrics);
+        texCoords.y = 1.0f - texCoords.y;
+        getTextueData(callablePayload, texCoords);
+    }
+}
 //-------------------------------------------------直接光采样--------------------------------------------------
 #ifdef NEE
 bool hitTest(float distance, float3 sampleDir, float3 hitPos, float3 hitNormal, int NEEShaderIndex, float time) {
@@ -240,8 +285,8 @@ float3 sphereRectangleSample(Quadrilateral quad, float3 hitPos, float u, float v
 }
 
 void initNEE(inout CallablePayload payload, SceneInfo sceneInfo, int NEEShaderIndex, float time) {
-    bool isDielectric = payload.material.type == uint(MaterialType::Deielectric) ||
-                        payload.material.type == uint(MaterialType::RoughDeielectric);
+    bool isDielectric = payload.material.type == uint(MaterialType::Dielectric) ||
+                        payload.material.type == uint(MaterialType::RoughDielectric);
 
     uint lightNum = min(sceneInfo.numLights, NEE_MAX_SAMPLE_NUM);
     for (int lightIndex = 0; lightIndex < lightNum; ++lightIndex) {

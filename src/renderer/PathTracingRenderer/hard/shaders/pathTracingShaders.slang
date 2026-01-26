@@ -47,11 +47,11 @@ void raygenMain()
     // Iterative reflection loop
     while (payload.bounceDepth < pushConst.maxDepth && (payload.bsdf_cosine.x + payload.bsdf_cosine.y + payload.bsdf_cosine.z > 0.0f))
     {
-#ifdef PathTracingMotionBlur
+    #ifdef PathTracingMotionBlur
         TraceMotionRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, pushConst.time, payload);
-#else
+    #else
         TraceRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, payload);
-#endif
+    #endif
         accumulatedRadiance += payload.radiance;
 
         float randomNumber = rand(payload.randomSeed);
@@ -76,54 +76,17 @@ void raygenMain()
 void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionAttributes attr)
 {
     float3 barycentrics = float3(1 - attr.barycentrics.x - attr.barycentrics.y, attr.barycentrics.x, attr.barycentrics.y);
-    uint   instanceID   = InstanceIndex();
-    uint   meshID       = InstanceID();
-    uint   triID        = PrimitiveIndex();
-
-    SceneInfo         sceneInfo = pushConst.sceneInfoAddress[0];
-    Instance          instance  = sceneInfo.instances[instanceID];
-    Mesh              mesh      = sceneInfo.meshes[instance.meshIndex];
-    BSDFMaterial material  = sceneInfo.materials[instance.materialIndex];
-
-    HitState hitState = getHitStateWithPositionFetch(barycentrics);
-
-    //int3 indices = getTriangleIndices(mesh.dataBuffer, mesh.triMesh, triID);
-    // float3 pos = getTriangleAttribute<float3>(mesh.dataBuffer, mesh.triMesh.positions, indices, barycentrics);
-    //float3 normal = getTriangleAttribute<float3>(mesh.dataBuffer, mesh.triMesh.normals, indices, barycentrics);
-    // hitState.pos = float3(mul(float4(pos, 1.0), ObjectToWorld4x3()));
-    // hitState.normal = normalize(mul(WorldToObject4x3(), normal).xyz);
-    // float3 tangent, bitangent;
-    // orthonormalBasis(hitState.normal, tangent, bitangent);
-    // hitState.TBN = float3x3(tangent, bitangent, hitState.normal);
-
-    float cosineON = dot(hitState.normal, -payload.rayDirection);
-    if (cosineON < 0) hitState.normal = -hitState.normal;
-
+    SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
     CallablePayload callablePayload;
-    callablePayload.material = material;
-    callablePayload.TBN = hitState.TBN;
-    callablePayload.randomSeed = payload.randomSeed;
-    callablePayload.bsdf = float3(0.0f);
-    callablePayload.pdf = 1.0f;
-    callablePayload.hitPos = hitState.pos;
-    callablePayload.hitNormal = hitState.normal;
-    callablePayload.outgoing = -payload.rayDirection;
-    callablePayload.isExt = payload.isExt;
+    initCallableShader(callablePayload, payload, barycentrics, sceneInfo);
 
-    if (material.materialMapIndex.x >= 0 || material.materialMapIndex.y >= 0 || material.materialMapIndex.z >= 0) {
-        int3 indices = getTriangleIndices(mesh.dataBuffer, mesh.triMesh, triID);
-        float2 texCoords = getTriangleAttribute<float2>(mesh.dataBuffer, mesh.triMesh.texCoords, indices, barycentrics);
-        texCoords.y = 1.0f - texCoords.y;
-        getTextueData(callablePayload, texCoords);
-    }
-
-    CallShader<CallablePayload>(uint(material.type), callablePayload);
+    CallShader<CallablePayload>(uint(callablePayload.material.type), callablePayload);
 
     payload.randomSeed = callablePayload.randomSeed;
-    payload.radiance = material.emissive * payload.bsdf_cosine / payload.pdf;
+    payload.radiance = callablePayload.material.emissive * payload.bsdf_cosine / payload.pdf;
     payload.rayDirection = callablePayload.incidence;
-    payload.rayOrigin = offsetRay(hitState.pos, hitState.normal); // hitState.pos + 0.001f * payload.rayDirection;
-    payload.bsdf_cosine *= callablePayload.bsdf * abs(dot(hitState.normal, payload.rayDirection));
+    payload.rayOrigin = offsetRay(callablePayload.hitPos, callablePayload.hitNormal); // hitState.pos + 0.001f * payload.rayDirection;
+    payload.bsdf_cosine *= callablePayload.bsdf * abs(dot(callablePayload.hitNormal, payload.rayDirection));
     payload.pdf *= callablePayload.pdf;
     payload.isExt = callablePayload.isExt;
 

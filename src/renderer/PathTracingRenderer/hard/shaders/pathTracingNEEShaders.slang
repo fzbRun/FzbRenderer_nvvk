@@ -68,11 +68,11 @@ void raygenMain()
     uint lightNum = min(sceneInfo.numLights, NEE_MAX_SAMPLE_NUM);
     while (payload.bounceDepth < pushConst.maxDepth && (payload.bsdf_cosine.x + payload.bsdf_cosine.y + payload.bsdf_cosine.z > 0.0f))
     {
-#ifdef PathTracingMotionBlur
+    #ifdef PathTracingMotionBlur
         TraceMotionRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, pushConst.time, payload);
-#else
+    #else
         TraceRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, payload);
-#endif
+    #endif
 
         if (payload.bounceDepth == MISS_DEPTH) {}
         else if (payload.bounceDepth > 1) { //except first boucne
@@ -126,6 +126,8 @@ void rayClosestHitMain(inout NEEHitPayload payload, in BuiltInTriangleIntersecti
 
     float cosineON = dot(hitState.normal, -payload.rayDirection);
     if (cosineON < 0) hitState.normal = -hitState.normal;
+    if (material.type != MaterialType::Dielectric && material.type != MaterialType::RoughDielectric)
+        material.emissive *= max(cosineON, 0.0f);
 
     CallablePayload callablePayload;
     callablePayload.material = material;

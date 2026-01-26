@@ -175,7 +175,7 @@ void Octree::render(VkCommandBuffer cmd) {
 void Octree::postProcess(VkCommandBuffer cmd) {
 	debug_wirefame(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-	debug_mergeResult(cmd);
+	//debug_mergeResult(cmd);
 };
 
 void Octree::createOctreeArray() {

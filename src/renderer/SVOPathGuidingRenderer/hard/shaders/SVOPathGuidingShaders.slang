@@ -47,25 +47,25 @@ void raygenMain()
     // Iterative reflection loop
     while (payload.bounceDepth < pushConst.maxDepth && (payload.bsdf_cosine.x + payload.bsdf_cosine.y + payload.bsdf_cosine.z > 0.0f))
     {
-#ifdef PathTracingMotionBlur
+    #ifdef PathTracingMotionBlur
         TraceMotionRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, pushConst.time, payload);
-#else
+    #else
         TraceRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, payload);
-#endif
+    #endif
         accumulatedRadiance += payload.radiance;
 
         float randomNumber = rand(payload.randomSeed);
         if (randomNumber >= RR) break;
         payload.pdf *= RR;
 
-#ifndef NDEBUG
+    #ifndef NDEBUG
         if (payload.bounceDepth == 1) {
             float3 hitPos = payload.rayOrigin + 0.01f * ray.Direction;
             float4 clipPos = mul(float4(hitPos, 1.0f), sceneInfo.viewProjMatrix);
             float depth = clipPos.z / clipPos.w; // any hitPoint must in our cameraView
             depthImage[int2(launchID)] = depth;
         } else if (payload.bounceDepth == MISS_DEPTH) depthImage[int2(launchID)] = 1.0f;
-#endif
+    #endif
 
         ray.Origin = payload.rayOrigin;
         ray.Direction = payload.rayDirection;
@@ -98,6 +98,8 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
 
     float cosineON = dot(hitState.normal, -payload.rayDirection);
     if (cosineON < 0) hitState.normal = -hitState.normal;
+    if (material.type != MaterialType::Dielectric && material.type != MaterialType::RoughDielectric)
+        material.emissive *= max(cosineON, 0.0f);
 
     CallablePayload callablePayload;
     callablePayload.material = material;
