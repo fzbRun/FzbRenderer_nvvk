@@ -28,12 +28,13 @@ struct OctreePushConstant {
 #endif
 };
 
+#define MAX_MATERIAL_TYPE_COUNT 5
 struct OctreeNodeData_G {
 	float4 meanNormal;
 	AABB aabb;
 	uint32_t indivisible;
 	uint32_t label;
-	uint32_t materialIndex;
+	uint32_t materialType;
 };
 struct OctreeNodeData_E {
 	float3 irradiance;

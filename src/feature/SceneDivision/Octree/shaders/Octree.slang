@@ -33,6 +33,7 @@ void computeMain_initOctreeArray(uint threadIndex: SV_DispatchThreadID) {
     nodeData_G.aabb = aabb;
     nodeData_G.indivisible = 1;
     nodeData_G.label = 0;
+    nodeData_G.materialType = voxelData.materialType_Count >> 27;
     OctreeArray_G[pushConst.maxDepth][threadIndex] = nodeData_G;
 
     OctreeNodeData_E nodeData_E;
@@ -173,6 +174,13 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
             surfaceAreaSum += WaveReadLaneAt(surfaceAreaSum, targetLane);
         }
 
+        uint blockMaterialTypeMask = nodeData_G.materialType;
+        for (int offset = 4; offset > 0; offset /= 2) {
+            uint targetLane = warpLane + offset;
+            blockMaterialTypeMask |= WaveReadLaneAt(blockMaterialTypeMask, targetLane);
+        }
+        uint materialTypeCount = countbits(blockMaterialTypeMask);
+        materialTypeCount = min(materialTypeCount, 1) - 1;
         //--------------------------------------------judge divisible--------------------------------------------
         bool indivisible = true;
         // calc mergeNode's entropy
@@ -180,7 +188,8 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
         if (warpLane == blockFirstWarpLane) {
             float normalEntropy = max(1.0f - length(mergeNormal), 0.0f);
             float surfaceAreaEntropy = max(1.0f - surfaceAreaSum / mergeAABBSurfaceArea, 0.0f);
-            entropy = (normalEntropy + surfaceAreaEntropy) * 0.5f;
+            float materialEntropy = materialTypeCount / MAX_MATERIAL_TYPE_COUNT;
+            entropy = (normalEntropy + surfaceAreaEntropy + materialEntropy) * 0.33333f;
             //if node is very tidy or very chaos, we assume it can be clustering
             indivisible = entropy < pushConst.entropyThreshold.x || entropy > pushConst.entropyThreshold.y;
         }
@@ -202,7 +211,20 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
 
     if (blockHasIrradianceNodeCount == 0) return;
     if (blockHasIrradianceNodeCount == 1) {
-        if (hasIrradiance) OctreeArray_E[pushConst.currentDepth - 1][blockIndex] = nodeData_E;
+        if (pushConst.currentDepth == pushConst.maxDepth) {     //for reduce noise, mean irradiance
+            AABB mergeAABB = nodeData_E.aabb;
+            atomicMergeAABB(mergeAABB);
+            if (hasIrradiance) {
+                nodeData_E.aabb.minimum.x = WaveReadLaneAt(mergeAABB.minimum.x, blockFirstWarpLane);
+                nodeData_E.aabb.minimum.y = WaveReadLaneAt(mergeAABB.minimum.y, blockFirstWarpLane);
+                nodeData_E.aabb.minimum.z = WaveReadLaneAt(mergeAABB.minimum.z, blockFirstWarpLane);
+                nodeData_E.aabb.maximum.x = WaveReadLaneAt(mergeAABB.maximum.x, blockFirstWarpLane);
+                nodeData_E.aabb.maximum.y = WaveReadLaneAt(mergeAABB.maximum.y, blockFirstWarpLane);
+                nodeData_E.aabb.maximum.z = WaveReadLaneAt(mergeAABB.maximum.z, blockFirstWarpLane);
+
+                OctreeArray_E[pushConst.currentDepth - 1][blockIndex] = nodeData_E;
+            }
+        }else if (hasIrradiance) OctreeArray_E[pushConst.currentDepth - 1][blockIndex] = nodeData_E;
         return;
     } else {
         //--------------------------------get max rradiance node------------------------------------------
@@ -234,7 +256,44 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
 
         // if only one node has irradiance, directly assign
         if (blockNotIgnoreCount == 1) {
-            if (hasIrradiance) OctreeArray_E[pushConst.currentDepth - 1][blockIndex] = nodeData_E;
+            float3 mergeIrradiance = nodeData_E.irradiance.xyz;
+            for (int offset = 4; offset > 0; offset /= 2) {
+                uint targetLane = warpLane + offset;
+                mergeIrradiance.x += WaveReadLaneAt(mergeIrradiance.x, targetLane);
+                mergeIrradiance.y += WaveReadLaneAt(mergeIrradiance.y, targetLane);
+                mergeIrradiance.z += WaveReadLaneAt(mergeIrradiance.z, targetLane);
+            }
+
+            if (pushConst.currentDepth == pushConst.maxDepth) { // for reduce noise, mean irradiance
+                float3 meanNormal = nodeData_E.meanNormal.xyz;
+                for (int offset = 4; offset > 0; offset /= 2) {
+                    uint targetLane = warpLane + offset;
+                    meanNormal.x += WaveReadLaneAt(meanNormal.x, targetLane);
+                    meanNormal.y += WaveReadLaneAt(meanNormal.y, targetLane);
+                    meanNormal.z += WaveReadLaneAt(meanNormal.z, targetLane);
+                }
+                meanNormal /= blockNotIgnoreCount;
+
+                AABB mergeAABB = nodeData_E.aabb;
+                atomicMergeAABB(mergeAABB);
+
+                if (warpLane == blockFirstWarpLane) {
+                    nodeData_E.meanNormal = float4(meanNormal, 1.0f);
+                    nodeData_E.aabb = mergeAABB;
+                    nodeData_E.irradiance = mergeIrradiance;
+
+                    OctreeArray_E[pushConst.currentDepth - 1][blockIndex] = nodeData_E;
+                }
+            } else {
+                mergeIrradiance.x = WaveReadLaneAt(mergeIrradiance.x, blockFirstWarpLane);
+                mergeIrradiance.y = WaveReadLaneAt(mergeIrradiance.y, blockFirstWarpLane);
+                mergeIrradiance.z = WaveReadLaneAt(mergeIrradiance.z, blockFirstWarpLane);
+
+                if (ignore == 0) {
+                    nodeData_E.notIgnoreRatio = irradianceValue / length(mergeIrradiance);
+                    OctreeArray_E[pushConst.currentDepth - 1][blockIndex] = nodeData_E;
+                }
+            }
             return;
         }
         //--------------------------------calc mergeNode data------------------------------------------
