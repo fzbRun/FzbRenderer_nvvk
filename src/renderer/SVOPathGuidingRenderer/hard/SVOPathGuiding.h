@@ -4,6 +4,7 @@
 #include "./shaderio.h"
 #include <feature/LightInject/LightInject.h>
 #include <feature/SceneDivision/Octree/Octree.h>
+#include <feature/SceneDivision/SparseVoxelOctree/SparseVoxelOctree.h>
 
 #ifndef FZBRENDERER_SVO_PATHGUIDING_H
 #define FZBRENDERER_SVO_PATHGUIDING_H
@@ -35,6 +36,7 @@ public:
 	std::shared_ptr<FzbRenderer::RasterVoxelization> rasterVoxelization;
 	std::shared_ptr<FzbRenderer::LightInject> lightInject;
 	std::shared_ptr<FzbRenderer::Octree> octree;
+	std::shared_ptr<FzbRenderer::SparseVoxelOctree> svo;
 };
 }
 

@@ -187,17 +187,16 @@ void Octree::createOctreeArray() {
 	nvvk::StagingUploader& stagingUploader = Application::stagingUploader;
 	nvvk::ResourceAllocator* allocator = stagingUploader.getResourceAllocator();
 
-	uint32_t bufferSize = sizeof(shaderio::VGBVoxelData);
 	for (int depth = 0; depth <= setting.OctreeDepth; ++depth) {
+		uint32_t bufferSize = sizeof(shaderio::OctreeNodeData_G) * std::pow(8, depth);
 		allocator->createBuffer(OctreeArray_G[depth], bufferSize,
 			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 		NVVK_DBG_NAME(OctreeArray_G[depth].buffer);
 
+		bufferSize = sizeof(shaderio::OctreeNodeData_E) * std::pow(8, depth);
 		allocator->createBuffer(OctreeArray_E[depth], bufferSize,
 			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 		NVVK_DBG_NAME(OctreeArray_E[depth].buffer);
-
-		bufferSize *= 8;
 	}
 
 	pushConstant.maxDepth = setting.OctreeDepth;

@@ -14,6 +14,8 @@ FzbRenderer::SVOPathGuidingRenderer::SVOPathGuidingRenderer(pugi::xml_node& rend
 		lightInject = std::make_shared<FzbRenderer::LightInject>(lightInjectNode);
 	if (pugi::xml_node octreeNode = rendererNode.child("Octree"))
 		octree = std::make_shared<FzbRenderer::Octree>(octreeNode);
+	if (pugi::xml_node svoNode = rendererNode.child("SVO"))
+		svo = std::make_shared<FzbRenderer::SparseVoxelOctree>(svoNode);
 }
 void FzbRenderer::SVOPathGuidingRenderer::init() {
 	ptContext.getRayTracingPropertiesAndFeature();
@@ -40,6 +42,11 @@ void FzbRenderer::SVOPathGuidingRenderer::init() {
 	};
 	octree->init(octreeSetting);
 
+	SVOSetting svoSetting{
+		.octree = octree
+	};
+	svo->init(svoSetting);
+
 	IF_DEBUG(Feature::createGBuffer(true, true, 1), Feature::createGBuffer(false, true, 1));
 	createDescriptorSetLayout();
 	Renderer::createPipelineLayout(sizeof(shaderio::SVOPathGuidingPushConstant));
@@ -52,6 +59,7 @@ void FzbRenderer::SVOPathGuidingRenderer::clean() {
 	rasterVoxelization->clean();
 	lightInject->clean();
 	octree->clean();
+	svo->clean();
 	PathTracingRenderer::clean();
 };
 void FzbRenderer::SVOPathGuidingRenderer::uiRender() {
@@ -92,6 +100,7 @@ void FzbRenderer::SVOPathGuidingRenderer::uiRender() {
 	rasterVoxelization->uiRender();
 	lightInject->uiRender();
 	octree->uiRender();
+	svo->uiRender();
 
 	if (UIModified) resetFrame();
 };
@@ -112,7 +121,7 @@ void FzbRenderer::SVOPathGuidingRenderer::resize(VkCommandBuffer cmd, const VkEx
 	IF_DEBUG(rasterVoxelization->resize(cmd, size, gBuffers, eImgTonemapped), rasterVoxelization->resize(cmd, size));
 	lightInject->resize(cmd, size);
 	IF_DEBUG(octree->resize(cmd, size, gBuffers, eImgTonemapped), octree->resize(cmd, size));
-	
+	svo->resize(cmd, size);
 };
 void FzbRenderer::SVOPathGuidingRenderer::preRender() {
 	Scene& scene = Application::sceneResource;
@@ -126,6 +135,7 @@ void FzbRenderer::SVOPathGuidingRenderer::preRender() {
 	rasterVoxelization->preRender();
 	lightInject->preRender();
 	octree->preRender();
+	svo->preRender();
 }
 void FzbRenderer::SVOPathGuidingRenderer::render(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
@@ -136,6 +146,8 @@ void FzbRenderer::SVOPathGuidingRenderer::render(VkCommandBuffer cmd) {
 	lightInject->render(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_NV, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	octree->render(cmd);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	svo->render(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_NV);
 
 	pathGuiding(cmd);
@@ -364,6 +376,7 @@ void FzbRenderer::SVOPathGuidingRenderer::updateDataPerFrame(VkCommandBuffer cmd
 	rasterVoxelization->updateDataPerFrame(cmd);
 	lightInject->updateDataPerFrame(cmd);
 	octree->updateDataPerFrame(cmd);
+	svo->updateDataPerFrame(cmd);
 }
 
 void FzbRenderer::SVOPathGuidingRenderer::pathGuiding(VkCommandBuffer cmd) {

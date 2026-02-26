@@ -360,7 +360,7 @@ void computeMain_createOctreeArray2(uint threadIndex: SV_DispatchThreadID, uint 
     uint32_t blockIndexInGroup = groupThreadIndex / 8;
     //----------------------------------------getOctree_G-------------------------------------------
     OctreeNodeData_G nodeData_G = OctreeArray_G[pushConst.currentDepth][threadIndex];
-    bool hasGeometry = nodeData_G.aabb.minimum.x > 10000.0f;
+    bool hasGeometry = nodeData_G.meanNormal.w > 0.0f;
     uint32_t warpHasGeometryMask = WaveActiveBallot(hasGeometry).x;
     uint32_t blockHasGeometryNodeCount = countbits(warpHasGeometryMask & blockNodeMask);
     // Geometry injection is not 100% effective. It may not be injected completely.
