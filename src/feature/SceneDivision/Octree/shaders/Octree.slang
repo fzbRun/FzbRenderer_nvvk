@@ -56,6 +56,7 @@ void computeMain_initOctreeArray(uint threadIndex: SV_DispatchThreadID) {
     nodeData_G.meanNormal = float4(0.0f);
     nodeData_G.aabb = aabb;
 
+    nodeData_E.irradiance = float3(0.0f);
     nodeData_E.meanNormal = float4(0.0f);
     nodeData_E.aabb = aabb;
     for (int i = pushConst.maxDepth - 1; i > 0; --i) {
@@ -211,19 +212,16 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
 
     if (blockHasIrradianceNodeCount == 0) return;
     if (blockHasIrradianceNodeCount == 1) {
-        if (pushConst.currentDepth == pushConst.maxDepth) {     //for reduce noise, mean irradiance
+        if (pushConst.currentDepth == pushConst.maxDepth) { // for reduce noise, mean irradiance
             AABB mergeAABB = nodeData_E.aabb;
             atomicMergeAABB(mergeAABB);
-            if (hasIrradiance) {
-                nodeData_E.aabb.minimum.x = WaveReadLaneAt(mergeAABB.minimum.x, blockFirstWarpLane);
-                nodeData_E.aabb.minimum.y = WaveReadLaneAt(mergeAABB.minimum.y, blockFirstWarpLane);
-                nodeData_E.aabb.minimum.z = WaveReadLaneAt(mergeAABB.minimum.z, blockFirstWarpLane);
-                nodeData_E.aabb.maximum.x = WaveReadLaneAt(mergeAABB.maximum.x, blockFirstWarpLane);
-                nodeData_E.aabb.maximum.y = WaveReadLaneAt(mergeAABB.maximum.y, blockFirstWarpLane);
-                nodeData_E.aabb.maximum.z = WaveReadLaneAt(mergeAABB.maximum.z, blockFirstWarpLane);
-
-                OctreeArray_E[pushConst.currentDepth - 1][blockIndex] = nodeData_E;
-            }
+            nodeData_E.aabb.minimum.x = WaveReadLaneAt(mergeAABB.minimum.x, blockFirstWarpLane);
+            nodeData_E.aabb.minimum.y = WaveReadLaneAt(mergeAABB.minimum.y, blockFirstWarpLane);
+            nodeData_E.aabb.minimum.z = WaveReadLaneAt(mergeAABB.minimum.z, blockFirstWarpLane);
+            nodeData_E.aabb.maximum.x = WaveReadLaneAt(mergeAABB.maximum.x, blockFirstWarpLane);
+            nodeData_E.aabb.maximum.y = WaveReadLaneAt(mergeAABB.maximum.y, blockFirstWarpLane);
+            nodeData_E.aabb.maximum.z = WaveReadLaneAt(mergeAABB.maximum.z, blockFirstWarpLane);
+            if (hasIrradiance) OctreeArray_E[pushConst.currentDepth - 1][blockIndex] = nodeData_E;
         }else if (hasIrradiance) OctreeArray_E[pushConst.currentDepth - 1][blockIndex] = nodeData_E;
         return;
     } else {
@@ -383,16 +381,17 @@ void computeMain_createOctreeArray2(uint threadIndex: SV_DispatchThreadID, uint 
     uint32_t warpHasIrradianceMask = WaveActiveBallot(hasIrradiance).x;
     uint32_t blockHasIrradianceNodeCount = countbits(warpHasIrradianceMask & blockNodeMask);
 
-    if (blockHasIrradianceNodeCount == 0) return;
-    if (blockHasIrradianceNodeCount == 1) {
+    if (blockHasIrradianceNodeCount == 0) {}
+    else if (blockHasIrradianceNodeCount == 1) {
         if (hasIrradiance) OctreeArray_E[pushConst.currentDepth - 1][blockIndex] = nodeData_E;
-        return;
     } else {
         AABB mergeAABB = nodeData_E.aabb;
         atomicMergeAABB(mergeAABB);
         if (warpLane == blockFirstWarpLane) {
             nodeData_E.indivisible = 0;
             nodeData_E.aabb = mergeAABB;
+            nodeData_E.irradiance = float3(1.0f, 0.0f, 0.0f);
+            nodeData_E.meanNormal = float4(0.0f, 0.0f, 0.0f, 1.0f);
             OctreeArray_E[pushConst.currentDepth - 1][blockIndex] = nodeData_E;
         }
     }
@@ -472,7 +471,7 @@ VSout_Wireframe vertexMain_Wireframe(uint vertexIndex: SV_VertexID, int instance
     output.renderTargetIndex = 0;
 
     bool isG = true;
-    if (instanceIndex > pushConst.showOctreeNodeTotalCount) {
+    if (instanceIndex >= pushConst.showOctreeNodeTotalCount) {
         instanceIndex -= pushConst.showOctreeNodeTotalCount;
         isG = false;
         output.renderTargetIndex += pushConst.maxDepth - pushConst.clusteringLevel;
@@ -489,11 +488,11 @@ VSout_Wireframe vertexMain_Wireframe(uint vertexIndex: SV_VertexID, int instance
     if (isG) {
         OctreeNodeData_G octreeData_G = OctreeArray_G[level][nodeIndex];
         nodeAABB = octreeData_G.aabb;
-        invisible = octreeData_G.indivisible;
+        invisible = octreeData_G.meanNormal.w > 0.0f && octreeData_G.indivisible == 1;
     } else {
         OctreeNodeData_E octreeData_E = OctreeArray_E[level][nodeIndex];
         nodeAABB = octreeData_E.aabb;
-        invisible = octreeData_E.indivisible;
+        invisible = (octreeData_E.irradiance.x + octreeData_E.irradiance.y + octreeData_E.irradiance.z > 0.0f) && octreeData_E.indivisible == 1;
     }
 
     if (nodeAABB.minimum.x > 10000.0f || invisible == 0) output.sv_position = float4(2.0, 2.0, 2.0, 1.0);

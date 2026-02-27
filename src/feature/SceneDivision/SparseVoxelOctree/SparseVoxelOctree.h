@@ -57,6 +57,10 @@ private:
 	nvvk::Buffer SVODivisibleNodeIndices_E;
 
 	nvvk::Buffer SVOThreadGroupInfos;
+
+#ifndef NDEBUG
+	void debugPrepare();
+#endif
 };
 }
 

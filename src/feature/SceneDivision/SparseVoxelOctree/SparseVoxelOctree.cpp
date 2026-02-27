@@ -11,6 +11,8 @@ SparseVoxelOctree::SparseVoxelOctree(pugi::xml_node& featureNode) {
 void SparseVoxelOctree::init(SVOSetting setting) {
 	this->setting = setting;
 
+
+
 	createSVOArray();
 	createDescriptorSetLayout();
 	createDescriptorSet();
@@ -42,7 +44,9 @@ void SparseVoxelOctree::uiRender() {
 
 }
 void SparseVoxelOctree::preRender() {
-
+#ifndef NDEBUG
+	pushConstant.frameIndex = Application::frameIndex;
+#endif
 }
 void SparseVoxelOctree::render(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd, "SVO_render");
@@ -288,6 +292,16 @@ void SparseVoxelOctree::initSVOArray(VkCommandBuffer cmd) {
 	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_initSVOArray);
 
+	VkPushConstantsInfo pushInfo = {
+		.sType = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
+		.layout = pipelineLayout,
+		.stageFlags = VK_SHADER_STAGE_ALL,
+		.offset = 0,
+		.size = sizeof(shaderio::SVOPushConstant),
+		.pValues = &pushConstant,
+	};
+	vkCmdPushConstants2(cmd, &pushInfo);
+
 	uint32_t totalVoxelCount = SVOInitialSize[pushConstant.maxDepth];
 	VkExtent2D groupSize = nvvk::getGroupCounts({ totalVoxelCount, 1 }, VkExtent2D{ 512, 1 });
 	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
@@ -325,3 +339,18 @@ void SparseVoxelOctree::createSVOArray(VkCommandBuffer cmd) {
 		}
 	}
 }
+
+#ifndef NDEBUG
+void SparseVoxelOctree::debugPrepare() {
+	Feature::createGBuffer(true, false, 2);
+
+	pushConstant.totalNodeCount = 0;
+	for (int i = 1; i < setting.octree->setting.OctreeDepth; ++i) pushConstant.totalNodeCount += SVOInitialSize[i];
+
+	nvutils::PrimitiveMesh primitive = FzbRenderer::MeshSet::createWireframe();
+	FzbRenderer::MeshSet mesh = FzbRenderer::MeshSet("Wireframe", primitive);
+	scene.addMeshSet(mesh);
+
+	scene.createSceneInfoBuffer();
+}
+#endif

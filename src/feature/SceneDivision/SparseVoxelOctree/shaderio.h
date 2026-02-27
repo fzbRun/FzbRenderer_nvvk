@@ -28,6 +28,11 @@ struct SVOPushConstant {
 	uint32_t maxDepth;;
 	uint32_t currentDepth;
 	uint32_t sizes[8];
+#ifndef NDEBUG
+	float frameIndex;
+	uint32_t totalNodeCount;
+	SceneInfo* sceneInfoAddress;
+#endif
 };
 
 typedef OctreeNodeData_G SVONodeData_G;
