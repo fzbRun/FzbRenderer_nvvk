@@ -32,5 +32,44 @@ enum DynamicBindingPoints_SVOPG {
 	eSVOTlas_SVOPG = 1,
 };
 
+//-------------------------------------------SVOWeight----------------------------------------
+#define WEIGHT_HITTEST_COUNT 8
+#define HITTEST_COUNT 32
+#define OUTGOING_COUNT 32
+struct SVOWeightPushConstant {
+	uint32_t frameIndex;
+	uint32_t sizes[8];
+	uint32_t maxDepth_G;
+	uint32_t maxDepth_E;
+	uint32_t currentDepth_E;
+	SceneInfo* sceneInfoAddress;
+};
+
+enum StaticBindingPoints_SVOWeight {
+	eSVO_G_SVOWeight = 0,
+	eSVO_E_SVOWeight,
+	eSVOLayerInfos_G_SVOWeight,
+	eSVOLayerInfos_E_SVOWeight,
+	eDispatchIndirect_SVOWeight,
+	eSVO_IndivisibleNodeInfos_G_SVOWeight,
+	eHitTestResult_SVOWeight,
+	eSVOWeightSampleCounts_SVOWeight,
+	eSVOWeights_SVOWeight
+};
+struct DispatchIndirectCommand {
+	uint32_t    x;
+	uint32_t    y;
+	uint32_t    z;
+};
+struct SVOIndivisibleNodeInfo {
+	uint32_t layerIndex;
+	uint32_t nodeIndex;
+};
+struct HitTestResult {
+	float V_Cosine;
+	uint32_t layerIndex;
+	uint32_t nodeIndex;
+};
+
 NAMESPACE_SHADERIO_END()
 #endif

@@ -39,8 +39,9 @@ public:
 
 	SVOSetting setting;
 	shaderio::SVOPushConstant pushConstant{};
+	VkPushConstantsInfo pushInfo;
 
-	uint32_t SVOInitialSize[8] = { 1, 8, 64, 512, 1024, 1024, 2048, 2048 };
+	uint32_t SVOInitialSize[8] = { 1, SVONodeCount_E_Layer1, SVONodeCount_E_Layer2, SVONodeCount_E_Layer3, 1024, 1024, 2048, 2048 };
 	std::vector<nvvk::Buffer> SVOArray_G;
 	std::vector<nvvk::Buffer> SVOArray_E;
 	nvvk::Buffer SVOIndivisibleNodes_G;
@@ -59,7 +60,18 @@ private:
 	nvvk::Buffer SVOThreadGroupInfos;
 
 #ifndef NDEBUG
+public:
 	void debugPrepare();
+	void resize(VkCommandBuffer cmd, const VkExtent2D& size, nvvk::GBuffer& gBuffers_other, uint32_t baseMapIndex);
+	void debug_wirefame(VkCommandBuffer cmd);
+
+	VkImageView depthImageView;
+
+	VkShaderEXT vertexShader_Wireframe{};
+	VkShaderEXT fragmentShader_Wireframe{};
+
+	bool showWireframeMap_G = false;
+	bool showWireframeMap_E = false;
 #endif
 };
 }

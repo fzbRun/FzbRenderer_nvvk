@@ -13,7 +13,7 @@
 [[vk::binding(BindingPoints_SVO::eSVOThreadGroupInfos_SVO)]] RWStructuredBuffer<SVOThreadGroupInfo> SVOThreadGroupInfos;
 
 //----------------------------------------------initSVOArray--------------------------------------------
-[numthreads(512, 1, 1)]
+[numthreads(THREADGROUP_SIZE, 1, 1)]
 [shader("compute")]
 void computeMain_initSVOArray(uint threadIndex: SV_DispatchThreadID) {
     uint maxNodeCount = pushConst.sizes[pushConst.maxDepth];
@@ -54,7 +54,7 @@ void computeMain_initSVOArray(uint threadIndex: SV_DispatchThreadID) {
     nodeData_G.aabb.maximum.z = -3.402823466e+38F;
     nodeData_G.indivisible = 1;
     nodeData_G.label = 0;
-    nodeData_G.materialType = 0;
+    nodeData_G.materialIndex = 0;
 
     SVONodeData_E nodeData_E;
     nodeData_E.irradiance = float3(0.0f);
@@ -99,7 +99,7 @@ void computeMain_createSVOArray(uint threadIndex: SV_DispatchThreadID, uint thre
         if (threadIndex == 0) {
             SVOLayerInfos_G[pushConst.currentDepth].divsibleNodeCount = 0;
             SVOLayerInfos_E[pushConst.currentDepth].divsibleNodeCount = 0;
-            printf("Error: totalNodeCount exceeds the maximum node count of the current layer. totalNodeCount: %u,        maxNodeCount: %u\n", totalNodeCount, pushConst.sizes[pushConst.currentDepth]);
+            printf("Error: totalNodeCount exceeds the maximum node count of the current layer. totalNodeCount: %u,         maxNodeCount: %u\n", totalNodeCount, pushConst.sizes[pushConst.currentDepth]);
         }
         return;
     }
@@ -186,7 +186,7 @@ void computeMain_createSVOArray(uint threadIndex: SV_DispatchThreadID, uint thre
         if (threadIndex == 0) {
             SVOLayerInfos_G[pushConst.currentDepth].divsibleNodeCount = 0;
             SVOLayerInfos_E[pushConst.currentDepth].divsibleNodeCount = 0;
-            printf("Error: totalNodeCount exceeds the maximum node count of the current layer. totalNodeCount: %u,       maxNodeCount: %u\n", totalNodeCount, pushConst.sizes[pushConst.currentDepth]);
+            printf("Error: totalNodeCount exceeds the maximum node count of the current layer. totalNodeCount: %u,        maxNodeCount: %u\n", totalNodeCount, pushConst.sizes[pushConst.currentDepth]);
         }
         return;
     }
@@ -349,8 +349,8 @@ void computeMain_offsetLabelMultiBlock(uint threadIndex: SV_DispatchThreadID, ui
     }
 }
 
-//---------------------------------------------------debug-----------------------------------------
 #ifndef NDEBUG
+//----------------------------------------debugDrawWireframe----------------------------------------
 static const float4 Colors[8] = {
     float4(0.0f, 0.0f, 0.0f, 1.0f),
     float4(1.0f, 1.0f, 1.0f, 1.0f),
@@ -365,11 +365,13 @@ static const float4 Colors[8] = {
 struct VSout_Wireframe {
     float4 sv_position : SV_Position;
     float4 color;
+    bool isG;
 };
 struct PSout_Wireframe
 {
     float4 color0 : SV_Target0;
-}
+    float4 color1 : SV_Target1;
+};
 [shader("vertex")]
 VSout_Wireframe vertexMain_Wireframe(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID) {
     VSout_Wireframe output;
@@ -381,8 +383,10 @@ VSout_Wireframe vertexMain_Wireframe(uint vertexIndex: SV_VertexID, int instance
         nodeIndex -= pushConst.totalNodeCount;
         isG = false;
     }
+    output.isG = isG;
+
     for (; layerIndex <= pushConst.maxDepth; ++layerIndex) {
-        uint layerNodeCount = SVOLayerInfos_G[layerIndex - 1].divsibleNodeCount * 8;
+        uint layerNodeCount = pushConst.sizes[layerIndex];
         if (nodeIndex >= layerNodeCount) nodeIndex -= layerNodeCount;
         else break;
     }
@@ -414,11 +418,17 @@ VSout_Wireframe vertexMain_Wireframe(uint vertexIndex: SV_VertexID, int instance
 
     return output;
 }
-
 [shader("pixel")]
 PSout_Wireframe fragmentMain_Wireframe(VSout_Wireframe input) {
     PSout_Wireframe output;
-    output.color0 = input.color;
+    if (input.isG) {
+        output.color0 = input.color;
+        output.color1 = float4(0.0f);
+    }
+    else {
+        output.color0 = float4(0.0f);
+        output.color1 = input.color;
+    }
     return output;
 }
 #endif

@@ -62,10 +62,11 @@ void raygenMain()
         ray.Direction = payload.rayDirection;
     }
 
+    if (any(isnan(accumulatedRadiance)) || any(isinf(accumulatedRadiance))) return;
     // When the maximum frame rate is reached, the original image will decay by ((maxframe-1)/maxframe)^k < 1, and the final image will turn black
-    if (pushConst.frameIndex > 0)
+    if (pushConst.frameIndex > 1)
     {
-        float a = 1.0f / float(pushConst.frameIndex + 1);
+        float a = 1.0f / float(pushConst.frameIndex);
         float3 old_color = outImage[int2(launchID)].xyz;
         outImage[int2(launchID)] = float4(lerp(old_color, accumulatedRadiance, a), 1.0f);
     }
@@ -117,7 +118,7 @@ void diffuseMaterialMain(inout CallablePayload payload) {
 
 [shader("callable")]
 void conductorMaterialMain(inout CallablePayload payload) {
-    payload.bsdf = 1.0f;
+    payload.bsdf = payload.material.albedo;
     payload.pdf = 1.0f;
     payload.incidence = reflect(-payload.outgoing, payload.hitNormal);
 }

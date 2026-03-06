@@ -5,6 +5,8 @@
 #ifndef FZBRENDERER_OCTREE_SHADERIO_H
 #define FZBRENDERER_OCTREE_SHADERIO_H
 
+#define MAX_OCTREE_DEPTH 8
+
 NAMESPACE_SHADERIO_BEGIN()
 enum BindingPoints_Octree {
 	eVGB_Octree = 0,
@@ -34,7 +36,7 @@ struct OctreeNodeData_G {
 	AABB aabb;
 	uint32_t indivisible;
 	uint32_t label;
-	uint32_t materialType;
+	uint32_t materialIndex;
 };
 struct OctreeNodeData_E {
 	float3 irradiance;

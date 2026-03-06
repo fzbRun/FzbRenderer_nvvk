@@ -33,7 +33,7 @@ void computeMain_initOctreeArray(uint threadIndex: SV_DispatchThreadID) {
     nodeData_G.aabb = aabb;
     nodeData_G.indivisible = 1;
     nodeData_G.label = 0;
-    nodeData_G.materialType = voxelData.materialType_Count >> 27;
+    nodeData_G.materialIndex = voxelData.materialIndex_Count >> 26;
     OctreeArray_G[pushConst.maxDepth][threadIndex] = nodeData_G;
 
     OctreeNodeData_E nodeData_E;
@@ -175,13 +175,28 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
             surfaceAreaSum += WaveReadLaneAt(surfaceAreaSum, targetLane);
         }
 
-        uint blockMaterialTypeMask = nodeData_G.materialType;
+        uint blockMaterialTypeMask = 1u << nodeData_G.materialIndex;
         for (int offset = 4; offset > 0; offset /= 2) {
             uint targetLane = warpLane + offset;
             blockMaterialTypeMask |= WaveReadLaneAt(blockMaterialTypeMask, targetLane);
         }
         uint materialTypeCount = countbits(blockMaterialTypeMask);
         materialTypeCount = min(materialTypeCount, 1) - 1;
+
+        uint blockMaterialType = nodeData_G.materialIndex;
+        uint blockMaterialTypeCount = 1;
+        for (int offset = 0; offset < 8; ++offset) {
+            uint targetLane = blockFirstWarpLane + offset;
+            blockMaterialTypeCount += (WaveReadLaneAt(blockMaterialType, targetLane) != blockMaterialType) ? 1 : 0;
+        }
+        for (int offset = 4; offset > 0; offset /= 2) {
+            uint targetLane = warpLane + offset;
+            uint other_blockMaterialTypeCount = WaveReadLaneAt(blockMaterialTypeCount, targetLane);
+            if (other_blockMaterialTypeCount > blockMaterialTypeCount) {
+                blockMaterialTypeCount = other_blockMaterialTypeCount;
+                blockMaterialType = WaveReadLaneAt(blockMaterialType, targetLane);
+            }
+        }
         //--------------------------------------------judge divisible--------------------------------------------
         bool indivisible = true;
         // calc mergeNode's entropy
@@ -200,6 +215,7 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
             nodeData_G.label = 0;
             nodeData_G.aabb = mergeAABB;
             nodeData_G.meanNormal = float4(mergeNormal, 1.0f);
+            nodeData_G.materialIndex = blockMaterialType;
             OctreeArray_G[pushConst.currentDepth - 1][blockIndex] = nodeData_G;
         }
     }
@@ -372,6 +388,7 @@ void computeMain_createOctreeArray2(uint threadIndex: SV_DispatchThreadID, uint 
         if (warpLane == blockFirstWarpLane) {
             nodeData_G.indivisible = 0;
             nodeData_G.aabb = mergeAABB;
+            nodeData_G.meanNormal = float4(0.0f, 0.0f, 0.0f, 1.0f);
             OctreeArray_G[pushConst.currentDepth - 1][blockIndex] = nodeData_G;
         }
     }

@@ -4,6 +4,8 @@
 using namespace FzbRenderer;
 
 void PathTracingContext::setContextInfo() {
+	accelFeature.accelerationStructure = VK_TRUE;
+	//accelFeature.accelerationStructureIndirectBuild = VK_TRUE;  nvidia√≤À∆≤ª÷ß≥÷∞°
 	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, &accelFeature });
 	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, &rtPipelineFeature });
 	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME });

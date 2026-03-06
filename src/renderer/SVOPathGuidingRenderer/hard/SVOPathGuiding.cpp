@@ -121,26 +121,31 @@ void FzbRenderer::SVOPathGuidingRenderer::resize(VkCommandBuffer cmd, const VkEx
 	IF_DEBUG(rasterVoxelization->resize(cmd, size, gBuffers, eImgTonemapped), rasterVoxelization->resize(cmd, size));
 	lightInject->resize(cmd, size);
 	IF_DEBUG(octree->resize(cmd, size, gBuffers, eImgTonemapped), octree->resize(cmd, size));
-	svo->resize(cmd, size);
+	IF_DEBUG(svo->resize(cmd, size, gBuffers, eImgTonemapped), svo->resize(cmd, size));
 };
 void FzbRenderer::SVOPathGuidingRenderer::preRender() {
+	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
+
 	Scene& scene = Application::sceneResource;
 	if (scene.cameraChange) resetFrame();	//如果相机参数变化，则从新累计帧
 	if (scene.periodInstanceCount + scene.randomInstanceCount > 0 || scene.hasDynamicLight) maxFrames = 1;
 	pushConstant.frameIndex = std::min(Application::frameIndex, maxFrames - 1);
 	pushConstant.time = Application::sceneResource.time;
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
-	asManager.updateToplevelAS();
+	asManager.updateToplevelAS(cmd);
 
-	rasterVoxelization->preRender();
+	rasterVoxelization->preRender(cmd);
 	lightInject->preRender();
 	octree->preRender();
 	svo->preRender();
+
+	Application::app->submitAndWaitTempCmdBuffer(cmd);
 }
 void FzbRenderer::SVOPathGuidingRenderer::render(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
 
 	updateDataPerFrame(cmd);
+
 	rasterVoxelization->render(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR);
 	lightInject->render(cmd);
@@ -155,13 +160,16 @@ void FzbRenderer::SVOPathGuidingRenderer::render(VkCommandBuffer cmd) {
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	Renderer::postProcess(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT);
+	//nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
 
 	rasterVoxelization->postProcess(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT);
 	lightInject->postProcess(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_GEOMETRY_SHADER_BIT);
 	octree->postProcess(cmd);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT);
+	svo->postProcess(cmd);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
 };
 
 void FzbRenderer::SVOPathGuidingRenderer::createDescriptorSetLayout() {
@@ -372,12 +380,7 @@ void FzbRenderer::SVOPathGuidingRenderer::compileAndCreateShaders() {
 	lightInject->compileAndCreateShaders();
 	octree->compileAndCreateShaders();
 };
-void FzbRenderer::SVOPathGuidingRenderer::updateDataPerFrame(VkCommandBuffer cmd) {
-	rasterVoxelization->updateDataPerFrame(cmd);
-	lightInject->updateDataPerFrame(cmd);
-	octree->updateDataPerFrame(cmd);
-	svo->updateDataPerFrame(cmd);
-}
+void FzbRenderer::SVOPathGuidingRenderer::updateDataPerFrame(VkCommandBuffer cmd) {}
 
 void FzbRenderer::SVOPathGuidingRenderer::pathGuiding(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);

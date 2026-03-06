@@ -42,7 +42,7 @@ public:
 	void resize(VkCommandBuffer cmd, const VkExtent2D& size, nvvk::GBuffer& gBuffers_other, uint32_t baseMapIndex);
 #endif
 	void resize(VkCommandBuffer cmd, const VkExtent2D& size) override;
-	void preRender() override;
+	void preRender(VkCommandBuffer cmd);
 	void render(VkCommandBuffer cmd) override;
 	void postProcess(VkCommandBuffer cmd);
 

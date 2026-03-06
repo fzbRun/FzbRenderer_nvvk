@@ -7,8 +7,12 @@
 #define FZBRENDERER_SVO_SHADERIO_H
 
 #define THREADGROUP_SIZE 512u
+#define THREADGROUP_SIZE2 256u
 #define WARP_SIZE 32u
 #define MAX_WARP_COUNT (THREADGROUP_SIZE / WARP_SIZE)
+#define SVONodeCount_E_Layer1 8
+#define SVONodeCount_E_Layer2 64
+#define SVONodeCount_E_Layer3 512
 
 NAMESPACE_SHADERIO_BEGIN()
 

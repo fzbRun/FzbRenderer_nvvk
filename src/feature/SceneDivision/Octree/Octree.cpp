@@ -143,6 +143,8 @@ void Octree::preRender() {
 void Octree::render(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd, "Octree_render");
 
+	updateDataPerFrame(cmd);
+
 	bindDescriptorSetsInfo = {
 		.sType = VK_STRUCTURE_TYPE_BIND_DESCRIPTOR_SETS_INFO,
 		.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
@@ -173,9 +175,11 @@ void Octree::render(VkCommandBuffer cmd) {
 
 }
 void Octree::postProcess(VkCommandBuffer cmd) {
+#ifndef NDEBUG
 	debug_wirefame(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	//debug_mergeResult(cmd);
+#endif
 };
 
 void Octree::createOctreeArray() {
@@ -354,13 +358,13 @@ void Octree::compileAndCreateShaders() {
 #endif
 }
 void Octree::updateDataPerFrame(VkCommandBuffer cmd) {
-	scene.sceneInfo = Application::sceneResource.sceneInfo;
-
-	nvvk::cmdBufferMemoryBarrier(cmd, { scene.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-								   VK_PIPELINE_STAGE_2_TRANSFER_BIT });
-	vkCmdUpdateBuffer(cmd, scene.bSceneInfo.buffer, 0, sizeof(shaderio::SceneInfo), &scene.sceneInfo);
-	nvvk::cmdBufferMemoryBarrier(cmd, { scene.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-									   VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT });
+	//scene.sceneInfo = Application::sceneResource.sceneInfo;
+	//
+	//nvvk::cmdBufferMemoryBarrier(cmd, { scene.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+	//							   VK_PIPELINE_STAGE_2_TRANSFER_BIT });
+	//vkCmdUpdateBuffer(cmd, scene.bSceneInfo.buffer, 0, sizeof(shaderio::SceneInfo), &scene.sceneInfo);
+	//nvvk::cmdBufferMemoryBarrier(cmd, { scene.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+	//								   VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT });
 }
 
 void Octree::initOctreeArray(VkCommandBuffer cmd) {
@@ -496,7 +500,7 @@ void Octree::debug_wirefame(VkCommandBuffer cmd) {
 	const shaderio::Mesh& mesh = scene.meshes[wireframeMeshIndex];
 	const shaderio::TriangleMesh& triMesh = mesh.triMesh;
 
-	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)scene.bSceneInfo.address;
+	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 	vkCmdPushConstants2(cmd, &pushInfo);
 
 	uint32_t bufferIndex = scene.getMeshBufferIndex(wireframeMeshIndex);

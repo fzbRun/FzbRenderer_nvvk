@@ -123,6 +123,8 @@ void FzbRenderer::LightInject::preRender() {
 void FzbRenderer::LightInject::render(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
 
+	updateDataPerFrame(cmd);
+
 	{
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipeline);
 
@@ -404,12 +406,12 @@ void FzbRenderer::LightInject::compileAndCreateShaders() {
 #endif
 }
 void FzbRenderer::LightInject::updateDataPerFrame(VkCommandBuffer cmd) {
-	scene.sceneInfo = Application::sceneResource.sceneInfo;
-	nvvk::cmdBufferMemoryBarrier(cmd, { scene.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-								   VK_PIPELINE_STAGE_2_TRANSFER_BIT });
-	vkCmdUpdateBuffer(cmd, scene.bSceneInfo.buffer, 0, sizeof(shaderio::SceneInfo), &scene.sceneInfo);
-	nvvk::cmdBufferMemoryBarrier(cmd, { scene.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-									   VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT });
+	//scene.sceneInfo = Application::sceneResource.sceneInfo;
+	//nvvk::cmdBufferMemoryBarrier(cmd, { scene.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+	//							   VK_PIPELINE_STAGE_2_TRANSFER_BIT });
+	//vkCmdUpdateBuffer(cmd, scene.bSceneInfo.buffer, 0, sizeof(shaderio::SceneInfo), &scene.sceneInfo);
+	//nvvk::cmdBufferMemoryBarrier(cmd, { scene.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+	//								   VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT });
 }
 
 #ifndef NDEBUG
@@ -454,7 +456,7 @@ void FzbRenderer::LightInject::debug_Cube(VkCommandBuffer cmd) {
 		.size = sizeof(shaderio::LightInjectPushConstant),
 		.pValues = &pushConstant,
 	};
-	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)scene.bSceneInfo.address;
+	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 	vkCmdPushConstants2(cmd, &pushInfo);
 
 	VkVertexInputBindingDescription2EXT bindingDescription{};

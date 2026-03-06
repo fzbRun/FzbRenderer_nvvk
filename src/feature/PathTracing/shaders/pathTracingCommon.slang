@@ -1,4 +1,5 @@
 #include "common/Shader/nvvk/Slang/pbr.h.slang"
+#include "common/Shader/Slang/commonFunction.slang"
 #include "nvshaders/constants.h.slang"
 #include "nvshaders/random.h.slang"
 #include "nvshaders/ray_utils.h.slang"
@@ -11,7 +12,7 @@
 
 #define MISS_DEPTH 1000
 #define MISS_DISTANCE 10000000.0f
-#define NEE_MAX_SAMPLE_NUM 2
+#define NEE_MAX_SAMPLE_NUM 1
 
 // Raytracing Payload
 struct HitPayload {
@@ -300,7 +301,7 @@ void initNEE(inout CallablePayload payload, SceneInfo sceneInfo, int NEEShaderIn
 
             if (!hitTest(distance, sampleDir, payload.hitPos, payload.hitNormal, NEEShaderIndex, time)) continue; // 遮挡
 
-            payload.radiance_nee[lightIndex] = flux / (4.0f * M_PI * distance * distance);
+            payload.radiance_nee[lightIndex] = flux;    // / (4.0f * M_PI * distance * distance);
         }
         else if (light.type == uint(LightType::Spot)) {}
         else if (light.type == uint(LightType::Directional)) {}
@@ -324,7 +325,7 @@ void initNEE(inout CallablePayload payload, SceneInfo sceneInfo, int NEEShaderIn
                 if (!hitTest(distance, sampleDir, payload.hitPos, payload.hitNormal, NEEShaderIndex, time)) continue; // 遮挡
 
                 // L = dPhi / (dA * cosTheta * domega) * (bsdf * cosTheta2) / pdf
-                payload.radiance_nee[lightIndex] = flux / (M_TWO_PI * length(light.edge1) * length(light.edge2) * pdf);
+                payload.radiance_nee[lightIndex] = flux / pdf;  //flux / (M_TWO_PI * length(light.edge1) * length(light.edge2) * pdf);
                 payload.radiancePdf_nee[lightIndex] = pdf;
             } else {
                 float3 samplePos = light.pos + light.edge1 * randomNumber1 + light.edge2 * randomNumber2;
@@ -339,7 +340,7 @@ void initNEE(inout CallablePayload payload, SceneInfo sceneInfo, int NEEShaderIn
                 // L = dPhi / (dA * cosTheta1 * domega) * (cosTheta1 / distance * distance) * (bsdf * cosTheta2) / pdf
                 // 分母有一个cos和面积，雅可比有一个cos，pdf有一个面积，抵消了
                 distance = max(distance, 0.001f);
-                payload.radiance_nee[lightIndex] = flux / (M_TWO_PI * distance * distance);
+                payload.radiance_nee[lightIndex] = flux * dot(normalize(sampleDir), light.direction) / (distance * distance * length(light.edge1) * length(light.edge2)); //flux / (M_TWO_PI * distance * distance);
                 payload.radiancePdf_nee[lightIndex] = 1.0f / (sqrt(dot(light.edge1, light.edge1) * dot(light.edge2, light.edge2))); // 1 / area
             }
         }
@@ -487,7 +488,7 @@ void PopulateCallablePayload_DiffuseMaterial(inout CallablePayload payload) {
     payload.incidence = normalize(payload.incidence);
 
     payload.pdf = M_1_PI * dot(payload.incidence, payload.hitNormal);
-    payload.bsdf = payload.material.albedo * payload.pdf;
+    payload.bsdf = payload.material.albedo * M_1_PI;
 }
 
 float pdf_DielectricMaterial(float cosineOH, float3 F0, inout uint randomSeed, float eta) {
@@ -518,17 +519,20 @@ void PopulateCallablePayload_DielectricMaterial(inout CallablePayload payload, i
     if (totalInternalReflection) {
         payload.incidence = reflect(-payload.outgoing, payload.hitNormal);
         payload.pdf = 1;
+        payload.bsdf = F;
     } else {
         float randomNumber = rand(payload.randomSeed);
         if (randomNumber < F_oneChanel) {
             payload.incidence = reflect(-payload.outgoing, payload.hitNormal);
             payload.pdf = F_oneChanel;
+            payload.bsdf = F;
         }
         else {
             // refract(payload.outgoing, payload.hitNormal, eta, cosineOH, totalInternalReflection);
             payload.incidence = normalize((-payload.outgoing * eta + payload.hitNormal * (eta * cosineOH - sqrt(1.0f - refraction))));
             payload.pdf = 1.0f - F_oneChanel;
-            if (!totalInternalReflection) payload.isExt = !payload.isExt;
+            payload.bsdf = float3(1.0f) - F;
+            payload.isExt = !payload.isExt;
         }
     }
 }
@@ -545,14 +549,30 @@ void PopulateCallablePayload_RoughConductorMaterial(inout CallablePayload payloa
 
     outgoing_tangentSpace = mul(payload.TBN, payload.outgoing);
     float3 h_tangentSpace = hvd_ggx_sample_vndf(outgoing_tangentSpace, float2(roughness), float2(randomNumber1, randomNumber2));
+    if (h_tangentSpace.z == 0.0f) {
+        payload.bsdf = float3(0.0f);
+        payload.pdf = 1.0f;
+        return;
+    }
+    float cosineOH = dot(outgoing_tangentSpace, h_tangentSpace);
+    if (cosineOH <= 0.0f) {
+        payload.bsdf = float3(0.0f);
+        payload.pdf = 1.0f;
+        return;
+    }
 
     float3 incidence_tangentSpace = reflect(-outgoing_tangentSpace, h_tangentSpace);
+    if (incidence_tangentSpace.z <= 0.0f) {
+        payload.bsdf = float3(0.0f);
+        payload.pdf = 1.0f;
+        return;
+    }
     // If h is particularly biased towards n, the incident vector may appear in the negative normal hemisphere
     payload.incidence = mul(incidence_tangentSpace, payload.TBN);
 
     float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h_tangentSpace); // h需要在切线空间中
     float D = D_costhetaNH / h_tangentSpace.z;                                   // max(h.z, 1e-6f);
-    float cosineOH = max(dot(outgoing_tangentSpace, h_tangentSpace), 0.001f);
+
     payload.pdf = max(D_costhetaNH / (4.0f * cosineOH), 0.001f);
 
     float G1_outgoing, G1_incidence;
@@ -563,6 +583,11 @@ void PopulateCallablePayload_RoughConductorMaterial(inout CallablePayload payloa
         incidence_tangentSpace,
                                      float2(roughness)
     );
+    if (G2 <= 0.0f) {
+        payload.bsdf = float3(0.0f);
+        payload.pdf = 1.0f;
+        return;
+    }
     float3 F = schlickFresnel(payload.material.albedo, float3(1.0F), cosineOH);
     payload.bsdf = (D * G2 * F) / (4.0f * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 0.001f);
 }

@@ -1,26 +1,7 @@
 #define NEE
 #include "feature/PathTracing/shaders/pathTracingCommon.slang"
 
-[[vk::push_constant]]                           ConstantBuffer<PathTracingPushConstant, ScalarDataLayout> pushConst;
-
-struct NEEHitPayload {
-    uint randomSeed;
-
-    float3 radiance_emissive;
-    float3 radiance_directLightSample;
-    float pdf_bsdfSample;
-
-    float3 bsdf_cosine;
-    float pdf;
-    float weight;
-
-    bool isExt;
-
-    float3 rayOrigin;
-    float3 rayDirection;
-
-    uint bounceDepth;
-}
+[[vk::push_constant]] ConstantBuffer<PathTracingPushConstant, ScalarDataLayout> pushConst;
 
 //-------------------------------------------------主Shader-------------------------------------------------
 [shader("raygeneration")]
@@ -48,23 +29,19 @@ void raygenMain()
     ray.TMax = INFINITE;
 
     // Initial state
-    NEEHitPayload payload;
+    HitPayload payload;
     payload.randomSeed = seed;
-    payload.radiance_emissive = float3(0, 0, 0);
-    payload.radiance_directLightSample = float3(0, 0, 0);
-    payload.pdf_bsdfSample  = 1.0f;
+    payload.radiance = float3(0, 0, 0);
     payload.bsdf_cosine = float3(1.0f);
     payload.pdf = 1.0f;
-    payload.weight = 1.0f;
-    payload.isExt = true;
+    payload.bounceDepth = 0;
     payload.rayOrigin = ray.Origin;
     payload.rayDirection = ray.Direction;
-    payload.bounceDepth = 0;
+    payload.isExt = true;
 
     float3 accumulatedRadiance = float3(0, 0, 0);
     float RR = 0.8f;
 
-    float weight_bsdf = 1.0f;
     uint lightNum = min(sceneInfo.numLights, NEE_MAX_SAMPLE_NUM);
     while (payload.bounceDepth < pushConst.maxDepth && (payload.bsdf_cosine.x + payload.bsdf_cosine.y + payload.bsdf_cosine.z > 0.0f))
     {
@@ -74,31 +51,16 @@ void raygenMain()
         TraceRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, payload);
     #endif
 
-        ray.Origin = payload.rayOrigin;
-        ray.Direction = payload.rayDirection;
-
-        if (payload.bounceDepth == MISS_DEPTH) {}
-        else if (payload.bounceDepth > 1) { // except first boucne
-            float pdf_directLightSample = 0.0f;
-            for (int i = 0; i < lightNum; ++i) {
-                Light light = sceneInfo.lights[i];
-                if (!isPosInDirectionLight(payload.rayOrigin, light)) continue;
-                pdf_directLightSample = getPdf_directionLightSample(ray.Origin, ray.Direction, light);
-                break; // bsdf sample only in one direct light, other light's pdf is 0
-            }
-            weight_bsdf = payload.pdf_bsdfSample / (payload.pdf_bsdfSample + pdf_directLightSample + 0.0001f);
-            payload.weight *= weight_bsdf;
-        }
-
-        accumulatedRadiance += payload.radiance_emissive + payload.radiance_directLightSample;
+        accumulatedRadiance += payload.radiance;
 
         float randomNumber = rand(payload.randomSeed);
         if (randomNumber >= RR) break;
         payload.pdf *= RR;
-    }
-    accumulatedRadiance = accumulatedRadiance - payload.radiance_directLightSample;
 
-    if (any(isnan(accumulatedRadiance)) || any(isinf(accumulatedRadiance))) return;
+        ray.Origin = payload.rayOrigin;
+        ray.Direction = payload.rayDirection;
+    }
+
     // When the maximum frame rate is reached, the original image will decay by ((maxframe-1)/maxframe)^k < 1, and the final image will turn black
     if (pushConst.frameIndex > 0)
     {
@@ -110,7 +72,7 @@ void raygenMain()
 }
 
 [shader("closesthit")]
-void rayClosestHitMain(inout NEEHitPayload payload, in BuiltInTriangleIntersectionAttributes attr)
+void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionAttributes attr)
 {
     float3 barycentrics = float3(1 - attr.barycentrics.x - attr.barycentrics.y, attr.barycentrics.x, attr.barycentrics.y);
     uint   instanceID   = InstanceIndex();
@@ -154,9 +116,7 @@ void rayClosestHitMain(inout NEEHitPayload payload, in BuiltInTriangleIntersecti
 
     payload.randomSeed = callablePayload.randomSeed;
 
-    payload.radiance_emissive = material.emissive * payload.weight * payload.bsdf_cosine / payload.pdf;
-    payload.radiance_directLightSample = callablePayload.radianceSum_nee * payload.weight * payload.bsdf_cosine / payload.pdf;
-    payload.pdf_bsdfSample = callablePayload.pdf;
+    payload.radiance = 0.5f * (material.emissive + callablePayload.radianceSum_nee) * payload.bsdf_cosine / payload.pdf;
 
     payload.rayDirection = callablePayload.incidence;
     payload.rayOrigin = offsetRay(hitState.pos, hitState.normal);
@@ -168,17 +128,16 @@ void rayClosestHitMain(inout NEEHitPayload payload, in BuiltInTriangleIntersecti
 }
 
 [shader("miss")]
-void rayMissMain(inout NEEHitPayload payload)
+void rayMissMain(inout HitPayload payload)
 {
     SceneInfo* sceneInfo = pushConst.sceneInfoAddress;
     if (sceneInfo.useSky == 1)
     {
         float3 skyColor = evalSimpleSky(sceneInfo.skySimpleParam, WorldRayDirection());
-        payload.radiance_emissive += skyColor * payload.bsdf_cosine / payload.pdf;
+        payload.radiance += skyColor * payload.bsdf_cosine / payload.pdf;
     }
-    else payload.radiance_emissive += sceneInfo.backgroundColor * payload.bsdf_cosine / payload.pdf;
+    else payload.radiance += sceneInfo.backgroundColor * payload.bsdf_cosine / payload.pdf;
 
-    payload.radiance_directLightSample = float3(0.0f);
     payload.bounceDepth = MISS_DEPTH; // Stop
 }
 
@@ -203,8 +162,7 @@ void diffuseMaterialMain(inout CallablePayload payload) {
             float pdf_directLightSample = payload.radiancePdf_nee[i];
             float pdf_bsdfSample = pdf_DiffuseMaterial(sampleDir, payload.hitNormal);
 
-            //radiance_nee *= pdf_directLightSample / (pdf_directLightSample + pdf_bsdfSample + 0.0001f);
-            radiance_nee /= (pdf_directLightSample + pdf_bsdfSample + 0.0001f);
+            radiance_nee *= pdf_directLightSample / (pdf_directLightSample + pdf_bsdfSample + 0.0001f);
             payload.radianceSum_nee += radiance_nee;
         }
     }
@@ -232,8 +190,7 @@ void conductorMaterialMain(inout CallablePayload payload) {
             float pdf_directLightSample = payload.radiancePdf_nee[i];
             float pdf_bsdfSample = abs(dot(sampleDir, payload.hitNormal)) > 0.99f ? 1.0f : 0.0f;
 
-            //radiance_nee *= pdf_directLightSample / (pdf_directLightSample + pdf_bsdfSample + 0.0001f);
-            radiance_nee /= (pdf_directLightSample + pdf_bsdfSample + 0.0001f);
+            radiance_nee *= pdf_directLightSample / (pdf_directLightSample + pdf_bsdfSample + 0.0001f);
             payload.radianceSum_nee += radiance_nee;
         }
     }
@@ -274,9 +231,8 @@ void dielectricMaterialMain(inout CallablePayload payload) {
             radiance_nee = radiance_nee * bsdf * abs(dot(sampleDir, payload.hitNormal));
 
             float pdf_directLightSample = payload.radiancePdf_nee[i];
-
-            //radiance_nee *= pdf_directLightSample / (pdf_directLightSample + pdf_bsdfSample + 0.0001f);
-            radiance_nee /= (pdf_directLightSample + pdf_bsdfSample + 0.0001f);
+            
+            radiance_nee *= pdf_directLightSample / (pdf_directLightSample + pdf_bsdfSample + 0.0001f);
             payload.radianceSum_nee += radiance_nee;
         }
     }
@@ -301,14 +257,11 @@ void roughConductorMaterialMain(inout CallablePayload payload) {
             float3 h = normalize(sampleDir + payload.outgoing);
             float3 h_tangentSpace = mul(payload.TBN, h); // h需要在切线空间中
             // 因为TBN可能不准，导致出现细微的小于0的z，导致出错。上面的h不用这样是因为hvd_ggx_sample_vndf必然生成z大于0的h
-            if (h_tangentSpace.z == 0.0f) continue;
-
-            float cosineOH = dot(outgoing_tangentSpace, h_tangentSpace);
-            if (cosineOH <= 0.0f) continue;
-
+            if (h_tangentSpace.z <= 0.001f) continue;
             float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h_tangentSpace);
             float D = D_costhetaNH / h_tangentSpace.z;
 
+            float cosineOH = max(dot(outgoing_tangentSpace, h_tangentSpace), 0.001f);
             float3 F = schlickFresnel(payload.material.albedo, float3(1.0F), cosineOH);
 
             float3 incidence_tangentSpace = mul(payload.TBN, sampleDir);
@@ -320,7 +273,6 @@ void roughConductorMaterialMain(inout CallablePayload payload) {
                 incidence_tangentSpace,
                 float2(roughness)
             );
-            if (G2 <= 0.0f) continue;
 
             float3 bsdf = (D * G2 * F) / (4.0f * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 0.001f);
             radiance_nee = radiance_nee * bsdf * max(dot(sampleDir, payload.hitNormal), 0.0f);
@@ -328,8 +280,7 @@ void roughConductorMaterialMain(inout CallablePayload payload) {
             float pdf_directLightSample = payload.radiancePdf_nee[i];
             float pdf_bsdfSample = max(D_costhetaNH / (4.0f * cosineOH), 0.001f);
 
-            //radiance_nee *= pdf_directLightSample / (pdf_directLightSample + pdf_bsdfSample + 0.0001f);
-            radiance_nee /= (pdf_directLightSample + pdf_bsdfSample + 0.0001f);
+            radiance_nee *= pdf_directLightSample / (pdf_directLightSample + pdf_bsdfSample + 0.0001f);
             payload.radianceSum_nee += radiance_nee;
         }
     }
@@ -396,8 +347,7 @@ void roughDielectricMaterialMain(inout CallablePayload payload) {
 
             float pdf_directLightSample = payload.radiancePdf_nee[i];
 
-            //radiance_nee *= pdf_directLightSample / (pdf_directLightSample + pdf_bsdfSample + 0.0001f);
-            radiance_nee /= (pdf_directLightSample + pdf_bsdfSample + 0.0001f);
+            radiance_nee *= pdf_directLightSample / (pdf_directLightSample + pdf_bsdfSample + 0.0001f);
             payload.radianceSum_nee += radiance_nee;
         }
     }
