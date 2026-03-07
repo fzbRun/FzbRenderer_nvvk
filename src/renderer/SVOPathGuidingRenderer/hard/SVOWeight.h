@@ -14,7 +14,7 @@ struct SVOWeightSetting{
 	PathTracingContext* ptContext;
 };
 
-class SVOWeight : public PathTracing {
+class SVOWeight : public Feature {
 public:
 	SVOWeight() = default;
 	virtual ~SVOWeight() = default;
@@ -29,9 +29,9 @@ public:
 	void render(VkCommandBuffer cmd) override;
 	void postProcess(VkCommandBuffer cmd) override;
 
+	void createWeightArray();
 	void createDescriptorSetLayout();
 	void createDescriptorSet();
-	void createPipeline();
 	void compileAndCreateShaders() override;
 	void updateDataPerFrame(VkCommandBuffer cmd) override;
 
@@ -40,10 +40,27 @@ public:
 	VkPipeline rtPipeline{};
 	VkPipelineLayout rtPipelineLayout{};
 
+	nvvk::Buffer CSDispatchCommandBuffer;
+	nvvk::Buffer indivisibleNodeInfosBuffer_G;
+	nvvk::Buffer weightSampleCountsBuffer;
 	nvvk::Buffer weightBuffer;
+	nvvk::Buffer weightSumsBuffer;
+
+	VkShaderEXT computeShader_getIndivisibleNode_G{};
+	VkShaderEXT computeShader_initWeights{};
+	VkShaderEXT computeShader_getWeights{};
+	VkShaderEXT computeShader_getProbability{};
 private:
 	shaderio::SVOWeightPushConstant pushConstant;
+	VkPushConstantsInfo pushInfo;
 	VkShaderModuleCreateInfo shaderCode;
+
+	VkPhysicalDeviceRayQueryFeaturesKHR rayqueryFeature{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR };
+
+	void getIndivisibleNode_G(VkCommandBuffer cmd);
+	void initWeights(VkCommandBuffer cmd);
+	void getWeights(VkCommandBuffer cmd);
+	void getProbability(VkCommandBuffer cmd);
 };
 }
 

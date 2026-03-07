@@ -41,7 +41,8 @@ public:
 	shaderio::SVOPushConstant pushConstant{};
 	VkPushConstantsInfo pushInfo;
 
-	uint32_t SVOInitialSize[8] = { 1, SVONodeCount_E_Layer1, SVONodeCount_E_Layer2, SVONodeCount_E_Layer3, 1024, 1024, 2048, 2048 };
+	//后面可以将G的和E的initialSize分开来，一般E的会显著小于G的；并且我们可以根据场景的不同，设置不同的initialSize
+	uint32_t SVOInitialSize[8] = { 1, SVONodeCount_E_Layer1, SVONodeCount_E_Layer2, SVONodeCount_E_Layer3, 512, 1024, 1024, 2048 };
 	std::vector<nvvk::Buffer> SVOArray_G;
 	std::vector<nvvk::Buffer> SVOArray_E;
 	nvvk::Buffer SVOIndivisibleNodes_G;

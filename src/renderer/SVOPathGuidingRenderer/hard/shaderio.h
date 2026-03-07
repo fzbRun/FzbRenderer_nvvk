@@ -39,10 +39,8 @@ enum DynamicBindingPoints_SVOPG {
 struct SVOWeightPushConstant {
 	uint32_t frameIndex;
 	uint32_t sizes[8];
-	uint32_t maxDepth_G;
-	uint32_t maxDepth_E;
-	uint32_t currentDepth_E;
 	SceneInfo* sceneInfoAddress;
+	uint32_t countdown;
 };
 
 enum StaticBindingPoints_SVOWeight {
@@ -52,9 +50,9 @@ enum StaticBindingPoints_SVOWeight {
 	eSVOLayerInfos_E_SVOWeight,
 	eDispatchIndirect_SVOWeight,
 	eSVO_IndivisibleNodeInfos_G_SVOWeight,
-	eHitTestResult_SVOWeight,
 	eSVOWeightSampleCounts_SVOWeight,
-	eSVOWeights_SVOWeight
+	eSVOWeights_SVOWeight,
+	eSVOWeightSums_SVOWeight,
 };
 struct DispatchIndirectCommand {
 	uint32_t    x;
