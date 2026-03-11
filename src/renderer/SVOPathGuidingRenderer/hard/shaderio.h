@@ -41,14 +41,19 @@ struct SVOWeightPushConstant {
 	uint32_t sizes[8];
 	SceneInfo* sceneInfoAddress;
 	uint32_t countdown;
+#ifndef NDEBUG
+	float3 samplePos;
+	float3 outgoing;
+	uint instanceIndex;
+#endif
 };
 
 enum StaticBindingPoints_SVOWeight {
-	eSVO_G_SVOWeight = 0,
+	eSVO_G_SVOWeight = 2,
 	eSVO_E_SVOWeight,
 	eSVOLayerInfos_G_SVOWeight,
 	eSVOLayerInfos_E_SVOWeight,
-	eDispatchIndirect_SVOWeight,
+	eGlobalInfo_SVOWeight,
 	eSVO_IndivisibleNodeInfos_G_SVOWeight,
 	eSVOWeightSampleCounts_SVOWeight,
 	eSVOWeights_SVOWeight,
@@ -58,6 +63,18 @@ struct DispatchIndirectCommand {
 	uint32_t    x;
 	uint32_t    y;
 	uint32_t    z;
+};
+struct SVOWeightGlobalInfo {
+	DispatchIndirectCommand cmd;
+	uint indivisibleNodeCount_G;
+	uint indivisibleNodeCount_E;
+	uint SVOMaxLayer_G;
+	uint SVOMaxLayer_E;
+	uint totalNodeCount_E;
+#ifndef NDEBUG
+	AABB sampelNodeAABB;
+	uint sampelNodeLabel;
+#endif
 };
 struct SVOIndivisibleNodeInfo {
 	uint32_t layerIndex;

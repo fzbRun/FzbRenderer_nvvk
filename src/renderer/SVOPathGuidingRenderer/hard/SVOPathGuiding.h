@@ -5,6 +5,7 @@
 #include <feature/LightInject/LightInject.h>
 #include <feature/SceneDivision/Octree/Octree.h>
 #include <feature/SceneDivision/SparseVoxelOctree/SparseVoxelOctree.h>
+#include "SVOWeight.h"
 
 #ifndef FZBRENDERER_SVO_PATHGUIDING_H
 #define FZBRENDERER_SVO_PATHGUIDING_H
@@ -37,6 +38,7 @@ public:
 	std::shared_ptr<FzbRenderer::LightInject> lightInject;
 	std::shared_ptr<FzbRenderer::Octree> octree;
 	std::shared_ptr<FzbRenderer::SparseVoxelOctree> svo;
+	std::shared_ptr<FzbRenderer::SVOWeight> svoWeight;
 };
 }
 

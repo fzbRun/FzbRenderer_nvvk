@@ -630,7 +630,17 @@ void PopulateCallablePayload_RoughDielectricMaterial(inout CallablePayload paylo
 
     outgoing_tangentSpace = mul(payload.TBN, payload.outgoing);
     float3 h_tangentSpace = hvd_ggx_sample_vndf(outgoing_tangentSpace, float2(roughness), float2(randomNumber1, randomNumber2));
-    float cosineOH = max(dot(outgoing_tangentSpace, h_tangentSpace), 0.001f);
+    if (h_tangentSpace.z == 0.0f) {
+        payload.bsdf = float3(0.0f);
+        payload.pdf = 1.0f;
+        return;
+    }
+    float cosineOH = dot(outgoing_tangentSpace, h_tangentSpace);
+    if (cosineOH <= 0.0f) {
+        payload.bsdf = float3(0.0f);
+        payload.pdf = 1.0f;
+        return;
+    }
 
     float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h_tangentSpace); // h需要在切线空间中
     float D = D_costhetaNH / max(h_tangentSpace.z, 0.001f);
@@ -654,6 +664,11 @@ void PopulateCallablePayload_RoughDielectricMaterial(inout CallablePayload paylo
             refraction = true;
         }
     }
+    if (incidence_tangentSpace.z <= 0.0f) {
+        payload.bsdf = float3(0.0f);
+        payload.pdf = 1.0f;
+        return;
+    }
     payload.incidence = mul(incidence_tangentSpace, payload.TBN);
 
     float G1_outgoing, G1_incidence;
@@ -662,8 +677,13 @@ void PopulateCallablePayload_RoughDielectricMaterial(inout CallablePayload paylo
         G1_incidence,
         outgoing_tangentSpace,
         incidence_tangentSpace,
-        float2(roughness)
+                                     float2(roughness)
     );
+    if (G2 <= 0.0f) {
+        payload.bsdf = float3(0.0f);
+        payload.pdf = 1.0f;
+        return;
+    }
 
     if (refraction) {
         float weight = dot(incidence_tangentSpace, h_tangentSpace) / eta + cosineOH;

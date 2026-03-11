@@ -67,6 +67,7 @@ inline bool checkPointInAABB(float3 pos, AABB aabb) {
 groupshared uint groupSVOLayerMaxDepth_G;
 groupshared uint groupSVOLayerMaxDepth_E;
 groupshared SVOLayerInfo groupSVOLayerInfos_G[MAX_OCTREE_DEPTH];
+groupshared SVOLayerInfo groupSVOLayerInfos_E[MAX_OCTREE_DEPTH];
 groupshared uint groupIndivisibleNodeCount_G;
 groupshared uint groupNodeCount_E;
 void fillGroupshared(uint groupThreadIndex) {
@@ -75,11 +76,11 @@ void fillGroupshared(uint groupThreadIndex) {
 
         if (groupThreadIndex == 0) {
             for (int i = 1; i < 8; ++i) {
-                if (groupSVOLayerInfos_G[i].divsibleNodeCount == 0) groupSVOLayerMaxDepth_G = i;
+                if (groupSVOLayerInfos_G[i].divisibleNodeCount == 0) groupSVOLayerMaxDepth_G = i;
                 break;
             }
             for (int i = 1; i < 8; ++i) {
-                if (groupSVOLayerInfos_E[i].divsibleNodeCount == 0) groupSVOLayerMaxDepth_E = i;
+                if (groupSVOLayerInfos_E[i].divisibleNodeCount == 0) groupSVOLayerMaxDepth_E = i;
                 break;
             }
         }
@@ -90,7 +91,7 @@ void fillGroupshared(uint groupThreadIndex) {
         if (groupThreadIndex == 0) groupIndivisibleNodeCount_G = indivisibleNodeCount_G;
 
         uint nodeCount_E = 0;
-        if (groupThreadIndex <= groupSVOLayerMaxDepth_E - 1) nodeCount_E = groupSVOLayerInfos_G[groupThreadIndex].indivisibleNodeCount * 8;
+        if (groupThreadIndex <= groupSVOLayerMaxDepth_E - 1) nodeCount_E = groupSVOLayerInfos_E[groupThreadIndex].indivisibleNodeCount * 8;
         nodeCount_E = WaveActiveSum(nodeCount_E);
         if (groupThreadIndex == 0) groupNodeCount_E = nodeCount_E;
     }    
@@ -148,7 +149,6 @@ void computeMain_initWeights(uint threadIndex: SV_DispatchThreadID, uint groupTh
         DispatchCommand[0].x = (groupIndivisibleNodeCount_G * HITTEST_COUNT + THREADGROUP_SIZE2 - 1) / THREADGROUP_SIZE2;
 }
 
-groupshared SVOLayerInfo groupSVOLayerInfos_E[MAX_OCTREE_DEPTH];
 groupshared SVONodeData_G groupSVONodeB[THREADGROUP_SIZE2 / HITTEST_COUNT];
 groupshared SVONodeInfo_E groupNodeInfo_E_first3Layer[SVONodeCount_E_Layer1 + SVONodeCount_E_Layer2 + SVONodeCount_E_Layer3];   //18.25 KB
 bool hitSVONodeTest_useSharedMemory(inout uint layerIndex, inout uint nodeIndex, inout uint layerNodeSum, inout bool hitIndivisibleNode, float3 hitPos) {
@@ -381,7 +381,7 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
     }
 
     if (threadIndex == 0) {
-        uint bottomLayerNodeCount_E = SVOLayerInfos_E[groupSVOLayerMaxDepth_G - 1].divsibleNodeCount * 8;
+        uint bottomLayerNodeCount_E = SVOLayerInfos_E[groupSVOLayerMaxDepth_G - 1].divisibleNodeCount * 8;
         DispatchCommand[0].x = (OUTGOING_COUNT * groupIndivisibleNodeCount_G * bottomLayerNodeCount_E + THREADGROUP_SIZE2 - 1) / THREADGROUP_SIZE2;
     }
 }
@@ -400,12 +400,12 @@ void computeMain_getProbability(uint threadIndex: SV_DispatchThreadID, uint thre
         uint currentLayerIndex = groupSVOLayerMaxDepth_E - pushConst.countdown;
         uint previousLayerNodeCountSum_E = groupNodeCount_E;
         for (int i = groupSVOLayerMaxDepth_E - 1; i >= currentLayerIndex - 1; --i)
-            previousLayerNodeCountSum_E -= groupSVOLayerInfos_E[i].divsibleNodeCount * 8;
+            previousLayerNodeCountSum_E -= groupSVOLayerInfos_E[i].divisibleNodeCount * 8;
         groupPreviousLayerNodeCountSum_E = previousLayerNodeCountSum_E;
     }
     GroupMemoryBarrierWithGroupSync();
 
-    uint layerNodeCount_E = groupParentLayerInfo_E.divsibleNodeCount * 8;
+    uint layerNodeCount_E = groupParentLayerInfo_E.divisibleNodeCount * 8;
     if (threadIndex >= OUTGOING_COUNT * groupIndivisibleNodeCount_G * layerNodeCount_E) return;
 
     uint nodeAIndex = threadIndex / (groupIndivisibleNodeCount_G * layerNodeCount_E);   //outgoing Index
@@ -443,7 +443,7 @@ void computeMain_getProbability(uint threadIndex: SV_DispatchThreadID, uint thre
 
     if (threadIndex == 0) {
         if (currentLayerIndex > 1) {
-            uint upperLayerNodeCount_E = SVOLayerInfos_E[currentLayerIndex - 2].divsibleNodeCount * 8;
+            uint upperLayerNodeCount_E = SVOLayerInfos_E[currentLayerIndex - 2].divisibleNodeCount * 8;
             DispatchCommand[0].x = (OUTGOING_COUNT * groupIndivisibleNodeCount_G * upperLayerNodeCount_E + THREADGROUP_SIZE2 - 1) / THREADGROUP_SIZE2;
         } else DispatchCommand[0].x = 0;
     }

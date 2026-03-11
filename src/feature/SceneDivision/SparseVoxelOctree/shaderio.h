@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <common/Shader/shaderStructType.h>
 #include "../Octree/shaderio.h"
@@ -13,6 +13,9 @@
 #define SVONodeCount_E_Layer1 8
 #define SVONodeCount_E_Layer2 64
 #define SVONodeCount_E_Layer3 512
+#define SVONodeCount_G_Layer1 8
+#define SVONodeCount_G_Layer2 64
+#define SVONodeCount_G_Layer3 512
 
 NAMESPACE_SHADERIO_BEGIN()
 
@@ -50,7 +53,7 @@ struct SVOThreadGroupInfo {
 };
 
 struct SVOLayerInfo {
-	uint32_t divsibleNodeCount;
+	uint32_t divisibleNodeCount;
 	uint32_t indivisibleNodeCount;
 };
 

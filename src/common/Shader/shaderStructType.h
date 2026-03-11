@@ -1,4 +1,4 @@
-#pragma once
+Ôªø#pragma once
 
 #include "./nvvk/shaderio.h"
 #include "./nvvk/io_gltf.h"
@@ -8,14 +8,14 @@
 #define FZBRENDERER_SHADERSTRUCTTYPE_H
 
 NAMESPACE_SHADERIO_BEGIN()
-//------------------------------------------------------- µ¿˝------------------------------------------------------------
+//-------------------------------------------------------Instance------------------------------------------------------------
 struct Instance {
 	float4x4 transform;      // Transform matrix for the instance (local to world)
 	uint32_t materialIndex;  // Material properties for the instance
 	uint32_t meshIndex;      // Index of the mesh in the GltfMesh vector
 };
 CHECK_STRUCT_ALIGNMENT(Instance)
-//-------------------------------------------------------Œ∆¿Ì------------------------------------------------------------
+//-------------------------------------------------------Texture------------------------------------------------------------
 enum TextureType {
 	NormalMap = 0,
 	AlbedoMap = 1,
@@ -25,7 +25,7 @@ enum AlbedoMapType {
 	Texture = 0,
 	Checkerboard = 1000,
 };
-//-------------------------------------------------------≤ƒ÷ ------------------------------------------------------------
+//-------------------------------------------------------Material------------------------------------------------------------
 enum MaterialType {
 	Diffuse = 0,
 	Conductor = 1,
@@ -50,7 +50,7 @@ struct Mesh
 	TriangleMesh triMesh;               // Mesh data
 	int          indexType;             // Index type (uint16_t or uint32_t)
 };
-//---------------------------------------------------------π‚‘¥--------------------------------------------------------------
+//---------------------------------------------------------Light--------------------------------------------------------------
 enum LightType {
 	Point = 0,
 	Spot = 1,
@@ -71,7 +71,7 @@ struct Light {
 	float padding;
 };
 CHECK_STRUCT_ALIGNMENT(Light)
-//-------------------------------------------------------≥°æ∞–≈œ¢------------------------------------------------------------
+//-------------------------------------------------------SceneInfo------------------------------------------------------------
 struct SceneInfo
 {
 	float4x4               viewProjMatrix;     // View projection matrix for the scene
@@ -88,7 +88,7 @@ struct SceneInfo
 	SkySimpleParameters    skySimpleParam;
 };
 CHECK_STRUCT_ALIGNMENT(SceneInfo)
-//-------------------------------------------------------Õ∆ÀÕ≥£¡ø------------------------------------------------------------
+//-------------------------------------------------------PushConstant------------------------------------------------------------
 struct DefaultPushConstant
 {
 	float3x3       normalMatrix;

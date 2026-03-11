@@ -11,7 +11,7 @@
 namespace FzbRenderer {
 struct SVOWeightSetting{
 	std::shared_ptr<SparseVoxelOctree> svo;
-	PathTracingContext* ptContext;
+	AccelerationStructureManager* asManager;
 };
 
 class SVOWeight : public Feature {
@@ -32,6 +32,7 @@ public:
 	void createWeightArray();
 	void createDescriptorSetLayout();
 	void createDescriptorSet();
+	void createPipelineLayout();
 	void compileAndCreateShaders() override;
 	void updateDataPerFrame(VkCommandBuffer cmd) override;
 
@@ -40,7 +41,7 @@ public:
 	VkPipeline rtPipeline{};
 	VkPipelineLayout rtPipelineLayout{};
 
-	nvvk::Buffer CSDispatchCommandBuffer;
+	nvvk::Buffer GlobalInfoBuffer;
 	nvvk::Buffer indivisibleNodeInfosBuffer_G;
 	nvvk::Buffer weightSampleCountsBuffer;
 	nvvk::Buffer weightBuffer;
@@ -57,10 +58,24 @@ private:
 
 	VkPhysicalDeviceRayQueryFeaturesKHR rayqueryFeature{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR };
 
-	void getIndivisibleNode_G(VkCommandBuffer cmd);
+	void getIndivisibleNode_E(VkCommandBuffer cmd);
 	void initWeights(VkCommandBuffer cmd);
 	void getWeights(VkCommandBuffer cmd);
 	void getProbability(VkCommandBuffer cmd);
+
+#ifndef NDEBUG
+	void debugPrepare();
+	void debug_visualization(VkCommandBuffer cmd);
+
+	glm::vec3 samplePoint = glm::vec3(-1.812, 1.3, -3.613);
+	glm::vec3 outgoing = glm::vec3(0.0f, 1.0f, 1.0f);
+
+	VkShaderEXT computeShader_getSampleNodeInfo{};
+	VkShaderEXT vertexShader_visualization{};
+	VkShaderEXT fragmentShader_visualization{};
+
+	bool show = false;
+#endif
 };
 }
 

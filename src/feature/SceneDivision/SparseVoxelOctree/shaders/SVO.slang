@@ -20,15 +20,15 @@ void computeMain_initSVOArray(uint threadIndex: SV_DispatchThreadID) {
     if (threadIndex >= maxNodeCount) return;
 
     if (threadIndex == 0) {
-        SVOLayerInfos_G[0].divsibleNodeCount = 1;
+        SVOLayerInfos_G[0].divisibleNodeCount = 1;
         SVOLayerInfos_G[0].indivisibleNodeCount = 0;
-        SVOLayerInfos_E[0].divsibleNodeCount = 1;
+        SVOLayerInfos_E[0].divisibleNodeCount = 1;
         SVOLayerInfos_E[0].indivisibleNodeCount = 0;
     }
     if (threadIndex > 0 && threadIndex <= pushConst.maxDepth) {
-        SVOLayerInfos_G[threadIndex].divsibleNodeCount = 0;
+        SVOLayerInfos_G[threadIndex].divisibleNodeCount = 0;
         SVOLayerInfos_G[threadIndex].indivisibleNodeCount = 0;
-        SVOLayerInfos_E[threadIndex].divsibleNodeCount = 0;
+        SVOLayerInfos_E[threadIndex].divisibleNodeCount = 0;
         SVOLayerInfos_E[threadIndex].indivisibleNodeCount = 0;
     }
 
@@ -89,16 +89,16 @@ void computeMain_createSVOArray(uint threadIndex: SV_DispatchThreadID, uint thre
     uint warpIndex = groupThreadIndex / WARP_SIZE;
 
     if (groupThreadIndex == 0) {
-        fatherLayerDivisibleNodeCount_G = SVOLayerInfos_G[pushConst.currentDepth - 1].divsibleNodeCount;
-        fatherLayerDivisibleNodeCount_E = SVOLayerInfos_E[pushConst.currentDepth - 1].divsibleNodeCount;
+        fatherLayerDivisibleNodeCount_G = SVOLayerInfos_G[pushConst.currentDepth - 1].divisibleNodeCount;
+        fatherLayerDivisibleNodeCount_E = SVOLayerInfos_E[pushConst.currentDepth - 1].divisibleNodeCount;
     }
     GroupMemoryBarrierWithGroupSync();
     //------------------------------------------------G---------------------------------------------------------
     uint totalNodeCount = fatherLayerDivisibleNodeCount_G * 8;
     if (totalNodeCount > pushConst.sizes[pushConst.currentDepth]) {
         if (threadIndex == 0) {
-            SVOLayerInfos_G[pushConst.currentDepth].divsibleNodeCount = 0;
-            SVOLayerInfos_E[pushConst.currentDepth].divsibleNodeCount = 0;
+            SVOLayerInfos_G[pushConst.currentDepth].divisibleNodeCount = 0;
+            SVOLayerInfos_E[pushConst.currentDepth].divisibleNodeCount = 0;
             printf("Error: totalNodeCount exceeds the maximum node count of the current layer. totalNodeCount: %u,         maxNodeCount: %u\n", totalNodeCount, pushConst.sizes[pushConst.currentDepth]);
         }
         return;
@@ -159,17 +159,17 @@ void computeMain_createSVOArray(uint threadIndex: SV_DispatchThreadID, uint thre
 
         if (warpIndex == warpCount - 1 && warpLane == 0) {
             if (totalNodeCount <= WARP_SIZE) {
-                SVOLayerInfos_G[pushConst.currentDepth].divsibleNodeCount = countbits(warpDivisibleNodeMask);
+                SVOLayerInfos_G[pushConst.currentDepth].divisibleNodeCount = countbits(warpDivisibleNodeMask);
                 SVOLayerInfos_G[pushConst.currentDepth].indivisibleNodeCount = countbits(warpIndivisibleNodeMask);
             } else if (totalNodeCount <= THREADGROUP_SIZE) {
-                SVOLayerInfos_G[pushConst.currentDepth].divsibleNodeCount = warpDivisibleNodeCountSums[warpIndex] + countbits(warpDivisibleNodeMask);
+                SVOLayerInfos_G[pushConst.currentDepth].divisibleNodeCount = warpDivisibleNodeCountSums[warpIndex] + countbits(warpDivisibleNodeMask);
                 SVOLayerInfos_G[pushConst.currentDepth].indivisibleNodeCount = warpIndivisibleNodeCountSums[warpIndex] + countbits(warpIndivisibleNodeMask);
             }
             else {
                 uint threadGroupDivisibleNodeCount = warpDivisibleNodeCountSums[warpIndex] + countbits(warpDivisibleNodeMask);
                 uint threadGroupInDivisibleNodeCount = warpIndivisibleNodeCountSums[warpIndex] + countbits(warpIndivisibleNodeMask);
 
-                InterlockedAdd<uint>(SVOLayerInfos_G[pushConst.currentDepth].divsibleNodeCount, threadGroupDivisibleNodeCount);
+                InterlockedAdd<uint>(SVOLayerInfos_G[pushConst.currentDepth].divisibleNodeCount, threadGroupDivisibleNodeCount);
                 InterlockedAdd<uint>(SVOLayerInfos_G[pushConst.currentDepth].indivisibleNodeCount, threadGroupInDivisibleNodeCount);
 
                 SVOThreadGroupInfos[threadGroupIndex].threadGroupDivisibleNodeCount_G = warpDivisibleNodeCountSums[warpIndex] + countbits(warpDivisibleNodeMask);
@@ -184,8 +184,8 @@ void computeMain_createSVOArray(uint threadIndex: SV_DispatchThreadID, uint thre
     totalNodeCount = fatherLayerDivisibleNodeCount_E * 8;
     if (totalNodeCount > pushConst.sizes[pushConst.currentDepth]) {
         if (threadIndex == 0) {
-            SVOLayerInfos_G[pushConst.currentDepth].divsibleNodeCount = 0;
-            SVOLayerInfos_E[pushConst.currentDepth].divsibleNodeCount = 0;
+            SVOLayerInfos_G[pushConst.currentDepth].divisibleNodeCount = 0;
+            SVOLayerInfos_E[pushConst.currentDepth].divisibleNodeCount = 0;
             printf("Error: totalNodeCount exceeds the maximum node count of the current layer. totalNodeCount: %u,        maxNodeCount: %u\n", totalNodeCount, pushConst.sizes[pushConst.currentDepth]);
         }
         return;
@@ -197,7 +197,7 @@ void computeMain_createSVOArray(uint threadIndex: SV_DispatchThreadID, uint thre
         bool hasData = false;
         if (threadIndex < totalNodeCount) {
             nodeData = OctreeArray_E[pushConst.currentDepth][nodeIndex];
-            hasData = nodeData.meanNormal.w > 0.0f;
+            hasData = nodeData.irradiance.x + nodeData.irradiance.y + nodeData.irradiance.z > 0.0f;
         }
         bool divisible = hasData && nodeData.indivisible == 0;
         bool indivisible = hasData && nodeData.indivisible == 1;
@@ -246,17 +246,17 @@ void computeMain_createSVOArray(uint threadIndex: SV_DispatchThreadID, uint thre
 
         if (warpIndex == warpCount - 1 && warpLane == 0) {
             if (totalNodeCount <= WARP_SIZE) {
-                SVOLayerInfos_E[pushConst.currentDepth].divsibleNodeCount = countbits(warpDivisibleNodeMask);
+                SVOLayerInfos_E[pushConst.currentDepth].divisibleNodeCount = countbits(warpDivisibleNodeMask);
                 SVOLayerInfos_E[pushConst.currentDepth].indivisibleNodeCount = countbits(warpIndivisibleNodeMask);
             } else if (totalNodeCount <= THREADGROUP_SIZE) {
-                SVOLayerInfos_E[pushConst.currentDepth].divsibleNodeCount = warpDivisibleNodeCountSums[warpIndex] + countbits(warpDivisibleNodeMask);
+                SVOLayerInfos_E[pushConst.currentDepth].divisibleNodeCount = warpDivisibleNodeCountSums[warpIndex] + countbits(warpDivisibleNodeMask);
                 SVOLayerInfos_E[pushConst.currentDepth].indivisibleNodeCount = warpIndivisibleNodeCountSums[warpIndex] + countbits(warpIndivisibleNodeMask);
             }
             else {
                 uint threadGroupDivisibleNodeCount = warpDivisibleNodeCountSums[warpIndex] + countbits(warpDivisibleNodeMask);
                 uint threadGroupInDivisibleNodeCount = warpIndivisibleNodeCountSums[warpIndex] + countbits(warpIndivisibleNodeMask);
 
-                InterlockedAdd<uint>(SVOLayerInfos_E[pushConst.currentDepth].divsibleNodeCount, threadGroupDivisibleNodeCount);
+                InterlockedAdd<uint>(SVOLayerInfos_E[pushConst.currentDepth].divisibleNodeCount, threadGroupDivisibleNodeCount);
                 InterlockedAdd<uint>(SVOLayerInfos_E[pushConst.currentDepth].indivisibleNodeCount, threadGroupInDivisibleNodeCount);
 
                 SVOThreadGroupInfos[threadGroupIndex].threadGroupDivisibleNodeCount_E = warpDivisibleNodeCountSums[warpIndex] + countbits(warpDivisibleNodeMask);
@@ -275,8 +275,8 @@ groupshared uint threadGroupIndivisibleNodeCountSum;
 [shader("compute")]
 void computeMain_offsetLabelMultiBlock(uint threadIndex: SV_DispatchThreadID, uint threadGroupIndex: SV_GroupID, uint groupThreadIndex: SV_GroupThreadID) {
     if (groupThreadIndex == 0) {
-        fatherLayerDivisibleNodeCount_G = SVOLayerInfos_G[pushConst.currentDepth - 1].divsibleNodeCount;
-        fatherLayerDivisibleNodeCount_E = SVOLayerInfos_E[pushConst.currentDepth - 1].divsibleNodeCount;
+        fatherLayerDivisibleNodeCount_G = SVOLayerInfos_G[pushConst.currentDepth - 1].divisibleNodeCount;
+        fatherLayerDivisibleNodeCount_E = SVOLayerInfos_E[pushConst.currentDepth - 1].divisibleNodeCount;
     }
     GroupMemoryBarrierWithGroupSync();
     //------------------------------------------------G---------------------------------------------------------
