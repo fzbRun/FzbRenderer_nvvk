@@ -32,11 +32,11 @@ void SVOWeight::clean() {
 
 	Application::allocator.destroyBuffer(GlobalInfoBuffer);
 	Application::allocator.destroyBuffer(indivisibleNodeInfosBuffer_G);
-	Application::allocator.destroyBuffer(weightSampleCountsBuffer);
+	Application::allocator.destroyBuffer(indivisibleNodeInfosBuffer_E);
 	Application::allocator.destroyBuffer(weightBuffer);
 	Application::allocator.destroyBuffer(weightSumsBuffer);
 
-	vkDestroyShaderEXT(device, computeShader_getIndivisibleNode_G, nullptr);
+	vkDestroyShaderEXT(device, computeShader_getIndivisibleNode, nullptr);
 	vkDestroyShaderEXT(device, computeShader_initWeights, nullptr);
 	vkDestroyShaderEXT(device, computeShader_getWeights, nullptr);
 	vkDestroyShaderEXT(device, computeShader_getProbability, nullptr);
@@ -129,7 +129,7 @@ void SVOWeight::render(VkCommandBuffer cmd) {
 	write.append(dynamicDescPack.makeWrite(shaderio::DynamicSetBindingPoints_PT::eTlas_PT), setting.asManager->asBuilder.tlas);
 	vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 1, write.size(), write.data());
 
-	getIndivisibleNode_E(cmd);
+	getIndivisibleNode(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 	initWeights(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
@@ -162,12 +162,11 @@ void SVOWeight::createWeightArray() {
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(indivisibleNodeInfosBuffer_G.buffer);
 
-	uint32_t weightCount = OUTGOING_COUNT * SVONodeMaxCount * SVONodeMaxCount;
-	bufferSize = weightCount * sizeof(uint32_t);
-	allocator->createBuffer(weightSampleCountsBuffer, bufferSize,
+	allocator->createBuffer(indivisibleNodeInfosBuffer_E, bufferSize,
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-	NVVK_DBG_NAME(weightSampleCountsBuffer.buffer);
+	NVVK_DBG_NAME(indivisibleNodeInfosBuffer_G.buffer);
 
+	uint32_t weightCount = OUTGOING_COUNT * SVONodeMaxCount * SVONodeMaxCount;
 	bufferSize = weightCount * sizeof(float);
 	allocator->createBuffer(weightBuffer, bufferSize,
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
@@ -216,7 +215,7 @@ void SVOWeight::createDescriptorSetLayout() {
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
-		.binding = shaderio::StaticBindingPoints_SVOWeight::eSVOWeightSampleCounts_SVOWeight,
+		.binding = shaderio::StaticBindingPoints_SVOWeight::eSVO_IndivisibleNodeInfos_E_SVOWeight,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
@@ -280,13 +279,13 @@ void SVOWeight::createDescriptorSet() {
 		staticDescPack.makeWrite(shaderio::StaticBindingPoints_SVOWeight::eGlobalInfo_SVOWeight, 0, 0, 1);
 	write.append(globalInfoWrite, GlobalInfoBuffer, 0, GlobalInfoBuffer.bufferSize);
 
-	VkWriteDescriptorSet IndivisibleNodeInfos_GWrite =
+	VkWriteDescriptorSet IndivisibleNodeInfosWrite =
 		staticDescPack.makeWrite(shaderio::StaticBindingPoints_SVOWeight::eSVO_IndivisibleNodeInfos_G_SVOWeight, 0, 0, 1);
-	write.append(IndivisibleNodeInfos_GWrite, indivisibleNodeInfosBuffer_G, 0, indivisibleNodeInfosBuffer_G.bufferSize);
+	write.append(IndivisibleNodeInfosWrite, indivisibleNodeInfosBuffer_G, 0, indivisibleNodeInfosBuffer_G.bufferSize);
 
-	VkWriteDescriptorSet weightSampleCountWrite =
-		staticDescPack.makeWrite(shaderio::StaticBindingPoints_SVOWeight::eSVOWeightSampleCounts_SVOWeight, 0, 0, 1);
-	write.append(weightSampleCountWrite, weightSampleCountsBuffer, 0, weightSampleCountsBuffer.bufferSize);
+	IndivisibleNodeInfosWrite =
+		staticDescPack.makeWrite(shaderio::StaticBindingPoints_SVOWeight::eSVO_IndivisibleNodeInfos_E_SVOWeight, 0, 0, 1);
+	write.append(IndivisibleNodeInfosWrite, indivisibleNodeInfosBuffer_E, 0, indivisibleNodeInfosBuffer_E.bufferSize);
 
 	VkWriteDescriptorSet weightsWrite =
 		staticDescPack.makeWrite(shaderio::StaticBindingPoints_SVOWeight::eSVOWeights_SVOWeight, 0, 0, 1);
@@ -329,7 +328,7 @@ void SVOWeight::compileAndCreateShaders() {
 	SCOPED_TIMER(__FUNCTION__);
 
 	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
-	std::filesystem::path shaderSource = shaderPath / "SVOWeightShaders2.slang";
+	std::filesystem::path shaderSource = shaderPath / "SVOWeightShaders.slang";
 	VkShaderModuleCreateInfo shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
 
 	const VkPushConstantRange pushConstantRange{
@@ -351,15 +350,15 @@ void SVOWeight::compileAndCreateShaders() {
 	VkDevice device = Application::app->getDevice();
 	//--------------------------------------------------------------------------------------
 	{
-		vkDestroyShaderEXT(device, computeShader_getIndivisibleNode_G, nullptr);
+		vkDestroyShaderEXT(device, computeShader_getIndivisibleNode, nullptr);
 
 		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
 		shaderInfo.nextStage = 0;
-		shaderInfo.pName = "computeMain_getIndivisibleNode_G";
+		shaderInfo.pName = "computeMain_getIndivisibleNode";
 		shaderInfo.codeSize = shaderCode.codeSize;
 		shaderInfo.pCode = shaderCode.pCode;
-		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_getIndivisibleNode_G);
-		NVVK_DBG_NAME(computeShader_getIndivisibleNode_G);
+		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_getIndivisibleNode);
+		NVVK_DBG_NAME(computeShader_getIndivisibleNode);
 	}
 	//--------------------------------------------------------------------------------------
 	{
@@ -433,11 +432,11 @@ void SVOWeight::updateDataPerFrame(VkCommandBuffer cmd) {
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 }
 
-void SVOWeight::getIndivisibleNode_E(VkCommandBuffer cmd) {
+void SVOWeight::getIndivisibleNode(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
 
 	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
-	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getIndivisibleNode_G);
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getIndivisibleNode);
 
 	vkCmdPushConstants2(cmd, &pushInfo);
 

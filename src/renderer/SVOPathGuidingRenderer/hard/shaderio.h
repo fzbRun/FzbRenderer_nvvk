@@ -34,7 +34,7 @@ enum DynamicBindingPoints_SVOPG {
 
 //-------------------------------------------SVOWeight----------------------------------------
 #define WEIGHT_HITTEST_COUNT 8
-#define HITTEST_COUNT 32
+#define HITTEST_COUNT 8
 #define OUTGOING_COUNT 32
 struct SVOWeightPushConstant {
 	uint32_t frameIndex;
@@ -55,7 +55,7 @@ enum StaticBindingPoints_SVOWeight {
 	eSVOLayerInfos_E_SVOWeight,
 	eGlobalInfo_SVOWeight,
 	eSVO_IndivisibleNodeInfos_G_SVOWeight,
-	eSVOWeightSampleCounts_SVOWeight,
+	eSVO_IndivisibleNodeInfos_E_SVOWeight,
 	eSVOWeights_SVOWeight,
 	eSVOWeightSums_SVOWeight,
 };
@@ -80,10 +80,17 @@ struct SVOIndivisibleNodeInfo {
 	uint32_t layerIndex;
 	uint32_t nodeIndex;
 };
-struct HitTestResult {
-	float V_Cosine;
-	uint32_t layerIndex;
-	uint32_t nodeIndex;
+struct IndivisibleNodeData_E {
+	float3 normal;
+	uint nodeIndex;
+	float irradiance;
+	AABB aabb;
+};
+struct IndivisibleNodeData_G {
+	float3 normal;
+	uint nodeLabel;
+	AABB aabb;
+	uint materialType;
 };
 
 NAMESPACE_SHADERIO_END()

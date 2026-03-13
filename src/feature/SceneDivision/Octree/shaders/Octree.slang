@@ -1,4 +1,4 @@
-#include "common/Shader/shaderStructType.h"
+﻿#include "common/Shader/shaderStructType.h"
 #include "feature/SceneDivision/Octree/shaderio.h"
 #include "feature/SceneDivision/RasterVoxelization/shaderio.h"
 
@@ -36,10 +36,19 @@ void computeMain_initOctreeArray(uint threadIndex: SV_DispatchThreadID) {
     nodeData_G.materialIndex = voxelData.materialIndex_Count >> 26;
     OctreeArray_G[pushConst.maxDepth][threadIndex] = nodeData_G;
 
+    hasNormal = voxelData.sumNormal_E.w > 0.0f;
+    if (hasNormal && aabb.minimum.x >= 3.402823466e+36F) {
+        /*
+        RasterVoxelization is discrete and sparse，so some voxel not be inject gemotry info，so we inject the voxel's aabb
+        threadTotal = VGBSize^3，so the per eight thread is the brother node，so we can get the aabb from other brother
+        if all of other brothers has't aabb, we believe this node's irradiance is noise
+        */
+        hasNormal = false;
+        voxelData.irradiance.w = -1.0f;
+    }
     OctreeNodeData_E nodeData_E;
     nodeData_E.irradiance = voxelData.irradiance.w > 0.0f ? voxelData.irradiance.xyz / voxelData.irradiance.w : float3(0.0f);
     nodeData_E.notIgnoreRatio = 1.0f;
-    hasNormal = voxelData.sumNormal_E.x != 0.0f || voxelData.sumNormal_E.y != 0.0f || voxelData.sumNormal_E.z != 0.0f;
     nodeData_E.meanNormal = hasNormal ? float4(normalize(voxelData.sumNormal_E.xyz), 1.0f) : float4(0.0f);
     nodeData_E.aabb = aabb;
     nodeData_E.indivisible = 1;
@@ -202,7 +211,7 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
         // calc mergeNode's entropy
         float entropy = 0.0f;
         if (warpLane == blockFirstWarpLane) {
-            float normalEntropy = max(1.0f - length(mergeNormal), 0.0f);
+            float normalEntropy = max(1.0f - length(mergeNormal), 0.0f);        //this should use Pi rather than 1.0f
             float surfaceAreaEntropy = max(1.0f - surfaceAreaSum / mergeAABBSurfaceArea, 0.0f);
             float materialEntropy = materialTypeCount / MAX_MATERIAL_TYPE_COUNT;
             entropy = (normalEntropy + surfaceAreaEntropy + materialEntropy) * 0.33333f;
@@ -238,7 +247,7 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
             nodeData_E.aabb.maximum.y = WaveReadLaneAt(mergeAABB.maximum.y, blockFirstWarpLane);
             nodeData_E.aabb.maximum.z = WaveReadLaneAt(mergeAABB.maximum.z, blockFirstWarpLane);
             if (hasIrradiance) OctreeArray_E[pushConst.currentDepth - 1][blockIndex] = nodeData_E;
-        }else if (hasIrradiance) OctreeArray_E[pushConst.currentDepth - 1][blockIndex] = nodeData_E;
+        } else if (hasIrradiance) OctreeArray_E[pushConst.currentDepth - 1][blockIndex] = nodeData_E;
         return;
     } else {
         //--------------------------------get max rradiance node------------------------------------------

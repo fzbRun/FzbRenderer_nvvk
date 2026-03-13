@@ -43,6 +43,14 @@ FzbRenderer::MeshSet::MeshSet(std::string meshID, std::string meshType, std::fil
 	else if (meshType == "obj") {
 		loadObjData(meshPath);
 	}
+	else if (meshType == "plane") {
+		nvutils::PrimitiveMesh primitive = FzbRenderer::MeshSet::createPlane(1, 1.0f, 1.0f);
+		createCustomMeshSet(meshID, primitive);
+	}
+	else if (meshType == "cube") {
+		nvutils::PrimitiveMesh primitive = FzbRenderer::MeshSet::createCube(true);
+		createCustomMeshSet(meshID, primitive);
+	}
 
 	aabb.minimum = { FLT_MAX, FLT_MAX, FLT_MAX };
 	aabb.maximum = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
@@ -420,8 +428,7 @@ void FzbRenderer::MeshSet::loadObjData(std::filesystem::path meshPath) {
 	processNode(sceneData->mRootNode, sceneData);
 }
 
-FzbRenderer::MeshSet::MeshSet(std::string meshID, nvutils::PrimitiveMesh primitiveMesh)
-{
+void FzbRenderer::MeshSet::createCustomMeshSet(std::string meshID, nvutils::PrimitiveMesh primitiveMesh) {
 	this->meshID = meshID;
 	shaderio::Mesh mesh{};
 
@@ -429,7 +436,7 @@ FzbRenderer::MeshSet::MeshSet(std::string meshID, nvutils::PrimitiveMesh primiti
 	uint32_t maxIndex = 0;
 	for (const auto& tri : primitiveMesh.triangles)
 		maxIndex = std::max(maxIndex, std::max(tri.indices.x, std::max(tri.indices.y, tri.indices.z)));
-	if(maxIndex <= 0xFFFF) {
+	if (maxIndex <= 0xFFFF) {
 		mesh.indexType = VK_INDEX_TYPE_UINT16;
 		std::vector<uint16_t> indexData;
 		indexData.reserve(indexCount);
@@ -489,6 +496,10 @@ FzbRenderer::MeshSet::MeshSet(std::string meshID, nvutils::PrimitiveMesh primiti
 		.mesh = mesh,
 	};
 	childMeshInfos.emplace_back(childMeshInfo);
+}
+FzbRenderer::MeshSet::MeshSet(std::string meshID, nvutils::PrimitiveMesh primitiveMesh)
+{
+	createCustomMeshSet(meshID, primitiveMesh);
 }
 
 nvvk::Buffer FzbRenderer::MeshSet::createMeshDataBuffer() {
@@ -645,10 +656,9 @@ nvutils::PrimitiveMesh FzbRenderer::MeshSet::createCube(bool normal, bool texCoo
 				if (texCoords) vertexData.tex = texcoords[v];
 				mesh.vertices.push_back(vertexData);
 			}
-			glm::uvec3 indices0 = glm::uvec3(faces[f][0], faces[f][1], faces[f][2]);
-			glm::uvec3 indices1 = glm::uvec3(faces[f][1], faces[f][2], faces[f][3]);
-			mesh.triangles.push_back({ indices0 });
-			mesh.triangles.push_back({ indices1 });
+			uint32_t base = f * 4;
+			mesh.triangles.push_back({ {base + 0, base + 1, base + 2} });
+			mesh.triangles.push_back({ {base + 0, base + 2, base + 3} });
 		}
 	}
 

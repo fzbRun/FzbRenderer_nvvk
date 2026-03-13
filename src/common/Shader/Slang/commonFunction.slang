@@ -1,5 +1,6 @@
 #include "common/Shader/shaderStructType.h"
 #include "nvshaders/constants.h.slang"
+#include "nvshaders/random.h.slang"
 
 float3x3 Inverse3x3(float3x3 m) {
 	float3 c0 = m[0];
@@ -60,4 +61,16 @@ uint inverseSF(float3 p, uint n) {
     }
 
     return bestIdx;
+}
+float3 sample_hemisphere_mean(inout uint seed) {
+    float r1 = rand(seed); float r2 = rand(seed); // mean sample hemisphere
+    float cosTheta = r1; float phi = 2.0f * M_PI * r2;
+    float sinTheta = sqrt(1.0f - cosTheta * cosTheta);
+    return float3(sinTheta * cos(phi), sinTheta * sin(phi), cosTheta);
+}
+float3 sample_sphere_mean(inout uint seed) {
+    float r1 = rand(seed); float r2 = rand(seed); // mean sample hemisphere
+    float cosTheta = 1 - 2 * r1; float phi = 2.0f * M_PI * r2;
+    float sinTheta = sqrt(1.0f - cosTheta * cosTheta);
+    return float3(sinTheta * cos(phi), sinTheta * sin(phi), cosTheta);
 }

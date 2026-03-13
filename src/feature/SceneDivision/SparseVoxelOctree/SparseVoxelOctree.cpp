@@ -309,6 +309,7 @@ void SparseVoxelOctree::compileAndCreateShaders() {
 
 	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
 	std::filesystem::path shaderSource = shaderPath / "SVO.slang";
+	std::vector<uint32_t> shaderBuffer;
 	VkShaderModuleCreateInfo shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
 
 	const VkPushConstantRange pushConstantRange{

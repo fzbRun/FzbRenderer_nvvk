@@ -50,6 +50,7 @@ private:
 	void processMesh(aiMesh* meshData, const aiScene* sceneData);
 	void processNode(aiNode* node, const aiScene* sceneData);
 	void loadObjData(std::filesystem::path meshPath);
+	void createCustomMeshSet(std::string meshID, nvutils::PrimitiveMesh primitiveMesh);
 };
 }
 

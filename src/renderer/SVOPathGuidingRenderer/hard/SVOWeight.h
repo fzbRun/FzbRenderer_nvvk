@@ -43,11 +43,11 @@ public:
 
 	nvvk::Buffer GlobalInfoBuffer;
 	nvvk::Buffer indivisibleNodeInfosBuffer_G;
-	nvvk::Buffer weightSampleCountsBuffer;
+	nvvk::Buffer indivisibleNodeInfosBuffer_E;
 	nvvk::Buffer weightBuffer;
 	nvvk::Buffer weightSumsBuffer;
 
-	VkShaderEXT computeShader_getIndivisibleNode_G{};
+	VkShaderEXT computeShader_getIndivisibleNode{};
 	VkShaderEXT computeShader_initWeights{};
 	VkShaderEXT computeShader_getWeights{};
 	VkShaderEXT computeShader_getProbability{};
@@ -58,7 +58,7 @@ private:
 
 	VkPhysicalDeviceRayQueryFeaturesKHR rayqueryFeature{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR };
 
-	void getIndivisibleNode_E(VkCommandBuffer cmd);
+	void getIndivisibleNode(VkCommandBuffer cmd);
 	void initWeights(VkCommandBuffer cmd);
 	void getWeights(VkCommandBuffer cmd);
 	void getProbability(VkCommandBuffer cmd);
@@ -67,8 +67,8 @@ private:
 	void debugPrepare();
 	void debug_visualization(VkCommandBuffer cmd);
 
-	glm::vec3 samplePoint = glm::vec3(-1.812, 1.3, -3.613);
-	glm::vec3 outgoing = glm::vec3(0.0f, 1.0f, 1.0f);
+	glm::vec3 samplePoint = glm::vec3(-1.0f, 0.5f, 0.5f);
+	glm::vec3 outgoing = glm::vec3(0.0f, 1.0f, -1.0f);
 
 	VkShaderEXT computeShader_getSampleNodeInfo{};
 	VkShaderEXT vertexShader_visualization{};

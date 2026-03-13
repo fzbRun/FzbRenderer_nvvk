@@ -1,4 +1,4 @@
-#ifndef SHADERIO_H
+﻿#ifndef SHADERIO_H
 #define SHADERIO_H
 
 #include "./io_gltf.h"

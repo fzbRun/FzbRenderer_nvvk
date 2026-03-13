@@ -99,7 +99,7 @@ void computeMain_createSVOArray(uint threadIndex: SV_DispatchThreadID, uint thre
         if (threadIndex == 0) {
             SVOLayerInfos_G[pushConst.currentDepth].divisibleNodeCount = 0;
             SVOLayerInfos_E[pushConst.currentDepth].divisibleNodeCount = 0;
-            printf("Error: totalNodeCount exceeds the maximum node count of the current layer. totalNodeCount: %u,         maxNodeCount: %u\n", totalNodeCount, pushConst.sizes[pushConst.currentDepth]);
+            printf("Error: totalNodeCount exceeds the maximum node count of the current layer. totalNodeCount: %u,          maxNodeCount: %u\n", totalNodeCount, pushConst.sizes[pushConst.currentDepth]);
         }
         return;
     }
@@ -186,7 +186,7 @@ void computeMain_createSVOArray(uint threadIndex: SV_DispatchThreadID, uint thre
         if (threadIndex == 0) {
             SVOLayerInfos_G[pushConst.currentDepth].divisibleNodeCount = 0;
             SVOLayerInfos_E[pushConst.currentDepth].divisibleNodeCount = 0;
-            printf("Error: totalNodeCount exceeds the maximum node count of the current layer. totalNodeCount: %u,        maxNodeCount: %u\n", totalNodeCount, pushConst.sizes[pushConst.currentDepth]);
+            printf("Error: totalNodeCount exceeds the maximum node count of the current layer. totalNodeCount: %u,         maxNodeCount: %u\n", totalNodeCount, pushConst.sizes[pushConst.currentDepth]);
         }
         return;
     }

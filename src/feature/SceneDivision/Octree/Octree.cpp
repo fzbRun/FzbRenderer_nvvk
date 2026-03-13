@@ -279,6 +279,10 @@ void Octree::compileAndCreateShaders() {
 	std::filesystem::path shaderSource = shaderPath / "Octree.slang";
 	VkShaderModuleCreateInfo shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
 
+#ifndef NDEBUG
+	Application::slangCompiler.clearMacros();
+#endif
+
 	const VkPushConstantRange pushConstantRange{
 		.stageFlags = VK_SHADER_STAGE_ALL ,
 		.offset = 0,
