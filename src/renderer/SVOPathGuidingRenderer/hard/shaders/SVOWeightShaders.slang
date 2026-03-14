@@ -113,10 +113,10 @@ inline bool checkPointInAABB(float3 pos, AABB aabb) {
 float3 getBSDF(BSDFMaterial material, float3 incidence, float3 normal, float3 outgoing, float3x3 TBN) {
     float cosineON = dot(outgoing, normal);
     float3 bsdf = float3(0.0f);
-    if (material.type == MaterialType::Diffuse) bsdf = M_1_PI * dot(incidence, normal);
+    if (material.type == MaterialType::Diffuse) bsdf = M_1_PI * material.albedo;
     else if (material.type == MaterialType::Conductor) {
         float3 h = normalize(incidence + outgoing);
-        bsdf = cosineON > 0.0f && dot(h, normal) < 0.01f ? 1.0f : 0.0f;
+        bsdf = cosineON > 0.0f && dot(h, normal) < 0.01f ? material.albedo : float3(0.0f);
     }
     else if (material.type == MaterialType::Dielectric) {
         float eta = material.eta.x;
@@ -340,13 +340,6 @@ void computeMain_getIndivisibleNode(uint threadIndex: SV_DispatchThreadID, uint 
 
             nodeLabel += nodeData.label - 1;
             SVO_IndivisibleNodeInfos_E[nodeLabel] = nodeInfo;
-
-            if (pushConst.frameIndex == 1) {
-                printf("AABB: %f %f %f %f %f %f\n",
-                    nodeData.aabb.minimum.x, nodeData.aabb.minimum.y, nodeData.aabb.minimum.z,
-                    nodeData.aabb.maximum.x, nodeData.aabb.maximum.y, nodeData.aabb.maximum.z
-                );
-            }
         }
     }
 }
@@ -457,14 +450,6 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
 
         float3 sampleDir = normalize(samplePoint_G - samplePoint_E);
 
-        //if (abs(nodeCenter_G.y - 1.0f) < 0.000001f && (nodeCenter_E.x - 1.0f) < 0.00001f && pushConst.frameIndex == 1) {
-        //    printf("samplePoint_E: %f %f %f,  samplePoint_G: %f %f %f   sampleDir: %f %f %f\n",
-        //           nodeData_E.aabb.minimum.x, nodeData_E.aabb.minimum.y, nodeData_E.aabb.minimum.z,
-        //        samplePoint_G.x, samplePoint_G.y, samplePoint_G.z,
-        //        sampleDir.x, sampleDir.y, sampleDir.z
-        //    );
-        //}
-
         if (singleSide_E && dot(sampleDir, meanNormal_E) <= 0.0f) continue;
         //if (singleSide_G && dot(-sampleDir, meanNormal_G) <= 0.0f) continue;
         //if (hitPayload.material.type != MaterialType::Dielectric && hitPayload.material.type != MaterialType::RoughDielectric) {
@@ -530,21 +515,21 @@ void computeMain_getProbability(uint threadIndex: SV_DispatchThreadID, uint thre
     uint layerNodeCount_E = groupParentLayerInfo_E.divisibleNodeCount * 8;
     if (threadIndex >= OUTGOING_COUNT * groupIndivisibleNodeCount_G * layerNodeCount_E) return;
 
-    uint nodeAIndex = threadIndex / (groupIndivisibleNodeCount_G * layerNodeCount_E); // outgoing Index
-    uint indexInA = threadIndex - nodeAIndex * (groupIndivisibleNodeCount_G * layerNodeCount_E);
-    uint nodeBIndex = indexInA / layerNodeCount_E;              // SVO_G nodeIndex
-    uint nodeCIndex = indexInA - nodeBIndex * layerNodeCount_E; // SVO_E currentLayer nodeIndex
+    uint outgoingIndex = threadIndex / (groupIndivisibleNodeCount_G * layerNodeCount_E); // outgoing Index
+    uint indexInA = threadIndex - outgoingIndex * (groupIndivisibleNodeCount_G * layerNodeCount_E);
+    uint nodeLable_G = indexInA / layerNodeCount_E;              // SVO_G nodeIndex
+    uint nodeIndex_E = indexInA - nodeLable_G * layerNodeCount_E; // SVO_E currentLayer nodeIndex
 
-    SVONodeData_E nodeData_E = SVO_E[currentLayerIndex][nodeCIndex];
+    SVONodeData_E nodeData_E = SVO_E[currentLayerIndex][nodeIndex_E];
 
     float weight = 0.0f;
-    uint weightIndex = nodeAIndex * groupIndivisibleNodeCount_G * groupTotalNodeCount_E +
-                       nodeBIndex * groupTotalNodeCount_E +
-                       groupPreviousLayerNodeCountSum_E + nodeCIndex;
+    uint weightIndex = outgoingIndex * groupIndivisibleNodeCount_G * groupTotalNodeCount_E +
+                       nodeLable_G * groupTotalNodeCount_E +
+                       groupPreviousLayerNodeCountSum_E + nodeIndex_E;
     uint weightSumArraySize = pushConst.sizes[groupSVOLayerMaxLayer_E - 1];
     if (nodeData_E.indivisible == 0) { // divisible node's weight is sum of childNode's weight
-        uint weightSumIndex = nodeAIndex * groupIndivisibleNodeCount_G * weightSumArraySize +
-                              nodeBIndex * weightSumArraySize + nodeData_E.label - 1;
+        uint weightSumIndex = outgoingIndex * groupIndivisibleNodeCount_G * weightSumArraySize +
+                              nodeLable_G * weightSumArraySize + nodeData_E.label - 1;
         weight = SVOWeightSums[weightSumIndex];
     } else weight = SVOWeights[weightIndex];
 
@@ -554,11 +539,11 @@ void computeMain_getProbability(uint threadIndex: SV_DispatchThreadID, uint thre
         uint targetLane = warplane + offset;
         weightSum += WaveReadLaneAt(weightSum, targetLane);
     }
-    float prbability = weight / max(weightSum, 1.0f);
-    SVOWeights[weightIndex] = prbability;
+    float probability = weight / max(weightSum, 1.0f);
+    SVOWeights[weightIndex] = probability;
 
-    uint fatherNodeLabel = nodeCIndex / 8;
-    fatherNodeLabel += nodeAIndex * groupIndivisibleNodeCount_G * weightSumArraySize + nodeBIndex * weightSumArraySize;
+    uint fatherNodeLabel = nodeIndex_E / 8;
+    fatherNodeLabel += outgoingIndex * groupIndivisibleNodeCount_G * weightSumArraySize + nodeLable_G * weightSumArraySize;
     if ((warplane & 7u) == 0) SVOWeightSums[fatherNodeLabel] = weightSum;
     
     if (threadIndex == 0) {
@@ -605,10 +590,9 @@ void computeMain_getSampleNodeInfo(uint threadIndex: SV_DispatchThreadID, uint t
         }
         if (!hitNode || hitIndivisibleNode) break;
         nodeLabel += layerInfos_G[layerIndex].indivisibleNodeCount;
-    }    
+    }
 
-    if (hitIndivisibleNode)
-        GlobalInfo[0] .sampelNodeAABB = nodeData.aabb;
+    if (hitIndivisibleNode) GlobalInfo[0].sampelNodeAABB = nodeData.aabb;
     else {
         AABB aabb;
         aabb.minimum.x = 3.402823466e+38F;
@@ -618,14 +602,19 @@ void computeMain_getSampleNodeInfo(uint threadIndex: SV_DispatchThreadID, uint t
         aabb.maximum.y = -3.402823466e+38F;
         aabb.maximum.z = -3.402823466e+38F;
         GlobalInfo[0].sampelNodeAABB = aabb;
-        GlobalInfo[0].sampelNodeLabel = nodeLabel;
     }
+    GlobalInfo[0].sampelNodeLabel = nodeLabel;
 
     if (pushConst.frameIndex == 1) {
         AABB aabb = GlobalInfo[0].sampelNodeAABB;
-        printf("sampleNodeAABB:\n %f %f %f\n%f %f %f", 
+        printf("sampleNodeLabel: %d, sampleNodeAABB:\n %f %f %f\n%f %f %f\n", 
+            nodeLabel,
             aabb.minimum.x, aabb.minimum.y, aabb.minimum.z,
             aabb.maximum.x, aabb.maximum.y, aabb.maximum.z);
+
+        float3 nodeCenter = (aabb.maximum + aabb.minimum) * 0.5f;
+        uint outgoingIndex = inverseSF(normalize(pushConst.sceneInfoAddress[0].cameraPosition - nodeCenter), OUTGOING_COUNT);
+        printf("outgoingIndex: %d\n", outgoingIndex);
     }
         
 }
@@ -671,16 +660,17 @@ PSout fragmentMain(VSout input) {
     AABB sampleNodeAABB = globalInfo.sampelNodeAABB;
     if (checkPointInAABB(pos.xyz, sampleNodeAABB)) return { float4(1.0f, 0.0f, 0.0f, 1.0f) };
 
-    uint outgoingIndex = inverseSF(normalize(pushConst.sceneInfoAddress[0].cameraPosition - input.worldPos), OUTGOING_COUNT);
+    float3 nodeCenter_G = (globalInfo.sampelNodeAABB.maximum + globalInfo.sampelNodeAABB.minimum) * 0.5f;
+    uint outgoingIndex = inverseSF(normalize(pushConst.sceneInfoAddress[0].cameraPosition - nodeCenter_G), OUTGOING_COUNT);
     uint weightIndex = outgoingIndex * globalInfo.indivisibleNodeCount_G * globalInfo.totalNodeCount_E +
                        globalInfo.sampelNodeLabel * globalInfo.totalNodeCount_E;
 
     SVONodeData_E nodeData;
     float probability = 1.0f;
-    uint layerIndex = 1, nodeIndex = 0;
+    uint layerIndex = 1, nodeIndex = 0; int nodeOffset = 0;
     bool hitNode = false, hitIndivisibleNode = false;
     for (; layerIndex <= globalInfo.SVOMaxLayer_E; ++layerIndex) {
-        for (int nodeOffset = 0; nodeOffset < 8; ++nodeOffset) {
+        for (nodeOffset = 0; nodeOffset < 8; ++nodeOffset) {
             nodeData = SVO_E[layerIndex][nodeIndex + nodeOffset];
             if (checkPointInAABB(input.worldPos, nodeData.aabb)) {
                 probability *= SVOWeights[weightIndex + nodeIndex + nodeOffset];
@@ -694,11 +684,11 @@ PSout fragmentMain(VSout input) {
                 break;
             }
         }
-        if (!hitNode || hitIndivisibleNode) break;
+        if (!hitNode || hitIndivisibleNode || probability == 0.0f) break;
     }
     if (!hitIndivisibleNode) return { float4(0.0f) };
 
     probability *= nodeData.notIgnoreRatio;
-    return { float4(0.0f, probability, 0.0f, 1.0f) };
+    return { float4(0.0f, probability * 10.0f, 0.0f, 1.0f) };
 }
 #endif
