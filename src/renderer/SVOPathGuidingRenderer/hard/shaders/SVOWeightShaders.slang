@@ -107,107 +107,7 @@ void traceRay(RayDesc ray, inout HitPayload_SVOWeight payload)
     else payload.hit = 0.0f;
 }
 
-inline bool checkPointInAABB(float3 pos, AABB aabb) {
-    return all((pos - aabb.minimum >= -0.00001f) && (aabb.maximum - pos >= -0.0001f));
-}
-float3 getBSDF(BSDFMaterial material, float3 incidence, float3 normal, float3 outgoing, float3x3 TBN) {
-    float cosineON = dot(outgoing, normal);
-    float3 bsdf = float3(0.0f);
-    if (material.type == MaterialType::Diffuse) bsdf = M_1_PI * material.albedo;
-    else if (material.type == MaterialType::Conductor) {
-        float3 h = normalize(incidence + outgoing);
-        bsdf = cosineON > 0.0f && dot(h, normal) < 0.01f ? material.albedo : float3(0.0f);
-    }
-    else if (material.type == MaterialType::Dielectric) {
-        float eta = material.eta.x;
-        if (cosineON < 0) {
-            cosineON = -cosineON;
-            normal = -normal;
-            eta = 1.0f / eta;
-        }
-        float3 F = schlickFresnel(material.albedo, float3(1.0F), cosineON); // cosineON = cosineOH
-        float F_oneChanel = 0.299 * F.x + 0.587 * F.y + 0.114 * F.z;
 
-        if (dot(incidence, normal) > 0.0f) {
-            float3 h = normalize(incidence + outgoing);
-            if (abs(dot(h, normal)) > 0.99f) bsdf = F;
-        } else {
-            float3 h = normalize(eta * outgoing + incidence);
-            if (abs(dot(h, normal)) > 0.99f) bsdf = 1.0f - F;
-        }
-    } else if (material.type == MaterialType::RoughConductor) {
-        if (cosineON <= 0.0f) return bsdf;
-        float3 h = normalize(incidence + outgoing);
-        float3 h_tangentSpace = mul(TBN, h);
-        if (h_tangentSpace.z == 0.0f) return bsdf;
-
-        float3 outgoing_tangentSpace = mul(TBN, outgoing);
-        float cosineOH = dot(outgoing_tangentSpace, h_tangentSpace);
-        if (cosineOH <= 0) return bsdf;
-
-        float D_costhetaNH = hvd_ggx_eval(float2(1.0f / material.roughness), h_tangentSpace);
-        float D = D_costhetaNH / h_tangentSpace.z;
-
-        float3 F = schlickFresnel(material.albedo, float3(1.0F), cosineOH);
-
-        float3 incidence_tangentSpace = mul(TBN, incidence);
-        if (incidence_tangentSpace.z <= 0) return bsdf;
-
-        float G1_outgoing, G1_incidence;
-        float G2 = ggx_smith_shadow_mask(
-                G1_outgoing,
-                G1_incidence,
-                outgoing_tangentSpace,
-                incidence_tangentSpace,
-                float2(material.roughness));
-        if (G2 <= 0.0f) return bsdf;
-
-        bsdf = (D * G2 * F) / (4.0f * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 0.001f);
-    } else if (material.type == MaterialType::RoughDielectric) {
-        float eta = material.eta.x;
-        if (cosineON < 0) {
-            cosineON = -cosineON;
-            normal = -normal;
-            eta = 1.0f / eta;
-        }
-
-        bool refraction = dot(incidence, normal) < 0.0f;
-        float3 h;
-        if (refraction) h = normalize(incidence + normal * eta);
-        else h = normalize(incidence + outgoing);
-
-        float3 h_tangentSpace = mul(TBN, h);
-        if (h_tangentSpace.z <= 0.0f) return bsdf;
-
-        float3 outgoing_tangentSpace = mul(TBN, outgoing);
-        float cosineOH = dot(outgoing_tangentSpace, h_tangentSpace);
-        if (cosineOH <= 0.0f) return bsdf;
-
-        float D_costhetaNH = hvd_ggx_eval(float2(1.0f / material.roughness), h_tangentSpace);
-        float D = D_costhetaNH / max(h_tangentSpace.z, 0.001f);
-
-        float3 F = schlickFresnel(material.albedo, float3(1.0F), cosineOH);
-
-        h_tangentSpace = faceforward(h_tangentSpace, outgoing_tangentSpace, -h_tangentSpace); // dot(I, nerf) < 0 return n;else return -n
-        float3 incidence_tangentSpace = mul(TBN, incidence);
-
-        float G1_outgoing, G1_incidence;
-        float G2 = ggx_smith_shadow_mask(
-                G1_outgoing,
-                G1_incidence,
-                outgoing_tangentSpace,
-                incidence_tangentSpace,
-                float2(material.roughness));
-        if(G2 <= 0.0f) return bsdf;
-        if (refraction) {
-            float weight = dot(incidence_tangentSpace, h_tangentSpace) / eta + cosineOH;
-            bsdf = D * G2 * (1.0f - F) * abs(dot(incidence_tangentSpace, h_tangentSpace)) * cosineOH
-                        / (weight * weight * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 0.001f);
-        } else
-            bsdf = (D * G2 * F) / (4.0f * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 0.001f);
-    }
-    return bsdf;
-}
 //--------------------------------------------------compute shader-----------------------------------------
 //computeMain_getIndivisibleNode_G get SVO_G's indivisibleNode's info for reduce thread wastage(except divisibleNode)
 [numthreads(THREADGROUP_SIZE, 1, 1)]
@@ -534,12 +434,14 @@ void computeMain_getProbability(uint threadIndex: SV_DispatchThreadID, uint thre
     } else weight = SVOWeights[weightIndex];
 
     uint warplane = groupThreadIndex & (WARP_SIZE - 1);
+    uint blockFirstWarplane = warplane / 8 * 8;
     float weightSum = weight;
     for (int offset = 4; offset > 0; offset /= 2) {
         uint targetLane = warplane + offset;
         weightSum += WaveReadLaneAt(weightSum, targetLane);
     }
-    float probability = weight / max(weightSum, 1.0f);
+    weightSum = WaveReadLaneAt(weightSum, blockFirstWarplane);
+    float probability = weight / max(weightSum, 0.00001f);
     SVOWeights[weightIndex] = probability;
 
     uint fatherNodeLabel = nodeIndex_E / 8;
@@ -552,6 +454,10 @@ void computeMain_getProbability(uint threadIndex: SV_DispatchThreadID, uint thre
             GlobalInfo[0].cmd.x = (OUTGOING_COUNT * groupIndivisibleNodeCount_G * upperLayerNodeCount_E + THREADGROUP_SIZE - 1) / THREADGROUP_SIZE;
         } else GlobalInfo[0].cmd.x = 1;
     }
+
+    //if (pushConst.frameIndex == 1 && outgoingIndex == 0 && nodeLable_G == 316) {
+    //    printf("layerIndex: %d, nodeIndex: %d, probability: %f, weight: %f\n", currentLayerIndex, nodeIndex_E, probability, weight);
+    //}
 }
 
 #ifndef NDEBUG
@@ -576,10 +482,6 @@ void computeMain_getSampleNodeInfo(uint threadIndex: SV_DispatchThreadID, uint t
         for (int nodeOffset = 0; nodeOffset < 8; ++nodeOffset) {
             nodeData = SVO_G[layerIndex][nodeIndex + nodeOffset];
             if (checkPointInAABB(pushConst.samplePos, nodeData.aabb)) {
-                if (pushConst.frameIndex == 1) {
-                    printf("layerIndex; %d,  nodeIndex: %d, indivisible: %d\n", layerIndex, nodeIndex + nodeOffset, nodeData.indivisible);
-                }
-
                 if (nodeData.indivisible == 1) {
                     hitIndivisibleNode = true;
                     nodeLabel += nodeData.label - 1;

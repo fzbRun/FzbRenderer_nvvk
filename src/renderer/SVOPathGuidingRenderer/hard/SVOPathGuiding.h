@@ -10,6 +10,8 @@
 #ifndef FZBRENDERER_SVO_PATHGUIDING_H
 #define FZBRENDERER_SVO_PATHGUIDING_H
 
+#define USE_RAYQUERY_SVOPG
+
 namespace FzbRenderer {
 class SVOPathGuidingRenderer : public PathTracingRenderer {
 public:
@@ -27,11 +29,14 @@ public:
 
 	void createDescriptorSetLayout();
 	void createDescriptorSet();
+	void createPipelineLayout();
+	void createShader();
 	void createPipeline();
 	void compileAndCreateShaders() override;
 	void updateDataPerFrame(VkCommandBuffer cmd) override;
 
 	void pathGuiding(VkCommandBuffer cmd);
+	void pathGuiding_rayQuery(VkCommandBuffer cmd);
 
 	shaderio::SVOPathGuidingPushConstant pushConstant{};
 	std::shared_ptr<FzbRenderer::RasterVoxelization> rasterVoxelization;
@@ -39,6 +44,9 @@ public:
 	std::shared_ptr<FzbRenderer::Octree> octree;
 	std::shared_ptr<FzbRenderer::SparseVoxelOctree> svo;
 	std::shared_ptr<FzbRenderer::SVOWeight> svoWeight;
+
+private:
+	VkShaderEXT computeShader_SVOPathGuiding{};
 };
 }
 

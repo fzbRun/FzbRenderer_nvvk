@@ -6,14 +6,17 @@
 #define FZBRENDERER_PATHGUIDING_SHADER_IO_H
 NAMESPACE_SHADERIO_BEGIN()
 
+#define SVO_PATHGUIDING_THREADGROUP_SIZE_X 16
+#define SVO_PATHGUIDING_THREADGROUP_SIZE_Y 16
 struct SVOPathGuidingPushConstant
 {
 	float4 VGBStartPos_Size;
 	int frameIndex = 0;
 	int maxDepth = 3;
 	float time;
-	float3x3 normalMatrix;
 	SceneInfo* sceneInfoAddress;
+	uint2 sceneSize;
+	uint2 threadGroupCount;
 };
 
 enum StaticBindingPoints_SVOPG
@@ -23,13 +26,34 @@ enum StaticBindingPoints_SVOPG
 	eVGB_SVOPG = 2,
 	eSVO_G_SVOPG,
 	eSVO_E_SVOPG,
+	eSVOLayerInfos_G_SVOPG,
+	eSVOLayerInfos_E_SVOPG,
+	eGlobalInfo_SVOPG,
 	eWeights_SVOPG,
-	eOutImage_MIS_SVOPG,
+#ifndef NDEBUG
 	eDepthImage_SVOPG,
+#endif
 };
 enum DynamicBindingPoints_SVOPG {
 	//eTlas_SVOPG = 0,
 	eSVOTlas_SVOPG = 1,
+};
+
+struct GlobalInfo_SOVPG {
+	uint SVOMaxLayer_G;
+	uint SVOMaxLayer_E;
+	uint indivisibleNodeCount_G;
+	uint totalNodeCount_E;
+};
+struct SVONodeInfo_G_SVOPG {
+	uint label;
+	uint indivisible;
+	AABB aabb;
+};
+struct SVONodeInfo_E_SVOPG {
+	uint label;
+	uint indivisible;
+	AABB aabb;
 };
 
 //-------------------------------------------SVOWeight----------------------------------------

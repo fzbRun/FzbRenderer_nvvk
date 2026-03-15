@@ -21,8 +21,9 @@ void raygenMain()
 
     const uint rayFlags = 0;    //RAY_FLAG_CULL_BACK_FACING_TRIANGLES;
     const float2 pixelCenter = launchID + subpixel_jitter;
-    const float2 clipCoords = launchID / launchSize * 2.0 - 1.0;
-    const float4 viewCoords = mul(float4(clipCoords, 1.0, 1.0), sceneInfo.projInvMatrix);
+    const float2 clipCoords = pixelCenter / launchSize * 2.0 - 1.0;
+    float4 viewCoords = mul(float4(clipCoords, 1.0, 1.0), sceneInfo.projInvMatrix);
+    viewCoords /= viewCoords.w;
 
     RayDesc ray;
     ray.Origin = sceneInfo.cameraPosition; // mul(float4(0.0, 0.0, 0.0, 1.0), sceneInfo.viewInvMatrix).xyz;

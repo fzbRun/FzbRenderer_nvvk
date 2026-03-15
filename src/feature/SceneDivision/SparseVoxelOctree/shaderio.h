@@ -13,9 +13,11 @@
 #define SVONodeCount_E_Layer1 8
 #define SVONodeCount_E_Layer2 64
 #define SVONodeCount_E_Layer3 512
+#define SVONodeCount_E_FirstLayer3 SVONodeCount_E_Layer1 + SVONodeCount_E_Layer2 + SVONodeCount_E_Layer3
 #define SVONodeCount_G_Layer1 8
 #define SVONodeCount_G_Layer2 64
 #define SVONodeCount_G_Layer3 512
+#define SVONodeCount_G_FirstLayer3 SVONodeCount_G_Layer1 + SVONodeCount_G_Layer2 + SVONodeCount_G_Layer3
 
 NAMESPACE_SHADERIO_BEGIN()
 

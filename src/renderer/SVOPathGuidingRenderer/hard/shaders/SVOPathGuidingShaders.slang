@@ -1,7 +1,15 @@
 #include "feature/PathTracing/shaders/pathTracingCommon.slang"
+#include "feature/SceneDivision/RasterVoxelization/shaderio.h"
+#include "feature/SceneDivision/SparseVoxelOctree/shaderio.h"
 #include "renderer/SVOPathGuidingRenderer/hard/shaderio.h"
 
 [[vk::push_constant]] ConstantBuffer<SVOPathGuidingPushConstant, ScalarDataLayout> pushConst;
+[[vk::binding(StaticBindingPoints_SVOPG::eVGB_SVOPG)]] StructuredBuffer<VGBVoxelData, ScalarDataLayout> VGB;
+[[vk::binding(StaticBindingPoints_SVOPG::eSVO_G_SVOPG)]] StructuredBuffer<SVONodeData_G, ScalarDataLayout> SVO_G[];
+[[vk::binding(StaticBindingPoints_SVOPG::eSVO_E_SVOPG)]] StructuredBuffer<SVONodeData_E, ScalarDataLayout> SVO_E[];
+[[vk::binding(StaticBindingPoints_SVOPG::eSVOLayerInfos_G_SVOPG)]] StructuredBuffer<SVOLayerInfo> SVOLayerInfos_G;
+[[vk::binding(StaticBindingPoints_SVOPG::eSVOLayerInfos_E_SVOPG)]] StructuredBuffer<SVOLayerInfo> SVOLayerInfos_E;
+[[vk::binding(StaticBindingPoints_SVOPG::eWeights_SVOPG)]] StructuredBuffer<float> SVOWeights;
 #ifndef NDEBUG
 [[vk::binding(StaticBindingPoints_SVOPG::eDepthImage_SVOPG, 0)]] RWTexture2D<float> depthImage; // VK_FORMAT_D32_SFLOAT
 #endif
@@ -22,7 +30,8 @@ void raygenMain()
     const uint rayFlags = 0; // RAY_FLAG_CULL_BACK_FACING_TRIANGLES;
     const float2 pixelCenter = launchID + subpixel_jitter;
     const float2 clipCoords = launchID / launchSize * 2.0 - 1.0;
-    const float4 viewCoords = mul(float4(clipCoords, 1.0, 1.0), sceneInfo.projInvMatrix);
+    float4 viewCoords = mul(float4(clipCoords, 1.0, 1.0), sceneInfo.projInvMatrix);
+    viewCoords /= viewCoords.w;
 
     RayDesc ray;
     ray.Origin = sceneInfo.cameraPosition; // mul(float4(0.0, 0.0, 0.0, 1.0), sceneInfo.viewInvMatrix).xyz;
@@ -154,7 +163,7 @@ void diffuseMaterialMain(inout CallablePayload payload) {
 
 [shader("callable")]
 void conductorMaterialMain(inout CallablePayload payload) {
-    payload.bsdf = 1.0f;
+    payload.bsdf = payload.material.albedo;
     payload.pdf = 1.0f;
     payload.incidence = reflect(-payload.outgoing, payload.hitNormal);
 }
