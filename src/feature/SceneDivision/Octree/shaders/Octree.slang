@@ -11,6 +11,24 @@
 [[vk::binding(BindingPoints_Octree::eBaseMap_Octree)]] Texture2D<float4> baseMap;
 #endif
 
+int3 getVoxelIndexXYZ(int voxelIndex) {
+    int voxelCount = int(pushConst.VGBStartPos_Size.w);
+    int voxelGroupTotalCount = voxelCount * voxelCount * voxelCount;
+    int3 voxelIndexXYZ = int3(0, 0, 0);
+    while (voxelIndex > 0) {
+        voxelGroupTotalCount /= 8;
+        voxelCount /= 2;
+        int groupIndex = voxelIndex / voxelGroupTotalCount;
+        int3 groupIndexXYZ = int3(groupIndex & 1, (groupIndex & 2) >> 1, (groupIndex & 4) >> 2);
+        voxelIndexXYZ += groupIndexXYZ * voxelCount;
+
+        voxelIndex -= groupIndexXYZ.x * voxelGroupTotalCount + 
+                      groupIndexXYZ.y * voxelGroupTotalCount * 2 +
+                      groupIndexXYZ.z * voxelGroupTotalCount * 4;
+    }
+    return voxelIndexXYZ;
+}
+
 //----------------------------------------------clearOctreeArray--------------------------------------------
 [numthreads(512, 1, 1)]
 [shader("compute")]
@@ -473,23 +491,6 @@ struct PSout_Wireframe
     #endif
 };
 
-int3 getVoxelIndexXYZ(int voxelIndex) {
-    int voxelCount = int(pushConst.VGBStartPos_Size.w);
-    int voxelGroupTotalCount = voxelCount * voxelCount * voxelCount;
-    int3 voxelIndexXYZ = int3(0, 0, 0);
-    while (voxelIndex > 0) {
-        voxelGroupTotalCount /= 8;
-        voxelCount /= 2;
-        int groupIndex = voxelIndex / voxelGroupTotalCount;
-        int3 groupIndexXYZ = int3(groupIndex & 1, (groupIndex & 2) >> 1, (groupIndex & 4) >> 2);
-        voxelIndexXYZ += groupIndexXYZ * voxelCount;
-
-        voxelIndex -= groupIndexXYZ.x * voxelGroupTotalCount + 
-                      groupIndexXYZ.y * voxelGroupTotalCount * 2 +
-                      groupIndexXYZ.z * voxelGroupTotalCount * 4;
-    }
-    return voxelIndexXYZ;
-}
 [shader("vertex")]
 VSout_Wireframe vertexMain_Wireframe(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID)
 {

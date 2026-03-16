@@ -56,7 +56,7 @@ inline void fillGroupshared(uint groupThreadIndex) {
     WaveActiveAllTrue(true);
 }
 
-void traceRay(RayDesc ray, inout HitPayload_SVOWeight payload)
+void traceRay(RayDesc ray, inout HitPayload_SVOWeight payload, AABB nodeAABB_G)
 {
     // Initialize inline ray query with no special flags
     RayQuery<RAY_FLAG_NONE> q;
@@ -93,6 +93,12 @@ void traceRay(RayDesc ray, inout HitPayload_SVOWeight payload)
         triPos = q.CommittedGetIntersectionTriangleVertexPositions();
         const float3 localPosition = triPos[0] * barycentrics.x + triPos[1] * barycentrics.y + triPos[2] * barycentrics.z;
         payload.hitPos = float3(mul(float4(localPosition, 1.0), objectToWorld));
+
+        if (!checkPointInAABB(payload.hitPos, nodeAABB_G)) {
+            payload.hit = -1.0f;
+            return;
+        }
+
         payload.hit = 1.0f;
 
         const float3 edge1 = triPos[1] - triPos[0];
@@ -256,7 +262,7 @@ void computeMain_initWeights(uint threadIndex: SV_DispatchThreadID, uint groupTh
     SVOWeights[threadIndex] = 0.0f;
 
     if (threadIndex == 0)
-        GlobalInfo[0].cmd.x = (OUTGOING_COUNT * groupIndivisibleNodeCount_E * groupIndivisibleNodeCount_G + THREADGROUP_SIZE - 1) / THREADGROUP_SIZE;
+        GlobalInfo[0].cmd.x = (groupIndivisibleNodeCount_E * OUTGOING_COUNT * groupIndivisibleNodeCount_G + THREADGROUP_SIZE - 1) / THREADGROUP_SIZE;
 }
 
 [numthreads(THREADGROUP_SIZE, 1, 1)]
@@ -321,8 +327,8 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
     uint groupNodeGIndex = ((threadIndex / threadCount_perNodeG) - currentGroupNodeGStartIndex) % groupIndivisibleNodeCount_G;
     IndivisibleNodeData_G nodeData_G = groupNodeDatas_G[groupNodeGIndex];
 
-    float3 meanNormal_E = nodeData_E.normal; float normalLength_E = length(meanNormal_E); bool singleSide_E = normalLength_E > M_PI_2;
-    float3 meanNormal_G = nodeData_G.normal; float normalLength_G = length(meanNormal_G); bool singleSide_G = normalLength_G > M_PI_2;
+    float3 meanNormal_E = nodeData_E.normal; float normalLength_E = length(meanNormal_E); bool singleSide_E = normalLength_E >= 0.707;
+    float3 meanNormal_G = nodeData_G.normal; float normalLength_G = length(meanNormal_G); bool singleSide_G = normalLength_G >= 0.707;
 
     meanNormal_E = normalize(meanNormal_E);
     meanNormal_G = normalize(meanNormal_G);
@@ -331,6 +337,9 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
     orthonormalBasis(meanNormal_E, tangent, bitangent);
     float3x3 TBN_E = float3x3(tangent, bitangent, meanNormal_E);
 
+    orthonormalBasis(meanNormal_G, tangent, bitangent);
+    float3x3 TBN_G = float3x3(tangent, bitangent, meanNormal_G);
+
     uint seed = xxhash32(uint3(threadIndex, groupThreadIndex, pushConst.frameIndex));
 
     uint outgoingIndex = threadIndex % OUTGOING_COUNT;
@@ -338,15 +347,18 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
 
     float3 halfSize_E = (nodeData_E.aabb.maximum - nodeData_E.aabb.minimum) * 0.5f;
     float3 nodeCenter_E = nodeData_E.aabb.minimum + halfSize_E;
-    float3 nodeCenter_G = (nodeData_G.aabb.maximum + nodeData_G.aabb.minimum) * 0.5f;
+    float3 halfSize_G = (nodeData_G.aabb.maximum - nodeData_G.aabb.minimum) * 0.5f;
+    float3 nodeCenter_G = nodeData_G.aabb.minimum + halfSize_G;
     RayDesc ray;
     float weight = 0.0f;
     for (int hitTestIndex = 0; hitTestIndex < HITTEST_COUNT; ++hitTestIndex) {
-        float3 samplePoint_E = sample_hemisphere_mean(seed) * 0.001f;
-        samplePoint_E = mul(samplePoint_E, TBN_E) + nodeCenter_E; // slang is right multiplication
+        float3 samplePoint_E = singleSide_E ? sample_hemisphere_mean(seed) : sample_sphere_mean(seed);
+        samplePoint_E = mul(samplePoint_E, TBN_E); // slang is right multiplication
+        samplePoint_E = getAABBPoint(samplePoint_E, nodeCenter_E, halfSize_E);
 
-        float3 samplePoint_G = sample_sphere_mean(seed) * 0.001f;
-        samplePoint_G += nodeCenter_G;
+        float3 samplePoint_G = singleSide_G ? sample_hemisphere_mean(seed) : sample_sphere_mean(seed);
+        samplePoint_G = mul(samplePoint_G, TBN_G);
+        samplePoint_G = getAABBPoint(samplePoint_G, nodeCenter_G, halfSize_G);
 
         float3 sampleDir = normalize(samplePoint_G - samplePoint_E);
 
@@ -357,38 +369,50 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
         //}
 
         ray.Direction = sampleDir;
-        // get startPoint from aabb
-        ray.Origin = nodeCenter_E;
-        float3 invDir = 1.0f / max(abs(sampleDir), 0.001f);
-        float3 tCandidate = halfSize_E * invDir;
-        float t = min(min(tCandidate.x, tCandidate.y), tCandidate.z);
-        ray.Origin += sampleDir * t + ray.Direction * 0.0001f;
+        ray.Origin = samplePoint_E + sampleDir * 0.00001f;
         ray.TMin = 0.001;
         ray.TMax = INFINITE;
 
         HitPayload_SVOWeight hitPayload;
-        traceRay(ray, hitPayload);
-        if (hitPayload.hit == 0.0f) continue;
+        traceRay(ray, hitPayload, nodeData_G.aabb);
+
+        //uint nodeGIndex = (threadIndex / threadCount_perNodeG) % groupIndivisibleNodeCount_G;
+        //uint nodeEIndex = threadIndex / threadCount_perNodeE;
+        //if (pushConst.frameIndex == 1 && outgoingIndex == 23 && nodeGIndex == 17 && nodeEIndex == 45) {
+        //    printf("hit: %f, singleSide_E: %d, singleSide_G: %d\nmeanNormal_E: %f %f %f, meanNormal_G: %f %f %f\nsamplePoint_E: %f %f %f, samplePoint_G: %f %f %f,     sampleDir: %f %f  %f\nhitPos: %f %f %f\n\n",
+        //           hitPayload.hit, singleSide_E, singleSide_G,
+        //        meanNormal_E.x, meanNormal_E.y, meanNormal_E.z,
+        //        meanNormal_G.x, meanNormal_G.y, meanNormal_G.z,
+        //        samplePoint_E.x, samplePoint_E.y, samplePoint_E.z,
+        //        samplePoint_G.x, samplePoint_G.y, samplePoint_G.z,
+        //        sampleDir.x, sampleDir.y, sampleDir.z,
+        //        hitPayload.hitPos.x, hitPayload.hitPos.y, hitPayload.hitPos.z
+        //    );
+        //}
+
+        if (hitPayload.hit <= 0.0f) continue;
         float cosine = dot(-sampleDir, hitPayload.normal);
 
         if (hitPayload.material.type != MaterialType::Dielectric && hitPayload.material.type != MaterialType::RoughDielectric) {
-            if (cosine <= 0.0f || dot(outgoing, hitPayload.normal) <= 0.0f) continue;
+            //if (cosine <= 0.0f || dot(outgoing, hitPayload.normal) <= 0.0f) continue;
+            if (cosine <= 0.0f) continue;
         }
 
         orthonormalBasis(hitPayload.normal, tangent, bitangent);
-        float3x3 TBN_G = float3x3(tangent, bitangent, hitPayload.normal);
+        TBN_G = float3x3(tangent, bitangent, hitPayload.normal);
 
         float3 bsdf = getBSDF(hitPayload.material, -sampleDir, hitPayload.normal, outgoing, TBN_G);
         float3 weight3 = nodeData_E.irradiance * cosine * bsdf; // notIgnoreRatio is made by irradiance length, so use length here;
         weight += 0.299 * weight3.x + 0.587 * weight3.y + 0.114 * weight3.z;
     }
     weight /= HITTEST_COUNT;
+
     if (weight == 0.0f) return;
 
     uint nodeIndex_E = nodeData_E.nodeIndex;
-    uint nodeLayer_G = nodeData_G.nodeLabel;
+    uint nodeLable_G = nodeData_G.nodeLabel;    //has -1
     uint weightIndex = outgoingIndex * groupIndivisibleNodeCount_G * groupTotalNodeCount_E +
-                       nodeLayer_G * groupTotalNodeCount_E + nodeIndex_E;
+                       nodeLable_G * groupTotalNodeCount_E + nodeIndex_E;
     SVOWeights[weightIndex] = weight;
 }
 
@@ -455,7 +479,7 @@ void computeMain_getProbability(uint threadIndex: SV_DispatchThreadID, uint thre
         } else GlobalInfo[0].cmd.x = 1;
     }
 
-    //if (pushConst.frameIndex == 1 && outgoingIndex == 0 && nodeLable_G == 316) {
+    //if (pushConst.frameIndex == 1 && outgoingIndex == 17 && nodeLable_G == 46) {
     //    printf("layerIndex: %d, nodeIndex: %d, probability: %f, weight: %f\n", currentLayerIndex, nodeIndex_E, probability, weight);
     //}
 }
@@ -518,13 +542,24 @@ void computeMain_getSampleNodeInfo(uint threadIndex: SV_DispatchThreadID, uint t
         uint outgoingIndex = inverseSF(normalize(pushConst.sceneInfoAddress[0].cameraPosition - nodeCenter), OUTGOING_COUNT);
         printf("outgoingIndex: %d\n", outgoingIndex);
     }
-        
+
+    //if (pushConst.frameIndex == 1) {
+    //    for (int i = 0; i < 8; ++i) {
+    //        AABB aabb = SVO_G[1][i].aabb;
+    //        printf("layerIndex: 1, nodeIndex: %d, aabb: %f %f %f %f %f %f\n",
+    //            i,
+    //            aabb.minimum.x, aabb.minimum.y, aabb.minimum.z,
+    //            aabb.maximum.x, aabb.maximum.y, aabb.maximum.z,
+    //        );
+    //    }
+    //}
 }
 
 struct VSout {
     float4 sv_position : SV_Position;
     float3 worldPos;
     float2 uv;
+    uint randomSeed;
 }
 struct PSout
 {
@@ -551,6 +586,7 @@ VSout vertexMain(uint vertexIndex: SV_VertexID)
 
     output.sv_position = mul(pos, sceneInfo.viewProjMatrix);
     output.worldPos = pos.xyz;
+    output.randomSeed = xxhash32(uint3(vertexIndex, instanceIndex, pushConst.frameIndex));
     return output;
 }
 [shader("pixel")]
@@ -563,7 +599,12 @@ PSout fragmentMain(VSout input) {
     if (checkPointInAABB(pos.xyz, sampleNodeAABB)) return { float4(1.0f, 0.0f, 0.0f, 1.0f) };
 
     float3 nodeCenter_G = (globalInfo.sampelNodeAABB.maximum + globalInfo.sampelNodeAABB.minimum) * 0.5f;
-    uint outgoingIndex = inverseSF(normalize(pushConst.sceneInfoAddress[0].cameraPosition - nodeCenter_G), OUTGOING_COUNT);
+
+    float3 view = normalize(pushConst.sceneInfoAddress[0].cameraPosition - pos);
+    float probabality = rand(input.randomSeed);
+    uint outgoingIndex = inverseSF(view, OUTGOING_COUNT, probabality);
+
+    //uint outgoingIndex = inverseSF(normalize(pushConst.sceneInfoAddress[0].cameraPosition - nodeCenter_G), OUTGOING_COUNT);
     uint weightIndex = outgoingIndex * globalInfo.indivisibleNodeCount_G * globalInfo.totalNodeCount_E +
                        globalInfo.sampelNodeLabel * globalInfo.totalNodeCount_E;
 
@@ -589,6 +630,9 @@ PSout fragmentMain(VSout input) {
         if (!hitNode || hitIndivisibleNode || probability == 0.0f) break;
     }
     if (!hitIndivisibleNode) return { float4(0.0f) };
+
+    // if (nodeIndex + nodeOffset == 107 && layerIndex == 3) return { float4(0.0f, 0.0f, 1.0f, 1.0f) };
+    // if (nodeData.label - 1 == 45 && layerIndex == 3) return { float4(0.0f, 0.0f, 1.0f, 1.0f) };
 
     probability *= nodeData.notIgnoreRatio;
     return { float4(0.0f, probability * 10.0f, 0.0f, 1.0f) };

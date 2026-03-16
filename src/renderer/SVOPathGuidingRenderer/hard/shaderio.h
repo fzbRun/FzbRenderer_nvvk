@@ -59,7 +59,7 @@ struct SVONodeInfo_E_SVOPG {
 //-------------------------------------------SVOWeight----------------------------------------
 #define WEIGHT_HITTEST_COUNT 8
 #define HITTEST_COUNT 8
-#define OUTGOING_COUNT 32
+#define OUTGOING_COUNT 64
 struct SVOWeightPushConstant {
 	uint32_t frameIndex;
 	uint32_t sizes[8];

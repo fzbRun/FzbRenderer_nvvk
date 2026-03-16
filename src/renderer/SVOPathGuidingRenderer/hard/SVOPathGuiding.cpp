@@ -169,6 +169,7 @@ void FzbRenderer::SVOPathGuidingRenderer::render(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
 
 	updateDataPerFrame(cmd);
+	//if (pushConstant.frameIndex == maxFrames - 1) return;
 
 	rasterVoxelization->render(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR);

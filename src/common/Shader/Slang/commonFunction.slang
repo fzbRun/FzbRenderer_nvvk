@@ -21,51 +21,163 @@ float3x3 Inverse3x3(float3x3 m) {
 
     return transpose(float3x3(r0, r1, r2));
 }
+float2x2 Inverse2x2(float2x2 m) {
+    // 计算行列式：det = a*d - b*c
+    float det = m[0][0] * m[1][1] - m[0][1] * m[1][0];
 
+    // 假设 det != 0（实际使用时需保证）
+    float invDet = 1.0f / det;
+
+    // 使用向量运算一次性构造两行
+    float2x2 result;
+    result[0] = float2(m[1][1], -m[0][1]) * invDet;
+    result[1] = float2(-m[1][0], m[0][0]) * invDet;
+
+    return result;
+}
+//---------------------------------------------------AABB---------------------------------------------------
 inline bool checkPointInAABB(float3 pos, AABB aabb) {
-    return all((pos - aabb.minimum >= -0.00001f) && (aabb.maximum - pos >= -0.00001f));
+    return all((pos - aabb.minimum >= -0.001f) && (aabb.maximum - pos >= -0.001f));
 }
+inline float3 getAABBPoint(float3 sampleDir, float3 aabbCenter, float3 aabbHalfSize) {
+    float3 invDir = 1.0f / max(abs(sampleDir), 1e-6f);
 
-float3 fibSpherePoint(uint i, uint n) {
-    float f_i = float(i);
-    float f_n = float(n);
+    float3 signHalfSize = sign(aabbHalfSize);
+    float3 aabbHalfSize2 = (signHalfSize * -1.0f + 1.0f) * 3.402823466e+36F + aabbHalfSize;
 
-    float cosTheta = 1.0 - (2.0 * f_i + 1.0) / f_n;
+    float3 tCandidate = aabbHalfSize2 * invDir;
+    float t = min(min(tCandidate.x, tCandidate.y), tCandidate.z);
+    return aabbCenter + sampleDir * t * signHalfSize;
+}
+//------------------------------------------------SphericalFibonacci---------------------------------------------
+#define M_PHI 1.618033988749895
+//y axis is up, get worldPos
+inline float3 fibSpherePoint(float i, float n) {
+    float phi = 2.0 * M_PI * frac(i / M_PHI);
+    float cosTheta = 1.0 - (2.0 * i + 1.0) / n;
     float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
-
-    //float PHI = 1.618033988749895f;
-    float GOLDEN_ANGLE = 2.0 * M_PI * (1.618033988749895f - 1.0);
-    float phi = GOLDEN_ANGLE * f_i;
-
-    return float3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
+    return float3(cos(phi) * sinTheta, cosTheta, sin(phi) * sinTheta);
 }
-uint inverseSF(float3 p, uint n) {
-    float f_n = float(n);
-    float cosTheta = p.z;
 
-    //    cosTheta = 1 - (2*i+1)/n  => i ≈ (n*(1-cosTheta)-1)/2
-    float i_est = (f_n * (1.0 - cosTheta) - 1.0) * 0.5;
-    int i0 = int(floor(i_est));
-
-    int searchRadius = 2;
-    int start = max(0, i0 - searchRadius);
-    int end = min(int(n) - 1, i0 + searchRadius);
-
-    uint bestIdx = 0;
-    float bestDistSq = 1e10;
-
-    for (int idx = start; idx <= end; ++idx) {
-        float3 q = fibSpherePoint(uint(idx), n);
-        float3 d = q - p;
-        float distSq = dot(d, d);
-        if (distSq < bestDistSq) {
-            bestDistSq = distSq;
-            bestIdx = uint(idx);
+#define madfrac(A, B) mad((A), (B), -floor((A) * (B)))
+uint inverseSF(float3 p, float n) {
+    float phi = min(atan2(p.z, p.x), M_PI), cosTheta = p.y;
+    float k = max(2, floor(
+        log(n * M_PI * sqrt(5) * (1 - cosTheta * cosTheta))
+        / log(M_PHI * M_PHI)));
+    float Fk = pow(M_PHI, k) / sqrt(5);
+    float F0 = round(Fk), F1 = round(Fk * M_PHI);
+    float2x2 B = float2x2(
+                2 * M_PI * madfrac(F0 + 1, M_PHI - 1) - 2 * M_PI * (M_PHI - 1),
+                2 * M_PI * madfrac(F1 + 1, M_PHI - 1) - 2 * M_PI * (M_PHI - 1),
+                -2 * F0 / n,
+                -2 * F1 / n);
+    float2x2 invB = Inverse2x2(B);
+    float2 c = floor(mul(invB, float2(phi, cosTheta - (1 - 1 / n))));
+    float d = INFINITE, j = 0;
+    for (uint s = 0; s < 4; ++s) {
+        float cosTheta = dot(B[1], float2(s % 2, s / 2) + c) + (1 - 1 / n);
+        cosTheta = clamp(cosTheta, -1, +1) * 2 - cosTheta;
+        float i = floor(n * 0.5 - cosTheta * n * 0.5);
+        float3 q = fibSpherePoint(i, n);
+        float squaredDistance = dot(q - p, q - p);
+        if (squaredDistance < d) {
+            d = squaredDistance;
+            j = i;
         }
     }
-
-    return bestIdx;
+    return (uint)j;
 }
+
+uint inverseSF(float3 p, float n, inout float probability) {
+    float phi = min(atan2(p.z, p.x), M_PI), cosTheta = p.y;
+    float k = max(2, floor(
+        log(n * M_PI * sqrt(5) * (1 - cosTheta * cosTheta))
+        / log(M_PHI * M_PHI)));
+    float Fk = pow(M_PHI, k) / sqrt(5);
+    float F0 = round(Fk), F1 = round(Fk * M_PHI);
+    float2x2 B = float2x2(
+                2 * M_PI * madfrac(F0 + 1, M_PHI - 1) - 2 * M_PI * (M_PHI - 1),
+                          2 * M_PI * madfrac(F1 + 1, M_PHI - 1) - 2 * M_PI * (M_PHI - 1),
+                -2 * F0 / n,
+                -2 * F1 / n);
+    float2x2 invB = Inverse2x2(B);
+
+    if (k <= 4.0f) {    //range = 90 - arcsin(sqrt(6.68 / n))
+        float2 c = floor(mul(invB, float2(phi, cosTheta - (1 - 1 / n))));
+        float d = INFINITE, j = 0;
+        for (uint s = 0; s < 4; ++s) {
+            float cosTheta = dot(B[1], float2(s % 2, s / 2) + c) + (1 - 1 / n);
+            cosTheta = clamp(cosTheta, -1, +1) * 2 - cosTheta;
+            float i = floor(n * 0.5 - cosTheta * n * 0.5);
+            float3 q = fibSpherePoint(i, n);
+            float squaredDistance = dot(q - p, q - p);
+            if (squaredDistance < d) {
+                d = squaredDistance;
+                j = i;
+            }
+        }
+        probability = 1.0f;
+        return (uint)j;
+    } else {
+        float2 c = mul(invB, float2(phi, cosTheta - (1.0 - 1.0 / n)));
+        int2 center = int2((int)round(c.x), (int)round(c.y));
+
+        float h = sqrt(4.0 * M_PI / n);
+        float totalWeight = 0.0;
+        float weights[9]; uint idxs[9];
+        uint idx_result = 0;
+        for (int di = -1; di <= 1; ++di) {
+            for (int dj = -1; dj <= 1; ++dj) {
+                int idx_index = (di + 1) * 3 + (dj + 1);
+                int2 gridCoord = center + int2(di, dj);
+
+                float cosCorner = B[1][0] * gridCoord.x + B[1][1] * gridCoord.y + (1.0 - 1.0 / n);
+
+                if (cosCorner > 1.0) cosCorner = 2.0 - cosCorner;
+                else if (cosCorner < -1.0) cosCorner = -2.0 - cosCorner;
+
+                float iEst = floor(n * 0.5 - cosCorner * n * 0.5);
+                int idx = (int)iEst;
+                idx = clamp(idx, 0, (int)n - 1);
+                idxs[idx_index] = idx;
+
+                float3 q = fibSpherePoint(idx, n);
+
+                float delta = distance(q, p);
+
+                float t = max(0.0, 1.0 - delta / h);
+                float w = 3.0 * t * t - 2.0 * t * t * t;
+
+                if (w > 0.0) {
+                    totalWeight += w;
+                    weights[idx_index] = w;
+                } else weights[idx_index] = 0.0f;
+            }
+        }
+        if (totalWeight == 0) {
+            probability = 1.0f;
+            return 0;
+        }
+        for (int i = 0; i < 9; ++i) weights[i] /= totalWeight;
+        for (int i = 0; i < 9; ++i) {
+            if (probability <= weights[i]) {
+                idx_result = idxs[i];
+                break;
+            }
+            probability -= weights[i];
+        }
+        probability = 0.0f;
+        for (int i = 0; i < 9; ++i) {
+            if (idxs[i] == idx_result) probability += weights[i];
+        }
+        return idx_result;
+    }
+
+    probability = 1.0f;
+    return 0;
+}
+//------------------------------------------------sphereMeanSample---------------------------------------------
 float3 sample_hemisphere_mean(inout uint seed) {
     float r1 = rand(seed); float r2 = rand(seed); // mean sample hemisphere
     float cosTheta = r1; float phi = 2.0f * M_PI * r2;
@@ -78,7 +190,7 @@ float3 sample_sphere_mean(inout uint seed) {
     float sinTheta = sqrt(1.0f - cosTheta * cosTheta);
     return float3(sinTheta * cos(phi), sinTheta * sin(phi), cosTheta);
 }
-
+//------------------------------------------------sphereRectangleSample---------------------------------------------
 struct Quadrilateral {
     float3 startPos;
     float3 normal;
@@ -229,3 +341,4 @@ float3 sphericalRectangleSample(Quadrilateral_initialization quadrangle, float u
 
     return xu * quadrangle.x + yv * quadrangle.y + quadrangle.z0 * quadrangle.z; // 未归一化
 }
+

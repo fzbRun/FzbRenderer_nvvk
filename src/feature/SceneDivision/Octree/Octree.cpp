@@ -135,9 +135,9 @@ void Octree::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 };
 void Octree::preRender() {
 #ifndef NDEBUG
+	pushConstant.VGBStartPos_Size = glm::vec4(setting.VGBStartPos, setting.VGBSize);
 	pushConstant.frameIndex = Application::frameIndex;
 	pushConstant.clusteringLevel = setting.clusteringLevel;
-	pushConstant.VGBStartPos_Size = glm::vec4(setting.VGBStartPos, setting.VGBSize);
 #endif
 }
 void Octree::render(VkCommandBuffer cmd) {

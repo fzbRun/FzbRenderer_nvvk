@@ -112,7 +112,11 @@ void geometryMain(
 }
 
 int getVoxelIndex(float3 worldPos) {
-    int3 voxelIndex = int3((worldPos - pushConst.voxelGroupStartPos) / pushConst.voxelSize_Count.xyz);
+    /*
+    We determine whether a pos is located in a node by checking whether it is contained within the aabb of the node in the order of 0-7.
+    Therefore, we should assign the pos of the boundary to the smaller node to avoid issues caused by floating-point number comparisons
+    */
+    int3 voxelIndex = int3((worldPos - pushConst.voxelGroupStartPos) * 0.999f / pushConst.voxelSize_Count.xyz);
     int voxelCount = uint(pushConst.voxelSize_Count.w);
     int voxelTotalCount = voxelCount * voxelCount * voxelCount;
     int voxelIndexU = 0;
