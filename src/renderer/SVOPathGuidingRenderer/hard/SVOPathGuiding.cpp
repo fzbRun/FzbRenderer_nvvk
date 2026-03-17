@@ -32,6 +32,8 @@ void FzbRenderer::SVOPathGuidingRenderer::init() {
 		.VGBStartPos = rasterVoxelization->setting.pushConstant.voxelGroupStartPos,
 		.VGBVoxelSize = glm::vec3(rasterVoxelization->setting.pushConstant.voxelSize_Count),
 		.VGBSize = rasterVoxelization->setting.pushConstant.voxelSize_Count.w,
+		.sceneStartPos = rasterVoxelization->setting.sceneStartPos,
+		.sceneSize = rasterVoxelization->setting.sceneSize,
 		.ptContext = &ptContext,
 		.asManager = &asManager
 	};

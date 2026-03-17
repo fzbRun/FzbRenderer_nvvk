@@ -66,6 +66,11 @@
 		<bsdf type="diffuse" id="Pot2BSDF">
 			<albedo value="0.8, 0.8, 0.8" />
 		</bsdf>
+		<bsdf type="roughDielectric" id="Pot2BSDF_RoughDieletric">
+			<roughness value="0.2" />
+			<int_ior value="1.5" />
+			<ext_Ior value="1.0" />
+		</bsdf>
 		<bsdf type="roughConductor" id="Pot3BSDF">
 			<roughness value="0.01" />
 			<eta value="1.91, 1.31, 0.82" />
@@ -254,14 +259,14 @@
 				<matrix value="-0.0891049 0 7.7898e-009 -1.95645 0 0.0891049 0 0.648205 -7.7898e-009 0 -0.0891049 -2.67687 0 0 0 1"/>
 			</transform>
 			<meshRef id = "Pot" />
-			<materialRef id = "Pot2BSDF" />
+			<materialRef id = "Pot2BSDF_RoughDieletric" />
 		</instance>
 		<instance>
 			<transform name="to_world">
 				<matrix value="-0.0891049 0 7.7898e-009 -1.95645 0 0.0891049 0 0.648205 -7.7898e-009 0 -0.0891049 -2.67687 0 0 0 1"/>
 			</transform>
 			<meshRef id = "PotLid" />
-			<materialRef id = "Pot2BSDF" />
+			<materialRef id = "Pot2BSDF_RoughDieletric" />
 		</instance>
 
 		<instance>

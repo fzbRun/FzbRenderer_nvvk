@@ -56,9 +56,11 @@ void FzbRenderer::RasterVoxelization::init() {
 			aabb.maximum.y = std::max(meshAABB.maximum.y, aabb.maximum.y);
 			aabb.maximum.z = std::max(meshAABB.maximum.z, aabb.maximum.z);
 		}
+		setting.sceneSize = aabb.maximum - aabb.minimum;
+		setting.sceneStartPos = aabb.minimum;
 
 		//放大一点，防止边界处的数据错误（比方说2个voxel，那么右边界的索引是2不是1;不然会导致2->0，0voxel本没有数据先有了数据）
-		glm::vec3 distance = (aabb.maximum - aabb.minimum) * 1.1f;		
+		glm::vec3 distance = setting.sceneSize * 1.1f;
 		float maxDistance = std::max(distance.x, std::max(distance.y, distance.z));
 		glm::vec3 center = (aabb.maximum + aabb.minimum) * 0.5f;
 		glm::vec3 minimum = center - distance * 0.5f;

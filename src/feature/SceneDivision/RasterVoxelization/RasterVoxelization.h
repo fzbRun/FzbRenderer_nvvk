@@ -26,6 +26,8 @@ struct RasterVoxelizationSetting{
 	shaderio::RasterVoxelizationPushConstant pushConstant;
 	DebugMode debugMode = DebugMode::None;
 	float lineWidth = 2.0f;
+	shaderio::float3 sceneStartPos;
+	shaderio::float3 sceneSize;
 };
 
 class RasterVoxelization : public Feature {

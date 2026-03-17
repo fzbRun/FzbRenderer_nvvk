@@ -153,8 +153,13 @@ void FzbRenderer::LightInject::render(VkCommandBuffer cmd) {
 		vkCmdPushConstants2(cmd, &pushInfo);
 
 		const nvvk::SBTGenerator::Regions& regions = sbtGenerator.getSBTRegions();
-		const VkExtent2D& size = Application::app->getViewportSize();
-		vkCmdTraceRaysKHR(cmd, &regions.raygen, &regions.miss, &regions.hit, &regions.callable, size.width, size.height, 1);
+		
+		float sceneMinSize = std::min(setting.sceneSize.x, std::min(setting.sceneSize.y, setting.sceneSize.z));
+		shaderio::uint3 sizeAxis = setting.sceneSize / sceneMinSize;
+		uint32_t minAxisSampleCount = LIGHTINJECT_SAMPLEPOINTCOUNT / (sizeAxis.x + sizeAxis.y + sizeAxis.z);
+		shaderio::uint3 sampleCount = sizeAxis * minAxisSampleCount;
+
+		vkCmdTraceRaysKHR(cmd, &regions.raygen, &regions.miss, &regions.hit, &regions.callable, sampleCount.x, sampleCount.y, sampleCount.z);
 	}
 }
 void FzbRenderer::LightInject::postProcess(VkCommandBuffer cmd) {
@@ -228,7 +233,7 @@ void FzbRenderer::LightInject::createPipeline() {
 
 	addPathTracingSlangMacro();
 	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
-	std::filesystem::path shaderSource = shaderPath / "lightInject.slang";
+	std::filesystem::path shaderSource = shaderPath / "lightInject2.slang";
 	shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
 
 	enum StageIndices {

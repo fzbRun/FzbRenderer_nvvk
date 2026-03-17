@@ -16,6 +16,15 @@
 			<albedo value="0.8, 0.8, 0.8, 1.0" />
 			<emissive value = "10.0, 10.0, 10.0" />
 		</bsdf>
+		<bsdf type="roughDielectric" id="RoughDieletric">
+			<roughness value="0.2" />
+			<int_ior value="1.5" />
+			<ext_Ior value="1.0" />
+		</bsdf>
+		<bsdf type="dielectric" id="dieletric">
+			<int_ior value="1.5" />
+			<ext_Ior value="1.0" />
+		</bsdf>
 	</bsdfs>
 	<meshes>
 		<mesh type="plane" id="Plane">
@@ -42,7 +51,7 @@
 	</instances>
 
 	<lights>
-		<useSky value = "false" />
+		<useSky value = "true" />
 		<backgroundColor value = "0.0, 0.0, 0.0" />
 		<light type="area" id="Light">
 			<emissive value = "1.0, 1.0, 1.0" />

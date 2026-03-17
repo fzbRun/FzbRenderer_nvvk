@@ -123,12 +123,10 @@ void rayClosestHitMain(inout NEEHitPayload payload, in BuiltInTriangleIntersecti
     Mesh              mesh      = sceneInfo.meshes[instance.meshIndex];
     BSDFMaterial material  = sceneInfo.materials[instance.materialIndex];
 
-    HitState hitState = getHitStateWithPositionFetch(barycentrics);
+    HitState hitState = getHitStateWithPositionFetch(barycentrics, payload.rayDirection);
 
-    float cosineON = dot(hitState.normal, -payload.rayDirection);
-    if (cosineON < 0) hitState.normal = -hitState.normal;
     if (material.type != MaterialType::Dielectric && material.type != MaterialType::RoughDielectric)
-        material.emissive *= max(cosineON, 0.0f);
+        material.emissive *= max(hitState.cosineON, 0.0f);
 
     CallablePayload callablePayload;
     callablePayload.material = material;
@@ -245,8 +243,7 @@ void dielectricMaterialMain(inout CallablePayload payload) {
     float eta = payload.material.eta.x;
     if (!payload.isExt) eta = 1.0f / eta;
 
-    float3 F;
-    PopulateCallablePayload_DielectricMaterial(payload, F, eta);
+    PopulateCallablePayload_DielectricMaterial(payload);
 
     if (pushConst.NEEShaderIndex > 0) {
         uint lightNum = min(pushConst.sceneInfoAddress[0].numLights, NEE_MAX_SAMPLE_NUM);
@@ -255,6 +252,9 @@ void dielectricMaterialMain(inout CallablePayload payload) {
             if (radiance_nee.x + radiance_nee.y + radiance_nee.z < 0.001f) continue;
 
             float pdf_bsdfSample = 0.0f;
+
+            float cosineOH = dot(payload.outgoing, payload.hitNormal);
+            float3 F = schlickFresnel(payload.material.albedo, float3(1.0F), cosineOH);
 
             float3 sampleDir = payload.sampleDir_nee[i];
             float3 bsdf = float3(0.0f);
@@ -285,9 +285,9 @@ void dielectricMaterialMain(inout CallablePayload payload) {
 
 [shader("callable")]
 void roughConductorMaterialMain(inout CallablePayload payload) {
-    float3 outgoing_tangentSpace;
-    PopulateCallablePayload_RoughConductorMaterial(payload, outgoing_tangentSpace);
+    PopulateCallablePayload_RoughConductorMaterial(payload);
 
+    float3 outgoing_tangentSpace = mul(payload.TBN, payload.outgoing);
     float roughness = payload.material.roughness;
     float G1_outgoing, G1_incidence;
 
@@ -323,11 +323,11 @@ void roughConductorMaterialMain(inout CallablePayload payload) {
             );
             if (G2 <= 0.0f) continue;
 
-            float3 bsdf = (D * G2 * F) / (4.0f * abs(outgoing_tangentSpace.z) * abs(incidence_tangentSpace.z) + 0.001f);
+            float3 bsdf = (D * G2 * F) / (4.0f * outgoing_tangentSpace.z * incidence_tangentSpace.z);
             radiance_nee = radiance_nee * bsdf * max(dot(sampleDir, payload.hitNormal), 0.0f);
 
             float pdf_directLightSample = payload.radiancePdf_nee[i];
-            float pdf_bsdfSample = max(D_costhetaNH / (4.0f * cosineOH), 0.001f);
+            float pdf_bsdfSample = D_costhetaNH / (4.0f * cosineOH);
 
             //radiance_nee *= pdf_directLightSample / (pdf_directLightSample + pdf_bsdfSample + 0.0001f);
             radiance_nee /= (pdf_directLightSample + pdf_bsdfSample + 0.0001f);
@@ -338,10 +338,12 @@ void roughConductorMaterialMain(inout CallablePayload payload) {
 
 [shader("callable")]
 void roughDielectricMaterialMain(inout CallablePayload payload) {
-    float3 outgoing_tangentSpace;
-    float eta;
-    PopulateCallablePayload_RoughDielectricMaterial(payload, outgoing_tangentSpace, eta);
+    float eta = payload.material.eta.x;
+    if (!payload.isExt) eta = 1.0f / eta;
 
+    PopulateCallablePayload_RoughDielectricMaterial(payload);
+
+    float3 outgoing_tangentSpace = mul(payload.TBN, payload.outgoing);
     float roughness = payload.material.roughness;
     float G1_outgoing, G1_incidence;
 

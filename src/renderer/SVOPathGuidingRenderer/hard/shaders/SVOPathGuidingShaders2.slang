@@ -68,6 +68,11 @@ bool traceRay(RayDesc ray, inout HitPayload_SVOPG payload)
         const float3 geoNormal = normalize(cross(edge1, edge2));
 
         payload.hitNormal = normalize(mul(worldToObject, geoNormal).xyz);
+        float cosineON = dot(payload.hitNormal, -ray.Direction);
+        if (cosineON <= 0.0f) payload.hitNormal = -payload.hitNormal;
+        if (payload.material.type != MaterialType::Dielectric && payload.material.type != MaterialType::RoughDielectric)
+            payload.material.emissive *= max(cosineON, 0.0f);
+
         float3 tangent, bitangent;
         orthonormalBasis(payload.hitNormal, tangent, bitangent);
         payload.TBN = float3x3(tangent, bitangent, payload.hitNormal); // column matrix
@@ -379,13 +384,7 @@ void computeMain_SVOPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
             accumulatedRadiance += RayMiss(ray.Direction) * bsdf_cosine_pdf;
             bounceDepth = MISS_DEPTH;
         } else {
-            float3 emissive = payload.material.emissive;
-            float cosineON = dot(payload.hitNormal, payload.outgoing);
-            if (cosineON < 0) payload.hitNormal = -payload.hitNormal;
-            if (payload.material.type != MaterialType::Dielectric && payload.material.type != MaterialType::RoughDielectric)
-                emissive *= max(cosineON, 0.0f);
-
-            accumulatedRadiance += emissive * bsdf_cosine_pdf;
+            accumulatedRadiance += payload.material.emissive * bsdf_cosine_pdf;
             AABB nodeAABB_E;
             bool useSVOPG = getNodeAABB_E_SVOPG(nodeAABB_E, payload);
             if (useSVOPG) useSVOPG = SphericalRectangleSample(nodeAABB_E, payload.hitPos, payload.randomSeed, payload.incidence, payload.pdf);

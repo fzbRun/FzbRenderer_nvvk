@@ -8,8 +8,9 @@
 #include <common/Material/Material.h>
 
 shaderio::AABB FzbRenderer::MeshInfo::getAABB(glm::mat4 transformMatrix) {
-	glm::vec3 maximum = { FLT_MAX, FLT_MAX, FLT_MAX };
-	if (aabb.minimum != maximum && aabb.maximum != -maximum) return aabb;
+	//glm::vec3 maximum = { FLT_MAX, FLT_MAX, FLT_MAX };
+	//if (aabb.minimum != maximum && aabb.maximum != -maximum) return aabb;
+	shaderio::AABB aabb = { { FLT_MAX, FLT_MAX, FLT_MAX }, { -FLT_MAX, -FLT_MAX, -FLT_MAX } };
 
 	Scene& sceneRsource = Application::sceneResource;
 	std::vector<uint8_t>& meshByteData = sceneRsource.meshSets[sceneRsource.getMeshSetIndex(meshIndex)].meshByteData;

@@ -24,7 +24,6 @@ struct HitPayload_SVOWeight {
     float3 hitPos;
     float hit;
     float3 normal;
-    float3x3 TBN;
 }
 
 //---------------------------------------------groupsharedMemory-----------------------------------------
@@ -106,9 +105,6 @@ void traceRay(RayDesc ray, inout HitPayload_SVOWeight payload, AABB nodeAABB_G)
         const float3 geoNormal = normalize(cross(edge1, edge2));
 
         payload.normal = normalize(mul(worldToObject, geoNormal).xyz);
-        float3 tangent, bitangent;
-        orthonormalBasis(payload.normal, tangent, bitangent);
-        payload.TBN = float3x3(tangent, bitangent, payload.normal); // column matrix
     }
     else payload.hit = 0.0f;
 }

@@ -46,7 +46,7 @@ void raygenMain()
     float RR = 0.8f;
 
     // Iterative reflection loop
-    while (payload.bounceDepth < pushConst.maxDepth && (payload.bsdf_cosine.x + payload.bsdf_cosine.y + payload.bsdf_cosine.z > 0.0f))
+    while (payload.bounceDepth < pushConst.maxDepth && (payload.bsdf_cosine.x + payload.bsdf_cosine.y + payload.bsdf_cosine.z > 0.0001f))
     {
     #ifdef PathTracingMotionBlur
         TraceMotionRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, pushConst.time, payload);
@@ -87,7 +87,7 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
     payload.randomSeed = callablePayload.randomSeed;
     payload.radiance = callablePayload.material.emissive * payload.bsdf_cosine / payload.pdf;
     payload.rayDirection = callablePayload.incidence;
-    payload.rayOrigin = offsetRay(callablePayload.hitPos, callablePayload.hitNormal); // hitState.pos + 0.001f * payload.rayDirection;
+    payload.rayOrigin = callablePayload.hitPos + 0.001f * payload.rayDirection;
     payload.bsdf_cosine *= callablePayload.bsdf * abs(dot(callablePayload.hitNormal, payload.rayDirection));
     payload.pdf *= callablePayload.pdf;
     payload.isExt = callablePayload.isExt;
@@ -119,29 +119,20 @@ void diffuseMaterialMain(inout CallablePayload payload) {
 
 [shader("callable")]
 void conductorMaterialMain(inout CallablePayload payload) {
-    payload.bsdf = payload.material.albedo;
-    payload.pdf = 1.0f;
-    payload.incidence = reflect(-payload.outgoing, payload.hitNormal);
+    PopulateCallablePayload_ConductorMaterial(payload);
 }
 
 [shader("callable")]
 void dielectricMaterialMain(inout CallablePayload payload) {
-    float eta = payload.material.eta.x;
-    if (!payload.isExt) eta = 1.0f / eta;
-
-    float3 F;
-    PopulateCallablePayload_DielectricMaterial(payload, F, eta);
+    PopulateCallablePayload_DielectricMaterial(payload);
 }
 
 [shader("callable")]
 void roughConductorMaterialMain(inout CallablePayload payload) {
-    float3 outgoing_tangentSpace;
-    PopulateCallablePayload_RoughConductorMaterial(payload, outgoing_tangentSpace);
+    PopulateCallablePayload_RoughConductorMaterial(payload);
 }
 
 [shader("callable")]
 void roughDielectricMaterialMain(inout CallablePayload payload) {
-    float3 outgoing_tangentSpace;
-    float eta;
-    PopulateCallablePayload_RoughDielectricMaterial(payload, outgoing_tangentSpace, eta);
+    PopulateCallablePayload_RoughDielectricMaterial(payload);
 }
