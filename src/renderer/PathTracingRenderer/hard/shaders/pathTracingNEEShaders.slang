@@ -97,7 +97,7 @@ void raygenMain()
         if (randomNumber >= RR) break;
         payload.pdf *= RR;
     }
-    accumulatedRadiance = accumulatedRadiance - payload.radiance_directLightSample;
+    //accumulatedRadiance = accumulatedRadiance - payload.radiance_directLightSample;
 
     if (any(isnan(accumulatedRadiance)) || any(isinf(accumulatedRadiance))) return;
     // When the maximum frame rate is reached, the original image will decay by ((maxframe-1)/maxframe)^k < 1, and the final image will turn black
@@ -155,10 +155,11 @@ void rayClosestHitMain(inout NEEHitPayload payload, in BuiltInTriangleIntersecti
 
     payload.radiance_emissive = material.emissive * payload.weight * payload.bsdf_cosine / payload.pdf;
     payload.radiance_directLightSample = callablePayload.radianceSum_nee * payload.weight * payload.bsdf_cosine / payload.pdf;
+
     payload.pdf_bsdfSample = callablePayload.pdf;
 
     payload.rayDirection = callablePayload.incidence;
-    payload.rayOrigin = offsetRay(hitState.pos, hitState.normal);
+    payload.rayOrigin = hitState.pos + payload.rayDirection * 0.001f;
     payload.bsdf_cosine *= callablePayload.bsdf * abs(dot(hitState.normal, payload.rayDirection));;
     payload.pdf *= callablePayload.pdf;
     payload.isExt = callablePayload.isExt;
@@ -200,7 +201,7 @@ void diffuseMaterialMain(inout CallablePayload payload) {
 
             // first, calc sampleDir's directLightSample pdf and bsdfSample pdf
             float pdf_directLightSample = payload.radiancePdf_nee[i];
-            float pdf_bsdfSample = pdf_DiffuseMaterial(sampleDir, payload.hitNormal);
+            float pdf_bsdfSample = getPdf_Diffuse(sampleDir, payload.hitNormal);
 
             //radiance_nee *= pdf_directLightSample / (pdf_directLightSample + pdf_bsdfSample + 0.0001f);
             radiance_nee /= (pdf_directLightSample + pdf_bsdfSample + 0.0001f);

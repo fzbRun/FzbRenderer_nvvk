@@ -278,22 +278,15 @@ bool getNodeAABB_E_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload) {
 void BSDFSample(inout HitPayload_SVOPG payload) {
     if (payload.material.type == MaterialType::Diffuse) PopulateCallablePayload_DiffuseMaterial(payload);
     else if (payload.material.type == MaterialType::Conductor) {
-        payload.bsdf = 1.0f;
+        payload.bsdf = payload.material.albedo;
         payload.pdf = 1.0f;
         payload.incidence = reflect(-payload.outgoing, payload.hitNormal);
     } else if (payload.material.type == MaterialType::Dielectric) {
-        float eta = payload.material.eta.x;
-        if (!payload.isExt) eta = 1.0f / eta;
-
-        float3 F;
-        PopulateCallablePayload_DielectricMaterial(payload, F, eta);
+        PopulateCallablePayload_DielectricMaterial(payload);
     } else if (payload.material.type == MaterialType::RoughConductor) {
-        float3 outgoing_tangentSpace;
-        PopulateCallablePayload_RoughConductorMaterial(payload, outgoing_tangentSpace);
+        PopulateCallablePayload_RoughConductorMaterial(payload);
     } else if (payload.material.type == MaterialType::RoughDielectric) {
-        float3 outgoing_tangentSpace;
-        float eta;
-        PopulateCallablePayload_RoughDielectricMaterial(payload, outgoing_tangentSpace, eta);
+        PopulateCallablePayload_RoughDielectricMaterial(payload);
     }
 }
 //----------------------------------------------------CS----------------------------------------------
@@ -380,6 +373,16 @@ void computeMain_SVOPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
     uint bounceDepth = 0;
     while (bounceDepth < pushConst.maxDepth && (bsdf_cosine_pdf.x + bsdf_cosine_pdf.y + bsdf_cosine_pdf.z > 0.0f)) {
         bool hit = traceRay(ray, payload);
+
+        #ifndef NDEBUG
+        if (bounceDepth == 0) {
+            float3 hitPos = payload.hitPos + 0.01f * ray.Direction;
+            float4 clipPos = mul(float4(hitPos, 1.0f), sceneInfo.viewProjMatrix);
+            float depth = clipPos.z / clipPos.w; // any hitPoint must in our cameraView
+            depthImage[int2(launchID)] = depth;
+        } else if (bounceDepth == MISS_DEPTH) depthImage[int2(launchID)] = 1.0f;
+        #endif
+
         if (!hit) {
             accumulatedRadiance += RayMiss(ray.Direction) * bsdf_cosine_pdf;
             bounceDepth = MISS_DEPTH;
@@ -388,7 +391,10 @@ void computeMain_SVOPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
             AABB nodeAABB_E;
             bool useSVOPG = getNodeAABB_E_SVOPG(nodeAABB_E, payload);
             if (useSVOPG) useSVOPG = SphericalRectangleSample(nodeAABB_E, payload.hitPos, payload.randomSeed, payload.incidence, payload.pdf);
-            if (useSVOPG) payload.bsdf = getBSDF(payload.material, payload.incidence, payload.hitNormal, payload.outgoing, payload.TBN);
+            if (useSVOPG) {
+                payload.bsdf = getBSDF(payload.material, payload.incidence, payload.hitNormal, payload.outgoing, payload.TBN, payload.isExt);
+                if (dot(payload.incidence, payload.hitNormal) * dot(payload.outgoing, payload.hitNormal) < 0.0f) payload.isExt = !payload.isExt;
+            }
             //else BSDFSample(payload);
             else break;
 
@@ -406,15 +412,6 @@ void computeMain_SVOPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
 
             ++bounceDepth;
         }
-
-        #ifndef NDEBUG
-        if (bounceDepth == 1) {
-            float3 hitPos = payload.hitPos + 0.01f * ray.Direction;
-            float4 clipPos = mul(float4(hitPos, 1.0f), sceneInfo.viewProjMatrix);
-            float depth = clipPos.z / clipPos.w; // any hitPoint must in our cameraView
-            depthImage[int2(launchID)] = depth;
-        } else if (bounceDepth == MISS_DEPTH) depthImage[int2(launchID)] = 1.0f;
-        #endif
     }
 
     // When the maximum frame rate is reached, the original image will decay by ((maxframe-1)/maxframe)^k < 1, and the final image will turn black

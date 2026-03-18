@@ -7,6 +7,8 @@
 #include <nvgui/property_editor.hpp>
 #include <nvvk/compute_pipeline.hpp>
 
+#define LIGHTINJECT_SAMPLEPOINTCOUNT 16384
+
 FzbRenderer::LightInject::LightInject(pugi::xml_node& featureNode) {
 #ifndef NDEBUG
 	Application::vkContext->getPhysicalDeviceFeatures_notConst().geometryShader = VK_TRUE;
@@ -119,6 +121,8 @@ void FzbRenderer::LightInject::preRender() {
 	pushConstant.frameIndex = Application::frameIndex;
 	pushConstant.time = Application::sceneResource.time;
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
+	pushConstant.sceneStartPos = setting.sceneStartPos;
+	pushConstant.sceneSize = setting.sceneSize;
 }
 void FzbRenderer::LightInject::render(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
@@ -156,7 +160,7 @@ void FzbRenderer::LightInject::render(VkCommandBuffer cmd) {
 		
 		float sceneMinSize = std::min(setting.sceneSize.x, std::min(setting.sceneSize.y, setting.sceneSize.z));
 		shaderio::uint3 sizeAxis = setting.sceneSize / sceneMinSize;
-		uint32_t minAxisSampleCount = LIGHTINJECT_SAMPLEPOINTCOUNT / (sizeAxis.x + sizeAxis.y + sizeAxis.z);
+		uint32_t minAxisSampleCount = std::cbrt(LIGHTINJECT_SAMPLEPOINTCOUNT / (sizeAxis.x * sizeAxis.y * sizeAxis.z));
 		shaderio::uint3 sampleCount = sizeAxis * minAxisSampleCount;
 
 		vkCmdTraceRaysKHR(cmd, &regions.raygen, &regions.miss, &regions.hit, &regions.callable, sampleCount.x, sampleCount.y, sampleCount.z);

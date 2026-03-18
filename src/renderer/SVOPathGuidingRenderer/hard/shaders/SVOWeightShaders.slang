@@ -103,7 +103,6 @@ void traceRay(RayDesc ray, inout HitPayload_SVOWeight payload, AABB nodeAABB_G)
         const float3 edge1 = triPos[1] - triPos[0];
         const float3 edge2 = triPos[2] - triPos[0];
         const float3 geoNormal = normalize(cross(edge1, edge2));
-
         payload.normal = normalize(mul(worldToObject, geoNormal).xyz);
     }
     else payload.hit = 0.0f;
@@ -175,7 +174,7 @@ void computeMain_getIndivisibleNode(uint threadIndex: SV_DispatchThreadID, uint 
 
                 #ifndef NDEBUG
                 if (pushConst.frameIndex == 1) {
-                    printf("getIndivisibleNode_G\ncmd:%d %d %d\nindivisibleNodeCount: G: %d  E: %d\nSVOMaxLayer: G: %d  E:     %d\ntotalNodeCount_E: %d\n",
+                    printf("getIndivisibleNode_G\ncmd:%d %d %d\nindivisibleNodeCount: G: %d  E: %d\nSVOMaxLayer: G: %d  E: %d\ntotalNodeCount_E: %d\n",
                            cmd.x, cmd.y, cmd.z,
                         indivisibleNodeCount_G, indivisibleNodeCount_E,
                         groupSVOLayerMaxLayer_G, groupSVOLayerMaxLayer_E,
@@ -374,7 +373,7 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
 
         //uint nodeGIndex = (threadIndex / threadCount_perNodeG) % groupIndivisibleNodeCount_G;
         //uint nodeEIndex = threadIndex / threadCount_perNodeE;
-        //if (pushConst.frameIndex == 1 && outgoingIndex == 23 && nodeGIndex == 17 && nodeEIndex == 45) {
+        //if (pushConst.frameIndex == 1 && outgoingIndex == 26 && nodeGIndex == 46) {
         //    printf("hit: %f, singleSide_E: %d, singleSide_G: %d\nmeanNormal_E: %f %f %f, meanNormal_G: %f %f %f\nsamplePoint_E: %f %f %f, samplePoint_G: %f %f %f,     sampleDir: %f %f  %f\nhitPos: %f %f %f\n\n",
         //           hitPayload.hit, singleSide_E, singleSide_G,
         //        meanNormal_E.x, meanNormal_E.y, meanNormal_E.z,
@@ -389,15 +388,16 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
         if (hitPayload.hit <= 0.0f) continue;
         float cosine = dot(-sampleDir, hitPayload.normal);
 
+        bool isExt = true;
         if (hitPayload.material.type != MaterialType::Dielectric && hitPayload.material.type != MaterialType::RoughDielectric) {
             //if (cosine <= 0.0f || dot(outgoing, hitPayload.normal) <= 0.0f) continue;
             if (cosine <= 0.0f) continue;
-        }
+        } else if (dot(hitPayload.normal, -ray.Direction) < 0.0f) isExt = false;
 
         orthonormalBasis(hitPayload.normal, tangent, bitangent);
         TBN_G = float3x3(tangent, bitangent, hitPayload.normal);
 
-        float3 bsdf = getBSDF(hitPayload.material, -sampleDir, hitPayload.normal, outgoing, TBN_G);
+        float3 bsdf = getBSDF(hitPayload.material, -sampleDir, hitPayload.normal, outgoing, TBN_G, isExt);
         float3 weight3 = nodeData_E.irradiance * cosine * bsdf; // notIgnoreRatio is made by irradiance length, so use length here;
         weight += 0.299 * weight3.x + 0.587 * weight3.y + 0.114 * weight3.z;
     }
