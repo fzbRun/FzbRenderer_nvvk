@@ -1,6 +1,7 @@
 #pragma once
 
 #include <common/Shader/shaderStructType.h>
+#include "feature/SceneDivision/Octree/shaderio.h"
 
 #ifndef FZBRENDERER_PATHGUIDING_SHADER_IO_H
 #define FZBRENDERER_PATHGUIDING_SHADER_IO_H
@@ -62,7 +63,7 @@ struct SVONodeInfo_E_SVOPG {
 #define OUTGOING_COUNT 64
 struct SVOWeightPushConstant {
 	uint32_t frameIndex;
-	uint32_t sizes[8];
+	uint32_t layerNodeMaxCount_E;
 	SceneInfo* sceneInfoAddress;
 	uint32_t countdown;
 #ifndef NDEBUG
@@ -83,11 +84,7 @@ enum StaticBindingPoints_SVOWeight {
 	eSVOWeights_SVOWeight,
 	eSVOWeightSums_SVOWeight,
 };
-struct DispatchIndirectCommand {
-	uint32_t    x;
-	uint32_t    y;
-	uint32_t    z;
-};
+
 struct SVOWeightGlobalInfo {
 	DispatchIndirectCommand cmd;
 	uint indivisibleNodeCount_G;

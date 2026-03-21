@@ -6,10 +6,10 @@
 #ifndef FZBRENDERER_SVO_SHADERIO_H
 #define FZBRENDERER_SVO_SHADERIO_H
 
+#define SVO
 #define THREADGROUP_SIZE 512u
 #define THREADGROUP_SIZE2 256u
 #define WARP_SIZE 32u
-#define MAX_WARP_COUNT (THREADGROUP_SIZE / WARP_SIZE)
 #define SVONodeCount_E_Layer1 8
 #define SVONodeCount_E_Layer2 64
 #define SVONodeCount_E_Layer3 512
@@ -28,6 +28,7 @@ enum BindingPoints_SVO {
 	eSVOArray_E_SVO,
 	eSVOLayerInfos_G_SVO,
 	eSVOLayerInfos_E_SVO,
+	eSVOGlobalInfo_SVO,
 	eSVODivisibleNodeIndices_G_SVO,
 	eSVODivisibleNodeIndices_E_SVO,
 	eSVOThreadGroupInfos_SVO
@@ -36,16 +37,26 @@ enum BindingPoints_SVO {
 struct SVOPushConstant {
 	uint32_t maxDepth;;
 	uint32_t currentDepth;
-	uint32_t sizes[8];
+	uint32_t sizes_G[MAX_OCTREE_DEPTH];
+	uint32_t sizes_E[MAX_OCTREE_DEPTH];
 #ifndef NDEBUG
 	float frameIndex;
-	uint32_t totalNodeCount;
 	SceneInfo* sceneInfoAddress;
 #endif
 };
 
 typedef OctreeNodeData_G SVONodeData_G;
 typedef OctreeNodeData_E SVONodeData_E;
+
+
+struct SVOGloablInfo_SVO {
+	DispatchIndirectCommand cmd;	//CS Dispatch size
+#ifndef NDEBUG
+	DrawIndexedIndirectCommand drawCmd;
+	uint32_t totalNodeCount_G;
+	uint32_t totalNodeCount_E;
+#endif
+};
 
 struct SVOThreadGroupInfo {
 	uint threadGroupDivisibleNodeCount_G;

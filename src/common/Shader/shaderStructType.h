@@ -95,5 +95,18 @@ struct DefaultPushConstant
 	int            instanceIndex;              // Instance index for the current draw call
 	SceneInfo*     sceneInfoAddress;           // Address of the scene information buffer
 };
+//-------------------------------------------------------IndirectCommand------------------------------------------------------------
+struct DispatchIndirectCommand {
+	uint32_t    x;
+	uint32_t    y;
+	uint32_t    z;
+};
+struct DrawIndexedIndirectCommand {
+	uint32_t    indexCount;
+	uint32_t    instanceCount;
+	uint32_t    firstIndex;
+	int32_t     vertexOffset;
+	uint32_t    firstInstance;
+};
 NAMESPACE_SHADERIO_END()
 #endif

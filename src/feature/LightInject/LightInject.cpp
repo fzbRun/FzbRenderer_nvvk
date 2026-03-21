@@ -7,7 +7,7 @@
 #include <nvgui/property_editor.hpp>
 #include <nvvk/compute_pipeline.hpp>
 
-#define LIGHTINJECT_SAMPLEPOINTCOUNT 16384
+#define LIGHTINJECT_SAMPLEPOINTCOUNT 8192
 
 FzbRenderer::LightInject::LightInject(pugi::xml_node& featureNode) {
 #ifndef NDEBUG

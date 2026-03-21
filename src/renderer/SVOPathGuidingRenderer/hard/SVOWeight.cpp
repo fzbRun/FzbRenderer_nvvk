@@ -153,11 +153,16 @@ void SVOWeight::createWeightArray() {
 
 	//由于我们事先不知道具体SVO聚类后有几层，因此我们按最大层来创建buffer，即octree的层数
 	uint32_t OctreeDepth = setting.svo->setting.octree->setting.OctreeDepth;
-	uint32_t SVONodeMaxCount = 0;
-	for (int i = 1; i < OctreeDepth; ++i)
-		SVONodeMaxCount += setting.svo->SVOInitialSize[i];
+	uint32_t SVONodeTotalCount_G = 0;
+	uint32_t SVONodeTotalCount_E = 0;
+	uint32_t layerNodeMaxCount_E = 0;
+	for (int i = 1; i < OctreeDepth; ++i) {
+		SVONodeTotalCount_G += setting.svo->SVOInitialSize_G[i];
+		SVONodeTotalCount_E += setting.svo->SVOInitialSize_E[i];
+		layerNodeMaxCount_E = std::max(layerNodeMaxCount_E, setting.svo->SVOInitialSize_E[i]);
+	}
 
-	uint32_t bufferSize = SVONodeMaxCount * sizeof(shaderio::SVOIndivisibleNodeInfo);
+	uint32_t bufferSize = SVONodeTotalCount_G * sizeof(shaderio::SVOIndivisibleNodeInfo);
 	allocator->createBuffer(indivisibleNodeInfosBuffer_G, bufferSize,
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(indivisibleNodeInfosBuffer_G.buffer);
@@ -166,19 +171,19 @@ void SVOWeight::createWeightArray() {
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(indivisibleNodeInfosBuffer_G.buffer);
 
-	uint32_t weightCount = OUTGOING_COUNT * SVONodeMaxCount * SVONodeMaxCount;
+	uint32_t weightCount = OUTGOING_COUNT * SVONodeTotalCount_G * SVONodeTotalCount_E;
 	bufferSize = weightCount * sizeof(float);
 	allocator->createBuffer(weightBuffer, bufferSize,
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(weightBuffer.buffer);
 
-	weightCount = OUTGOING_COUNT * SVONodeMaxCount * setting.svo->SVOInitialSize[OctreeDepth - 1];
+	weightCount = OUTGOING_COUNT * SVONodeTotalCount_G * layerNodeMaxCount_E;
 	bufferSize = weightCount * sizeof(float);
 	allocator->createBuffer(weightSumsBuffer, bufferSize,
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(weightSumsBuffer.buffer);
 
-	for (int depth = 0; depth < 8; ++depth) pushConstant.sizes[depth] = setting.svo->SVOInitialSize[depth];
+	pushConstant.layerNodeMaxCount_E = layerNodeMaxCount_E;
 }
 void SVOWeight::createDescriptorSetLayout() {
 	SCOPED_TIMER(__FUNCTION__);
@@ -441,11 +446,15 @@ void SVOWeight::getIndivisibleNode(VkCommandBuffer cmd) {
 	vkCmdPushConstants2(cmd, &pushInfo);
 
 	uint32_t OctreeDepth = setting.svo->setting.octree->setting.OctreeDepth;
-	uint32_t SVONodeMaxCount = 0;
-	for (int i = 1; i < OctreeDepth; ++i)
-		SVONodeMaxCount += setting.svo->SVOInitialSize[i];
-	uint32_t totalVoxelCount = SVONodeMaxCount;
-	VkExtent2D groupSize = nvvk::getGroupCounts({ totalVoxelCount, 1 }, VkExtent2D{ THREADGROUP_SIZE2, 1 });
+	uint32_t SVONodeTotalCount_G = 0;
+	uint32_t SVONodeTotalCount_E = 0;
+	for (int i = 1; i < OctreeDepth; ++i) {
+		SVONodeTotalCount_G += setting.svo->SVOInitialSize_G[i];
+		SVONodeTotalCount_E += setting.svo->SVOInitialSize_E[i];
+	}
+	uint32_t SVONodeTotalCount = std::max(SVONodeTotalCount_G, SVONodeTotalCount_E);
+
+	VkExtent2D groupSize = nvvk::getGroupCounts({ SVONodeTotalCount, 1 }, VkExtent2D{ THREADGROUP_SIZE2, 1 });
 	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
 }
 void SVOWeight::initWeights(VkCommandBuffer cmd) {

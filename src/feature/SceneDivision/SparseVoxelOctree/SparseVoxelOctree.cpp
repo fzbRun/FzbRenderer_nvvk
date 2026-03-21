@@ -17,13 +17,13 @@ SparseVoxelOctree::SparseVoxelOctree(pugi::xml_node& featureNode) {
 void SparseVoxelOctree::init(SVOSetting setting) {
 	this->setting = setting;
 
-	IF_DEBUG(debugPrepare(), );
-
 	createSVOArray();
 	createDescriptorSetLayout();
 	createDescriptorSet();
 	Feature::createPipelineLayout(sizeof(shaderio::SVOPushConstant));
 	compileAndCreateShaders();
+
+	IF_DEBUG(debugPrepare(), );
 }
 
 void SparseVoxelOctree::clean() {
@@ -33,6 +33,7 @@ void SparseVoxelOctree::clean() {
 	Application::allocator.destroyBuffer(SVOIndivisibleNodes_G);
 	Application::allocator.destroyBuffer(SVOLayerInfos_G);
 	Application::allocator.destroyBuffer(SVOLayerInfos_E);
+	Application::allocator.destroyBuffer(SVOGlobalInfo);
 	Application::allocator.destroyBuffer(SVODivisibleNodeIndices_G);
 	Application::allocator.destroyBuffer(SVODivisibleNodeIndices_E);
 	Application::allocator.destroyBuffer(SVOThreadGroupInfos);
@@ -145,7 +146,7 @@ void SparseVoxelOctree::render(VkCommandBuffer cmd) {
 		staticDescPack.getSetPtr(), 0, nullptr);
 
 	initSVOArray(cmd);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 	createSVOArray(cmd);
 }
 void SparseVoxelOctree::postProcess(VkCommandBuffer cmd) {
@@ -163,19 +164,16 @@ void SparseVoxelOctree::createSVOArray() {
 	nvvk::ResourceAllocator* allocator = stagingUploader.getResourceAllocator();
 
 	for (int depth = 0; depth <= OctreeDepth; ++depth) {
-		uint32_t bufferSize = sizeof(shaderio::SVONodeData_G) * SVOInitialSize[depth];
+		uint32_t bufferSize = sizeof(shaderio::SVONodeData_G) * SVOInitialSize_G[depth];
 		allocator->createBuffer(SVOArray_G[depth], bufferSize,
 			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 		NVVK_DBG_NAME(SVOArray_G[depth].buffer);
 
-		bufferSize = sizeof(shaderio::SVONodeData_E) * SVOInitialSize[depth];
+		bufferSize = sizeof(shaderio::SVONodeData_E) * SVOInitialSize_E[depth];
 		allocator->createBuffer(SVOArray_E[depth], bufferSize,
 			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 		NVVK_DBG_NAME(SVOArray_E[depth].buffer);
 	}
-
-	//SVOIndivisibleNodes_G
-	//бнбн
 
 	uint32_t bufferSize = sizeof(shaderio::SVOLayerInfo) * (OctreeDepth + 1);
 	allocator->createBuffer(SVOLayerInfos_G, bufferSize,
@@ -186,21 +184,31 @@ void SparseVoxelOctree::createSVOArray() {
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(SVOLayerInfos_E.buffer);
 
-	bufferSize = sizeof(uint32_t) * SVOInitialSize[7];
+	allocator->createBuffer(SVOGlobalInfo, sizeof(shaderio::SVOGloablInfo_SVO),
+		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT
+		| VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT);
+	NVVK_DBG_NAME(SVOGlobalInfo.buffer);
+
+	bufferSize = sizeof(uint32_t) * SVOInitialSize_G[7];
 	allocator->createBuffer(SVODivisibleNodeIndices_G, bufferSize,
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(SVODivisibleNodeIndices_G.buffer);
 
+	bufferSize = sizeof(uint32_t) * SVOInitialSize_E[7];
 	allocator->createBuffer(SVODivisibleNodeIndices_E, bufferSize,
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(SVODivisibleNodeIndices_E.buffer);
 
-	bufferSize = sizeof(shaderio::SVOThreadGroupInfo) * (SVOInitialSize[7] / THREADGROUP_SIZE);
+	uint32_t maxLayerNodeCount = std::max(SVOInitialSize_G[7], SVOInitialSize_E[7]);
+	bufferSize = sizeof(shaderio::SVOThreadGroupInfo) * (maxLayerNodeCount / THREADGROUP_SIZE);
 	allocator->createBuffer(SVOThreadGroupInfos, bufferSize,
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(SVOThreadGroupInfos.buffer);
 
-	for (int depth = 0; depth < 8; ++depth) pushConstant.sizes[depth] = SVOInitialSize[depth];
+	for (int depth = 0; depth < 8; ++depth) {
+		pushConstant.sizes_G[depth] = SVOInitialSize_G[depth];
+		pushConstant.sizes_E[depth] = SVOInitialSize_E[depth];
+	}
 	pushConstant.maxDepth = OctreeDepth;
 }
 void SparseVoxelOctree::createDescriptorSetLayout() {
@@ -234,6 +242,11 @@ void SparseVoxelOctree::createDescriptorSetLayout() {
 		.stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
 		.binding = shaderio::BindingPoints_SVO::eSVOLayerInfos_E_SVO,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+	bindings.addBinding({
+		.binding = shaderio::BindingPoints_SVO::eSVOGlobalInfo_SVO,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
@@ -290,6 +303,10 @@ void SparseVoxelOctree::createDescriptorSet() {
 		staticDescPack.makeWrite(shaderio::BindingPoints_SVO::eSVOLayerInfos_E_SVO, 0, 0, 1);
 	write.append(SVOLayerInfosWrite, SVOLayerInfos_E, 0, SVOLayerInfos_E.bufferSize);
 
+	VkWriteDescriptorSet SVOGlobalInfoWrite =
+		staticDescPack.makeWrite(shaderio::BindingPoints_SVO::eSVOGlobalInfo_SVO, 0, 0, 1);
+	write.append(SVOGlobalInfoWrite, SVOGlobalInfo, 0, SVOGlobalInfo.bufferSize);
+
 	VkWriteDescriptorSet SVODivisibleNodeIndicesWrite = 
 		staticDescPack.makeWrite(shaderio::BindingPoints_SVO::eSVODivisibleNodeIndices_G_SVO, 0, 0, 1);
 	write.append(SVODivisibleNodeIndicesWrite, SVODivisibleNodeIndices_G, 0, SVODivisibleNodeIndices_G.bufferSize);
@@ -308,7 +325,7 @@ void SparseVoxelOctree::compileAndCreateShaders() {
 	SCOPED_TIMER(__FUNCTION__);
 
 	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
-	std::filesystem::path shaderSource = shaderPath / "SVO.slang";
+	std::filesystem::path shaderSource = shaderPath / "SVO2.slang";
 	std::vector<uint32_t> shaderBuffer;
 	VkShaderModuleCreateInfo shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
 
@@ -405,8 +422,8 @@ void SparseVoxelOctree::initSVOArray(VkCommandBuffer cmd) {
 
 	vkCmdPushConstants2(cmd, &pushInfo);
 
-	uint32_t totalVoxelCount = SVOInitialSize[pushConstant.maxDepth];
-	VkExtent2D groupSize = nvvk::getGroupCounts({ totalVoxelCount, 1 }, VkExtent2D{ 512, 1 });
+	uint32_t maxLayerNodeCount = std::max(SVOInitialSize_G[pushConstant.maxDepth], SVOInitialSize_E[pushConstant.maxDepth]);
+	VkExtent2D groupSize = nvvk::getGroupCounts({ maxLayerNodeCount, 1 }, VkExtent2D{ 512, 1 });
 	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
 }
 void SparseVoxelOctree::createSVOArray(VkCommandBuffer cmd) {
@@ -414,23 +431,16 @@ void SparseVoxelOctree::createSVOArray(VkCommandBuffer cmd) {
 
 	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
 	for (int depth = 1; depth <= pushConstant.maxDepth; ++depth) {
-		vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createSVOArray);
-
 		pushConstant.currentDepth = depth;
 		vkCmdPushConstants2(cmd, &pushInfo);
 
-		uint32_t totalVoxelCount = SVOInitialSize[depth];
-		VkExtent2D groupSize = nvvk::getGroupCounts({ totalVoxelCount, 1}, VkExtent2D{ THREADGROUP_SIZE, 1});
-		vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
+		vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createSVOArray);
+		vkCmdDispatchIndirect(cmd, SVOGlobalInfo.buffer, 0);
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 
-		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-
-		if (totalVoxelCount > THREADGROUP_SIZE) {
-			vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_offsetLabelMultiBlock);
-			vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
-
-			nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-		}
+		vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_offsetLabelMultiBlock);
+		vkCmdDispatchIndirect(cmd, SVOGlobalInfo.buffer, 0);
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 	}
 }
 
@@ -438,14 +448,24 @@ void SparseVoxelOctree::createSVOArray(VkCommandBuffer cmd) {
 void SparseVoxelOctree::debugPrepare() {
 	Feature::createGBuffer(false, false, 2);
 
-	pushConstant.totalNodeCount = 0;
-	for (int i = 1; i < setting.octree->setting.OctreeDepth; ++i) pushConstant.totalNodeCount += SVOInitialSize[i];
-
 	nvutils::PrimitiveMesh primitive = FzbRenderer::MeshSet::createWireframe();
-	FzbRenderer::MeshSet mesh = FzbRenderer::MeshSet("Wireframe", primitive);
-	scene.addMeshSet(mesh);
+	FzbRenderer::MeshSet meshSet = FzbRenderer::MeshSet("Wireframe", primitive);
+	scene.addMeshSet(meshSet);
 
 	scene.createSceneInfoBuffer();
+
+	shaderio::SVOGloablInfo_SVO globalInfo;
+	globalInfo.cmd = { 1, 1, 1 };
+
+	const shaderio::Mesh& mesh = scene.meshes[0];
+	const shaderio::TriangleMesh& triMesh = mesh.triMesh;
+	globalInfo.drawCmd = {
+		.indexCount = triMesh.indices.count,
+		.instanceCount = 0, .firstIndex = 0, .vertexOffset = 0, .firstInstance = 0,
+	};
+
+	nvvk::StagingUploader& stagingUploader = Application::stagingUploader;
+	NVVK_CHECK(stagingUploader.appendBuffer(SVOGlobalInfo, 0, std::span<const shaderio::SVOGloablInfo_SVO>({ globalInfo })));
 }
 
 void SparseVoxelOctree::resize(
@@ -542,7 +562,7 @@ void SparseVoxelOctree::debug_wirefame(VkCommandBuffer cmd) {
 
 	vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(mesh.indexType));
 
-	vkCmdDrawIndexed(cmd, triMesh.indices.count, pushConstant.totalNodeCount * 2, 0, 0, 0);
+	vkCmdDrawIndexedIndirect(cmd, SVOGlobalInfo.buffer, offsetof(shaderio::SVOGloablInfo_SVO, drawCmd), 1, 0);
 
 	vkCmdEndRendering(cmd);
 

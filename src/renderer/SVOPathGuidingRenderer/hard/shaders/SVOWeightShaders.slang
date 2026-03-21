@@ -446,7 +446,7 @@ void computeMain_getProbability(uint threadIndex: SV_DispatchThreadID, uint thre
     uint weightIndex = outgoingIndex * groupIndivisibleNodeCount_G * groupTotalNodeCount_E +
                        nodeLable_G * groupTotalNodeCount_E +
                        groupPreviousLayerNodeCountSum_E + nodeIndex_E;
-    uint weightSumArraySize = pushConst.sizes[groupSVOLayerMaxLayer_E - 1];
+    uint weightSumArraySize = pushConst.layerNodeMaxCount_E;
     if (nodeData_E.indivisible == 0) { // divisible node's weight is sum of childNode's weight
         uint weightSumIndex = outgoingIndex * groupIndivisibleNodeCount_G * weightSumArraySize +
                               nodeLable_G * weightSumArraySize + nodeData_E.label - 1;
