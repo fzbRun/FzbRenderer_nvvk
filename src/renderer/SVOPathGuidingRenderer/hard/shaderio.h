@@ -2,6 +2,7 @@
 
 #include <common/Shader/shaderStructType.h>
 #include "feature/SceneDivision/Octree/shaderio.h"
+#include <feature/SceneDivision/RasterVoxelization/shaderio.h>
 
 #ifndef FZBRENDERER_PATHGUIDING_SHADER_IO_H
 #define FZBRENDERER_PATHGUIDING_SHADER_IO_H
@@ -56,7 +57,27 @@ struct SVONodeInfo_E_SVOPG {
 	uint indivisible;
 	AABB aabb;
 };
+//-------------------------------------------SVORasterVoxelization----------------------------------------
+enum Normal_SVOPG {
+	Right_SVONormal,
+	Left_SVONormal,
+	Up_SVONormal,
+	Bottom_SVONormal,
+	Forward_SVONormal,
+	Back_SVONormal,
+};
 
+struct AABBI {
+	int4 minimum;
+	int4 maximum;
+};
+struct VGBVoxelData_SVOPG {
+	float4 irradiance;
+	float4 sumNormal_G;
+	float4 sumNormal_E;
+	AABBI aabbI;					 // 
+	uint32_t materialIndex_Count;	//first 26 bite is materialCount, last 6 bite is materialIndex(assume max 64 material)
+};
 //-------------------------------------------SVOWeight----------------------------------------
 #define WEIGHT_HITTEST_COUNT 8
 #define HITTEST_COUNT 8

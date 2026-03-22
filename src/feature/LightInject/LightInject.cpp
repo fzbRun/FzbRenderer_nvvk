@@ -187,7 +187,7 @@ void FzbRenderer::LightInject::createDescriptorSetLayout() {
 	bindings.addBinding({
 		.binding = shaderio::StaticBindingPoints_LightInject::eVGB_LightInject,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = 1,
+		.descriptorCount = (uint32_t)setting.VGBs.size(),
 		.stageFlags = VK_SHADER_STAGE_ALL });
 
 	staticDescPack.init(bindings, Application::app->getDevice(), 1, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
@@ -222,8 +222,9 @@ void FzbRenderer::LightInject::createDescriptorSet() {
 	//write.append(OutImageWrite, gBuffers.getColorImageView(0), VK_IMAGE_LAYOUT_GENERAL);
 
 	VkWriteDescriptorSet    VGBWrite =
-		staticDescPack.makeWrite(shaderio::StaticBindingPoints_LightInject::eVGB_LightInject, 0, 0, 1);
-	write.append(VGBWrite, setting.VGB, 0, setting.VGB.bufferSize);
+		staticDescPack.makeWrite(shaderio::StaticBindingPoints_LightInject::eVGB_LightInject, 0, 0, setting.VGBs.size());
+	nvvk::Buffer* VGBsPtr = setting.VGBs.data();
+	write.append(VGBWrite, VGBsPtr);
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }
@@ -479,7 +480,7 @@ void FzbRenderer::LightInject::debug_Cube(VkCommandBuffer cmd) {
 	const nvvk::Buffer& v = scene.bDatas[bufferIndex];
 
 	vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(mesh.indexType));
-	vkCmdDrawIndexed(cmd, triMesh.indices.count, pow(pushConstant.VGBStartPos_Size.w, 3), 0, 0, 0);
+	vkCmdDrawIndexed(cmd, triMesh.indices.count, pow(pushConstant.VGBStartPos_Size.w, 3) * 6, 0, 0, 0);
 
 	vkCmdEndRendering(cmd);
 

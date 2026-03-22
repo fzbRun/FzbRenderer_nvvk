@@ -21,6 +21,8 @@ struct OctreePushConstant {
 	uint32_t maxDepth;
 	uint32_t currentDepth;
 	float irradianceRelRatioThreshold;
+	uint32_t OctreeNodeTotalCount;
+	uint32_t currentLayerNodeCount;
 	SceneInfo* sceneInfoAddress;
 #ifndef NDEBUG
 	float4 VGBStartPos_Size;

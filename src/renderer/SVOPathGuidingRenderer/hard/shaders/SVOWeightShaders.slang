@@ -371,20 +371,6 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
         HitPayload_SVOWeight hitPayload;
         traceRay(ray, hitPayload, nodeData_G.aabb);
 
-        //uint nodeGIndex = (threadIndex / threadCount_perNodeG) % groupIndivisibleNodeCount_G;
-        //uint nodeEIndex = threadIndex / threadCount_perNodeE;
-        //if (pushConst.frameIndex == 1 && outgoingIndex == 26 && nodeGIndex == 46) {
-        //    printf("hit: %f, singleSide_E: %d, singleSide_G: %d\nmeanNormal_E: %f %f %f, meanNormal_G: %f %f %f\nsamplePoint_E: %f %f %f, samplePoint_G: %f %f %f,     sampleDir: %f %f  %f\nhitPos: %f %f %f\n\n",
-        //           hitPayload.hit, singleSide_E, singleSide_G,
-        //        meanNormal_E.x, meanNormal_E.y, meanNormal_E.z,
-        //        meanNormal_G.x, meanNormal_G.y, meanNormal_G.z,
-        //        samplePoint_E.x, samplePoint_E.y, samplePoint_E.z,
-        //        samplePoint_G.x, samplePoint_G.y, samplePoint_G.z,
-        //        sampleDir.x, sampleDir.y, sampleDir.z,
-        //        hitPayload.hitPos.x, hitPayload.hitPos.y, hitPayload.hitPos.z
-        //    );
-        //}
-
         if (hitPayload.hit <= 0.0f) continue;
         float cosine = dot(-sampleDir, hitPayload.normal);
 

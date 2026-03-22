@@ -17,13 +17,14 @@ enum RasterVoxelizationBindingPoints
 
 struct RasterVoxelizationPushConstant
 {
-	//float3x3 normalMatrix;
 	float4x4 VP[3];
 	float4 voxelSize_Count;
 	float3 voxelGroupStartPos;
 	int instanceIndex;
-	int frameIndex;		//debug
-	SceneInfo* sceneInfoAddress;           // Address of the scene information buffer
+	SceneInfo* sceneInfoAddress;
+#ifndef NDEBUG
+	int frameIndex;
+#endif
 };
 
 struct AABBU {

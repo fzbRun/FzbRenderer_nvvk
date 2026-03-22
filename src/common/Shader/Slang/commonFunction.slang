@@ -2,6 +2,24 @@
 #include "nvshaders/constants.h.slang"
 #include "nvshaders/random.h.slang"
 
+//---------------------------------------------------Number---------------------------------------------------
+int FloatToOrderedInt(float v)
+{
+    uint bits = asuint(v);
+    uint ordered = (bits & 0x80000000u) != 0
+        ? ~bits
+        : (bits ^ 0x80000000u);
+    return asint(ordered ^ 0x80000000u);
+}
+float OrderedIntToFloat(int orderedInt)
+{
+    uint ordered = asuint(orderedInt) ^ 0x80000000u;
+    uint bits = (ordered & 0x80000000u) != 0
+        ? (ordered ^ 0x80000000u)
+        : ~ordered;
+    return asfloat(bits);
+}
+//---------------------------------------------------Matrix---------------------------------------------------
 float3x3 Inverse3x3(float3x3 m) {
 	float3 c0 = m[0];
 	float3 c1 = m[1];

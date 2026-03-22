@@ -2,10 +2,10 @@
 
 #include "feature/PathTracing/shaders/pathTracingCommon.slang"
 #include "feature/LightInject/shaderio.h"
-#include "feature/SceneDivision/RasterVoxelization/shaderio.h"
+#include "renderer/SVOPathGuidingRenderer/hard/shaderio.h"
 
 [[vk::push_constant]] ConstantBuffer<LightInjectPushConstant, ScalarDataLayout> pushConst;
-[[vk::binding(StaticBindingPoints_LightInject::eVGB_LightInject)]] RWStructuredBuffer<VGBVoxelData, ScalarDataLayout> VGB;
+[[vk::binding(StaticBindingPoints_LightInject::eVGB_LightInject)]] RWStructuredBuffer<VGBVoxelData_SVOPG, ScalarDataLayout> VGBs[];
 
 struct LightInjectHitPayload {
     uint randomSeed;
@@ -149,17 +149,23 @@ void rayClosestHitMain(inout LightInjectHitPayload payload, in BuiltInTriangleIn
     ++payload.bounceDepth;
 
     int voxelIndex = getVGBVoxelIndex(hitState.pos);
+
+    float[3] normal = { hitState.normal.x, hitState.normal.y, hitState.normal.z };
+    float3 absNormal = abs(hitState.normal);
+    int VGBIndex = absNormal.x > absNormal.y ? (absNormal.x > absNormal.z ? 0 : 2) : (absNormal.y > absNormal.z ? 1 : 2);
+    VGBIndex = VGBIndex * 2 + 1 - sign(normal[VGBIndex]);
+
     if (all(payload.radiance > 0.0f) && !any(isnan(payload.radiance) || isinf(payload.radiance))) {
-        InterlockedAdd<float>(VGB[voxelIndex].irradiance.w, 1.0f);
-        InterlockedAdd<float>(VGB[voxelIndex].irradiance.x, payload.radiance.x);
-        InterlockedAdd<float>(VGB[voxelIndex].irradiance.y, payload.radiance.y);
-        InterlockedAdd<float>(VGB[voxelIndex].irradiance.z, payload.radiance.z);
+        InterlockedAdd<float>(VGBs[VGBIndex][voxelIndex].irradiance.w, 1.0f);
+        InterlockedAdd<float>(VGBs[VGBIndex][voxelIndex].irradiance.x, payload.radiance.x);
+        InterlockedAdd<float>(VGBs[VGBIndex][voxelIndex].irradiance.y, payload.radiance.y);
+        InterlockedAdd<float>(VGBs[VGBIndex][voxelIndex].irradiance.z, payload.radiance.z);
 
         float3 normal = length(payload.radiance) * hitState.normal;
-        InterlockedAdd<float>(VGB[voxelIndex].sumNormal_E.w, 1.0f);
-        InterlockedAdd<float>(VGB[voxelIndex].sumNormal_E.x, normal.x);
-        InterlockedAdd<float>(VGB[voxelIndex].sumNormal_E.y, normal.y);
-        InterlockedAdd<float>(VGB[voxelIndex].sumNormal_E.z, normal.z);
+        InterlockedAdd<float>(VGBs[VGBIndex][voxelIndex].sumNormal_E.w, 1.0f);
+        InterlockedAdd<float>(VGBs[VGBIndex][voxelIndex].sumNormal_E.x, normal.x);
+        InterlockedAdd<float>(VGBs[VGBIndex][voxelIndex].sumNormal_E.y, normal.y);
+        InterlockedAdd<float>(VGBs[VGBIndex][voxelIndex].sumNormal_E.z, normal.z);
     }
 
     #ifndef NDEBUG
@@ -416,13 +422,17 @@ int3 getVoxelIndexXYZ(int voxelIndex) {
 [shader("vertex")]
 VSout_Cube vertexMain_Cube(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID)
 {
-    VGBVoxelData voxelData = VGB[instanceIndex];
+    uint voxelTotalCount = uint(pow(pushConst.VGBStartPos_Size.w, 3));
+    uint VGBIndex = instanceIndex / voxelTotalCount;
+    uint voxelIndex = instanceIndex % voxelTotalCount;
+
+    VGBVoxelData_SVOPG voxelData = VGBs[VGBIndex][voxelIndex];
     VSout_Cube output;
     if (voxelData.irradiance.w == 0.0f) output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
     else {
-        output.worldPos.x = ((vertexIndex & 3) * 2) % 6 == 0 ? asfloat(voxelData.aabbU.minimum.x) : asfloat(voxelData.aabbU.maximum.x);
-        output.worldPos.y = (vertexIndex & 3) <= 1 ? asfloat(voxelData.aabbU.minimum.y) : asfloat(voxelData.aabbU.maximum.y);
-        output.worldPos.z = vertexIndex / 4 == 0 ? asfloat(voxelData.aabbU.minimum.z) : asfloat(voxelData.aabbU.maximum.z);
+        output.worldPos.x = ((vertexIndex & 3) * 2) % 6 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.x) : OrderedIntToFloat(voxelData.aabbI.maximum.x);
+        output.worldPos.y = (vertexIndex & 3) <= 1 ? OrderedIntToFloat(voxelData.aabbI.minimum.y) : OrderedIntToFloat(voxelData.aabbI.maximum.y);
+        output.worldPos.z = vertexIndex / 4 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.z) : OrderedIntToFloat(voxelData.aabbI.maximum.z);
 
         SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
         output.sv_position = mul(float4(output.worldPos.xyz, 1.0f), sceneInfo.viewProjMatrix);

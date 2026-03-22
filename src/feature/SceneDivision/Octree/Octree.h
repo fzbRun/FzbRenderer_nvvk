@@ -9,7 +9,7 @@
 
 namespace FzbRenderer {
 struct OctreeSetting{
-	nvvk::Buffer VGB;
+	std::vector<nvvk::Buffer> VGBs;
 	glm::vec3 VGBStartPos;
 	glm::vec3 VGBVoxelSize;
 	float VGBSize;

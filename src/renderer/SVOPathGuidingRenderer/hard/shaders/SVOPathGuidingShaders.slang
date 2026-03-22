@@ -103,7 +103,7 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
     Mesh mesh = sceneInfo.meshes[instance.meshIndex];
     BSDFMaterial material = sceneInfo.materials[instance.materialIndex];
 
-    HitState hitState = getHitStateWithPositionFetch(barycentrics);
+    HitState hitState = getHitStateWithPositionFetch(barycentrics, payload.rayDirection);
 
     float cosineON = dot(hitState.normal, -payload.rayDirection);
     if (cosineON < 0) hitState.normal = -hitState.normal;
@@ -170,22 +170,15 @@ void conductorMaterialMain(inout CallablePayload payload) {
 
 [shader("callable")]
 void dielectricMaterialMain(inout CallablePayload payload) {
-    float eta = payload.material.eta.x;
-    if (!payload.isExt) eta = 1.0f / eta;
-
-    float3 F;
-    PopulateCallablePayload_DielectricMaterial(payload, F, eta);
+    PopulateCallablePayload_DielectricMaterial(payload);
 }
 
 [shader("callable")]
 void roughConductorMaterialMain(inout CallablePayload payload) {
-    float3 outgoing_tangentSpace;
-    PopulateCallablePayload_RoughConductorMaterial(payload, outgoing_tangentSpace);
+    PopulateCallablePayload_RoughConductorMaterial(payload);
 }
 
 [shader("callable")]
 void roughDielectricMaterialMain(inout CallablePayload payload) {
-    float3 outgoing_tangentSpace;
-    float eta;
-    PopulateCallablePayload_RoughDielectricMaterial(payload, outgoing_tangentSpace, eta);
+    PopulateCallablePayload_RoughDielectricMaterial(payload);
 }

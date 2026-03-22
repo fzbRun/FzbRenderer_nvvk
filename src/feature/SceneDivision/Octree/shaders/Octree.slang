@@ -1,9 +1,10 @@
 ﻿#include "common/Shader/shaderStructType.h"
 #include "feature/SceneDivision/Octree/shaderio.h"
-#include "feature/SceneDivision/RasterVoxelization/shaderio.h"
+#include "renderer/SVOPathGuidingRenderer/hard/shaderio.h"
+#include "common/Shader/Slang/commonFunction.slang"
 
 [[vk::push_constant]] ConstantBuffer<OctreePushConstant> pushConst;
-[[vk::binding(BindingPoints_Octree::eVGB_Octree)]] RWStructuredBuffer<VGBVoxelData, ScalarDataLayout> VGB;
+[[vk::binding(BindingPoints_Octree::eVGB_Octree)]] StructuredBuffer<VGBVoxelData_SVOPG, ScalarDataLayout> VGBs[];
 [[vk::binding(BindingPoints_Octree::eOctreeArray_G_Octree)]] RWStructuredBuffer<OctreeNodeData_G, ScalarDataLayout> OctreeArray_G[];
 [[vk::binding(BindingPoints_Octree::eOctreeArray_E_Octree)]] RWStructuredBuffer<OctreeNodeData_E, ScalarDataLayout> OctreeArray_E[];
 #ifndef NDEBUG
@@ -30,49 +31,14 @@ int3 getVoxelIndexXYZ(int voxelIndex) {
 }
 
 //----------------------------------------------clearOctreeArray--------------------------------------------
-[numthreads(512, 1, 1)]
+#define THREADGROUP_SIZE 512
+[numthreads(THREADGROUP_SIZE, 1, 1)]
 [shader("compute")]
 void computeMain_initOctreeArray(uint threadIndex: SV_DispatchThreadID) {
-    uint nodeTotalCount = uint(pow(8, pushConst.maxDepth));
-    if (threadIndex >= nodeTotalCount) return;
-    VGBVoxelData voxelData = VGB[threadIndex];
+    uint maxLayerNodeTotalCount = uint(pow(8, pushConst.maxDepth));     //one thread per one node
+    if (threadIndex >= maxLayerNodeTotalCount) return;
 
     AABB aabb;
-    aabb.minimum.x = asfloat(voxelData.aabbU.minimum.x);
-    aabb.minimum.y = asfloat(voxelData.aabbU.minimum.y);
-    aabb.minimum.z = asfloat(voxelData.aabbU.minimum.z);
-    aabb.maximum.x = asfloat(voxelData.aabbU.maximum.x);
-    aabb.maximum.y = asfloat(voxelData.aabbU.maximum.y);
-    aabb.maximum.z = asfloat(voxelData.aabbU.maximum.z);
-
-    OctreeNodeData_G nodeData_G;
-    bool hasNormal = voxelData.sumNormal_G.x != 0.0f || voxelData.sumNormal_G.y != 0.0f || voxelData.sumNormal_G.z != 0.0f; // voxelData.sumNormal_G.w > 0.0f;
-    nodeData_G.meanNormal = hasNormal ? float4(normalize(voxelData.sumNormal_G.xyz), 1.0f) : float4(0.0f);
-    nodeData_G.aabb = aabb;
-    nodeData_G.indivisible = 1;
-    nodeData_G.label = 0;
-    nodeData_G.materialIndex = voxelData.materialIndex_Count >> 26;
-    OctreeArray_G[pushConst.maxDepth][threadIndex] = nodeData_G;
-
-    hasNormal = voxelData.sumNormal_E.w > 0.0f;
-    if (hasNormal && aabb.minimum.x >= 3.402823466e+36F) {
-        /*
-        RasterVoxelization is discrete and sparse，so some voxel not be inject gemotry info，so we inject the voxel's aabb
-        threadTotal = VGBSize^3，so the per eight thread is the brother node，so we can get the aabb from other brother
-        if all of other brothers has't aabb, we believe this node's irradiance is noise
-        */
-        hasNormal = false;
-        voxelData.irradiance.w = -1.0f;
-    }
-    OctreeNodeData_E nodeData_E;
-    nodeData_E.irradiance = voxelData.irradiance.w > 0.0f ? voxelData.irradiance.xyz / voxelData.irradiance.w : float3(0.0f);
-    nodeData_E.notIgnoreRatio = 1.0f;
-    nodeData_E.meanNormal = hasNormal ? float4(normalize(voxelData.sumNormal_E.xyz), 1.0f) : float4(0.0f);
-    nodeData_E.aabb = aabb;
-    nodeData_E.indivisible = 1;
-    nodeData_E.label = 0;
-    OctreeArray_E[pushConst.maxDepth][threadIndex] = nodeData_E;
-
     aabb.minimum.x = 3.402823466e+38F;
     aabb.minimum.y = 3.402823466e+38F;
     aabb.minimum.z = 3.402823466e+38F;
@@ -80,18 +46,89 @@ void computeMain_initOctreeArray(uint threadIndex: SV_DispatchThreadID) {
     aabb.maximum.y = -3.402823466e+38F;
     aabb.maximum.z = -3.402823466e+38F;
 
+    OctreeNodeData_G nodeData_G;
+    nodeData_G.indivisible = 1;
+    nodeData_G.label = 0;
+
+    uint irradianceCount = 0;
+    OctreeNodeData_E nodeData_E;
+    nodeData_E.irradiance = float3(0.0f);
+    nodeData_E.notIgnoreRatio = 1.0f;
+    nodeData_E.meanNormal = float4(0.0f);
+    nodeData_E.aabb = aabb;
+    nodeData_E.indivisible = 1;
+    nodeData_E.label = 0;
+    for (int normalIndex = 0; normalIndex < 6; ++normalIndex) {
+        VGBVoxelData_SVOPG voxelData = VGBs[normalIndex][threadIndex];
+
+        AABB nodeAabb;
+        nodeAabb.minimum.x = OrderedIntToFloat(voxelData.aabbI.minimum.x);
+        nodeAabb.minimum.y = OrderedIntToFloat(voxelData.aabbI.minimum.y);
+        nodeAabb.minimum.z = OrderedIntToFloat(voxelData.aabbI.minimum.z);
+        nodeAabb.maximum.x = OrderedIntToFloat(voxelData.aabbI.maximum.x);
+        nodeAabb.maximum.y = OrderedIntToFloat(voxelData.aabbI.maximum.y);
+        nodeAabb.maximum.z = OrderedIntToFloat(voxelData.aabbI.maximum.z);
+
+        bool hasNormal = voxelData.sumNormal_G.w > 0.0f;
+        nodeData_G.meanNormal = hasNormal ? voxelData.sumNormal_G / voxelData.sumNormal_G.w : float4(0.0f);
+        nodeData_G.aabb = nodeAabb;
+        nodeData_G.materialIndex = voxelData.materialIndex_Count >> 26;
+
+        uint32_t octreeIndex = normalIndex * (pushConst.maxDepth + 1) + pushConst.maxDepth;
+        OctreeArray_G[octreeIndex][threadIndex] = nodeData_G;
+
+        hasNormal = voxelData.sumNormal_E.w > 0.0f;
+        if (hasNormal && nodeAabb.minimum.x >= 3.402823466e+36F) {
+            hasNormal = false;
+            voxelData.irradiance = float4(0.0f);
+            voxelData.sumNormal_E = float4(0.0f);
+        }
+        nodeData_E.irradiance += voxelData.irradiance.xyz;
+        irradianceCount += (uint)voxelData.irradiance.w;
+
+        nodeData_E.meanNormal += voxelData.sumNormal_E;
+        nodeData_E.aabb.minimum.x = min(nodeData_E.aabb.minimum.x, nodeAabb.minimum.x);
+        nodeData_E.aabb.minimum.y = min(nodeData_E.aabb.minimum.y, nodeAabb.minimum.y);
+        nodeData_E.aabb.minimum.z = min(nodeData_E.aabb.minimum.z, nodeAabb.minimum.z);
+        nodeData_E.aabb.maximum.x = max(nodeData_E.aabb.maximum.x, nodeAabb.maximum.x);
+        nodeData_E.aabb.maximum.y = max(nodeData_E.aabb.maximum.y, nodeAabb.maximum.y);
+        nodeData_E.aabb.maximum.z = max(nodeData_E.aabb.maximum.z, nodeAabb.maximum.z);
+    }
+    if (irradianceCount > 0) {
+        nodeData_E.irradiance /= irradianceCount;
+        nodeData_E.meanNormal /= nodeData_E.meanNormal.w == 0.0f ? 1.0f : nodeData_E.meanNormal.w;
+    }
+    OctreeArray_E[pushConst.maxDepth][threadIndex] = nodeData_E;
+    
     nodeData_G.meanNormal = float4(0.0f);
     nodeData_G.aabb = aabb;
+    nodeData_G.materialIndex = 0;
 
     nodeData_E.irradiance = float3(0.0f);
     nodeData_E.meanNormal = float4(0.0f);
     nodeData_E.aabb = aabb;
-    for (int i = pushConst.maxDepth - 1; i > 0; --i) {
-        nodeTotalCount /= 8;
-        if (threadIndex >= nodeTotalCount) return;
 
-        OctreeArray_G[i][threadIndex] = nodeData_G;
+    uint nodeTotalCount = maxLayerNodeTotalCount;
+    for (int i = pushConst.maxDepth - 1; i >= 0; --i) {
+        nodeTotalCount /= 8;
+        if (threadIndex >= nodeTotalCount) continue;
         OctreeArray_E[i][threadIndex] = nodeData_E;
+    }
+
+    uint nodeTotalCount_oneOctree_G = pushConst.OctreeNodeTotalCount - maxLayerNodeTotalCount;     //except max layer
+    uint nodeTotalCount_allOctree_G = nodeTotalCount_oneOctree_G * 6;
+    for (int i = threadIndex; i < nodeTotalCount_allOctree_G; i += maxLayerNodeTotalCount) {
+        uint normalIndex = i / nodeTotalCount_oneOctree_G;
+        uint nodeIndex = i - normalIndex * nodeTotalCount_oneOctree_G;
+        int layerIndex = 0;
+        uint layerNodeCount = (uint)pow(8, layerIndex);
+        for (; layerIndex < pushConst.maxDepth; ++layerIndex) {
+            if (nodeIndex < layerNodeCount) break;
+            nodeIndex -= layerNodeCount;
+            layerNodeCount *= 8;
+        }
+        uint octreeIndex = normalIndex * (pushConst.maxDepth + 1) + layerIndex;
+        OctreeArray_G[octreeIndex][nodeIndex] = nodeData_G;
     }
 }
 
@@ -139,27 +176,29 @@ void atomicMergeAABB(inout AABB aabb) {
 [numthreads(256, 1, 1)]
 [shader("compute")]
 void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint groupThreadIndex: SV_GroupThreadID) {
-    uint nodeTotalCount = uint(pow(8, pushConst.currentDepth));
-    if (threadIndex >= nodeTotalCount) return;
+    uint nodeTotalCount = pushConst.currentLayerNodeCount;
+    if (threadIndex >= nodeTotalCount * 6) return;
 
     uint32_t warpIndex = groupThreadIndex / 32;
     uint32_t warpLane = groupThreadIndex & 31;
 
-    uint32_t indexInBlock = threadIndex & 7;            // index of eight brothers
-    uint32_t blockIndex = threadIndex / 8;              // blockIndex of global = fatherNodeIndex
-    uint32_t blockFirstWarpLane = (blockIndex & 3) * 8; // first thread of block in warp
+    uint32_t indexInBlock = threadIndex & 7;          // index of eight brothers
+    uint32_t blockFirstWarpLane = (warpLane / 8) * 8; // first thread of block in warp
     uint32_t blockNodeMask = 0xff << blockFirstWarpLane;
     uint32_t blockIndexInGroup = groupThreadIndex / 8;
     //----------------------------------------getOctree_G-------------------------------------------
-    OctreeNodeData_G nodeData_G = OctreeArray_G[pushConst.currentDepth][threadIndex];
-    bool hasGeometry = nodeData_G.aabb.minimum.x < 10000.0f;
+    uint normalIndex = threadIndex / nodeTotalCount;
+    uint octreeIndex = normalIndex * (pushConst.maxDepth + 1) + pushConst.currentDepth;
+    uint nodeIndex = threadIndex % nodeTotalCount;
+    uint32_t blockIndex = nodeIndex / 8; // blockIndex of global = fatherNodeIndex
+
+    OctreeNodeData_G nodeData_G = OctreeArray_G[octreeIndex][nodeIndex];
+    bool hasGeometry = nodeData_G.meanNormal.w > 0.0f;
     uint32_t warpHasGeometryMask = WaveActiveBallot(hasGeometry).x;
     uint32_t blockHasGeometryNodeCount = countbits(warpHasGeometryMask & blockNodeMask);
-    //Geometry injection is not 100% effective. It may not be injected completely. 
-    //However, if there is light in this area, we cannot directly return. We also need to handle E
     if (blockHasGeometryNodeCount == 0) {}
     else if (blockHasGeometryNodeCount == 1) {
-        if (hasGeometry) OctreeArray_G[pushConst.currentDepth - 1][blockIndex] = nodeData_G;
+        if (hasGeometry) OctreeArray_G[octreeIndex - 1][blockIndex] = nodeData_G;
     } else {
         //----------------------------------------calc node data-------------------------------------
         //get mergeAABB
@@ -202,51 +241,35 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
             surfaceAreaSum += WaveReadLaneAt(surfaceAreaSum, targetLane);
         }
 
-        uint blockMaterialTypeMask = 1u << nodeData_G.materialIndex;
+        uint blockMaterialTypeMask = hasGeometry ? 1u << nodeData_G.materialIndex : 0u;
         for (int offset = 4; offset > 0; offset /= 2) {
             uint targetLane = warpLane + offset;
             blockMaterialTypeMask |= WaveReadLaneAt(blockMaterialTypeMask, targetLane);
         }
         uint materialTypeCount = countbits(blockMaterialTypeMask);
-        materialTypeCount = min(materialTypeCount, 1) - 1;
-
-        uint blockMaterialType = nodeData_G.materialIndex;
-        uint blockMaterialTypeCount = 1;
-        for (int offset = 0; offset < 8; ++offset) {
-            uint targetLane = blockFirstWarpLane + offset;
-            blockMaterialTypeCount += (WaveReadLaneAt(blockMaterialType, targetLane) != blockMaterialType) ? 1 : 0;
-        }
+        //--------------------------------------------judge divisible--------------------------------------------
+        bool indivisible = nodeData_G.indivisible == 1;
         for (int offset = 4; offset > 0; offset /= 2) {
             uint targetLane = warpLane + offset;
-            uint other_blockMaterialTypeCount = WaveReadLaneAt(blockMaterialTypeCount, targetLane);
-            if (other_blockMaterialTypeCount > blockMaterialTypeCount) {
-                blockMaterialTypeCount = other_blockMaterialTypeCount;
-                blockMaterialType = WaveReadLaneAt(blockMaterialType, targetLane);
-            }
+            indivisible &= WaveReadLaneAt(indivisible, targetLane);
         }
-        //--------------------------------------------judge divisible--------------------------------------------
-        bool indivisible = true;
-        // calc mergeNode's entropy
-        float entropy = 0.0f;
-        if (warpLane == blockFirstWarpLane) {
-            float normalEntropy = max(1.0f - length(mergeNormal), 0.0f);        //this should use Pi rather than 1.0f
-            float surfaceAreaEntropy = max(1.0f - surfaceAreaSum / mergeAABBSurfaceArea, 0.0f);
-            float materialEntropy = materialTypeCount / MAX_MATERIAL_TYPE_COUNT;
-            entropy = (normalEntropy + surfaceAreaEntropy + materialEntropy) * 0.33333f;
-            //if node is very tidy or very chaos, we assume it can be clustering
-            indivisible = entropy < pushConst.entropyThreshold.x || entropy > pushConst.entropyThreshold.y;
-        }
+
+        indivisible &= hasGeometry ? materialTypeCount == 1 : true;
+        if (warpLane == blockFirstWarpLane)
+            indivisible &= length(mergeNormal) > pushConst.entropyThreshold.x &&
+                           (surfaceAreaSum / mergeAABBSurfaceArea) > pushConst.entropyThreshold.y;
         //---------------------------------------------assignment------------------------------------------------
         if (warpLane == blockFirstWarpLane) {
             nodeData_G.indivisible = indivisible;
             nodeData_G.label = 0;
             nodeData_G.aabb = mergeAABB;
             nodeData_G.meanNormal = float4(mergeNormal, 1.0f);
-            nodeData_G.materialIndex = blockMaterialType;
-            OctreeArray_G[pushConst.currentDepth - 1][blockIndex] = nodeData_G;
+            nodeData_G.materialIndex = firstbitlow(blockMaterialTypeMask);
+            OctreeArray_G[octreeIndex - 1][blockIndex] = nodeData_G;
         }
     }
 
+    /*
     //----------------------------------------getOctree_E-------------------------------------------
     OctreeNodeData_E nodeData_E = OctreeArray_E[pushConst.currentDepth][threadIndex];
     bool hasIrradiance = nodeData_E.irradiance.x + nodeData_E.irradiance.y + nodeData_E.irradiance.z > 0.0f;
@@ -384,6 +407,7 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
             OctreeArray_E[pushConst.currentDepth - 1][blockIndex] = nodeData_E;
         }
     }
+    */
 }
 [numthreads(512, 1, 1)]
 [shader("compute")]
@@ -498,29 +522,35 @@ VSout_Wireframe vertexMain_Wireframe(uint vertexIndex: SV_VertexID, int instance
     output.renderTargetIndex = 0;
 
     bool isG = true;
-    if (instanceIndex >= pushConst.showOctreeNodeTotalCount) {
-        instanceIndex -= pushConst.showOctreeNodeTotalCount;
+    uint nodeIndex = instanceIndex;
+    if (nodeIndex >= pushConst.showOctreeNodeTotalCount * 6) {
+        nodeIndex -= pushConst.showOctreeNodeTotalCount * 6;
         isG = false;
         output.renderTargetIndex += pushConst.maxDepth - pushConst.clusteringLevel;
-    }
+    } else nodeIndex = nodeIndex % pushConst.showOctreeNodeTotalCount;
 
-    uint nodeIndex = instanceIndex;
-    uint level = pushConst.clusteringLevel;
-    uint levelTotalNodeCount = uint(pow(8, level));
-    for (; level < pushConst.maxDepth && nodeIndex >= levelTotalNodeCount; ++level) {
-        nodeIndex -= levelTotalNodeCount;
-        levelTotalNodeCount *= 8;
+    uint layerIndex = pushConst.clusteringLevel;
+    uint layerNodeCount = uint(pow(8, layerIndex));
+    for (; layerIndex <= pushConst.maxDepth; ++layerIndex) {
+        if (nodeIndex < layerNodeCount) break;
+        nodeIndex -= layerNodeCount;
+        layerNodeCount *= 8;
     }
+    
     AABB nodeAABB; uint invisible = 1;
     if (isG) {
-        OctreeNodeData_G octreeData_G = OctreeArray_G[level][nodeIndex];
+        uint normalIndex = instanceIndex / pushConst.showOctreeNodeTotalCount;
+        uint octreeIndex = normalIndex * (pushConst.maxDepth + 1) + layerIndex;
+        OctreeNodeData_G octreeData_G = OctreeArray_G[octreeIndex][nodeIndex];
         nodeAABB = octreeData_G.aabb;
         invisible = octreeData_G.meanNormal.w > 0.0f && octreeData_G.indivisible == 1;
     } else {
-        OctreeNodeData_E octreeData_E = OctreeArray_E[level][nodeIndex];
+        OctreeNodeData_E octreeData_E = OctreeArray_E[layerIndex][nodeIndex];
         nodeAABB = octreeData_E.aabb;
         invisible = (octreeData_E.irradiance.x + octreeData_E.irradiance.y + octreeData_E.irradiance.z > 0.0f) && octreeData_E.indivisible == 1;
     }
+
+    if (instanceIndex / pushConst.showOctreeNodeTotalCount != 0) invisible = 0;
 
     if (nodeAABB.minimum.x > 10000.0f || invisible == 0) output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
     else {
@@ -533,7 +563,7 @@ VSout_Wireframe vertexMain_Wireframe(uint vertexIndex: SV_VertexID, int instance
 
         output.sv_position = mul(float4(output.sv_position.xyz, 1.0f), pushConst.sceneInfoAddress[0].viewProjMatrix);
     }
-    output.renderTargetIndex += level - pushConst.clusteringLevel;
+    output.renderTargetIndex += layerIndex - pushConst.clusteringLevel;
 
     return output;
 }

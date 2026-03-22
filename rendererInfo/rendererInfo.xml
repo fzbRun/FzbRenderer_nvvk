@@ -8,12 +8,12 @@
 		<useNEE value = "true" />
 		<RasterVoxelization>
 			<resolution value = "2048, 2048" />
-			<voxelCount value="64" />
+			<voxelCount value="32" />
 		</RasterVoxelization>
 		<LightInject>
 		</LightInject>
 		<Octree>
-			<entropyThreshold value="0.5, 0.8" />
+			<entropyThreshold value="0.5, 0.7" />
 			<irradianceRelRatioThreshold value="0.75" />
 			<clusteringLevel value="3" />
 		</Octree>

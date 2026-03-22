@@ -10,7 +10,7 @@ FzbRenderer::SVOPathGuidingRenderer::SVOPathGuidingRenderer(pugi::xml_node& rend
 	if (pugi::xml_node maxDepthNode = rendererNode.child("maxDepth"))
 		pushConstant.maxDepth = std::stoi(maxDepthNode.attribute("value").value());
 	if (pugi::xml_node rasterVoxelizationNode = rendererNode.child("RasterVoxelization"))
-		rasterVoxelization = std::make_shared<FzbRenderer::RasterVoxelization>(rasterVoxelizationNode);
+		rasterVoxelization = std::make_shared<FzbRenderer::RasterVoxelization_SVOPG>(rasterVoxelizationNode);
 	if (pugi::xml_node lightInjectNode = rendererNode.child("LightInject"))
 		lightInject = std::make_shared<FzbRenderer::LightInject>(lightInjectNode);
 	if (pugi::xml_node octreeNode = rendererNode.child("Octree"))
@@ -28,7 +28,7 @@ void FzbRenderer::SVOPathGuidingRenderer::init() {
 	rasterVoxelization->init();
 
 	LightInjectSetting lightInjectSetting{
-		.VGB = rasterVoxelization->VGB,
+		.VGBs = rasterVoxelization->VGBs,
 		.VGBStartPos = rasterVoxelization->setting.pushConstant.voxelGroupStartPos,
 		.VGBVoxelSize = glm::vec3(rasterVoxelization->setting.pushConstant.voxelSize_Count),
 		.VGBSize = rasterVoxelization->setting.pushConstant.voxelSize_Count.w,
@@ -40,13 +40,13 @@ void FzbRenderer::SVOPathGuidingRenderer::init() {
 	lightInject->init(lightInjectSetting);
 
 	OctreeSetting octreeSetting{
-		.VGB = rasterVoxelization->VGB,
+		.VGBs = rasterVoxelization->VGBs,
 		.VGBStartPos = lightInjectSetting.VGBStartPos,
 		.VGBVoxelSize = lightInjectSetting.VGBVoxelSize,
-		.VGBSize = lightInjectSetting.VGBSize
+		.VGBSize = lightInjectSetting.VGBSize,
 	};
 	octree->init(octreeSetting);
-
+	/*
 	SVOSetting svoSetting{
 		.octree = octree
 	};
@@ -57,7 +57,7 @@ void FzbRenderer::SVOPathGuidingRenderer::init() {
 		.asManager = &asManager
 	};
 	svoWeight->init(svoWeightSetting);
-
+	*/
 	IF_DEBUG(Feature::createGBuffer(true, true, 1), Feature::createGBuffer(false, true, 1));
 	createDescriptorSetLayout();
 	createDescriptorSet();
@@ -67,7 +67,6 @@ void FzbRenderer::SVOPathGuidingRenderer::init() {
 	#else
 	createPipeline();
 	#endif
-
 
 	Renderer::init();
 }
@@ -84,16 +83,16 @@ void FzbRenderer::SVOPathGuidingRenderer::clean() {
 };
 void FzbRenderer::SVOPathGuidingRenderer::uiRender() {
 	bool& UIModified = Application::UIModified;
-
+	
 	namespace PE = nvgui::PropertyEditor;
 	Application::viewportImage = gBuffers.getDescriptorSet(eImgTonemapped);
-
+	
 	if (ImGui::Begin("SVOPathGuidingSettings"))
 	{
 		ImGui::SeparatorText("Jitter");
 		UIModified |= ImGui::SliderInt("Max Frames", &maxFrames, 1, MAX_FRAME);
 		ImGui::TextDisabled("Frame: %d", pushConstant.frameIndex);
-
+	
 		ImGui::SeparatorText("Bounces");
 		{
 			PE::begin();
@@ -101,7 +100,7 @@ void FzbRenderer::SVOPathGuidingRenderer::uiRender() {
 				"Maximum Bounces depth");
 			PE::end();
 		}
-
+	
 		if (ptContext.rtPosFetchFeature.rayTracingPositionFetch == VK_FALSE)
 		{
 			ImGui::TextColored({ 1, 0, 0, 1 }, "ERROR: Position Fetch not supported!");
@@ -120,32 +119,32 @@ void FzbRenderer::SVOPathGuidingRenderer::uiRender() {
 	rasterVoxelization->uiRender();
 	lightInject->uiRender();
 	octree->uiRender();
-	svo->uiRender();
-	svoWeight->uiRender();
-
+	//svo->uiRender();
+	//svoWeight->uiRender();
+	
 	if (UIModified) resetFrame();
 };
 void FzbRenderer::SVOPathGuidingRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 	NVVK_CHECK(gBuffers.update(cmd, size));
-
+	
 	nvvk::WriteSetContainer write{};
 	VkWriteDescriptorSet    OutImageWrite =
 		staticDescPack.makeWrite(shaderio::StaticSetBindingPoints_PT::eOutImage_PT, 0, 0, 1);
 	write.append(OutImageWrite, gBuffers.getColorImageView(eImgRendered), VK_IMAGE_LAYOUT_GENERAL);
-
+	
 	#ifndef NDEBUG
 	VkWriteDescriptorSet    depthImageWrite =
 		staticDescPack.makeWrite(shaderio::StaticBindingPoints_SVOPG::eDepthImage_SVOPG, 0, 0, 1);
 	write.append(depthImageWrite, gBuffers.getDepthImageView(), VK_IMAGE_LAYOUT_GENERAL);
 	#endif
-
+	
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 
 	IF_DEBUG(rasterVoxelization->resize(cmd, size, gBuffers, eImgTonemapped), rasterVoxelization->resize(cmd, size));
 	lightInject->resize(cmd, size);
 	IF_DEBUG(octree->resize(cmd, size, gBuffers, eImgTonemapped), octree->resize(cmd, size));
-	IF_DEBUG(svo->resize(cmd, size, gBuffers, eImgTonemapped), svo->resize(cmd, size));
-	svoWeight->resize(cmd, size);
+	//IF_DEBUG(svo->resize(cmd, size, gBuffers, eImgTonemapped), svo->resize(cmd, size));
+	//svoWeight->resize(cmd, size);
 };
 void FzbRenderer::SVOPathGuidingRenderer::preRender() {
 	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
@@ -162,8 +161,8 @@ void FzbRenderer::SVOPathGuidingRenderer::preRender() {
 	rasterVoxelization->preRender(cmd);
 	lightInject->preRender();
 	octree->preRender();
-	svo->preRender();
-	svoWeight->preRender();
+	//svo->preRender();
+	//svoWeight->preRender();
 
 	Application::app->submitAndWaitTempCmdBuffer(cmd);
 }
@@ -179,9 +178,9 @@ void FzbRenderer::SVOPathGuidingRenderer::render(VkCommandBuffer cmd) {
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_NV, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	octree->render(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-	svo->render(cmd);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-	svoWeight->render(cmd);
+	//svo->render(cmd);
+	//nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	//svoWeight->render(cmd);
 	
 	#ifdef USE_RAYQUERY_SVOPG
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
@@ -190,24 +189,18 @@ void FzbRenderer::SVOPathGuidingRenderer::render(VkCommandBuffer cmd) {
 	#else
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_NV);
 	pathGuiding(cmd);
-	//nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	#endif
 	
-	
 	Renderer::postProcess(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT);
-	//nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
 
 	rasterVoxelization->postProcess(cmd);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT);
 	lightInject->postProcess(cmd);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_GEOMETRY_SHADER_BIT);
 	octree->postProcess(cmd);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT);
-	svo->postProcess(cmd);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-	svoWeight->postProcess(cmd);
+	//svo->postProcess(cmd);
+	//nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	//svoWeight->postProcess(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
 };
 
@@ -226,7 +219,7 @@ void FzbRenderer::SVOPathGuidingRenderer::createDescriptorSetLayout() {
 	bindings.addBinding({
 		.binding = shaderio::StaticBindingPoints_SVOPG::eVGB_SVOPG,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = 1,
+		.descriptorCount = 6,
 		.stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
 		.binding = shaderio::StaticBindingPoints_SVOPG::eSVO_G_SVOPG,
@@ -296,33 +289,34 @@ void FzbRenderer::SVOPathGuidingRenderer::createDescriptorSet() {
 
 	VkWriteDescriptorSet    VGBWrite =
 		staticDescPack.makeWrite(shaderio::StaticBindingPoints_SVOPG::eVGB_SVOPG, 0, 0, 1);
-	write.append(VGBWrite, rasterVoxelization->VGB);
+	nvvk::Buffer* SVOArrayPtr = rasterVoxelization->VGBs.data();
+	write.append(VGBWrite, SVOArrayPtr);
 
-	VkWriteDescriptorSet SVOArrayWrite =
-		staticDescPack.makeWrite(shaderio::StaticBindingPoints_SVOPG::eSVO_G_SVOPG, 0, 0, svo->SVOArray_G.size());
-	nvvk::Buffer* SVOArrayPtr = svo->SVOArray_G.data();
-	write.append(SVOArrayWrite, SVOArrayPtr);
-
-	SVOArrayWrite =
-		staticDescPack.makeWrite(shaderio::StaticBindingPoints_SVOPG::eSVO_E_SVOPG, 0, 0, svo->SVOArray_E.size());
-	SVOArrayPtr = svo->SVOArray_E.data();
-	write.append(SVOArrayWrite, SVOArrayPtr);
-
-	VkWriteDescriptorSet SVOLayerInfosWrite =
-		staticDescPack.makeWrite(shaderio::StaticBindingPoints_SVOPG::eSVOLayerInfos_G_SVOPG, 0, 0, 1);
-	write.append(SVOLayerInfosWrite, svo->SVOLayerInfos_G, 0, svo->SVOLayerInfos_G.bufferSize);
-
-	SVOLayerInfosWrite =
-		staticDescPack.makeWrite(shaderio::StaticBindingPoints_SVOPG::eSVOLayerInfos_E_SVOPG, 0, 0, 1);
-	write.append(SVOLayerInfosWrite, svo->SVOLayerInfos_E, 0, svo->SVOLayerInfos_E.bufferSize);
-
-	VkWriteDescriptorSet globalInfoWrite =
-		staticDescPack.makeWrite(shaderio::StaticBindingPoints_SVOPG::eGlobalInfo_SVOPG, 0, 0, 1);
-	write.append(globalInfoWrite, svoWeight->GlobalInfoBuffer, 0, svoWeight->GlobalInfoBuffer.bufferSize);
-
-	VkWriteDescriptorSet weightsWrite =
-		staticDescPack.makeWrite(shaderio::StaticBindingPoints_SVOPG::eWeights_SVOPG, 0, 0, 1);
-	write.append(weightsWrite, svoWeight->weightBuffer, 0, svoWeight->weightBuffer.bufferSize);
+	//VkWriteDescriptorSet SVOArrayWrite =
+	//	staticDescPack.makeWrite(shaderio::StaticBindingPoints_SVOPG::eSVO_G_SVOPG, 0, 0, svo->SVOArray_G.size());
+	//nvvk::Buffer* SVOArrayPtr = svo->SVOArray_G.data();
+	//write.append(SVOArrayWrite, SVOArrayPtr);
+	//
+	//SVOArrayWrite =
+	//	staticDescPack.makeWrite(shaderio::StaticBindingPoints_SVOPG::eSVO_E_SVOPG, 0, 0, svo->SVOArray_E.size());
+	//SVOArrayPtr = svo->SVOArray_E.data();
+	//write.append(SVOArrayWrite, SVOArrayPtr);
+	//
+	//VkWriteDescriptorSet SVOLayerInfosWrite =
+	//	staticDescPack.makeWrite(shaderio::StaticBindingPoints_SVOPG::eSVOLayerInfos_G_SVOPG, 0, 0, 1);
+	//write.append(SVOLayerInfosWrite, svo->SVOLayerInfos_G, 0, svo->SVOLayerInfos_G.bufferSize);
+	//
+	//SVOLayerInfosWrite =
+	//	staticDescPack.makeWrite(shaderio::StaticBindingPoints_SVOPG::eSVOLayerInfos_E_SVOPG, 0, 0, 1);
+	//write.append(SVOLayerInfosWrite, svo->SVOLayerInfos_E, 0, svo->SVOLayerInfos_E.bufferSize);
+	//
+	//VkWriteDescriptorSet globalInfoWrite =
+	//	staticDescPack.makeWrite(shaderio::StaticBindingPoints_SVOPG::eGlobalInfo_SVOPG, 0, 0, 1);
+	//write.append(globalInfoWrite, svoWeight->GlobalInfoBuffer, 0, svoWeight->GlobalInfoBuffer.bufferSize);
+	//
+	//VkWriteDescriptorSet weightsWrite =
+	//	staticDescPack.makeWrite(shaderio::StaticBindingPoints_SVOPG::eWeights_SVOPG, 0, 0, 1);
+	//write.append(weightsWrite, svoWeight->weightBuffer, 0, svoWeight->weightBuffer.bufferSize);
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }

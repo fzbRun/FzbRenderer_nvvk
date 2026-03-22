@@ -6,11 +6,12 @@
 #include <feature/SceneDivision/Octree/Octree.h>
 #include <feature/SceneDivision/SparseVoxelOctree/SparseVoxelOctree.h>
 #include "SVOWeight.h"
+#include "RasterVoxelizationSVOPG.h"
 
 #ifndef FZBRENDERER_SVO_PATHGUIDING_H
 #define FZBRENDERER_SVO_PATHGUIDING_H
 
-#define USE_RAYQUERY_SVOPG
+//#define USE_RAYQUERY_SVOPG
 
 namespace FzbRenderer {
 class SVOPathGuidingRenderer : public PathTracingRenderer {
@@ -39,7 +40,7 @@ public:
 	void pathGuiding_rayQuery(VkCommandBuffer cmd);
 
 	shaderio::SVOPathGuidingPushConstant pushConstant{};
-	std::shared_ptr<FzbRenderer::RasterVoxelization> rasterVoxelization;
+	std::shared_ptr<FzbRenderer::RasterVoxelization_SVOPG> rasterVoxelization;
 	std::shared_ptr<FzbRenderer::LightInject> lightInject;
 	std::shared_ptr<FzbRenderer::Octree> octree;
 	std::shared_ptr<FzbRenderer::SparseVoxelOctree> svo;
