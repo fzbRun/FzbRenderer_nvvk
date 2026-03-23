@@ -79,6 +79,8 @@ public:
 	VkShaderEXT fragmentShader_Wireframe{};
 
 	VkShaderEXT computeShader_postProcess{};
+
+	inline static int normalIndex = 0;
 private:
 	void resetFragmentCount(VkCommandBuffer cmd);
 	void createVGB_ThreeView(VkCommandBuffer cmd);

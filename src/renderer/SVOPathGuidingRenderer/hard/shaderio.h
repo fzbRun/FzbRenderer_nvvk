@@ -1,8 +1,8 @@
 #pragma once
 
 #include <common/Shader/shaderStructType.h>
-#include "feature/SceneDivision/Octree/shaderio.h"
 #include <feature/SceneDivision/RasterVoxelization/shaderio.h>
+#include <feature/SceneDivision/SparseVoxelOctree/shaderio.h>
 
 #ifndef FZBRENDERER_PATHGUIDING_SHADER_IO_H
 #define FZBRENDERER_PATHGUIDING_SHADER_IO_H
@@ -77,6 +77,46 @@ struct VGBVoxelData_SVOPG {
 	float4 sumNormal_E;
 	AABBI aabbI;					 // 
 	uint32_t materialIndex_Count;	//first 26 bite is materialCount, last 6 bite is materialIndex(assume max 64 material)
+};
+//-------------------------------------------SVO----------------------------------------
+#define SVOSize_G 3072	//512 * 6
+#define SVOSize_E 512
+#if SVOSize_G > SVOSize_E
+#define SVOSize SVOSize_G
+#else
+#define SVOSize SVOSize_E
+#endif
+
+enum class BindingPoints_SVOPG {
+	eOctreeArray_G_SVOPG = 0,
+	eOctreeArray_E_SVOPG,
+	eSVO_G_SVOPG,
+	eSVO_E_SVOPG,
+	eSVOGlobalInfo_SVOPG,
+	eSVODivisibleNodeIndices_G_SVOPG,
+	eSVODivisibleNodeIndices_E_SVOPG,
+	eSVOThreadGroupInfos_SVOPG
+};
+
+struct SVOPushConstant_SVOPG {
+	uint32_t maxDepth_Octree;
+	uint32_t currentDepth_SVO_G;
+	uint32_t currentDepth_SVO_E;
+#ifndef NDEBUG
+	float frameIndex;
+	SceneInfo* sceneInfoAddress;
+#endif
+};
+
+struct SVOGlobalInfo_SVOPG {
+	DispatchIndirectCommand cmd;	//CS Dispatch size
+	SVOLayerInfo layerInfos_G[MAX_OCTREE_DEPTH + 1];
+	SVOLayerInfo layerInfos_E[MAX_OCTREE_DEPTH];
+#ifndef NDEBUG
+	DrawIndexedIndirectCommand drawCmd;
+	uint32_t totalNodeCount_G;
+	uint32_t totalNodeCount_E;
+#endif
 };
 //-------------------------------------------SVOWeight----------------------------------------
 #define WEIGHT_HITTEST_COUNT 8

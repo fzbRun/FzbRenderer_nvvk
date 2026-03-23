@@ -287,7 +287,7 @@ VSout_Cube vertexMain_Cube(uint vertexIndex: SV_VertexID, int instanceIndex : SV
 
     VGBVoxelData_SVOPG voxelData = VGBs[VGBIndex][voxelIndex];
 
-    if (VGBIndex != 0) voxelData.sumNormal_G.w = 0.0f;
+    if (VGBIndex != pushConst.normalIndex) voxelData.sumNormal_G.w = 0.0f;
 
     VSout_Cube output;
     if (voxelData.sumNormal_G.w == 0.0f) output.sv_position = float4(2.0, 2.0, 2.0, 1.0);

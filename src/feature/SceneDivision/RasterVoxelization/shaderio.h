@@ -24,6 +24,7 @@ struct RasterVoxelizationPushConstant
 	SceneInfo* sceneInfoAddress;
 #ifndef NDEBUG
 	int frameIndex;
+	int normalIndex;
 #endif
 };
 

@@ -31,7 +31,6 @@ int3 getVoxelIndexXYZ(int voxelIndex) {
 }
 
 //----------------------------------------------clearOctreeArray--------------------------------------------
-#define THREADGROUP_SIZE 512
 [numthreads(THREADGROUP_SIZE, 1, 1)]
 [shader("compute")]
 void computeMain_initOctreeArray(uint threadIndex: SV_DispatchThreadID) {
@@ -173,7 +172,7 @@ void atomicMergeAABB(inout AABB aabb) {
         aabb.maximum.z = max(aabb.maximum.z, other_val);
     }
 }
-[numthreads(256, 1, 1)]
+[numthreads(THREADGROUP_SIZE2, 1, 1)]
 [shader("compute")]
 void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint groupThreadIndex: SV_GroupThreadID) {
     uint nodeTotalCount = pushConst.currentLayerNodeCount;
@@ -215,30 +214,27 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
         mergeNormal /= blockHasGeometryNodeCount;
 
         // get mergeAABB's surfaceArea
-        float mergeAABBSurfaceArea = 0.0f;
+        float mergeAABBVolume = 0.0f;
         if (warpLane == blockFirstWarpLane) {
-            float lengthX = mergeAABB.maximum.x - mergeAABB.minimum.x;
-            float lengthY = mergeAABB.maximum.y - mergeAABB.minimum.y;
-            float lengthZ = mergeAABB.maximum.z - mergeAABB.minimum.z;
-            mergeAABBSurfaceArea = (lengthX * lengthY + lengthX * lengthZ + lengthY * lengthZ) * 2;
+            float3 length = mergeAABB.maximum - mergeAABB.minimum;
+            length += float3(int3(1) - sign(length)); // if x == 0.0, then x = 1.0 else x = x
+            mergeAABBVolume = length.x * length.y * length.z;
         }
 
-        //get node aabb's surfaceArea
-        float surfaceArea = 0.0f;
-        // The surfaceArea is needed to calculate the scaling factor only when there is lighting.
+        float aabbVolume = 0.0f;
+        // The volume is needed to calculate the scaling factor only when there is lighting.
         // Although it is said that where there is lighting, there must be geometry, rasterization may not be injected
         if (hasGeometry) {
-            float lengthX = nodeData_G.aabb.maximum.x - nodeData_G.aabb.minimum.x;
-            float lengthY = nodeData_G.aabb.maximum.y - nodeData_G.aabb.minimum.y;
-            float lengthZ = nodeData_G.aabb.maximum.z - nodeData_G.aabb.minimum.z;
-            surfaceArea = (lengthX * lengthY + lengthX * lengthZ + lengthY * lengthZ) * 2;
+            float3 length = nodeData_G.aabb.maximum - nodeData_G.aabb.minimum;
+            length += float3(int3(1) - sign(length)); // if x == 0.0, then x = 1.0 else x = x
+            aabbVolume = length.x * length.y * length.z;
         }
 
-        // get merge node's aabb surfaceArea
-        float surfaceAreaSum = surfaceArea;
+        // get merge node's aabb volume
+        float aabbVolumeSum = aabbVolume;
         for (int offset = 4; offset > 0; offset /= 2) {
             uint targetLane = warpLane + offset;
-            surfaceAreaSum += WaveReadLaneAt(surfaceAreaSum, targetLane);
+            aabbVolumeSum += WaveReadLaneAt(aabbVolumeSum, targetLane);
         }
 
         uint blockMaterialTypeMask = hasGeometry ? 1u << nodeData_G.materialIndex : 0u;
@@ -248,16 +244,18 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
         }
         uint materialTypeCount = countbits(blockMaterialTypeMask);
         //--------------------------------------------judge divisible--------------------------------------------
-        bool indivisible = nodeData_G.indivisible == 1;
-        for (int offset = 4; offset > 0; offset /= 2) {
-            uint targetLane = warpLane + offset;
-            indivisible &= WaveReadLaneAt(indivisible, targetLane);
-        }
+        bool indivisible = true;   // = nodeData_G.indivisible == 1;
+        //for (int offset = 4; offset > 0; offset /= 2) {
+        //    uint targetLane = warpLane + offset;
+        //    indivisible &= WaveReadLaneAt(indivisible, targetLane);
+        //}
 
         indivisible &= hasGeometry ? materialTypeCount == 1 : true;
-        if (warpLane == blockFirstWarpLane)
+        if (warpLane == blockFirstWarpLane) {
             indivisible &= length(mergeNormal) > pushConst.entropyThreshold.x &&
-                           (surfaceAreaSum / mergeAABBSurfaceArea) > pushConst.entropyThreshold.y;
+                           (mergeAABBVolume - aabbVolumeSum) < pushConst.voxelVolume * (pushConst.maxDepth - pushConst.currentDepth + 1) * 4;
+        }
+
         //---------------------------------------------assignment------------------------------------------------
         if (warpLane == blockFirstWarpLane) {
             nodeData_G.indivisible = indivisible;
@@ -269,8 +267,11 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
         }
     }
 
-    /*
     //----------------------------------------getOctree_E-------------------------------------------
+    if (threadIndex >= nodeTotalCount) return;
+
+    blockIndex = threadIndex / 8;
+
     OctreeNodeData_E nodeData_E = OctreeArray_E[pushConst.currentDepth][threadIndex];
     bool hasIrradiance = nodeData_E.irradiance.x + nodeData_E.irradiance.y + nodeData_E.irradiance.z > 0.0f;
     uint32_t warpHasIrradianceMask = WaveActiveBallot(hasIrradiance).x;
@@ -407,24 +408,27 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
             OctreeArray_E[pushConst.currentDepth - 1][blockIndex] = nodeData_E;
         }
     }
-    */
 }
-[numthreads(512, 1, 1)]
+[numthreads(THREADGROUP_SIZE, 1, 1)]
 [shader("compute")]
 void computeMain_createOctreeArray2(uint threadIndex: SV_DispatchThreadID, uint groupThreadIndex: SV_GroupThreadID) {
-    uint nodeTotalCount = uint(pow(8, pushConst.currentDepth));
-    if (threadIndex >= nodeTotalCount) return;
+    uint nodeTotalCount = pushConst.currentLayerNodeCount;
+    if (threadIndex >= nodeTotalCount * 6) return;
 
     uint32_t warpIndex = groupThreadIndex / 32;
     uint32_t warpLane = groupThreadIndex & 31;
 
-    uint32_t indexInBlock = threadIndex & 7;            // index of eight brothers
-    uint32_t blockIndex = threadIndex / 8;              // blockIndex of global = fatherNodeIndex
-    uint32_t blockFirstWarpLane = (blockIndex & 3) * 8; // first thread of block in warp
+    uint32_t indexInBlock = threadIndex & 7;          // index of eight brothers
+    uint32_t blockFirstWarpLane = (warpLane / 8) * 8; // first thread of block in warp
     uint32_t blockNodeMask = 0xff << blockFirstWarpLane;
     uint32_t blockIndexInGroup = groupThreadIndex / 8;
     //----------------------------------------getOctree_G-------------------------------------------
-    OctreeNodeData_G nodeData_G = OctreeArray_G[pushConst.currentDepth][threadIndex];
+    uint normalIndex = threadIndex / nodeTotalCount;
+    uint octreeIndex = normalIndex * (pushConst.maxDepth + 1) + pushConst.currentDepth;
+    uint nodeIndex = threadIndex % nodeTotalCount;
+    uint32_t blockIndex = nodeIndex / 8; // blockIndex of global = fatherNodeIndex
+
+    OctreeNodeData_G nodeData_G = OctreeArray_G[octreeIndex][nodeIndex];
     bool hasGeometry = nodeData_G.meanNormal.w > 0.0f;
     uint32_t warpHasGeometryMask = WaveActiveBallot(hasGeometry).x;
     uint32_t blockHasGeometryNodeCount = countbits(warpHasGeometryMask & blockNodeMask);
@@ -432,7 +436,7 @@ void computeMain_createOctreeArray2(uint threadIndex: SV_DispatchThreadID, uint 
     // However, if there is light in this area, we cannot directly return. We also need to handle E
     if (blockHasGeometryNodeCount == 0) {}
     else if (blockHasGeometryNodeCount == 1) {
-        if (hasGeometry) OctreeArray_G[pushConst.currentDepth - 1][blockIndex] = nodeData_G;
+        if (hasGeometry) OctreeArray_G[octreeIndex - 1][blockIndex] = nodeData_G;
     } else {
         AABB mergeAABB = nodeData_G.aabb;
         atomicMergeAABB(mergeAABB);
@@ -440,10 +444,14 @@ void computeMain_createOctreeArray2(uint threadIndex: SV_DispatchThreadID, uint 
             nodeData_G.indivisible = 0;
             nodeData_G.aabb = mergeAABB;
             nodeData_G.meanNormal = float4(0.0f, 0.0f, 0.0f, 1.0f);
-            OctreeArray_G[pushConst.currentDepth - 1][blockIndex] = nodeData_G;
+            OctreeArray_G[octreeIndex - 1][blockIndex] = nodeData_G;
         }
     }
     //----------------------------------------getOctree_E-------------------------------------------
+    if (threadIndex >= nodeTotalCount) return;
+
+    blockIndex = threadIndex / 8;
+
     OctreeNodeData_E nodeData_E = OctreeArray_E[pushConst.currentDepth][threadIndex];
     bool hasIrradiance = nodeData_E.irradiance.x + nodeData_E.irradiance.y + nodeData_E.irradiance.z > 0.0f;
     uint32_t warpHasIrradianceMask = WaveActiveBallot(hasIrradiance).x;
@@ -550,7 +558,7 @@ VSout_Wireframe vertexMain_Wireframe(uint vertexIndex: SV_VertexID, int instance
         invisible = (octreeData_E.irradiance.x + octreeData_E.irradiance.y + octreeData_E.irradiance.z > 0.0f) && octreeData_E.indivisible == 1;
     }
 
-    if (instanceIndex / pushConst.showOctreeNodeTotalCount != 0) invisible = 0;
+    if (isG && instanceIndex / pushConst.showOctreeNodeTotalCount != pushConst.normalIndex) invisible = 0;
 
     if (nodeAABB.minimum.x > 10000.0f || invisible == 0) output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
     else {

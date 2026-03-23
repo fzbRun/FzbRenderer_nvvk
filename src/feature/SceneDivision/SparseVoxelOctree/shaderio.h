@@ -6,7 +6,6 @@
 #ifndef FZBRENDERER_SVO_SHADERIO_H
 #define FZBRENDERER_SVO_SHADERIO_H
 
-#define SVO
 #define THREADGROUP_SIZE 512u
 #define THREADGROUP_SIZE2 256u
 #define WARP_SIZE 32u
@@ -47,7 +46,6 @@ struct SVOPushConstant {
 
 typedef OctreeNodeData_G SVONodeData_G;
 typedef OctreeNodeData_E SVONodeData_E;
-
 
 struct SVOGloablInfo_SVO {
 	DispatchIndirectCommand cmd;	//CS Dispatch size

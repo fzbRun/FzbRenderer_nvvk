@@ -20,6 +20,7 @@ struct OctreePushConstant {
 	float2 entropyThreshold;
 	uint32_t maxDepth;
 	uint32_t currentDepth;
+	float voxelVolume;
 	float irradianceRelRatioThreshold;
 	uint32_t OctreeNodeTotalCount;
 	uint32_t currentLayerNodeCount;
@@ -29,6 +30,7 @@ struct OctreePushConstant {
 	float frameIndex;
 	uint32_t clusteringLevel;
 	uint32_t showOctreeNodeTotalCount;
+	int normalIndex;
 #endif
 };
 

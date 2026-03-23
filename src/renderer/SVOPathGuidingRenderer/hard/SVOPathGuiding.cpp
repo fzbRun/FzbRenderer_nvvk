@@ -16,7 +16,7 @@ FzbRenderer::SVOPathGuidingRenderer::SVOPathGuidingRenderer(pugi::xml_node& rend
 	if (pugi::xml_node octreeNode = rendererNode.child("Octree"))
 		octree = std::make_shared<FzbRenderer::Octree>(octreeNode);
 	if (pugi::xml_node svoNode = rendererNode.child("SVO"))
-		svo = std::make_shared<FzbRenderer::SparseVoxelOctree>(svoNode);
+		svo = std::make_shared<FzbRenderer::SVO_SVOPG>(svoNode);
 	if (pugi::xml_node svoWeightNode = rendererNode.child("SVOWeight"))
 		svoWeight = std::make_shared<FzbRenderer::SVOWeight>(svoWeightNode);
 }
@@ -44,14 +44,17 @@ void FzbRenderer::SVOPathGuidingRenderer::init() {
 		.VGBStartPos = lightInjectSetting.VGBStartPos,
 		.VGBVoxelSize = lightInjectSetting.VGBVoxelSize,
 		.VGBSize = lightInjectSetting.VGBSize,
+		#ifndef NDEBUG
+		.normalIndex = rasterVoxelization->setting.pushConstant.normalIndex,
+		#endif
 	};
 	octree->init(octreeSetting);
-	/*
-	SVOSetting svoSetting{
+
+	SVOSetting_SVOPG svoSetting{
 		.octree = octree
 	};
 	svo->init(svoSetting);
-
+	/*
 	SVOWeightSetting svoWeightSetting{
 		.svo = svo,
 		.asManager = &asManager
@@ -119,7 +122,7 @@ void FzbRenderer::SVOPathGuidingRenderer::uiRender() {
 	rasterVoxelization->uiRender();
 	lightInject->uiRender();
 	octree->uiRender();
-	//svo->uiRender();
+	svo->uiRender();
 	//svoWeight->uiRender();
 	
 	if (UIModified) resetFrame();
@@ -143,7 +146,7 @@ void FzbRenderer::SVOPathGuidingRenderer::resize(VkCommandBuffer cmd, const VkEx
 	IF_DEBUG(rasterVoxelization->resize(cmd, size, gBuffers, eImgTonemapped), rasterVoxelization->resize(cmd, size));
 	lightInject->resize(cmd, size);
 	IF_DEBUG(octree->resize(cmd, size, gBuffers, eImgTonemapped), octree->resize(cmd, size));
-	//IF_DEBUG(svo->resize(cmd, size, gBuffers, eImgTonemapped), svo->resize(cmd, size));
+	IF_DEBUG(svo->resize(cmd, size, gBuffers, eImgTonemapped), svo->resize(cmd, size));
 	//svoWeight->resize(cmd, size);
 };
 void FzbRenderer::SVOPathGuidingRenderer::preRender() {
@@ -161,7 +164,7 @@ void FzbRenderer::SVOPathGuidingRenderer::preRender() {
 	rasterVoxelization->preRender(cmd);
 	lightInject->preRender();
 	octree->preRender();
-	//svo->preRender();
+	svo->preRender();
 	//svoWeight->preRender();
 
 	Application::app->submitAndWaitTempCmdBuffer(cmd);
@@ -178,7 +181,7 @@ void FzbRenderer::SVOPathGuidingRenderer::render(VkCommandBuffer cmd) {
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_NV, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	octree->render(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-	//svo->render(cmd);
+	svo->render(cmd);
 	//nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	//svoWeight->render(cmd);
 	
@@ -198,10 +201,10 @@ void FzbRenderer::SVOPathGuidingRenderer::render(VkCommandBuffer cmd) {
 	rasterVoxelization->postProcess(cmd);
 	lightInject->postProcess(cmd);
 	octree->postProcess(cmd);
-	//svo->postProcess(cmd);
+	svo->postProcess(cmd);
 	//nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	//svoWeight->postProcess(cmd);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
 };
 
 void FzbRenderer::SVOPathGuidingRenderer::createDescriptorSetLayout() {
@@ -224,12 +227,12 @@ void FzbRenderer::SVOPathGuidingRenderer::createDescriptorSetLayout() {
 	bindings.addBinding({
 		.binding = shaderio::StaticBindingPoints_SVOPG::eSVO_G_SVOPG,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = (uint32_t)svo->SVOArray_G.size(),
+		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
 		.binding = shaderio::StaticBindingPoints_SVOPG::eSVO_E_SVOPG,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = (uint32_t)svo->SVOArray_E.size(),
+		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
 		.binding = shaderio::StaticBindingPoints_SVOPG::eSVOLayerInfos_G_SVOPG,

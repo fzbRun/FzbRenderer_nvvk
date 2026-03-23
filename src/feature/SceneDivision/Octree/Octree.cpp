@@ -7,6 +7,7 @@
 #include <bit>
 #include <nvvk/default_structs.hpp>
 #include <nvgui/property_editor.hpp>
+#include <renderer/SVOPathGuidingRenderer/hard/RasterVoxelizationSVOPG.h>
 
 using namespace FzbRenderer;
 
@@ -135,10 +136,12 @@ void Octree::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 };
 void Octree::preRender() {
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
+	pushConstant.voxelVolume = setting.VGBVoxelSize.x * setting.VGBVoxelSize.y * setting.VGBVoxelSize.z;
 #ifndef NDEBUG
 	pushConstant.VGBStartPos_Size = glm::vec4(setting.VGBStartPos, setting.VGBSize);
 	pushConstant.frameIndex = Application::frameIndex;
 	pushConstant.clusteringLevel = setting.clusteringLevel;
+	pushConstant.normalIndex = RasterVoxelization_SVOPG::normalIndex;
 #endif
 }
 void Octree::render(VkCommandBuffer cmd) {
@@ -386,7 +389,7 @@ void Octree::createOctreeArray(VkCommandBuffer cmd) {
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createOctreeArray);
 
 	uint32_t totalVoxelCount = pow(setting.VGBSize, 3);
-	VkExtent2D groupSize = nvvk::getGroupCounts({ totalVoxelCount * 6, 1 }, VkExtent2D{ 256, 1 });
+	VkExtent2D groupSize = nvvk::getGroupCounts({ totalVoxelCount * 6, 1 }, VkExtent2D{ THREADGROUP_SIZE2, 1 });
 	for (int i = pushConstant.maxDepth; i > setting.clusteringLevel; --i) {
 		pushConstant.currentDepth = i;
 		pushConstant.currentLayerNodeCount = totalVoxelCount;
@@ -396,23 +399,24 @@ void Octree::createOctreeArray(VkCommandBuffer cmd) {
 		if(i > 1) nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
 		totalVoxelCount /= 8;
-		groupSize = nvvk::getGroupCounts({ totalVoxelCount * 6, 1 }, VkExtent2D{ 256, 1 });
+		groupSize = nvvk::getGroupCounts({ totalVoxelCount * 6, 1 }, VkExtent2D{ THREADGROUP_SIZE2, 1 });
 	}
 
-	//vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createOctreeArray2);
-	//
-	//totalVoxelCount = pow(8, setting.clusteringLevel);
-	//groupSize = nvvk::getGroupCounts({ totalVoxelCount, 1 }, VkExtent2D{ 512, 1 });
-	//for (int i = setting.clusteringLevel; i > 0; --i) {
-	//	pushConstant.currentDepth = i;
-	//	vkCmdPushConstants2(cmd, &pushInfo);
-	//
-	//	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
-	//	if(i > 1) nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-	//
-	//	totalVoxelCount /= 8;
-	//	groupSize = nvvk::getGroupCounts({ totalVoxelCount, 1 }, VkExtent2D{ 512, 1 });
-	//}
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createOctreeArray2);
+	
+	totalVoxelCount = pow(8, setting.clusteringLevel);
+	groupSize = nvvk::getGroupCounts({ totalVoxelCount * 6, 1 }, VkExtent2D{ THREADGROUP_SIZE, 1 });
+	for (int i = setting.clusteringLevel; i > 0; --i) {
+		pushConstant.currentDepth = i;
+		pushConstant.currentLayerNodeCount = totalVoxelCount;
+		vkCmdPushConstants2(cmd, &pushInfo);
+	
+		vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
+		if(i > 1) nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	
+		totalVoxelCount /= 8;
+		groupSize = nvvk::getGroupCounts({ totalVoxelCount * 6, 1 }, VkExtent2D{ THREADGROUP_SIZE, 1 });
+	}
 }
 
 #ifndef NDEBUG

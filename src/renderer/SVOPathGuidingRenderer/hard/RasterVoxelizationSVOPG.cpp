@@ -118,6 +118,13 @@ void RasterVoxelization_SVOPG::uiRender() {
 			}
 		}
 		PE::end();
+		//---------------------------------------normalIndex--------------------------------------
+		std::vector<std::string> normalIndexNames = { "right", "left", "up", "bottom", "forward", "back"};
+
+		std::vector<const char*> normalIndexNames_pointers;
+		for (const auto& normalIndexName : normalIndexNames)
+			normalIndexNames_pointers.push_back(normalIndexName.c_str());
+		ImGui::Combo("normal", &normalIndex, normalIndexNames_pointers.data(), static_cast<int>(normalIndexNames_pointers.size()));
 		//------------------------------------------cube---------------------------------------------
 		if (PE::begin()) {
 			if (PE::entry("CubeMap", [&] {
@@ -178,7 +185,8 @@ void RasterVoxelization_SVOPG::uiRender() {
 void RasterVoxelization_SVOPG::resize(VkCommandBuffer cmd, const VkExtent2D& size) {};
 void RasterVoxelization_SVOPG::preRender(VkCommandBuffer cmd) {
 #ifndef NDEBUG
-	setting.pushConstant.frameIndex == Application::frameIndex;
+	setting.pushConstant.frameIndex = Application::frameIndex;
+	setting.pushConstant.normalIndex = normalIndex;
 
 	if (Application::frameIndex != 1) return;
 	VkBufferCopy2 copyRegionInfo{
