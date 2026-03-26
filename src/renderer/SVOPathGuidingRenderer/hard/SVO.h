@@ -44,12 +44,12 @@ public:
 	nvvk::Buffer SVO_G;		//buffer per normal
 	nvvk::Buffer SVO_E;
 
+	nvvk::Buffer SVOGlobalInfo;
+
 	VkShaderEXT computeShader_initSVOArray{};
 	VkShaderEXT computeShader_createSVOArray{};
 	VkShaderEXT computeShader_offsetLabelMultiBlock{};	//多个线程组需要跨线程组进行通信
 private:
-	nvvk::Buffer SVOGlobalInfo;
-
 	nvvk::Buffer SVODivisibleNodeInfos_G;		//每层可细分节点的索引
 	nvvk::Buffer SVODivisibleNodeInfos_E;
 

@@ -126,7 +126,7 @@ void rayClosestHitMain(inout NEEHitPayload payload, in BuiltInTriangleIntersecti
     HitState hitState = getHitStateWithPositionFetch(barycentrics, payload.rayDirection);
 
     if (material.type != MaterialType::Dielectric && material.type != MaterialType::RoughDielectric)
-        material.emissive *= max(hitState.cosineON, 0.0f);
+        material.emissive *= hitState.cosineON > 0.0f ? 1.0f : 0.0f;
 
     CallablePayload callablePayload;
     callablePayload.material = material;

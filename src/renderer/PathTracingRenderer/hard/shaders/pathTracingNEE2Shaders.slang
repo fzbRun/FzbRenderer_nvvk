@@ -90,7 +90,7 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
     float cosineON = dot(hitState.normal, -payload.rayDirection);
     if (cosineON < 0) hitState.normal = -hitState.normal;
     if (material.type != MaterialType::Dielectric && material.type != MaterialType::RoughDielectric)
-        material.emissive *= max(cosineON, 0.0f);
+        material.emissive *= hitState.cosineON > 0.0f ? 1.0f : 0.0f;
 
     CallablePayload callablePayload;
     callablePayload.material = material;

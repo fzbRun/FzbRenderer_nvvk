@@ -3,14 +3,15 @@
 #include "../../../feature/Feature.h"
 #include "../../../feature/PathTracing/PathTracing.h"
 #include "./shaderio.h"
-#include <feature/SceneDivision/SparseVoxelOctree/SparseVoxelOctree.h>
+#include "RasterVoxelizationSVOPG.h"
+#include "SVO.h"
 
 #ifndef FZBRENDERER_SVO_WEIGHT_H
 #define FZBRENDERER_SVO_WEIGHT_H
 
 namespace FzbRenderer {
 struct SVOWeightSetting{
-	std::shared_ptr<SparseVoxelOctree> svo;
+	std::shared_ptr<SVO_SVOPG> svo;
 	AccelerationStructureManager* asManager;
 };
 
@@ -67,8 +68,8 @@ private:
 	void debugPrepare();
 	void debug_visualization(VkCommandBuffer cmd);
 
-	//glm::vec3 samplePoint = glm::vec3(-1.0f, 0.5f, 0.0f);
-	glm::vec3 samplePoint = glm::vec3(0.8f, 1.99f, 0.5f);
+	glm::vec3 samplePoint = glm::vec3(-1.5f, 1.0f, 0.5f);
+	//glm::vec3 samplePoint = glm::vec3(0.9f, 0.0f, 0.5f);
 	//glm::vec3 samplePoint = glm::vec3(-2.2f, 1.0f, -4.5f);
 	glm::vec3 outgoing = glm::vec3(0.0f, 1.0f, -1.0f);
 

@@ -173,7 +173,7 @@ void initCallableShader(inout CallablePayload callablePayload,
     // hitState.TBN = float3x3(tangent, bitangent, hitState.normal);
 
     if (material.type != MaterialType::Dielectric && material.type != MaterialType::RoughDielectric)
-        material.emissive *= max(hitState.cosineON, 0.0f);
+        material.emissive *= hitState.cosineON > 0.0f ? 1.0f : 0.0f;
 
     callablePayload.material = material;
     callablePayload.TBN = hitState.TBN;

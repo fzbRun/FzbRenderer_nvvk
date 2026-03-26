@@ -8,8 +8,8 @@
 #define FZBRENDERER_PATHGUIDING_SHADER_IO_H
 NAMESPACE_SHADERIO_BEGIN()
 
-#define SVO_PATHGUIDING_THREADGROUP_SIZE_X 16
-#define SVO_PATHGUIDING_THREADGROUP_SIZE_Y 16
+#define SVO_PATHGUIDING_THREADGROUP_SIZE_X 32
+#define SVO_PATHGUIDING_THREADGROUP_SIZE_Y 32
 struct SVOPathGuidingPushConstant
 {
 	float4 VGBStartPos_Size;
@@ -25,11 +25,8 @@ enum StaticBindingPoints_SVOPG
 {
 	//eTextures = 0,
 	//eOutImage = 1,	//First save the result of lightInject, and finally MIS
-	eVGB_SVOPG = 2,
-	eSVO_G_SVOPG,
+	eSVO_G_SVOPG = 2,
 	eSVO_E_SVOPG,
-	eSVOLayerInfos_G_SVOPG,
-	eSVOLayerInfos_E_SVOPG,
 	eGlobalInfo_SVOPG,
 	eWeights_SVOPG,
 #ifndef NDEBUG
@@ -48,13 +45,11 @@ struct GlobalInfo_SOVPG {
 	uint totalNodeCount_E;
 };
 struct SVONodeInfo_G_SVOPG {
-	uint label;
-	uint indivisible;
+	uint label_indivisible;
 	AABB aabb;
 };
 struct SVONodeInfo_E_SVOPG {
-	uint label;
-	uint indivisible;
+	uint label_indivisible;
 	AABB aabb;
 };
 //-------------------------------------------SVORasterVoxelization----------------------------------------
@@ -79,8 +74,8 @@ struct VGBVoxelData_SVOPG {
 	uint32_t materialIndex_Count;	//first 26 bite is materialCount, last 6 bite is materialIndex(assume max 64 material)
 };
 //-------------------------------------------SVO----------------------------------------
-#define SVOSize_G 3072	//512 * 6
-#define SVOSize_E 512
+#define SVOSize_G 4000	//512 * 6
+#define SVOSize_E 800
 #if SVOSize_G > SVOSize_E
 #define SVOSize SVOSize_G
 #else
@@ -100,8 +95,7 @@ enum class BindingPoints_SVOPG {
 
 struct SVOPushConstant_SVOPG {
 	uint32_t maxDepth_Octree;
-	uint32_t currentDepth_SVO_G;
-	uint32_t currentDepth_SVO_E;
+	uint32_t currentDepth_SVO;
 #ifndef NDEBUG
 	float frameIndex;
 	SceneInfo* sceneInfoAddress;
@@ -110,16 +104,18 @@ struct SVOPushConstant_SVOPG {
 
 struct SVOGlobalInfo_SVOPG {
 	DispatchIndirectCommand cmd;	//CS Dispatch size
-	SVOLayerInfo layerInfos_G[MAX_OCTREE_DEPTH + 1];
-	SVOLayerInfo layerInfos_E[MAX_OCTREE_DEPTH];
 #ifndef NDEBUG
 	DrawIndexedIndirectCommand drawCmd;
+#endif
 	uint32_t totalNodeCount_G;
 	uint32_t totalNodeCount_E;
-#endif
+	SVOLayerInfo layerInfos_G[MAX_OCTREE_DEPTH];
+	SVOLayerInfo layerInfos_E[MAX_OCTREE_DEPTH];
 };
 //-------------------------------------------SVOWeight----------------------------------------
-#define WEIGHT_HITTEST_COUNT 8
+#define SVOIndivisibleNodeCount_G 1500
+#define SVOIndivisibleNodeCount_E 500
+
 #define HITTEST_COUNT 8
 #define OUTGOING_COUNT 64
 struct SVOWeightPushConstant {
@@ -137,8 +133,7 @@ struct SVOWeightPushConstant {
 enum StaticBindingPoints_SVOWeight {
 	eSVO_G_SVOWeight = 2,
 	eSVO_E_SVOWeight,
-	eSVOLayerInfos_G_SVOWeight,
-	eSVOLayerInfos_E_SVOWeight,
+	eSVOGlobalInfo_SVOWeight,
 	eGlobalInfo_SVOWeight,
 	eSVO_IndivisibleNodeInfos_G_SVOWeight,
 	eSVO_IndivisibleNodeInfos_E_SVOWeight,
@@ -157,6 +152,8 @@ struct SVOWeightGlobalInfo {
 	AABB sampelNodeAABB;
 	uint sampelNodeLabel;
 #endif
+	SVOLayerInfo layerInfos_G[MAX_OCTREE_DEPTH];
+	SVOLayerInfo layerInfos_E[MAX_OCTREE_DEPTH];
 };
 struct SVOIndivisibleNodeInfo {
 	uint32_t layerIndex;

@@ -12,7 +12,7 @@
 #ifndef FZBRENDERER_SVO_PATHGUIDING_H
 #define FZBRENDERER_SVO_PATHGUIDING_H
 
-//#define USE_RAYQUERY_SVOPG
+#define USE_RAYQUERY_SVOPG
 
 namespace FzbRenderer {
 class SVOPathGuidingRenderer : public PathTracingRenderer {

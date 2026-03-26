@@ -7,8 +7,6 @@
 [[vk::binding(StaticBindingPoints_SVOPG::eVGB_SVOPG)]] StructuredBuffer<VGBVoxelData, ScalarDataLayout> VGB;
 [[vk::binding(StaticBindingPoints_SVOPG::eSVO_G_SVOPG)]] StructuredBuffer<SVONodeData_G, ScalarDataLayout> SVO_G[];
 [[vk::binding(StaticBindingPoints_SVOPG::eSVO_E_SVOPG)]] StructuredBuffer<SVONodeData_E, ScalarDataLayout> SVO_E[];
-[[vk::binding(StaticBindingPoints_SVOPG::eSVOLayerInfos_G_SVOPG)]] StructuredBuffer<SVOLayerInfo> SVOLayerInfos_G;
-[[vk::binding(StaticBindingPoints_SVOPG::eSVOLayerInfos_E_SVOPG)]] StructuredBuffer<SVOLayerInfo> SVOLayerInfos_E;
 [[vk::binding(StaticBindingPoints_SVOPG::eWeights_SVOPG)]] StructuredBuffer<float> SVOWeights;
 #ifndef NDEBUG
 [[vk::binding(StaticBindingPoints_SVOPG::eDepthImage_SVOPG, 0)]] RWTexture2D<float> depthImage; // VK_FORMAT_D32_SFLOAT

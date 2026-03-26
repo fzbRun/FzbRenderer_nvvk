@@ -146,7 +146,7 @@ void SVO_SVOPG::render(VkCommandBuffer cmd) {
 }
 void SVO_SVOPG::postProcess(VkCommandBuffer cmd) {
 #ifndef NDEBUG
-	//debug_wirefame(cmd);
+	debug_wirefame(cmd);
 #endif
 }
 
@@ -381,8 +381,7 @@ void SVO_SVOPG::createSVOArray(VkCommandBuffer cmd) {
 
 	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
 	for (int depth = 1; depth <= pushConstant.maxDepth_Octree; ++depth) {
-		pushConstant.currentDepth_SVO_G = depth + 1;
-		pushConstant.currentDepth_SVO_E = depth;
+		pushConstant.currentDepth_SVO = depth;
 		vkCmdPushConstants2(cmd, &pushInfo);
 
 		vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createSVOArray);
@@ -397,7 +396,7 @@ void SVO_SVOPG::createSVOArray(VkCommandBuffer cmd) {
 
 #ifndef NDEBUG
 void SVO_SVOPG::debugPrepare() {
-	Feature::createGBuffer(false, false, 2);
+	Feature::createGBuffer(true, false, 2);
 
 	nvutils::PrimitiveMesh primitive = FzbRenderer::MeshSet::createWireframe();
 	FzbRenderer::MeshSet meshSet = FzbRenderer::MeshSet("Wireframe", primitive);
@@ -456,7 +455,8 @@ void SVO_SVOPG::debug_wirefame(VkCommandBuffer cmd) {
 
 	VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
 	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;		//使用PathGuiding的深度纹理
-	depthAttachment.imageView = depthImageView;
+	//depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
+	depthAttachment.imageView = depthImageView;	//gBuffers.getDepthImageView();	//
 
 	VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
 	renderingInfo.renderArea = { {0, 0}, gBuffers.getSize() };

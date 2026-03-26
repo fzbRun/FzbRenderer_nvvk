@@ -3,13 +3,12 @@
 #include "feature/PathTracing/shaders/pathTracingCommon.slang"
 
 [[vk::push_constant]] ConstantBuffer<SVOWeightPushConstant, ScalarDataLayout> pushConst;
-[[vk::binding(StaticBindingPoints_SVOWeight::eSVO_G_SVOWeight)]] StructuredBuffer<SVONodeData_G, ScalarDataLayout> SVO_G[];
-[[vk::binding(StaticBindingPoints_SVOWeight::eSVO_E_SVOWeight)]] StructuredBuffer<SVONodeData_E, ScalarDataLayout> SVO_E[];
-[[vk::binding(StaticBindingPoints_SVOWeight::eSVOLayerInfos_G_SVOWeight)]] StructuredBuffer<SVOLayerInfo> SVOLayerInfos_G;
-[[vk::binding(StaticBindingPoints_SVOWeight::eSVOLayerInfos_E_SVOWeight)]] StructuredBuffer<SVOLayerInfo> SVOLayerInfos_E;
+[[vk::binding(StaticBindingPoints_SVOWeight::eSVO_G_SVOWeight)]] StructuredBuffer<SVONodeData_G, ScalarDataLayout> SVO_G;
+[[vk::binding(StaticBindingPoints_SVOWeight::eSVO_E_SVOWeight)]] StructuredBuffer<SVONodeData_E, ScalarDataLayout> SVO_E;
+[[vk::binding(StaticBindingPoints_SVOWeight::eSVOGlobalInfo_SVOWeight)]] StructuredBuffer<SVOGlobalInfo_SVOPG> SVOGlobalInfo;
 [[vk::binding(StaticBindingPoints_SVOWeight::eGlobalInfo_SVOWeight)]] RWStructuredBuffer<SVOWeightGlobalInfo> GlobalInfo;
-[[vk::binding(StaticBindingPoints_SVOWeight::eSVO_IndivisibleNodeInfos_G_SVOWeight)]] RWStructuredBuffer<SVOIndivisibleNodeInfo> SVO_IndivisibleNodeInfos_G;
-[[vk::binding(StaticBindingPoints_SVOWeight::eSVO_IndivisibleNodeInfos_E_SVOWeight)]] RWStructuredBuffer<SVOIndivisibleNodeInfo> SVO_IndivisibleNodeInfos_E;
+[[vk::binding(StaticBindingPoints_SVOWeight::eSVO_IndivisibleNodeInfos_G_SVOWeight)]] RWStructuredBuffer<uint> SVO_IndivisibleNodeInfos_G;
+[[vk::binding(StaticBindingPoints_SVOWeight::eSVO_IndivisibleNodeInfos_E_SVOWeight)]] RWStructuredBuffer<uint> SVO_IndivisibleNodeInfos_E;
 [[vk::binding(StaticBindingPoints_SVOWeight::eSVOWeights_SVOWeight)]] RWStructuredBuffer<float> SVOWeights;
 [[vk::binding(StaticBindingPoints_SVOWeight::eSVOWeightSums_SVOWeight)]] RWStructuredBuffer<float> SVOWeightSums;
 
@@ -17,14 +16,14 @@ struct SVONodeInfo_G {
     AABB aabb;
     uint32_t indivisible;
     uint32_t label;
-}
+};
 
 struct HitPayload_SVOWeight {
     BSDFMaterial material;
     float3 hitPos;
     float hit;
     float3 normal;
-}
+};
 
 //---------------------------------------------groupsharedMemory-----------------------------------------
 groupshared uint groupSVOLayerMaxLayer_G;
@@ -35,13 +34,13 @@ groupshared uint groupIndivisibleNodeCount_G;
 groupshared uint groupIndivisibleNodeCount_E;
 groupshared uint groupTotalNodeCount_G;
 groupshared uint groupTotalNodeCount_E;
-groupshared uint groupMaxLayerNodeCount_E;
 
 groupshared IndivisibleNodeData_E groupNodeDatas_E[(THREADGROUP_SIZE + OUTGOING_COUNT - 1) / (OUTGOING_COUNT) + 1];
 groupshared IndivisibleNodeData_G groupNodeDatas_G[(THREADGROUP_SIZE + OUTGOING_COUNT - 1) / (OUTGOING_COUNT) + 1];
 
 groupshared SVOLayerInfo groupParentLayerInfo_E;
-groupshared uint groupPreviousLayerNodeCountSum_E; // except current layer
+groupshared uint groupPreviousLayerNodeCountSum_E;
+groupshared uint groupCurrentLayerNodeCountSum_E;
 
 inline void fillGroupshared(uint groupThreadIndex) {
     if (groupThreadIndex == 0) {
@@ -107,28 +106,27 @@ void traceRay(RayDesc ray, inout HitPayload_SVOWeight payload, AABB nodeAABB_G)
     }
     else payload.hit = 0.0f;
 }
-
-
 //--------------------------------------------------compute shader-----------------------------------------
 //computeMain_getIndivisibleNode_G get SVO_G's indivisibleNode's info for reduce thread wastage(except divisibleNode)
 [numthreads(THREADGROUP_SIZE, 1, 1)]
 [shader("compute")]
 void computeMain_getIndivisibleNode(uint threadIndex: SV_DispatchThreadID, uint groupThreadIndex: SV_GroupThreadID) {
     if (groupThreadIndex < WARP_SIZE) {
-        if (groupThreadIndex < 8) {
-            groupSVOLayerInfos_G[groupThreadIndex] = SVOLayerInfos_G[groupThreadIndex];
-            groupSVOLayerInfos_E[groupThreadIndex] = SVOLayerInfos_E[groupThreadIndex];
+        SVOGlobalInfo_SVOPG svoGlobalInfo = SVOGlobalInfo[0];
+        if (groupThreadIndex < MAX_OCTREE_DEPTH) {
+            groupSVOLayerInfos_G[groupThreadIndex] = svoGlobalInfo.layerInfos_G[groupThreadIndex];
+            groupSVOLayerInfos_E[groupThreadIndex] = svoGlobalInfo.layerInfos_E[groupThreadIndex];
         }
 
         if (groupThreadIndex == 0) {
             for (int i = 1; i < 8; ++i) {
-                if (groupSVOLayerInfos_G[i].divisibleNodeCount == 0) {
+                if (svoGlobalInfo.layerInfos_G[i].divisibleNodeCount == 0) {
                     groupSVOLayerMaxLayer_G = i;
                     break;
                 }
             }
             for (int i = 1; i < 8; ++i) {
-                if (groupSVOLayerInfos_E[i].divisibleNodeCount == 0) {
+                if (svoGlobalInfo.layerInfos_E[i].divisibleNodeCount == 0) {
                     groupSVOLayerMaxLayer_E = i;
                     break;
                 }
@@ -137,31 +135,23 @@ void computeMain_getIndivisibleNode(uint threadIndex: SV_DispatchThreadID, uint 
         WaveActiveAllTrue(true);
 
         uint indivisibleNodeCount_G = 0;
-        if (groupThreadIndex <= groupSVOLayerMaxLayer_G) indivisibleNodeCount_G = groupSVOLayerInfos_G[groupThreadIndex].indivisibleNodeCount;
+        if (groupThreadIndex <= groupSVOLayerMaxLayer_G) indivisibleNodeCount_G = svoGlobalInfo.layerInfos_G[groupThreadIndex].indivisibleNodeCount;
         indivisibleNodeCount_G = WaveActiveSum(indivisibleNodeCount_G);
 
-        uint totalNodeCount_G = 0;
-        if (groupThreadIndex <= groupSVOLayerMaxLayer_G - 1) totalNodeCount_G = groupSVOLayerInfos_G[groupThreadIndex].divisibleNodeCount * 8;
-        totalNodeCount_G = WaveActiveSum(totalNodeCount_G);
-
         uint indivisibleNodeCount_E = 0;
-        if (groupThreadIndex <= groupSVOLayerMaxLayer_E) indivisibleNodeCount_E = groupSVOLayerInfos_E[groupThreadIndex].indivisibleNodeCount;
+        if (groupThreadIndex <= groupSVOLayerMaxLayer_E) indivisibleNodeCount_E = svoGlobalInfo.layerInfos_E[groupThreadIndex].indivisibleNodeCount;
         indivisibleNodeCount_E = WaveActiveSum(indivisibleNodeCount_E);
-
-        uint totalNodeCount_E = 0;
-        if (groupThreadIndex <= groupSVOLayerMaxLayer_E - 1) totalNodeCount_E = groupSVOLayerInfos_E[groupThreadIndex].divisibleNodeCount * 8;
-        totalNodeCount_E = WaveActiveSum(totalNodeCount_E);
 
         if (groupThreadIndex == 0) {
             groupIndivisibleNodeCount_G = indivisibleNodeCount_G;
             groupIndivisibleNodeCount_E = indivisibleNodeCount_E;
-            groupTotalNodeCount_G = totalNodeCount_G;
-            groupTotalNodeCount_E = totalNodeCount_E;
+            groupTotalNodeCount_G = svoGlobalInfo.totalNodeCount_G;
+            groupTotalNodeCount_E = svoGlobalInfo.totalNodeCount_E;
 
             if (threadIndex == 0) {
 
                 DispatchIndirectCommand cmd;
-                cmd.x = (OUTGOING_COUNT * indivisibleNodeCount_G * totalNodeCount_E + THREADGROUP_SIZE - 1) / THREADGROUP_SIZE;
+                cmd.x = (OUTGOING_COUNT * indivisibleNodeCount_G * svoGlobalInfo.totalNodeCount_E + THREADGROUP_SIZE - 1) / THREADGROUP_SIZE;
                 cmd.y = 1; cmd.z = 1;
 
                 SVOWeightGlobalInfo globalInfo;
@@ -170,15 +160,20 @@ void computeMain_getIndivisibleNode(uint threadIndex: SV_DispatchThreadID, uint 
                 globalInfo.indivisibleNodeCount_E = indivisibleNodeCount_E;
                 globalInfo.SVOMaxLayer_G = groupSVOLayerMaxLayer_G;
                 globalInfo.SVOMaxLayer_E = groupSVOLayerMaxLayer_E;
-                globalInfo.totalNodeCount_E = totalNodeCount_E;
+                globalInfo.totalNodeCount_E = svoGlobalInfo.totalNodeCount_E;
+                for (int layerIndex = 0; layerIndex < MAX_OCTREE_DEPTH; ++layerIndex) {
+                    globalInfo.layerInfos_G[layerIndex] = svoGlobalInfo.layerInfos_G[layerIndex];
+                    globalInfo.layerInfos_E[layerIndex] = svoGlobalInfo.layerInfos_E[layerIndex];
+                }
+                GlobalInfo[0] = globalInfo;
 
                 #ifndef NDEBUG
-                if (pushConst.frameIndex == 1) {
-                    printf("getIndivisibleNode_G\ncmd:%d %d %d\nindivisibleNodeCount: G: %d  E: %d\nSVOMaxLayer: G: %d  E: %d\ntotalNodeCount_E: %d\n",
+                if (pushConst.frameIndex == 0) {
+                    printf("getIndivisibleNode_G\ncmd:%d %d %d\nindivisibleNodeCount: G: %d  E: %d\nSVOMaxLayer: G:  %d  E: %d\ntotalNodeCount_E: %d\n",
                            cmd.x, cmd.y, cmd.z,
                         indivisibleNodeCount_G, indivisibleNodeCount_E,
                         groupSVOLayerMaxLayer_G, groupSVOLayerMaxLayer_E,
-                        totalNodeCount_E
+                        svoGlobalInfo.totalNodeCount_E
                     );
                     for (int i = 0; i <= groupSVOLayerMaxLayer_G; ++i) {
                         printf("G layer%d: divisibleNodeCount: %d   indivisibleNodeCount: %d\n", i,
@@ -192,55 +187,63 @@ void computeMain_getIndivisibleNode(uint threadIndex: SV_DispatchThreadID, uint 
                     }
                 }
                 #endif
-
-
-                GlobalInfo[0] = globalInfo;
             }
         }
     }
     GroupMemoryBarrierWithGroupSync();
 
-    if (threadIndex < groupTotalNodeCount_G) {
-        uint nodeLayer = 1; uint nodeIndex = threadIndex; uint nodeLabel = 0;
-        for (; nodeLayer <= groupSVOLayerMaxLayer_G; ++nodeLayer) {
-            uint layerNodeCount = groupSVOLayerInfos_G[nodeLayer - 1].divisibleNodeCount * 8;
-            if (nodeIndex >= layerNodeCount) nodeIndex -= layerNodeCount;
-            else break;
-            nodeLabel += groupSVOLayerInfos_G[nodeLayer].indivisibleNodeCount;
+    if (groupIndivisibleNodeCount_G > SVOIndivisibleNodeCount_G) {
+        if (threadIndex == 0) {
+            printf( "Error: G indivisibleNodeCount_G exceeds the maximum node count. maxNodeCount: %u,   currentNodeCount: %u\n",
+                SVOIndivisibleNodeCount_G, GlobalInfo[0].indivisibleNodeCount_G);
+            GlobalInfo[0].indivisibleNodeCount_G = 0;
+            GlobalInfo[0].indivisibleNodeCount_E = 0;
+            GlobalInfo[0].cmd.x = 0;
         }
+        return;
+    }
+    if (groupIndivisibleNodeCount_E > SVOIndivisibleNodeCount_E) {
+        if (threadIndex == 0) {
+            printf("Error: G indivisibleNodeCount_E exceeds the maximum node count. maxNodeCount: %u,    currentNodeCount: %u\n",
+                SVOIndivisibleNodeCount_E, GlobalInfo[0].indivisibleNodeCount_E);
+            GlobalInfo[0].indivisibleNodeCount_G = 0;
+            GlobalInfo[0].indivisibleNodeCount_E = 0;
+            GlobalInfo[0].cmd.x = 0;
+        }
+        return;
+    }
 
-        SVONodeData_G nodeData = SVO_G[nodeLayer][nodeIndex];
+    if (threadIndex < groupTotalNodeCount_G) {
+        SVONodeData_G nodeData = SVO_G[threadIndex];
         bool hasData = nodeData.meanNormal.w > 0.0f;
         bool indivisible = hasData && nodeData.indivisible == 1;
         if (indivisible) {
-            SVOIndivisibleNodeInfo nodeInfo;
-            nodeInfo.layerIndex = nodeLayer;
-            nodeInfo.nodeIndex = nodeIndex;
-
-            nodeLabel += nodeData.label - 1;
-            SVO_IndivisibleNodeInfos_G[nodeLabel] = nodeInfo;
+            int maxLayerIndex = groupSVOLayerMaxLayer_G;
+            int nodeIndex = threadIndex, labelOffset = 0;
+            for (int layerIndex = 1; layerIndex <= maxLayerIndex; ++layerIndex) {
+                uint layerNodeCount = groupSVOLayerInfos_G[layerIndex - 1].divisibleNodeCount * 8;
+                if (nodeIndex < layerNodeCount) break;
+                nodeIndex -= layerNodeCount;
+                labelOffset += groupSVOLayerInfos_G[layerIndex].indivisibleNodeCount;
+            }
+            SVO_IndivisibleNodeInfos_G[labelOffset + nodeData.label - 1] = threadIndex;
         }
     }
 
     if (threadIndex < groupTotalNodeCount_E) {
-        uint nodeLayer = 1; uint nodeIndex = threadIndex; uint nodeLabel = 0;
-        for (; nodeLayer <= groupSVOLayerMaxLayer_E; ++nodeLayer) {
-            uint layerNodeCount = groupSVOLayerInfos_E[nodeLayer - 1].divisibleNodeCount * 8;
-            if (nodeIndex >= layerNodeCount) nodeIndex -= layerNodeCount;
-            else break;
-            nodeLabel += groupSVOLayerInfos_E[nodeLayer].indivisibleNodeCount;
-        }
-
-        SVONodeData_E nodeData = SVO_E[nodeLayer][nodeIndex];
+        SVONodeData_E nodeData = SVO_E[threadIndex];
         bool hasData = nodeData.irradiance.x + nodeData.irradiance.y + nodeData.irradiance.z > 0.0f;
         bool indivisible = hasData && nodeData.indivisible == 1;
         if (indivisible) {
-            SVOIndivisibleNodeInfo nodeInfo;
-            nodeInfo.layerIndex = nodeLayer;
-            nodeInfo.nodeIndex = nodeIndex;
-
-            nodeLabel += nodeData.label - 1;
-            SVO_IndivisibleNodeInfos_E[nodeLabel] = nodeInfo;
+            int maxLayerIndex = groupSVOLayerMaxLayer_E;
+            int nodeIndex = threadIndex, labelOffset = 0;
+            for (int layerIndex = 1; layerIndex <= maxLayerIndex; ++layerIndex) {
+                uint layerNodeCount = groupSVOLayerInfos_E[layerIndex - 1].divisibleNodeCount * 8;
+                if (nodeIndex < layerNodeCount) break;
+                nodeIndex -= layerNodeCount;
+                labelOffset += groupSVOLayerInfos_E[layerIndex].indivisibleNodeCount;
+            }
+            SVO_IndivisibleNodeInfos_E[labelOffset + nodeData.label - 1] = threadIndex;
         }
     }
 }
@@ -249,12 +252,14 @@ void computeMain_getIndivisibleNode(uint threadIndex: SV_DispatchThreadID, uint 
 [shader("compute")]
 void computeMain_initWeights(uint threadIndex: SV_DispatchThreadID, uint groupThreadIndex: SV_GroupThreadID) {
     fillGroupshared(groupThreadIndex);
-    if (groupThreadIndex == 0)
-        groupMaxLayerNodeCount_E = SVOLayerInfos_E[groupSVOLayerMaxLayer_E - 1].divisibleNodeCount * 8;
     GroupMemoryBarrierWithGroupSync();
 
-    if (threadIndex >= OUTGOING_COUNT * groupIndivisibleNodeCount_G * groupTotalNodeCount_E) return;
+    int threadTotalCount = OUTGOING_COUNT * groupIndivisibleNodeCount_G * groupTotalNodeCount_E;
+    if (threadIndex >= threadTotalCount) return;
     SVOWeights[threadIndex] = 0.0f;
+
+    if (threadIndex >= threadTotalCount / 8) return;
+    SVOWeightSums[threadIndex] = 0.0f;
 
     if (threadIndex == 0)
         GlobalInfo[0].cmd.x = (groupIndivisibleNodeCount_E * OUTGOING_COUNT * groupIndivisibleNodeCount_G + THREADGROUP_SIZE - 1) / THREADGROUP_SIZE;
@@ -264,24 +269,22 @@ void computeMain_initWeights(uint threadIndex: SV_DispatchThreadID, uint groupTh
 [shader("compute")]
 void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGroupIndex: SV_GroupID, uint groupThreadIndex: SV_GroupThreadID) {
     fillGroupshared(groupThreadIndex);
-    if (groupThreadIndex < 8) {
-        groupSVOLayerInfos_G[groupThreadIndex] = SVOLayerInfos_G[groupThreadIndex];
-        groupSVOLayerInfos_E[groupThreadIndex] = SVOLayerInfos_E[groupThreadIndex];
-    }
     GroupMemoryBarrierWithGroupSync();
 
-    uint threadCount_perNodeE = groupIndivisibleNodeCount_G * OUTGOING_COUNT;
-    uint currentGroupNodeEStartIndex = threadGroupIndex * THREADGROUP_SIZE / threadCount_perNodeE;
-    uint currentGroupNodeEEndIndex = ((threadGroupIndex + 1) * THREADGROUP_SIZE - 1) / threadCount_perNodeE;
-    uint currentGoupNodeECount = currentGroupNodeEEndIndex - currentGroupNodeEStartIndex + 1;
-    if (groupThreadIndex < currentGoupNodeECount) {
-        SVOIndivisibleNodeInfo nodeInfo = SVO_IndivisibleNodeInfos_E[groupThreadIndex + currentGroupNodeEStartIndex];
-        SVONodeData_E nodeData = SVO_E[nodeInfo.layerIndex][nodeInfo.nodeIndex];
+    int indivisibleNodeCount_G = groupIndivisibleNodeCount_G;
+    int totalNodeCount_E = groupTotalNodeCount_E;
+
+    uint threadCount_perNodeE = indivisibleNodeCount_G * OUTGOING_COUNT;
+    uint currentGroupNodeStartLabel_E = threadGroupIndex * THREADGROUP_SIZE / threadCount_perNodeE;
+    uint currentGroupNodeEndLabel_E = ((threadGroupIndex + 1) * THREADGROUP_SIZE - 1) / threadCount_perNodeE;
+    uint currentGroupNodeECount = currentGroupNodeEndLabel_E - currentGroupNodeStartLabel_E + 1;
+    if (groupThreadIndex < currentGroupNodeECount) {
+        uint nodeLabel = groupThreadIndex + currentGroupNodeStartLabel_E;
+        uint nodeIndex = SVO_IndivisibleNodeInfos_E[nodeLabel];
+        SVONodeData_E nodeData = SVO_E[nodeIndex];
 
         IndivisibleNodeData_E groupNodeData_E;
         groupNodeData_E.normal = nodeData.meanNormal.xyz;
-        uint nodeIndex = nodeInfo.nodeIndex;
-        for (int i = 0; i <= (int)nodeInfo.layerIndex - 2; ++i) nodeIndex += groupSVOLayerInfos_E[i].divisibleNodeCount * 8;
         groupNodeData_E.nodeIndex = nodeIndex;
         groupNodeData_E.irradiance = length(nodeData.irradiance);
         groupNodeData_E.aabb = nodeData.aabb;
@@ -290,18 +293,16 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
     }
 
     uint threadCount_perNodeG = OUTGOING_COUNT;
-    uint currentGroupNodeGStartIndex = threadGroupIndex * THREADGROUP_SIZE / threadCount_perNodeG;
-    uint currentGroupNodeGEndIndex = ((threadGroupIndex + 1) * THREADGROUP_SIZE - 1) / threadCount_perNodeG;
-    uint currentGoupNodeGCount = currentGroupNodeGEndIndex - currentGroupNodeGStartIndex + 1;
+    uint currentGroupNodeStartLabel_G = threadGroupIndex * THREADGROUP_SIZE / threadCount_perNodeG;
+    uint currentGroupNodeEndLabel_G = ((threadGroupIndex + 1) * THREADGROUP_SIZE - 1) / threadCount_perNodeG;
+    uint currentGoupNodeGCount = currentGroupNodeEndLabel_G - currentGroupNodeStartLabel_G + 1;
     if (groupThreadIndex < currentGoupNodeGCount) {
-        uint nodeGIndex = (currentGroupNodeGStartIndex + groupThreadIndex) % groupIndivisibleNodeCount_G;
-        SVOIndivisibleNodeInfo nodeInfo = SVO_IndivisibleNodeInfos_G[nodeGIndex];
-        SVONodeData_G nodeData = SVO_G[nodeInfo.layerIndex][nodeInfo.nodeIndex];
+        uint nodeLabel = (groupThreadIndex + currentGroupNodeStartLabel_G) % indivisibleNodeCount_G;
+        uint nodeIndex = SVO_IndivisibleNodeInfos_G[nodeLabel];
+        SVONodeData_G nodeData = SVO_G[nodeIndex];
 
         IndivisibleNodeData_G groupNodeData_G;
-        uint nodeLabel = nodeData.label - 1;
-        for (int i = 1; i < nodeInfo.layerIndex; ++i) nodeLabel += groupSVOLayerInfos_G[i].indivisibleNodeCount;
-        groupNodeData_G.nodeLabel = nodeLabel;
+        groupNodeData_G.nodeLabel = nodeLabel + 1;
         groupNodeData_G.normal = nodeData.meanNormal.xyz;
         groupNodeData_G.aabb = nodeData.aabb;
 
@@ -310,20 +311,20 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
     GroupMemoryBarrierWithGroupSync();
 
     if (threadIndex == 0) {
-        uint SVOMaxLayerNodeCount = groupSVOLayerInfos_E[groupSVOLayerMaxLayer_E - 1].divisibleNodeCount * 8;
-        uint threadTotalCount = OUTGOING_COUNT * groupIndivisibleNodeCount_G * SVOMaxLayerNodeCount;
+        uint SVOMaxLayerNodeCount = SVOGlobalInfo[0].layerInfos_E[groupSVOLayerMaxLayer_E - 1].divisibleNodeCount * 8;
+        uint threadTotalCount = OUTGOING_COUNT * indivisibleNodeCount_G * SVOMaxLayerNodeCount;
         GlobalInfo[0].cmd.x = (threadTotalCount + THREADGROUP_SIZE - 1) / THREADGROUP_SIZE;
     }
-    if (threadIndex >= groupIndivisibleNodeCount_E * groupIndivisibleNodeCount_G * OUTGOING_COUNT) return;
+    if (threadIndex >= groupIndivisibleNodeCount_E * indivisibleNodeCount_G * OUTGOING_COUNT) return;
 
-    uint groupNodeEIndex = threadIndex / threadCount_perNodeE - currentGroupNodeEStartIndex;
-    IndivisibleNodeData_E nodeData_E = groupNodeDatas_E[groupNodeEIndex];
+    uint groupNodeLabel_E = threadIndex / threadCount_perNodeE - currentGroupNodeStartLabel_E;
+    IndivisibleNodeData_E nodeData_E = groupNodeDatas_E[groupNodeLabel_E];
 
-    uint groupNodeGIndex = ((threadIndex / threadCount_perNodeG) - currentGroupNodeGStartIndex) % groupIndivisibleNodeCount_G;
-    IndivisibleNodeData_G nodeData_G = groupNodeDatas_G[groupNodeGIndex];
+    uint groupNodeLabel_G = ((threadIndex / threadCount_perNodeG) - currentGroupNodeStartLabel_G) % indivisibleNodeCount_G;
+    IndivisibleNodeData_G nodeData_G = groupNodeDatas_G[groupNodeLabel_G];
 
-    float3 meanNormal_E = nodeData_E.normal; float normalLength_E = length(meanNormal_E); bool singleSide_E = normalLength_E >= 0.707;
-    float3 meanNormal_G = nodeData_G.normal; float normalLength_G = length(meanNormal_G); bool singleSide_G = normalLength_G >= 0.707;
+    float3 meanNormal_E = nodeData_E.normal; bool singleSide_E = length(meanNormal_E) >= 0.707;
+    float3 meanNormal_G = nodeData_G.normal; bool singleSide_G = length(meanNormal_G) >= 0.707;
 
     meanNormal_E = normalize(meanNormal_E);
     meanNormal_G = normalize(meanNormal_G);
@@ -358,7 +359,7 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
         float3 sampleDir = normalize(samplePoint_G - samplePoint_E);
 
         if (singleSide_E && dot(sampleDir, meanNormal_E) <= 0.0f) continue;
-        //if (singleSide_G && dot(-sampleDir, meanNormal_G) <= 0.0f) continue;
+        if (singleSide_G && dot(-sampleDir, meanNormal_G) <= 0.0f) continue;
         //if (hitPayload.material.type != MaterialType::Dielectric && hitPayload.material.type != MaterialType::RoughDielectric) {
         //    if (dot(outgoing, sampleDir) <= 0.0f) continue;
         //}
@@ -376,8 +377,7 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
 
         bool isExt = true;
         if (hitPayload.material.type != MaterialType::Dielectric && hitPayload.material.type != MaterialType::RoughDielectric) {
-            //if (cosine <= 0.0f || dot(outgoing, hitPayload.normal) <= 0.0f) continue;
-            if (cosine <= 0.0f) continue;
+            if (cosine <= 0.0f || dot(outgoing, hitPayload.normal) <= 0.0f) continue;
         } else if (dot(hitPayload.normal, -ray.Direction) < 0.0f) isExt = false;
 
         orthonormalBasis(hitPayload.normal, tangent, bitangent);
@@ -389,12 +389,24 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
     }
     weight /= HITTEST_COUNT;
 
+    //bool hasSample = checkPointInAABB(pushConst.samplePos, nodeData_G.aabb);
+    //bool nodeCondition = meanNormal_E.z > 0.0f;
+    //if (pushConst.frameIndex == 15 && hasSample && nodeCondition && outgoingIndex == 36) {
+    //    uint weightIndex = outgoingIndex * indivisibleNodeCount_G * totalNodeCount_E +
+    //                       (nodeData_G.nodeLabel - 1) * totalNodeCount_E + nodeData_E.nodeIndex;
+    //    printf("weightIndex: %d, weight: %f, nodeLabel_G: %d, nodeIndex_E: %d, normal_E: %f %f %f outgoing: %f %f %f\naabb: %f %f %f %f %f %f\n\n",
+    //        weightIndex, weight, nodeData_G.nodeLabel, nodeData_E.nodeIndex,
+    //        meanNormal_E.x, meanNormal_E.y, meanNormal_E.z,
+    //        outgoing.x, outgoing.y, outgoing.z,
+    //        nodeData_G.aabb.minimum.x, nodeData_G.aabb.minimum.y, nodeData_G.aabb.minimum.z,
+    //        nodeData_G.aabb.maximum.x, nodeData_G.aabb.maximum.y, nodeData_G.aabb.maximum.z,
+    //    );
+    //}
+
     if (weight == 0.0f) return;
 
-    uint nodeIndex_E = nodeData_E.nodeIndex;
-    uint nodeLable_G = nodeData_G.nodeLabel;    //has -1
-    uint weightIndex = outgoingIndex * groupIndivisibleNodeCount_G * groupTotalNodeCount_E +
-                       nodeLable_G * groupTotalNodeCount_E + nodeIndex_E;
+    uint weightIndex = outgoingIndex * indivisibleNodeCount_G * totalNodeCount_E +
+                       (nodeData_G.nodeLabel - 1) * totalNodeCount_E + nodeData_E.nodeIndex;
     SVOWeights[weightIndex] = weight;
 }
 
@@ -406,38 +418,46 @@ void computeMain_getProbability(uint threadIndex: SV_DispatchThreadID, uint thre
         int currentLayerIndex = (int)groupSVOLayerMaxLayer_E - pushConst.countdown;
         if (currentLayerIndex <= 0) return;
 
-        groupParentLayerInfo_E = SVOLayerInfos_E[currentLayerIndex - 1];
+        SVOGlobalInfo_SVOPG svoGlobalInfo = SVOGlobalInfo[0];
 
-        uint previousLayerNodeCountSum_E = groupTotalNodeCount_E;
-        for (int i = groupSVOLayerMaxLayer_E; i >= currentLayerIndex; --i)
-            previousLayerNodeCountSum_E -= SVOLayerInfos_E[i - 1].divisibleNodeCount * 8;
-        groupPreviousLayerNodeCountSum_E = previousLayerNodeCountSum_E;
+        groupParentLayerInfo_E = svoGlobalInfo.layerInfos_E[currentLayerIndex - 1];
+
+        uint currentLayerNodeCountSum_E = groupTotalNodeCount_E;
+        for (int i = groupSVOLayerMaxLayer_E; i > currentLayerIndex; --i)
+            currentLayerNodeCountSum_E -= svoGlobalInfo.layerInfos_E[i - 1].divisibleNodeCount * 8;
+        groupCurrentLayerNodeCountSum_E = currentLayerNodeCountSum_E;
+
+        groupPreviousLayerNodeCountSum_E = currentLayerNodeCountSum_E - svoGlobalInfo.layerInfos_E[currentLayerIndex - 1].divisibleNodeCount * 8;
     }
     GroupMemoryBarrierWithGroupSync();
 
     int currentLayerIndex = (int)groupSVOLayerMaxLayer_E - pushConst.countdown;
     if (currentLayerIndex <= 0) return;
 
+    uint indivisibleNodeCount_G = groupIndivisibleNodeCount_G;
     uint layerNodeCount_E = groupParentLayerInfo_E.divisibleNodeCount * 8;
-    if (threadIndex >= OUTGOING_COUNT * groupIndivisibleNodeCount_G * layerNodeCount_E) return;
+    if (threadIndex >= OUTGOING_COUNT * indivisibleNodeCount_G * layerNodeCount_E) return;
 
-    uint outgoingIndex = threadIndex / (groupIndivisibleNodeCount_G * layerNodeCount_E); // outgoing Index
-    uint indexInA = threadIndex - outgoingIndex * (groupIndivisibleNodeCount_G * layerNodeCount_E);
+    uint outgoingIndex = threadIndex / (indivisibleNodeCount_G * layerNodeCount_E); // outgoing Index
+    uint indexInA = threadIndex - outgoingIndex * (indivisibleNodeCount_G * layerNodeCount_E);
     uint nodeLable_G = indexInA / layerNodeCount_E;              // SVO_G nodeIndex
-    uint nodeIndex_E = indexInA - nodeLable_G * layerNodeCount_E; // SVO_E currentLayer nodeIndex
+    uint nodeIndex_currentLayer_E = indexInA - nodeLable_G * layerNodeCount_E; // SVO_E currentLayer nodeIndex
 
-    SVONodeData_E nodeData_E = SVO_E[currentLayerIndex][nodeIndex_E];
+    int previousLayerNodeCountSum_E = groupPreviousLayerNodeCountSum_E;
+    uint nodeIndex = previousLayerNodeCountSum_E + nodeIndex_currentLayer_E;
+    SVONodeData_E nodeData_E = SVO_E[nodeIndex];
+
+    uint nodeTotalCount_E = groupTotalNodeCount_E;
 
     float weight = 0.0f;
-    uint weightIndex = outgoingIndex * groupIndivisibleNodeCount_G * groupTotalNodeCount_E +
-                       nodeLable_G * groupTotalNodeCount_E +
-                       groupPreviousLayerNodeCountSum_E + nodeIndex_E;
-    uint weightSumArraySize = pushConst.layerNodeMaxCount_E;
-    if (nodeData_E.indivisible == 0) { // divisible node's weight is sum of childNode's weight
-        uint weightSumIndex = outgoingIndex * groupIndivisibleNodeCount_G * weightSumArraySize +
-                              nodeLable_G * weightSumArraySize + nodeData_E.label - 1;
+    uint weightIndex = outgoingIndex * indivisibleNodeCount_G * nodeTotalCount_E +
+                       nodeLable_G * nodeTotalCount_E +
+                       nodeIndex;
+    if (nodeData_E.indivisible == 0) {
+        uint childNodeIndex = groupCurrentLayerNodeCountSum_E + (nodeData_E.label - 1) * 8;
+        uint weightSumIndex = (weightIndex - nodeIndex + childNodeIndex) / 8;
         weight = SVOWeightSums[weightSumIndex];
-    } else weight = SVOWeights[weightIndex];
+    }else weight = SVOWeights[weightIndex];
 
     uint warplane = groupThreadIndex & (WARP_SIZE - 1);
     uint blockFirstWarplane = warplane / 8 * 8;
@@ -448,21 +468,23 @@ void computeMain_getProbability(uint threadIndex: SV_DispatchThreadID, uint thre
     }
     weightSum = WaveReadLaneAt(weightSum, blockFirstWarplane);
     float probability = weight / max(weightSum, 0.00001f);
-    SVOWeights[weightIndex] = probability;
+    if(probability > 0.0f) SVOWeights[weightIndex] = probability;
 
-    uint fatherNodeLabel = nodeIndex_E / 8;
-    fatherNodeLabel += outgoingIndex * groupIndivisibleNodeCount_G * weightSumArraySize + nodeLable_G * weightSumArraySize;
-    if ((warplane & 7u) == 0) SVOWeightSums[fatherNodeLabel] = weightSum;
-    
-    if (threadIndex == 0) {
-        if (currentLayerIndex > 1) {
-            uint upperLayerNodeCount_E = SVOLayerInfos_E[currentLayerIndex - 2].divisibleNodeCount * 8;
+    if (currentLayerIndex > 1) {
+        if ((warplane & 7u) == 0 && weightSum > 0.0f) SVOWeightSums[weightIndex / 8] = weightSum;
+
+        if (threadIndex == 0) {
+            uint upperLayerNodeCount_E = SVOGlobalInfo[0].layerInfos_E[currentLayerIndex - 2].divisibleNodeCount * 8;
             GlobalInfo[0].cmd.x = (OUTGOING_COUNT * groupIndivisibleNodeCount_G * upperLayerNodeCount_E + THREADGROUP_SIZE - 1) / THREADGROUP_SIZE;
-        } else GlobalInfo[0].cmd.x = 1;
-    }
+        }
+    } else if (threadIndex == 0) GlobalInfo[0].cmd.x = 0;
 
-    //if (pushConst.frameIndex == 1 && outgoingIndex == 17 && nodeLable_G == 46) {
-    //    printf("layerIndex: %d, nodeIndex: %d, probability: %f, weight: %f\n", currentLayerIndex, nodeIndex_E, probability, weight);
+    //bool hasSample = nodeLable_G + 1 == 65;
+    //bool nodeCondition = nodeData_E.meanNormal.z > 0.0f;
+    //if (pushConst.frameIndex == 15 && hasSample && nodeCondition && outgoingIndex == 36) {
+    //    printf("currentLayerIndex: %d, nodeIndex_E: %d, weight: %f, probability: %f, weightIndex: %d\n",
+    //        currentLayerIndex, nodeIndex, weight, probability, weightIndex,
+    //    );
     //}
 }
 
@@ -477,64 +499,63 @@ thus displaying the selection of node_G where the samplePos is located during pa
 [shader("compute")]
 void computeMain_getSampleNodeInfo(uint threadIndex: SV_DispatchThreadID, uint threadGroupIndex: SV_GroupID, uint groupThreadIndex: SV_GroupThreadID) {
     SVOWeightGlobalInfo globalInfo = GlobalInfo[0];
+    if (globalInfo.indivisibleNodeCount_G == 0) return;
+
     int SVOMaxLayer = globalInfo.SVOMaxLayer_G;
-    SVOLayerInfo layerInfos_G[8];
-    for (int i = 0; i < SVOMaxLayer; ++i) layerInfos_G[i] = SVOLayerInfos_G[i];
+    SVOLayerInfo layerInfos_G[MAX_OCTREE_DEPTH];
+    for (int i = 0; i <= SVOMaxLayer; ++i) layerInfos_G[i] = SVOGlobalInfo[0].layerInfos_G[i];
 
     SVONodeData_G nodeData;
-    int layerIndex = 1, nodeIndex = 0, nodeLabel = 0;
-    bool hitNode = false, hitIndivisibleNode = false;
-    for (; layerIndex <= SVOMaxLayer; ++layerIndex) {
-        for (int nodeOffset = 0; nodeOffset < 8; ++nodeOffset) {
-            nodeData = SVO_G[layerIndex][nodeIndex + nodeOffset];
-            if (checkPointInAABB(pushConst.samplePos, nodeData.aabb)) {
-                if (nodeData.indivisible == 1) {
-                    hitIndivisibleNode = true;
-                    nodeLabel += nodeData.label - 1;
-                } else nodeIndex = (nodeData.label - 1) * 8;
-                hitNode = true;
-                break;
+    bool hitIndivisibleNode = false;
+    uint nodeIndex = 0, nodeOffset = 0, nodeLabelSum = 0;
+    for (int normalIndex = 0; normalIndex < 6; ++normalIndex) {
+        bool hitNode = false;
+        nodeIndex = normalIndex * 8; uint nodeSum = 0; nodeLabelSum = 0;
+        for (int layerIndex = 1; layerIndex <= SVOMaxLayer; ++layerIndex) {
+            for (nodeOffset = 0; nodeOffset < 8; ++nodeOffset) {
+                nodeData = SVO_G[nodeIndex + nodeOffset];
+                if (checkPointInAABB(pushConst.samplePos, nodeData.aabb)) {
+                    if (nodeData.indivisible == 1) hitIndivisibleNode = true;
+                    else {
+                        nodeSum += layerInfos_G[layerIndex - 1].divisibleNodeCount * 8;
+                        nodeIndex = nodeSum + (nodeData.label - 1) * 8;
+                        nodeLabelSum += layerInfos_G[layerIndex].indivisibleNodeCount;
+                    }
+                    hitNode = true;
+                    break;
+                }
             }
+            if (!hitNode || hitIndivisibleNode) break;
         }
-        if (!hitNode || hitIndivisibleNode) break;
-        nodeLabel += layerInfos_G[layerIndex].indivisibleNodeCount;
+        if (hitIndivisibleNode) break;
     }
 
     if (hitIndivisibleNode) GlobalInfo[0].sampelNodeAABB = nodeData.aabb;
     else {
-        AABB aabb;
-        aabb.minimum.x = 3.402823466e+38F;
-        aabb.minimum.y = 3.402823466e+38F;
-        aabb.minimum.z = 3.402823466e+38F;
-        aabb.maximum.x = -3.402823466e+38F;
-        aabb.maximum.y = -3.402823466e+38F;
-        aabb.maximum.z = -3.402823466e+38F;
-        GlobalInfo[0].sampelNodeAABB = aabb;
+        nodeData.aabb.minimum.x = 3.402823466e+38F;
+        nodeData.aabb.minimum.y = 3.402823466e+38F;
+        nodeData.aabb.minimum.z = 3.402823466e+38F;
+        nodeData.aabb.maximum.x = -3.402823466e+38F;
+        nodeData.aabb.maximum.y = -3.402823466e+38F;
+        nodeData.aabb.maximum.z = -3.402823466e+38F;
+        GlobalInfo[0].sampelNodeAABB = nodeData.aabb;
     }
-    GlobalInfo[0].sampelNodeLabel = nodeLabel;
+    GlobalInfo[0].sampelNodeLabel = nodeData.label + nodeLabelSum;
 
-    if (pushConst.frameIndex == 1) {
+
+    if (pushConst.frameIndex == 0) {
         AABB aabb = GlobalInfo[0].sampelNodeAABB;
-        printf("sampleNodeLabel: %d, sampleNodeAABB:\n %f %f %f\n%f %f %f\n", 
-            nodeLabel,
+        printf("nodeIndex: %d, sampleNodeLabel: %d\nsampleNodeAABB:\n %f %f %f\n%f %f %f\nnormal: %f %f %f\n",
+            nodeIndex + nodeOffset, nodeData.label + nodeLabelSum,
             aabb.minimum.x, aabb.minimum.y, aabb.minimum.z,
-            aabb.maximum.x, aabb.maximum.y, aabb.maximum.z);
+            aabb.maximum.x, aabb.maximum.y, aabb.maximum.z,
+            nodeData.meanNormal.x, nodeData.meanNormal.y, nodeData.meanNormal.z,
+        );
 
         float3 nodeCenter = (aabb.maximum + aabb.minimum) * 0.5f;
         uint outgoingIndex = inverseSF(normalize(pushConst.sceneInfoAddress[0].cameraPosition - nodeCenter), OUTGOING_COUNT);
         printf("outgoingIndex: %d\n", outgoingIndex);
     }
-
-    //if (pushConst.frameIndex == 1) {
-    //    for (int i = 0; i < 8; ++i) {
-    //        AABB aabb = SVO_G[1][i].aabb;
-    //        printf("layerIndex: 1, nodeIndex: %d, aabb: %f %f %f %f %f %f\n",
-    //            i,
-    //            aabb.minimum.x, aabb.minimum.y, aabb.minimum.z,
-    //            aabb.maximum.x, aabb.maximum.y, aabb.maximum.z,
-    //        );
-    //    }
-    //}
 }
 
 struct VSout {
@@ -542,7 +563,7 @@ struct VSout {
     float3 worldPos;
     float2 uv;
     uint randomSeed;
-}
+};
 struct PSout
 {
     float4 color : SV_Target;
@@ -580,41 +601,42 @@ PSout fragmentMain(VSout input) {
     AABB sampleNodeAABB = globalInfo.sampelNodeAABB;
     if (checkPointInAABB(pos.xyz, sampleNodeAABB)) return { float4(1.0f, 0.0f, 0.0f, 1.0f) };
 
+    if (globalInfo.indivisibleNodeCount_G == 0 ||  sampleNodeAABB.minimum.x > 100000.0f) return { float4(0.0f) };
+
     float3 nodeCenter_G = (globalInfo.sampelNodeAABB.maximum + globalInfo.sampelNodeAABB.minimum) * 0.5f;
 
     float3 view = normalize(pushConst.sceneInfoAddress[0].cameraPosition - pos);
-    float probabality = rand(input.randomSeed);
-    uint outgoingIndex = inverseSF(view, OUTGOING_COUNT, probabality);
+    float probability = rand(input.randomSeed);
+    //uint outgoingIndex = inverseSF(view, OUTGOING_COUNT, probabality);
+    uint outgoingIndex = inverseSF(view, OUTGOING_COUNT);
 
     //uint outgoingIndex = inverseSF(normalize(pushConst.sceneInfoAddress[0].cameraPosition - nodeCenter_G), OUTGOING_COUNT);
     uint weightIndex = outgoingIndex * globalInfo.indivisibleNodeCount_G * globalInfo.totalNodeCount_E +
-                       globalInfo.sampelNodeLabel * globalInfo.totalNodeCount_E;
+                       (globalInfo.sampelNodeLabel - 1) * globalInfo.totalNodeCount_E;
+
+    SVOGlobalInfo_SVOPG svoGlobalInfo = SVOGlobalInfo[0];
 
     SVONodeData_E nodeData;
-    float probability = 1.0f;
-    uint layerIndex = 1, nodeIndex = 0; int nodeOffset = 0;
+    float pdf = 1.0f;
     bool hitNode = false, hitIndivisibleNode = false;
-    for (; layerIndex <= globalInfo.SVOMaxLayer_E; ++layerIndex) {
+    uint nodeIndex = 0, nodeSum = 0, nodeOffset = 0;
+    for (int layerIndex = 1; layerIndex <= globalInfo.SVOMaxLayer_E; ++layerIndex) {
         for (nodeOffset = 0; nodeOffset < 8; ++nodeOffset) {
-            nodeData = SVO_E[layerIndex][nodeIndex + nodeOffset];
+            nodeData = SVO_E[nodeIndex + nodeOffset];
             if (checkPointInAABB(input.worldPos, nodeData.aabb)) {
-                probability *= SVOWeights[weightIndex + nodeIndex + nodeOffset];
-                weightIndex += SVOLayerInfos_E[layerIndex - 1].divisibleNodeCount * 8;
+                pdf *= SVOWeights[weightIndex + nodeIndex + nodeOffset];
+                nodeSum += svoGlobalInfo.layerInfos_E[layerIndex - 1].divisibleNodeCount * 8;
 
-                if (nodeData.indivisible == 1) {
-                    hitIndivisibleNode = true;
-                } else nodeIndex = (nodeData.label - 1) * 8;
+                if (nodeData.indivisible == 1) hitIndivisibleNode = true;
+                else nodeIndex = nodeSum + (nodeData.label - 1) * 8;
+
                 hitNode = true;
-
                 break;
             }
         }
-        if (!hitNode || hitIndivisibleNode || probability == 0.0f) break;
+        if (!hitNode || hitIndivisibleNode || pdf == 0.0f) break;
     }
     if (!hitIndivisibleNode) return { float4(0.0f) };
-
-    // if (nodeIndex + nodeOffset == 107 && layerIndex == 3) return { float4(0.0f, 0.0f, 1.0f, 1.0f) };
-    // if (nodeData.label - 1 == 45 && layerIndex == 3) return { float4(0.0f, 0.0f, 1.0f, 1.0f) };
 
     probability *= nodeData.notIgnoreRatio;
     return { float4(0.0f, probability * 10.0f, 0.0f, 1.0f) };
