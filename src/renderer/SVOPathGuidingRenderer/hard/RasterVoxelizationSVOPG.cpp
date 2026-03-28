@@ -65,6 +65,7 @@ void RasterVoxelization_SVOPG::init() {
 void RasterVoxelization_SVOPG::clean() {
 	Feature::clean();
 	for(int i = 0; i < 6; ++i) Application::allocator.destroyBuffer(VGBs[i]);
+	Application::allocator.destroyBuffer(VGBMaterialInfos);
 
 	VkDevice device = Application::app->getDevice();
 	vkDestroyShaderEXT(device, computeShader_clearVGB, nullptr);
@@ -306,51 +307,59 @@ void RasterVoxelization_SVOPG::createVGBs() {
 		setting.pushConstant.voxelSize_Count = glm::vec4(distance / setting.pushConstant.voxelSize_Count.w, setting.pushConstant.voxelSize_Count.w);
 	}
 
+	nvvk::StagingUploader& stagingUploader = Application::stagingUploader;
+	nvvk::ResourceAllocator* allocator = stagingUploader.getResourceAllocator();
+
 	uint32_t voxelTotalCount = std::pow(setting.pushConstant.voxelSize_Count.w, 3);
 	uint32_t VGBByteSize = voxelTotalCount * sizeof(shaderio::VGBVoxelData_SVOPG);
-	{
-		nvvk::StagingUploader& stagingUploader = Application::stagingUploader;
-		nvvk::ResourceAllocator* allocator = stagingUploader.getResourceAllocator();
-
-		VGBs.resize(6);
-		for (int i = 0; i < 6; ++i) {
-			allocator->createBuffer(VGBs[i], VGBByteSize,
-				VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-			NVVK_DBG_NAME(VGBs[i].buffer);
-		}
-
+	VGBs.resize(6);
+	for (int i = 0; i < 6; ++i) {
+		allocator->createBuffer(VGBs[i], VGBByteSize,
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+		NVVK_DBG_NAME(VGBs[i].buffer);
 	}
+
+	uint32_t VGBMaterialInfosBufferSize = voxelTotalCount * sizeof(shaderio::VGBMaterialInfo_SVOPG);
+	allocator->createBuffer(VGBMaterialInfos, VGBMaterialInfosBufferSize,
+		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+	NVVK_DBG_NAME(VGBMaterialInfos.buffer);
 }
 void RasterVoxelization_SVOPG::createDescriptorSetLayout() {
 	nvvk::DescriptorBindings bindings;
-	bindings.addBinding({ .binding = shaderio::RasterVoxelizationBindingPoints::eTextures_RV,
+	bindings.addBinding({ .binding = shaderio::RasterVoxelizationBindingPoints_SVOPG::eTextures_SVOPG,
 					 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 					 .descriptorCount = 10,
 					 .stageFlags = VK_SHADER_STAGE_ALL },
 		VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
 		| VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
-	bindings.addBinding({ .binding = shaderio::RasterVoxelizationBindingPoints::eVGB_RV,
+	bindings.addBinding({ .binding = shaderio::RasterVoxelizationBindingPoints_SVOPG::eVGB_SVOPG,
 						 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 						 .descriptorCount = (uint32_t)VGBs.size(),
 						 .stageFlags = VK_SHADER_STAGE_ALL },
 		VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
 		| VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
+	bindings.addBinding({ .binding = shaderio::RasterVoxelizationBindingPoints_SVOPG::eVGBMaterialInfo_SVOPG,
+					 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+					 .descriptorCount = 1,
+					 .stageFlags = VK_SHADER_STAGE_ALL },
+		VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
+		| VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
 #ifndef NDEBUG
-	bindings.addBinding({ .binding = shaderio::RasterVoxelizationBindingPoints::eFragmentCountBuffer_RV,
+	bindings.addBinding({ .binding = shaderio::RasterVoxelizationBindingPoints_SVOPG::eFragmentCountBuffer_SVOPG,
 					 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 					 .descriptorCount = 1,
 					 .stageFlags = VK_SHADER_STAGE_ALL },
 		VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
 		| VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
 
-	bindings.addBinding({ .binding = shaderio::RasterVoxelizationBindingPoints::eWireframeMap_RV,
+	bindings.addBinding({ .binding = shaderio::RasterVoxelizationBindingPoints_SVOPG::eWireframeMap_SVOPG,
 				 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
 				 .descriptorCount = 1,
 				 .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT },
 		VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
 		| VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
 
-	bindings.addBinding({ .binding = shaderio::RasterVoxelizationBindingPoints::eBaseMap,
+	bindings.addBinding({ .binding = shaderio::RasterVoxelizationBindingPoints_SVOPG::eBaseMap_SVOPG,
 			 .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
 			 .descriptorCount = 1,
 			 .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT },
@@ -365,13 +374,17 @@ void RasterVoxelization_SVOPG::createDescriptorSetLayout() {
 	NVVK_DBG_NAME(staticDescPack.getSet(0));
 }
 void RasterVoxelization_SVOPG::createDescriptorSet() {
-	Feature::addTextureArrayDescriptor(shaderio::RasterVoxelizationBindingPoints::eTextures_RV);
+	Feature::addTextureArrayDescriptor(shaderio::RasterVoxelizationBindingPoints_SVOPG::eTextures_SVOPG);
 
 	nvvk::WriteSetContainer write{};
 	VkWriteDescriptorSet    VGBWrite =
-		staticDescPack.makeWrite(shaderio::RasterVoxelizationBindingPoints::eVGB_RV, 0, 0, VGBs.size());
+		staticDescPack.makeWrite(shaderio::RasterVoxelizationBindingPoints_SVOPG::eVGB_SVOPG, 0, 0, VGBs.size());
 	nvvk::Buffer* VGBsPtr = VGBs.data();
 	write.append(VGBWrite, VGBsPtr);
+
+	VkWriteDescriptorSet    VGBMaterialInfoWrite =
+		staticDescPack.makeWrite(shaderio::RasterVoxelizationBindingPoints_SVOPG::eVGBMaterialInfo_SVOPG, 0, 0, 1);
+	write.append(VGBMaterialInfoWrite, VGBMaterialInfos, 0, VGBMaterialInfos.bufferSize);
 
 #ifndef NDEBUG
 	//-------------------------------------------threeView----------------------------------------
@@ -390,10 +403,10 @@ void RasterVoxelization_SVOPG::createDescriptorSet() {
 		NVVK_DBG_NAME(fragmentCountStageBuffer.buffer);
 	}
 
-	VkWriteDescriptorSet fcWrite = staticDescPack.makeWrite(shaderio::RasterVoxelizationBindingPoints::eFragmentCountBuffer_RV, 0, 0, 1);
+	VkWriteDescriptorSet fcWrite = staticDescPack.makeWrite(shaderio::RasterVoxelizationBindingPoints_SVOPG::eFragmentCountBuffer_SVOPG, 0, 0, 1);
 	write.append(fcWrite, fragmentCountBuffer, 0, sizeof(uint32_t));
 
-	VkWriteDescriptorSet wireframeMapWrite = staticDescPack.makeWrite(shaderio::RasterVoxelizationBindingPoints::eWireframeMap_RV, 0, 0, 1);
+	VkWriteDescriptorSet wireframeMapWrite = staticDescPack.makeWrite(shaderio::RasterVoxelizationBindingPoints_SVOPG::eWireframeMap_SVOPG, 0, 0, 1);
 	write.append(wireframeMapWrite, gBuffers.getColorImageView(RasterVoxelizationGBuffer_SVOPG::WireframeMap_SVOPG), VK_IMAGE_LAYOUT_GENERAL);
 #endif
 
@@ -536,8 +549,8 @@ void RasterVoxelization_SVOPG::clearVGB(VkCommandBuffer cmd) {
 
 	vkCmdPushConstants2(cmd, &pushInfo);
 
-	uint32_t totalVoxelCount = pow(setting.pushConstant.voxelSize_Count.w, 3);
-	VkExtent2D groupSize = nvvk::getGroupCounts({ totalVoxelCount, 1 }, VkExtent2D{ 512, 1 });
+	uint32_t totalVoxelCount = pow(setting.pushConstant.voxelSize_Count.w, 3) * 6;
+	VkExtent2D groupSize = nvvk::getGroupCounts({ totalVoxelCount, 1 }, VkExtent2D{ 1024, 1 });
 	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
 }
 void RasterVoxelization_SVOPG::createVGB(VkCommandBuffer cmd) {
@@ -595,7 +608,7 @@ void RasterVoxelization_SVOPG::resize(
 	nvvk::GBuffer& gBuffers_other, uint32_t baseMapIndex
 ) {
 	nvvk::WriteSetContainer write{};
-	VkWriteDescriptorSet baseMapWrite = staticDescPack.makeWrite(shaderio::RasterVoxelizationBindingPoints::eBaseMap, 0, 0, 1);
+	VkWriteDescriptorSet baseMapWrite = staticDescPack.makeWrite(shaderio::RasterVoxelizationBindingPoints_SVOPG::eBaseMap_SVOPG, 0, 0, 1);
 	write.append(baseMapWrite, gBuffers_other.getColorImageView(baseMapIndex), VK_IMAGE_LAYOUT_GENERAL);
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }

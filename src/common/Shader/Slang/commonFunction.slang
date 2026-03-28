@@ -55,7 +55,7 @@ float2x2 Inverse2x2(float2x2 m) {
 }
 //---------------------------------------------------AABB---------------------------------------------------
 inline bool checkPointInAABB(float3 pos, AABB aabb) {
-    return all((pos - aabb.minimum >= -0.001f) && (aabb.maximum - pos >= -0.001f));
+    return all((pos - aabb.minimum >= -0.00001f) && (aabb.maximum - pos >= -0.00001f));
 }
 inline float3 getAABBPoint(float3 sampleDir, float3 aabbCenter, float3 aabbHalfSize) {
     float3 invDir = 1.0f / max(abs(sampleDir), 1e-6f);

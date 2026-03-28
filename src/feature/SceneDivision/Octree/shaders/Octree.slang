@@ -5,6 +5,7 @@
 
 [[vk::push_constant]] ConstantBuffer<OctreePushConstant> pushConst;
 [[vk::binding(BindingPoints_Octree::eVGB_Octree)]] StructuredBuffer<VGBVoxelData_SVOPG, ScalarDataLayout> VGBs[];
+[[vk::binding(BindingPoints_Octree::eVGBMaterialInfos_Octree)]] StructuredBuffer<VGBMaterialInfo_SVOPG, ScalarDataLayout> eVGBMaterialInfos_Octree;
 [[vk::binding(BindingPoints_Octree::eOctreeArray_G_Octree)]] RWStructuredBuffer<OctreeNodeData_G, ScalarDataLayout> OctreeArray_G[];
 [[vk::binding(BindingPoints_Octree::eOctreeArray_E_Octree)]] RWStructuredBuffer<OctreeNodeData_E, ScalarDataLayout> OctreeArray_E[];
 #ifndef NDEBUG
@@ -49,6 +50,15 @@ void computeMain_initOctreeArray(uint threadIndex: SV_DispatchThreadID) {
     nodeData_G.indivisible = 1;
     nodeData_G.label = 0;
 
+    VGBMaterialInfo_SVOPG voxelMaterialInfos = eVGBMaterialInfos_Octree[threadIndex];
+    uint materialIndex = 0, materialCount = 0;
+    for (int i = 0; i < MAX_MATERIAL_COUNT; ++i) {
+        if (voxelMaterialInfos.materialCount[i] > materialCount) {
+            materialCount = voxelMaterialInfos.materialCount[i];
+            materialIndex = i;
+        }
+    }
+
     uint irradianceCount = 0;
     OctreeNodeData_E nodeData_E;
     nodeData_E.irradiance = float3(0.0f);
@@ -71,7 +81,7 @@ void computeMain_initOctreeArray(uint threadIndex: SV_DispatchThreadID) {
         bool hasNormal = voxelData.sumNormal_G.w > 0.0f;
         nodeData_G.meanNormal = hasNormal ? voxelData.sumNormal_G / voxelData.sumNormal_G.w : float4(0.0f);
         nodeData_G.aabb = nodeAabb;
-        nodeData_G.materialIndex = voxelData.materialIndex_Count >> 26;
+        nodeData_G.materialIndex = materialIndex;
 
         uint32_t octreeIndex = normalIndex * (pushConst.maxDepth + 1) + pushConst.maxDepth;
         OctreeArray_G[octreeIndex][threadIndex] = nodeData_G;
@@ -244,20 +254,19 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
         }
         uint materialTypeCount = countbits(blockMaterialTypeMask);
         //--------------------------------------------judge divisible--------------------------------------------
-        bool indivisible = true;   // = nodeData_G.indivisible == 1;
+        //bool indivisible = true;   // = nodeData_G.indivisible == 1;
         //for (int offset = 4; offset > 0; offset /= 2) {
         //    uint targetLane = warpLane + offset;
         //    indivisible &= WaveReadLaneAt(indivisible, targetLane);
         //}
+        //indivisible &= hasGeometry ? materialTypeCount == 1 : true;
 
-        indivisible &= hasGeometry ? materialTypeCount == 1 : true;
+        bool indivisible = true;
         if (warpLane == blockFirstWarpLane) {
-            indivisible &= length(mergeNormal) > pushConst.entropyThreshold.x &&
-                           (mergeAABBVolume - aabbVolumeSum) < pushConst.voxelVolume * (pushConst.maxDepth - pushConst.currentDepth + 1) * 4;
-        }
+            indivisible = materialTypeCount == 1 &&
+                          length(mergeNormal) > pushConst.entropyThreshold.x &&
+                          (mergeAABBVolume - aabbVolumeSum) < pushConst.voxelVolume * (pushConst.maxDepth - pushConst.currentDepth + 1) * 4;
 
-        //---------------------------------------------assignment------------------------------------------------
-        if (warpLane == blockFirstWarpLane) {
             nodeData_G.indivisible = indivisible;
             nodeData_G.label = 0;
             nodeData_G.aabb = mergeAABB;
@@ -265,6 +274,22 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
             nodeData_G.materialIndex = firstbitlow(blockMaterialTypeMask);
             OctreeArray_G[octreeIndex - 1][blockIndex] = nodeData_G;
         }
+
+        // octreeIndex: 11, nodeIndex: 28064, aabb: -1.019802 1.818015 0.954121 -1.019136 1.950553 0.989012
+        //if (pushConst.frameIndex == 0) {
+        //    if (octreeIndex == 11 && nodeIndex >= 28064 && nodeIndex <= 28071) { // && mergeAABB.maximum.x < -0.99f && mergeAABB.maximum.y > 1.9f
+        //        printf("\nblockIndex: %d, indivisible: %d, nodeData_G.meanNormal: %f %f %f\n",
+        //                blockIndex, indivisible,
+        //                nodeData_G.meanNormal.x, nodeData_G.meanNormal.y, nodeData_G.meanNormal.z
+        //            );
+        //    }
+        //    if (octreeIndex == 10 && nodeIndex >= 3508 && nodeIndex <= 3515) { // && mergeAABB.maximum.x < -0.99f && mergeAABB.maximum.y > 1.9f
+        //        printf("\nblockIndex: %d, indivisible: %d, nodeData_G.meanNormal: %f %f %f\n",
+        //                blockIndex, indivisible,
+        //               nodeData_G.meanNormal.x, nodeData_G.meanNormal.y, nodeData_G.meanNormal.z
+        //            );
+        //    }
+        //}
     }
 
     //----------------------------------------getOctree_E-------------------------------------------

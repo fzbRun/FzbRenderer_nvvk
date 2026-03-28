@@ -7,8 +7,8 @@
 [[vk::binding(BindingPoints_SVOPG::eSVO_G_SVOPG)]] RWStructuredBuffer<SVONodeData_G, ScalarDataLayout> SVO_G;
 [[vk::binding(BindingPoints_SVOPG::eSVO_E_SVOPG)]] RWStructuredBuffer<SVONodeData_E, ScalarDataLayout> SVO_E;
 [[vk::binding(BindingPoints_SVOPG::eSVOGlobalInfo_SVOPG)]] RWStructuredBuffer<SVOGlobalInfo_SVOPG> SVOGlobalInfo;
-[[vk::binding(BindingPoints_SVOPG::eSVODivisibleNodeIndices_G_SVOPG)]] RWStructuredBuffer<uint2> SVODivisibleNodeInfos_G;
-[[vk::binding(BindingPoints_SVOPG::eSVODivisibleNodeIndices_E_SVOPG)]] RWStructuredBuffer<uint> SVODivisibleNodeInfos_E;
+[[vk::binding(BindingPoints_SVOPG::eSVODivisibleNodeIndices_G_SVOPG)]] RWStructuredBuffer<uint4> SVODivisibleNodeInfos_G;
+[[vk::binding(BindingPoints_SVOPG::eSVODivisibleNodeIndices_E_SVOPG)]] RWStructuredBuffer<uint2> SVODivisibleNodeInfos_E;
 [[vk::binding(BindingPoints_SVOPG::eSVOThreadGroupInfos_SVOPG)]] RWStructuredBuffer<SVOThreadGroupInfo> SVOThreadGroupInfos;
 
 //----------------------------------------------initSVOArray--------------------------------------------
@@ -35,7 +35,7 @@ void computeMain_initSVOArray(uint threadIndex: SV_DispatchThreadID) {
 
         SVODivisibleNodeInfos_E[threadIndex] = 0;
     }
-    if (threadIndex < 6) SVODivisibleNodeInfos_G[threadIndex] = uint2(threadIndex * (pushConst.maxDepth_Octree + 1), 0);
+    if (threadIndex < 6) SVODivisibleNodeInfos_G[threadIndex] = uint4(threadIndex * (pushConst.maxDepth_Octree + 1), 0, 0, 0);
 
     if (threadIndex < SVOSize / THREADGROUP_SIZE) {
         SVOThreadGroupInfo threadGroupInfo;
@@ -108,6 +108,7 @@ void computeMain_createSVOArray(uint threadIndex: SV_DispatchThreadID, uint thre
     }
     GroupMemoryBarrierWithGroupSync();
 
+    bool oddLayer = (pushConst.currentDepth_SVO & 1) == 1;
     //------------------------------------------------G---------------------------------------------------------
     uint layerNodeCount_G = groupFatherLayerDivisibleNodeCount_G * 8;
     uint lastLayerNodeCountSum_G = groupSVONodeTotalCount_G;
@@ -121,17 +122,21 @@ void computeMain_createSVOArray(uint threadIndex: SV_DispatchThreadID, uint thre
         return;
     }
     if (threadIndex < ((layerNodeCount_G + WARP_SIZE - 1) / WARP_SIZE * WARP_SIZE)){
-        uint fatherNodeIndex = threadIndex / 8;
-        
+        uint4 fatherNodeInfo;
         uint octreeIndex = 0;
         uint nodeIndex = 0;
         SVONodeData_G nodeData;
         bool hasData = false;
         if (threadIndex < layerNodeCount_G) {
-            uint2 fatherNodeInfo = SVODivisibleNodeInfos_G[fatherNodeIndex];
-            octreeIndex = fatherNodeInfo.x + 1;
-            nodeIndex = fatherNodeInfo.y * 8 + blockLane;
-
+            uint fatherNodeLabel = threadIndex / 8;
+            fatherNodeInfo = SVODivisibleNodeInfos_G[fatherNodeLabel];
+            if (oddLayer) {
+                octreeIndex = fatherNodeInfo.x + pushConst.currentDepth_SVO;
+                nodeIndex = fatherNodeInfo.y * 8 + blockLane;
+            } else {
+                octreeIndex = fatherNodeInfo.z + pushConst.currentDepth_SVO;
+                nodeIndex = fatherNodeInfo.w * 8 + blockLane;
+            }
             nodeData = OctreeArray_G[octreeIndex][nodeIndex];
             hasData = nodeData.meanNormal.w > 0.0f;
         }
@@ -180,7 +185,16 @@ void computeMain_createSVOArray(uint threadIndex: SV_DispatchThreadID, uint thre
             else if (indivisible) nodeData.label = indivisibleLabelInThreadGroup + 1;
         }
 
-        if (divisible && layerNodeCount_G <= THREADGROUP_SIZE) SVODivisibleNodeInfos_G[nodeData.label - 1] = uint2(octreeIndex, nodeIndex);
+        if (divisible && layerNodeCount_G <= THREADGROUP_SIZE) {
+            if (oddLayer) {
+                uint2 divisibleNodeInfo = uint2(fatherNodeInfo.x, nodeIndex);
+                SVODivisibleNodeInfos_G[nodeData.label - 1].zw = divisibleNodeInfo;
+            }
+            else {
+                uint2 divisibleNodeInfo = uint2(fatherNodeInfo.z, nodeIndex);
+                SVODivisibleNodeInfos_G[nodeData.label - 1].xy = divisibleNodeInfo;
+            }
+        }
         if (hasData) SVO_G[lastLayerNodeCountSum_G + threadIndex] = nodeData;
 
         if (warpIndex == warpCount - 1 && warpLane == 0) {
@@ -202,6 +216,14 @@ void computeMain_createSVOArray(uint threadIndex: SV_DispatchThreadID, uint thre
                 SVOThreadGroupInfos[threadGroupIndex].threadGroupIndivisibleNodeCount_G = threadGroupInDivisibleNodeCount;
             }
         }
+
+        if (pushConst.frameIndex == 0) {
+            if (octreeIndex == 7 && nodeIndex == 6) printf("octreeIndex: %d, indivisible: %d\n", octreeIndex, indivisible);
+            if (octreeIndex == 8 && nodeIndex == 54) printf("octreeIndex: %d, indivisible: %d\n", octreeIndex, indivisible);
+            if (octreeIndex == 9 && nodeIndex == 438) printf("octreeIndex: %d, indivisible: %d\n", octreeIndex, indivisible);
+            if (octreeIndex == 10 && nodeIndex == 3508) printf("octreeIndex: %d, indivisible: %d\n", octreeIndex, indivisible);
+            if (octreeIndex == 11 && nodeIndex == 28064) printf("octreeIndex: %d, indivisible: %d\n", octreeIndex, indivisible);
+        }
     }
 
     uint layerNodeCount_E = groupFatherLayerDivisibleNodeCount_E * 8;
@@ -216,12 +238,15 @@ void computeMain_createSVOArray(uint threadIndex: SV_DispatchThreadID, uint thre
         return;
     }
     if (threadIndex < ((layerNodeCount_E + WARP_SIZE - 1) / WARP_SIZE * WARP_SIZE)) {
+        uint2 fatherNodeInfo;
         uint nodeIndex = 0;
         SVONodeData_E nodeData;
         bool hasData = false;
         if (threadIndex < layerNodeCount_E) {
-            uint fatherNodeIndex = threadIndex / 8;
-            nodeIndex = SVODivisibleNodeInfos_E[fatherNodeIndex] * 8 + blockLane;
+            uint fatherNodeLabel = threadIndex / 8;
+            fatherNodeInfo = SVODivisibleNodeInfos_E[fatherNodeLabel];
+            uint fatherNodeIndex = oddLayer ? fatherNodeInfo.x : fatherNodeInfo.y;
+            nodeIndex = fatherNodeIndex * 8 + blockLane;
 
             nodeData = OctreeArray_E[pushConst.currentDepth_SVO][nodeIndex];
             hasData = nodeData.irradiance.x + nodeData.irradiance.y + nodeData.irradiance.z > 0.0f;
@@ -269,7 +294,11 @@ void computeMain_createSVOArray(uint threadIndex: SV_DispatchThreadID, uint thre
             else if (indivisible) nodeData.label = indivisibleLabelInThreadGroup + 1;
         }
 
-        if (divisible && layerNodeCount_E <= THREADGROUP_SIZE) SVODivisibleNodeInfos_E[nodeData.label - 1] = nodeIndex;
+        if (divisible && layerNodeCount_E <= THREADGROUP_SIZE) {
+            uint2 divisibleNodeInfo = fatherNodeInfo;
+            if (oddLayer) SVODivisibleNodeInfos_E[nodeData.label - 1].y = nodeIndex;
+            else SVODivisibleNodeInfos_E[nodeData.label - 1].x = nodeIndex;
+        }
         if (hasData) SVO_E[lastLayerNodeCountSum_E + threadIndex] = nodeData;
 
         if (warpIndex == warpCount - 1 && warpLane == 0) {
@@ -350,6 +379,8 @@ void computeMain_offsetLabelMultiBlock(uint threadIndex: SV_DispatchThreadID, ui
         }
     }
     GroupMemoryBarrierWithGroupSync();
+
+    bool oddLayer = (pushConst.currentDepth_SVO & 1) == 1;
     //------------------------------------------------G---------------------------------------------------------
     uint layerNodeCount_G = groupFatherLayerDivisibleNodeCount_G * 8;
     uint lastLayerNodeCountSum_G = groupSVONodeTotalCount_G;
@@ -363,14 +394,25 @@ void computeMain_offsetLabelMultiBlock(uint threadIndex: SV_DispatchThreadID, ui
             uint label = nodeData.label + groupDivisibleNodeCountSum_G;
             SVO_G[lastLayerNodeCountSum_G + threadIndex].label = label;
 
-            uint fatherNodeIndex = threadIndex / 8;
+            uint fatherNodeLabel = threadIndex / 8;
             uint blockLane = groupThreadIndex & 7;
 
-            uint2 fatherNodeInfo = SVODivisibleNodeInfos_G[fatherNodeIndex];
-            uint octreeIndex = fatherNodeInfo.x + 1;
-            uint nodeIndex = fatherNodeInfo.y * 8 + blockLane;
+            uint4 fatherNodeInfo = SVODivisibleNodeInfos_G[fatherNodeLabel];
+            uint octreeIndex;
+            uint nodeIndex;
+            if (oddLayer) {
+                octreeIndex = fatherNodeInfo.x + pushConst.currentDepth_SVO;
+                nodeIndex = fatherNodeInfo.y * 8 + blockLane;
 
-            SVODivisibleNodeInfos_G[label - 1] = uint2(octreeIndex, nodeIndex);
+                uint2 divisibleNodeInfo = uint2(fatherNodeInfo.x, nodeIndex);
+                SVODivisibleNodeInfos_G[label - 1].zw = divisibleNodeInfo;
+            } else {
+                octreeIndex = fatherNodeInfo.z + pushConst.currentDepth_SVO;
+                nodeIndex = fatherNodeInfo.w * 8 + blockLane;
+
+                uint2 divisibleNodeInfo = uint2(fatherNodeInfo.z, nodeIndex);
+                SVODivisibleNodeInfos_G[label - 1].xy = divisibleNodeInfo;
+            }
         }
         else if (indivisible) SVO_G[lastLayerNodeCountSum_G + threadIndex].label += groupIndivisibleNodeCountSum_G;
     }
@@ -389,7 +431,8 @@ void computeMain_offsetLabelMultiBlock(uint threadIndex: SV_DispatchThreadID, ui
 
             uint fatherNodeIndex = threadIndex / 8;
             uint blockLane = groupThreadIndex & 7;
-            uint nodeIndex = SVODivisibleNodeInfos_E[fatherNodeIndex] * 8 + blockLane;
+            uint2 fatherNodeInfo = SVODivisibleNodeInfos_E[fatherNodeIndex];
+            uint nodeIndex = (oddLayer ? fatherNodeInfo.x : fatherNodeInfo.y) * 8 + blockLane;
             SVODivisibleNodeInfos_E[label - 1] = nodeIndex;
         }
         else if (indivisible) SVO_E[lastLayerNodeCountSum_E + threadIndex].label += groupIndivisibleNodeCountSum_E;
@@ -401,7 +444,6 @@ void computeMain_offsetLabelMultiBlock(uint threadIndex: SV_DispatchThreadID, ui
         uint cmdX = (nextLayerNodeCount + THREADGROUP_SIZE - 1) / THREADGROUP_SIZE;
         SVOGlobalInfo[0].cmd.x = cmdX;
 
-        
         if (cmdX == 0) {
             uint SVOTotalNodeCount_G = 0;
             uint SVOTotalNodeCount_E = 0;
@@ -419,7 +461,6 @@ void computeMain_offsetLabelMultiBlock(uint threadIndex: SV_DispatchThreadID, ui
             }
             #endif
         }
-        
     }
 }
 #ifndef NDEBUG

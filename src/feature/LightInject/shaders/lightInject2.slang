@@ -3,6 +3,7 @@
 #include "feature/PathTracing/shaders/pathTracingCommon.slang"
 #include "feature/LightInject/shaderio.h"
 #include "renderer/SVOPathGuidingRenderer/hard/shaderio.h"
+#include "renderer/SVOPathGuidingRenderer/hard/shaders/SVOPGCommon.slang"
 
 [[vk::push_constant]] ConstantBuffer<LightInjectPushConstant, ScalarDataLayout> pushConst;
 [[vk::binding(StaticBindingPoints_LightInject::eVGB_LightInject)]] RWStructuredBuffer<VGBVoxelData_SVOPG, ScalarDataLayout> VGBs[];
@@ -60,31 +61,6 @@ void raygenMain()
     }
 }
 
-int getVGBVoxelIndex(float3 hitPos) {
-    int voxelCount = int(pushConst.VGBStartPos_Size.w);
-    int voxelTotalCount = voxelCount * voxelCount * voxelCount;
-
-    int3 voxelIndexXYZ = int3((hitPos - pushConst.VGBStartPos_Size.xyz) / pushConst.VGBVoxelSize.xyz);
-
-    int voxelIndexU = 0;
-    while (voxelTotalCount > 1) {
-        voxelCount = voxelCount / 2;
-        voxelTotalCount = voxelTotalCount / 8;
-        if (voxelIndexXYZ.z / voxelCount == 1) {
-            voxelIndexU += 4 * voxelTotalCount;
-            voxelIndexXYZ.z -= voxelCount;
-        }
-        if (voxelIndexXYZ.y / voxelCount == 1) {
-            voxelIndexU += 2 * voxelTotalCount;
-            voxelIndexXYZ.y -= voxelCount;
-        }
-        if (voxelIndexXYZ.x / voxelCount == 1) {
-            voxelIndexU += voxelTotalCount;
-            voxelIndexXYZ.x -= voxelCount;
-        }
-    }
-    return voxelIndexU;
-}
 [shader("closesthit")]
 void rayClosestHitMain(inout LightInjectHitPayload payload, in BuiltInTriangleIntersectionAttributes attr) {
     float3 barycentrics = float3(1 - attr.barycentrics.x - attr.barycentrics.y, attr.barycentrics.x, attr.barycentrics.y);
@@ -141,13 +117,10 @@ void rayClosestHitMain(inout LightInjectHitPayload payload, in BuiltInTriangleIn
 
     CallShader<CallablePayload>(uint(material.type), callablePayload);
 
-    int voxelIndex = getVGBVoxelIndex(hitState.pos);
+    int voxelIndex = getVoxelIndex(hitState.pos, pushConst.VGBStartPos_Size.xyz, pushConst.VGBVoxelSize.xyz, (int)pushConst.VGBStartPos_Size.w);
 
-    float sign = sign(hitState.cosineON);
-    float[3] normal = { sign * hitState.normal.x, sign * hitState.normal.y, sign * hitState.normal.z };
-    float3 absNormal = abs(hitState.normal);
-    int VGBIndex = absNormal.x > absNormal.y ? (absNormal.x > absNormal.z ? 0 : 2) : (absNormal.y > absNormal.z ? 1 : 2);
-    VGBIndex = VGBIndex * 2 + (normal[VGBIndex] >= 0.0f ? 0 : 1);
+    float3 geoNormal = payload.isExt ? callablePayload.hitNormal : -callablePayload.hitNormal;
+    int VGBIndex = getVGBIndex(geoNormal);
 
     float3 irradiance = payload.radiance * max(hitState.cosineON, 0.0f) + material.emissive;
     uint lightNum = min(sceneInfo.numLights, NEE_MAX_SAMPLE_NUM);
@@ -474,23 +447,6 @@ struct PSout_Cube
 {
     float4 color : SV_Target;
 };
-int3 getVoxelIndexXYZ(int voxelIndex) {
-    int voxelCount = int(pushConst.VGBStartPos_Size.w);
-    int voxelGroupTotalCount = voxelCount * voxelCount * voxelCount;
-    int3 voxelIndexXYZ = int3(0, 0, 0);
-    while (voxelIndex > 0) {
-        voxelGroupTotalCount /= 8;
-        voxelCount /= 2;
-        int groupIndex = voxelIndex / voxelGroupTotalCount;
-        int3 groupIndexXYZ = int3(groupIndex & 1, (groupIndex & 2) >> 1, (groupIndex & 4) >> 2);
-        voxelIndexXYZ += groupIndexXYZ * voxelCount;
-
-        voxelIndex -= groupIndexXYZ.x * voxelGroupTotalCount + 
-                      groupIndexXYZ.y * voxelGroupTotalCount * 2 +
-                      groupIndexXYZ.z * voxelGroupTotalCount * 4;
-    }
-    return voxelIndexXYZ;
-}
 [shader("vertex")]
 VSout_Cube vertexMain_Cube(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID)
 {

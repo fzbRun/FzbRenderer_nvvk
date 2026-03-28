@@ -171,12 +171,12 @@ void SVO_SVOPG::createSVOArray() {
 		| VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT);
 	NVVK_DBG_NAME(SVOGlobalInfo.buffer);
 
-	bufferSize = sizeof(shaderio::uint2) * SVOSize_G;
+	bufferSize = sizeof(shaderio::uint4) * SVOSize_G;
 	allocator->createBuffer(SVODivisibleNodeInfos_G, bufferSize,
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(SVODivisibleNodeInfos_G.buffer);
 
-	bufferSize = sizeof(uint32_t) * SVOSize_E;
+	bufferSize = sizeof(shaderio::uint2) * SVOSize_E;
 	allocator->createBuffer(SVODivisibleNodeInfos_E, bufferSize,
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(SVODivisibleNodeInfos_E.buffer);

@@ -284,10 +284,15 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
         SVONodeData_E nodeData = SVO_E[nodeIndex];
 
         IndivisibleNodeData_E groupNodeData_E;
-        groupNodeData_E.normal = nodeData.meanNormal.xyz;
+        groupNodeData_E.singleSide = length(nodeData.meanNormal.xyz) >= 0.707;
+        groupNodeData_E.normal = normalize(nodeData.meanNormal.xyz);
         groupNodeData_E.nodeIndex = nodeIndex;
         groupNodeData_E.irradiance = length(nodeData.irradiance);
         groupNodeData_E.aabb = nodeData.aabb;
+
+        float3 tangent, bitangent;
+        orthonormalBasis(groupNodeData_E.normal, tangent, bitangent);
+        groupNodeData_E.TBN = float3x3(tangent, bitangent, groupNodeData_E.normal);
 
         groupNodeDatas_E[groupThreadIndex] = groupNodeData_E;
     }
@@ -303,8 +308,13 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
 
         IndivisibleNodeData_G groupNodeData_G;
         groupNodeData_G.nodeLabel = nodeLabel + 1;
-        groupNodeData_G.normal = nodeData.meanNormal.xyz;
+        groupNodeData_G.singleSide = length(nodeData.meanNormal.xyz) >= 0.707f;
+        groupNodeData_G.normal = normalize(nodeData.meanNormal.xyz);
         groupNodeData_G.aabb = nodeData.aabb;
+
+        float3 tangent, bitangent;
+        orthonormalBasis(groupNodeData_G.normal, tangent, bitangent);
+        groupNodeData_G.TBN = float3x3(tangent, bitangent, groupNodeData_G.normal);
 
         groupNodeDatas_G[groupThreadIndex] = groupNodeData_G;
     }
@@ -323,18 +333,10 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
     uint groupNodeLabel_G = ((threadIndex / threadCount_perNodeG) - currentGroupNodeStartLabel_G) % indivisibleNodeCount_G;
     IndivisibleNodeData_G nodeData_G = groupNodeDatas_G[groupNodeLabel_G];
 
-    float3 meanNormal_E = nodeData_E.normal; bool singleSide_E = length(meanNormal_E) >= 0.707;
-    float3 meanNormal_G = nodeData_G.normal; bool singleSide_G = length(meanNormal_G) >= 0.707;
+    float3 meanNormal_E = nodeData_E.normal; bool singleSide_E = nodeData_E.singleSide == 1;
+    float3 meanNormal_G = nodeData_G.normal; bool singleSide_G = nodeData_G.singleSide == 1;
 
-    meanNormal_E = normalize(meanNormal_E);
-    meanNormal_G = normalize(meanNormal_G);
-
-    float3 tangent, bitangent;
-    orthonormalBasis(meanNormal_E, tangent, bitangent);
-    float3x3 TBN_E = float3x3(tangent, bitangent, meanNormal_E);
-
-    orthonormalBasis(meanNormal_G, tangent, bitangent);
-    float3x3 TBN_G = float3x3(tangent, bitangent, meanNormal_G);
+    float3x3 TBN_G = nodeData_G.TBN;
 
     uint seed = xxhash32(uint3(threadIndex, groupThreadIndex, pushConst.frameIndex));
 
@@ -349,7 +351,7 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
     float weight = 0.0f;
     for (int hitTestIndex = 0; hitTestIndex < HITTEST_COUNT; ++hitTestIndex) {
         float3 samplePoint_E = singleSide_E ? sample_hemisphere_mean(seed) : sample_sphere_mean(seed);
-        samplePoint_E = mul(samplePoint_E, TBN_E); // slang is right multiplication
+        samplePoint_E = mul(samplePoint_E, nodeData_E.TBN); // slang is right multiplication
         samplePoint_E = getAABBPoint(samplePoint_E, nodeCenter_E, halfSize_E);
 
         float3 samplePoint_G = singleSide_G ? sample_hemisphere_mean(seed) : sample_sphere_mean(seed);
@@ -380,6 +382,7 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
             if (cosine <= 0.0f || dot(outgoing, hitPayload.normal) <= 0.0f) continue;
         } else if (dot(hitPayload.normal, -ray.Direction) < 0.0f) isExt = false;
 
+        float3 tangent, bitangent;
         orthonormalBasis(hitPayload.normal, tangent, bitangent);
         TBN_G = float3x3(tangent, bitangent, hitPayload.normal);
 

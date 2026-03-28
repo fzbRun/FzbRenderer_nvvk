@@ -224,6 +224,11 @@ void Octree::createDescriptorSetLayout() {
 		.descriptorCount = (uint32_t)setting.VGBs.size(),
 		.stageFlags = VK_SHADER_STAGE_ALL});
 	bindings.addBinding({
+		.binding = shaderio::BindingPoints_Octree::eVGBMaterialInfos_Octree,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+	bindings.addBinding({
 		.binding = shaderio::BindingPoints_Octree::eOctreeArray_G_Octree,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = (uint32_t)OctreeArray_G.size(),	//max 128x128x128
@@ -259,6 +264,10 @@ void Octree::createDescriptorSet() {
 		staticDescPack.makeWrite(shaderio::BindingPoints_Octree::eVGB_Octree, 0, 0, setting.VGBs.size());
 	nvvk::Buffer* VGBsPtr = setting.VGBs.data();
 	write.append(VGBWrite, VGBsPtr);
+
+	VkWriteDescriptorSet    VGBMaterialInfoWrite =
+		staticDescPack.makeWrite(shaderio::BindingPoints_Octree::eVGBMaterialInfos_Octree, 0, 0, 1);
+	write.append(VGBMaterialInfoWrite, setting.VGBMaterialInfos, 0, setting.VGBMaterialInfos.bufferSize);
 
 	VkWriteDescriptorSet    OctreeArrayWrite =
 		staticDescPack.makeWrite(shaderio::BindingPoints_Octree::eOctreeArray_G_Octree, 0, 0, OctreeArray_G.size());

@@ -1,23 +1,26 @@
 #include "common/Shader/shaderStructType.h"
 #include "renderer/SVOPathGuidingRenderer/hard/shaderio.h"
+#include "renderer/SVOPathGuidingRenderer/hard/shaders/SVOPGCommon.slang"
 #include "nvshaders/functions.h.slang"
 #include "common/Shader/Slang/commonFunction.slang"
 
 [[vk::push_constant]] ConstantBuffer<RasterVoxelizationPushConstant> pushConst;
-[[vk::binding(RasterVoxelizationBindingPoints::eTextures_RV)]] Sampler2D textures[];
-[[vk::binding(RasterVoxelizationBindingPoints::eVGB_RV)]] globallycoherent volatile RWStructuredBuffer<VGBVoxelData_SVOPG, ScalarDataLayout> VGBs[];
+[[vk::binding(RasterVoxelizationBindingPoints_SVOPG::eTextures_SVOPG)]] Sampler2D textures[];
+[[vk::binding(RasterVoxelizationBindingPoints_SVOPG::eVGB_SVOPG)]] RWStructuredBuffer<VGBVoxelData_SVOPG, ScalarDataLayout> VGBs[]; // globallycoherent volatile
+[[vk::binding(RasterVoxelizationBindingPoints_SVOPG::eVGBMaterialInfo_SVOPG)]] RWStructuredBuffer<VGBMaterialInfo_SVOPG> VGBMaterialInfos;
 #ifndef NDEBUG
-[[vk::binding(RasterVoxelizationBindingPoints::eFragmentCountBuffer_RV)]] RWStructuredBuffer<uint32_t> fragmentCountBuffer;
-[[vk::binding(RasterVoxelizationBindingPoints::eWireframeMap_RV)]] RWTexture2D<float4> wireframeMap;
-[[vk::binding(RasterVoxelizationBindingPoints::eBaseMap)]] Texture2D<float4> baseMap;
+[[vk::binding(RasterVoxelizationBindingPoints_SVOPG::eFragmentCountBuffer_SVOPG)]] RWStructuredBuffer<uint32_t> fragmentCountBuffer;
+[[vk::binding(RasterVoxelizationBindingPoints_SVOPG::eWireframeMap_SVOPG)]] RWTexture2D<float4> wireframeMap;
+[[vk::binding(RasterVoxelizationBindingPoints_SVOPG::eBaseMap_SVOPG)]] Texture2D<float4> baseMap;
 #endif
 
 //----------------------------------------------clearVGB--------------------------------------------
-[numthreads(512, 1, 1)]
+[numthreads(1024, 1, 1)]
 [shader("compute")]
-void computeMain_clearVGB(uint3 dispatchId: SV_DispatchThreadID) {
-    uint totalVoxelCount = uint(pow(pushConst.voxelSize_Count.w, 3));
-    if (dispatchId.x >= totalVoxelCount) return;
+void computeMain_clearVGB(uint threadIndex: SV_DispatchThreadID) {
+    uint voxelCount = uint(pushConst.voxelSize_Count.w * pushConst.voxelSize_Count.w * pushConst.voxelSize_Count.w);
+    uint totalVoxelCount = voxelCount  * 6;
+    if (threadIndex >= totalVoxelCount) return;
 
     VGBVoxelData_SVOPG voxelData;
     voxelData.aabbI.minimum = int4(FloatToOrderedInt(3.402823466e+38f));
@@ -26,8 +29,9 @@ void computeMain_clearVGB(uint3 dispatchId: SV_DispatchThreadID) {
     voxelData.sumNormal_G = float4(0.0f);
     voxelData.sumNormal_E = float4(0.0f);
 
-    for (int i = 0; i < 6; ++i)
-        VGBs[i][dispatchId.x] = voxelData;
+    uint normalIndex = threadIndex / voxelCount;
+    uint voxelIndex = threadIndex & (voxelCount - 1);
+    VGBs[normalIndex][voxelIndex] = voxelData;
 }
 //----------------------------------------------createVGB--------------------------------------------
 struct VSout
@@ -65,17 +69,17 @@ VSout vertexMain(uint vertexIndex: SV_VertexID)
     float3 posMesh = getAttribute<float3>(mesh.dataBuffer, mesh.triMesh.positions, vertexIndex);
     float3 normalMesh = getAttribute<float3>(mesh.dataBuffer, mesh.triMesh.normals, vertexIndex);
 
-    BSDFMaterial material = sceneInfo.materials[instance.materialIndex];
-    int normalMapIndex = material.materialMapIndex.x;
-    if (normalMapIndex >= 0) {
-        float2 texCoords = getAttribute<float2>(mesh.dataBuffer, mesh.triMesh.texCoords, vertexIndex);
-        float3 tangent, bitangent;
-        orthonormalBasis(normalMesh, tangent, bitangent);
-        float3x3 TBN = float3x3(tangent, bitangent, normalMesh);
-
-        float3 localNormal = textures[normalMapIndex].SampleLevel(texCoords, 0).xyz;
-        normalMesh = mul(localNormal, TBN);
-    }
+    //BSDFMaterial material = sceneInfo.materials[instance.materialIndex];
+    //int normalMapIndex = material.materialMapIndex.x;
+    //if (normalMapIndex >= 0) {
+    //    float2 texCoords = getAttribute<float2>(mesh.dataBuffer, mesh.triMesh.texCoords, vertexIndex);
+    //    float3 tangent, bitangent;
+    //    orthonormalBasis(normalMesh, tangent, bitangent);
+    //    float3x3 TBN = float3x3(tangent, bitangent, normalMesh);
+    //
+    //    float3 localNormal = textures[normalMapIndex].SampleLevel(texCoords, 0).xyz;
+    //    normalMesh = mul(localNormal, TBN);
+    //}
 
     float3 normal = mul(normalMesh, transpose(Inverse3x3(float3x3(instance.transform))));
     float4 pos = mul(float4(posMesh, 1.0), instance.transform);
@@ -111,33 +115,6 @@ void geometryMain(
     outputStream.RestartStrip();
 }
 
-int getVoxelIndex(float3 worldPos) {
-    /*
-    We determine whether a pos is located in a node by checking whether it is contained within the aabb of the node in the order of 0-7.
-    Therefore, we should assign the pos of the boundary to the smaller node to avoid issues caused by floating-point number comparisons
-    */
-    int3 voxelIndex = int3((worldPos - pushConst.voxelGroupStartPos) * 0.999f / pushConst.voxelSize_Count.xyz);
-    int voxelCount = uint(pushConst.voxelSize_Count.w);
-    int voxelTotalCount = voxelCount * voxelCount * voxelCount;
-    int voxelIndexU = 0;
-    while (voxelTotalCount > 1) {
-        voxelCount = voxelCount / 2;
-        voxelTotalCount = voxelTotalCount / 8;
-        if (voxelIndex.z / voxelCount == 1) {
-            voxelIndexU += 4 * voxelTotalCount;
-            voxelIndex.z -= voxelCount;
-        }
-        if (voxelIndex.y / voxelCount == 1) {
-            voxelIndexU += 2 * voxelTotalCount;
-            voxelIndex.y -= voxelCount;
-        }
-        if (voxelIndex.x / voxelCount == 1) {
-            voxelIndexU += voxelTotalCount;
-            voxelIndex.x -= voxelCount;
-        }
-    }
-    return voxelIndexU;
-}
 void atomicAABB(float3 worldPos, int voxelIndexU, int VGBIndex) {
     int worldPosX = FloatToOrderedInt(worldPos.x);
     int worldPosY = FloatToOrderedInt(worldPos.y);
@@ -149,7 +126,6 @@ void atomicAABB(float3 worldPos, int voxelIndexU, int VGBIndex) {
     InterlockedMax<int>(VGBs[VGBIndex][voxelIndexU].aabbI.maximum.y, worldPosY);
     InterlockedMax<int>(VGBs[VGBIndex][voxelIndexU].aabbI.maximum.z, worldPosZ);
 }
-
 void atomicNormalG(float3 normal, int voxelIndexU, int VGBIndex) {
     float3 normal_G = normalize(normal);
     InterlockedAdd<float>(VGBs[VGBIndex][voxelIndexU].sumNormal_G.w, 1.0f);
@@ -157,6 +133,7 @@ void atomicNormalG(float3 normal, int voxelIndexU, int VGBIndex) {
     InterlockedAdd<float>(VGBs[VGBIndex][voxelIndexU].sumNormal_G.y, normal_G.y);
     InterlockedAdd<float>(VGBs[VGBIndex][voxelIndexU].sumNormal_G.z, normal_G.z);
 }
+/*
 void atomicMaterialTypeCount(uint materialIndex, int voxelIndexU, int VGBIndex) {
     uint preVal = 0;
     uint newVal = uint(materialIndex) << 26; ++newVal;
@@ -180,15 +157,15 @@ void atomicMaterialTypeCount(uint materialIndex, int voxelIndexU, int VGBIndex) 
         InterlockedCompareExchange(VGBs[VGBIndex][voxelIndexU].materialIndex_Count, preVal, newVal, curVal);
     }
 }
+*/
+void atomicMaterialTypeCount(uint materialIndex, int voxelIndexU, int VGBIndex) {
+    InterlockedAdd<uint>(VGBMaterialInfos[voxelIndexU].materialCount[materialIndex], 1);
+}
 
 [shader("pixel")]
 void fragmentMain(GSout input) {
-    int voxelIndexU = getVoxelIndex(input.worldPos);
-
-    float[3] normal = { input.worldNormal.x, input.worldNormal.y, input.worldNormal.z };
-    float3 absNormal = abs(input.worldNormal);
-    int VGBIndex = absNormal.x > absNormal.y ? (absNormal.x > absNormal.z ? 0 : 2) : (absNormal.y > absNormal.z ? 1 : 2);
-    VGBIndex = VGBIndex * 2 + (normal[VGBIndex] >= 0.0f ? 0 : 1);
+    int voxelIndexU = getVoxelIndex(input.worldPos, pushConst.voxelGroupStartPos, pushConst.voxelSize_Count.xyz, (int)pushConst.voxelSize_Count.w);
+    int VGBIndex = getVGBIndex(input.worldNormal);
 
     atomicAABB(input.worldPos, voxelIndexU, VGBIndex);
     atomicNormalG(input.worldNormal, voxelIndexU, VGBIndex);
@@ -246,12 +223,8 @@ void geometryMain_ThreeView(
 
 [shader("pixel")]
 PSout_ThreeView fragmentMain_ThreeView(GSout_ThreeView input) {
-    int voxelIndexU = getVoxelIndex(input.worldPos);
-
-    float[3] normal = { input.worldNormal.x, input.worldNormal.y, input.worldNormal.z };
-    float3 absNormal = abs(input.worldNormal);
-    int VGBIndex = absNormal.x > absNormal.y ? (absNormal.x > absNormal.z ? 0 : 2) : (absNormal.y > absNormal.z ? 1 : 2);
-    VGBIndex = VGBIndex * 2 + (normal[VGBIndex] >= 0.0f ? 0 : 1);
+    int voxelIndexU = getVoxelIndex(input.worldPos, pushConst.voxelGroupStartPos, pushConst.voxelSize_Count.xyz, (int)pushConst.voxelSize_Count.w);
+    int VGBIndex = getVGBIndex(input.worldNormal);
 
     atomicAABB(input.worldPos, voxelIndexU, VGBIndex);
     atomicNormalG(input.worldNormal, voxelIndexU, VGBIndex);

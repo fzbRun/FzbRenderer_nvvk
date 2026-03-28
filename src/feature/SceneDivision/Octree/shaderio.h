@@ -10,6 +10,7 @@
 NAMESPACE_SHADERIO_BEGIN()
 enum BindingPoints_Octree {
 	eVGB_Octree = 0,
+	eVGBMaterialInfos_Octree,
 	eOctreeArray_G_Octree,
 	eOctreeArray_E_Octree,
 	eWireframeMap_Octree,

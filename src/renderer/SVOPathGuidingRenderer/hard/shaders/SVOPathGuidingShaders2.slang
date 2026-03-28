@@ -2,6 +2,7 @@
 #include "feature/SceneDivision/RasterVoxelization/shaderio.h"
 #include "feature/SceneDivision/SparseVoxelOctree/shaderio.h"
 #include "renderer/SVOPathGuidingRenderer/hard/shaderio.h"
+#include "renderer/SVOPathGuidingRenderer/hard/shaders/SVOPGCommon.slang"
 
 [[vk::push_constant]] ConstantBuffer<SVOPathGuidingPushConstant, ScalarDataLayout> pushConst;
 [[vk::binding(StaticBindingPoints_SVOPG::eSVO_G_SVOPG)]] StructuredBuffer<SVONodeData_G, ScalarDataLayout> SVO_G;
@@ -72,7 +73,7 @@ bool traceRay(RayDesc ray, inout HitPayload_SVOPG payload)
         float cosineON = dot(payload.hitNormal, -ray.Direction);
         if (cosineON <= 0.0f) payload.hitNormal = -payload.hitNormal;
         if (payload.material.type != MaterialType::Dielectric && payload.material.type != MaterialType::RoughDielectric)
-            payload.material.emissive *= cosineON > 0.0f ? 1.0f : 0.0f;;
+            payload.material.emissive *= cosineON > 0.0f ? 1.0f : 0.0f;
 
         float3 tangent, bitangent;
         orthonormalBasis(payload.hitNormal, tangent, bitangent);
@@ -146,11 +147,9 @@ bool SphericalRectangleSample(AABB aabb, float3 hitPos, inout uint randomSeed, i
     }
     return true;
 }
-bool getNodeAABB_E_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload) {
-    float normals[3] = { payload.hitNormal.x, payload.hitNormal.y, payload.hitNormal.z };
-    float3 absNormal = abs(payload.hitNormal);
-    uint normalIndex = absNormal.x > absNormal.y ? (absNormal.x > absNormal.z ? 0 : 2) : (absNormal.y > absNormal.z ? 1 : 2);
-    normalIndex = normalIndex * 2 + (normals[normalIndex] > 0.0f ? 0 : 1);
+int getNodeAABB_E_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload) {
+    float3 geoNormal = payload.isExt ? payload.hitNormal : -payload.hitNormal;
+    uint normalIndex = getVGBIndex(geoNormal);
 
     uint nodeIndex_G = normalIndex * 8, nodeLabel_G = 0, nodeIndexSum_G = 0, layerIndex_G = 1;
     bool hitIndivisible = false, hitNode = false;
@@ -194,7 +193,7 @@ bool getNodeAABB_E_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload) {
             if (!hitNode || hitIndivisible) break;
         }
     }
-    if (!hitIndivisible) return false;
+    if (!hitIndivisible) return 0;
 
     float pdf = 1.0f;
     float weightSampleProbability = rand(payload.randomSeed);
@@ -242,11 +241,11 @@ bool getNodeAABB_E_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload) {
         if (!hitNode || hitIndivisible) break;
     }
     if (!hitIndivisible) {
-        return false;
+        return 1;
     }
 
     payload.pdf = pdf * groupNodeNotIgnoreRatios_E[nodeLabel_E - 1];
-    return true;
+    return 2;
 }
 
 void BSDFSample(inout HitPayload_SVOPG payload) {
@@ -367,20 +366,20 @@ void computeMain_SVOPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
         } else {
             accumulatedRadiance += payload.material.emissive * bsdf_cosine_pdf;
             AABB nodeAABB_E;
-            bool useSVOPG = getNodeAABB_E_SVOPG(nodeAABB_E, payload);
-            if (useSVOPG) useSVOPG = SphericalRectangleSample(nodeAABB_E, payload.hitPos, payload.randomSeed, payload.incidence, payload.pdf);
-            if (useSVOPG) {
-                payload.bsdf = getBSDF(payload.material, payload.incidence, payload.hitNormal, payload.outgoing, payload.TBN, payload.isExt);
-                if (dot(payload.incidence, payload.hitNormal) * dot(payload.outgoing, payload.hitNormal) < 0.0f) payload.isExt = !payload.isExt;
-            }
-            else BSDFSample(payload);
+            //bool useSVOPG = getNodeAABB_E_SVOPG(nodeAABB_E, payload);
+            //if (useSVOPG) useSVOPG = SphericalRectangleSample(nodeAABB_E, payload.hitPos, payload.randomSeed, payload.incidence, payload.pdf);
+            //if (useSVOPG) {
+            //    payload.bsdf = getBSDF(payload.material, payload.incidence, payload.hitNormal, payload.outgoing, payload.TBN, payload.isExt);
+            //    if (dot(payload.incidence, payload.hitNormal) * dot(payload.outgoing, payload.hitNormal) < 0.0f) payload.isExt = !payload.isExt;
+            //}
+            ////else BSDFSample(payload);
             //else break;
 
-            //int useSVOPG = getNodeAABB_E_SVOPG(nodeAABB_E, payload);
-            //if (useSVOPG == 2) accumulatedRadiance = float3(10.0f, 0.0f, 0.0f);
-            //else if (useSVOPG == 1) accumulatedRadiance = float3(0.0f, 10.0f, 0.0f);
-            //else accumulatedRadiance = float3(0.0f, 0.0f, 10.0f);
-            //break;
+            int useSVOPG = getNodeAABB_E_SVOPG(nodeAABB_E, payload);
+            if (useSVOPG == 2) accumulatedRadiance = float3(10.0f, 0.0f, 0.0f);
+            else if (useSVOPG == 1) accumulatedRadiance = float3(0.0f, 10.0f, 0.0f);
+            else accumulatedRadiance = float3(0.0f, 0.0f, 10.0f);
+            break;
 
             float cosine = dot(payload.hitNormal, payload.incidence);
             if (payload.material.type == MaterialType::Dielectric || payload.material.type == MaterialType::RoughDielectric) cosine = abs(cosine);

@@ -26,6 +26,7 @@ enum AlbedoMapType {
 	Checkerboard = 1000,
 };
 //-------------------------------------------------------Material------------------------------------------------------------
+#define MAX_MATERIAL_COUNT 16
 enum MaterialType {
 	Diffuse = 0,
 	Conductor = 1,

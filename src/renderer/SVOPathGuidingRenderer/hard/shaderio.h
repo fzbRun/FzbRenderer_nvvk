@@ -53,13 +53,18 @@ struct SVONodeInfo_E_SVOPG {
 	AABB aabb;
 };
 //-------------------------------------------SVORasterVoxelization----------------------------------------
-enum Normal_SVOPG {
-	Right_SVONormal,
-	Left_SVONormal,
-	Up_SVONormal,
-	Bottom_SVONormal,
-	Forward_SVONormal,
-	Back_SVONormal,
+enum RasterVoxelizationBindingPoints_SVOPG
+{
+	eTextures_SVOPG = 0,
+	eVGB_SVOPG,
+	eVGBMaterialInfo_SVOPG,
+	eFragmentCountBuffer_SVOPG,
+	eWireframeMap_SVOPG,
+	eBaseMap_SVOPG,
+};
+
+struct VGBMaterialInfo_SVOPG {
+	uint materialCount[MAX_MATERIAL_COUNT];
 };
 
 struct AABBI {
@@ -70,11 +75,10 @@ struct VGBVoxelData_SVOPG {
 	float4 irradiance;
 	float4 sumNormal_G;
 	float4 sumNormal_E;
-	AABBI aabbI;					 // 
-	uint32_t materialIndex_Count;	//first 26 bite is materialCount, last 6 bite is materialIndex(assume max 64 material)
+	AABBI aabbI;
 };
 //-------------------------------------------SVO----------------------------------------
-#define SVOSize_G 4000	//512 * 6
+#define SVOSize_G 5000	//512 * 6
 #define SVOSize_E 800
 #if SVOSize_G > SVOSize_E
 #define SVOSize SVOSize_G
@@ -113,7 +117,7 @@ struct SVOGlobalInfo_SVOPG {
 	SVOLayerInfo layerInfos_E[MAX_OCTREE_DEPTH];
 };
 //-------------------------------------------SVOWeight----------------------------------------
-#define SVOIndivisibleNodeCount_G 1500
+#define SVOIndivisibleNodeCount_G 2000
 #define SVOIndivisibleNodeCount_E 500
 
 #define HITTEST_COUNT 8
@@ -161,15 +165,19 @@ struct SVOIndivisibleNodeInfo {
 };
 struct IndivisibleNodeData_E {
 	float3 normal;
+	uint singleSide;
+	float3x3 TBN;
 	uint nodeIndex;
 	float irradiance;
 	AABB aabb;
 };
 struct IndivisibleNodeData_G {
 	float3 normal;
+	uint singleSide;
+	float3x3 TBN;
 	uint nodeLabel;
-	AABB aabb;
 	uint materialType;
+	AABB aabb;
 };
 
 NAMESPACE_SHADERIO_END()
