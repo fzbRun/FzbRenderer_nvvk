@@ -165,7 +165,7 @@ void atomicMaterialTypeCount(uint materialIndex, int voxelIndexU, int VGBIndex) 
 [shader("pixel")]
 void fragmentMain(GSout input) {
     int voxelIndexU = getVoxelIndex(input.worldPos, pushConst.voxelGroupStartPos, pushConst.voxelSize_Count.xyz, (int)pushConst.voxelSize_Count.w);
-    int VGBIndex = getVGBIndex(input.worldNormal);
+    int VGBIndex = getNormalIndex(input.worldNormal);
 
     atomicAABB(input.worldPos, voxelIndexU, VGBIndex);
     atomicNormalG(input.worldNormal, voxelIndexU, VGBIndex);
@@ -224,7 +224,7 @@ void geometryMain_ThreeView(
 [shader("pixel")]
 PSout_ThreeView fragmentMain_ThreeView(GSout_ThreeView input) {
     int voxelIndexU = getVoxelIndex(input.worldPos, pushConst.voxelGroupStartPos, pushConst.voxelSize_Count.xyz, (int)pushConst.voxelSize_Count.w);
-    int VGBIndex = getVGBIndex(input.worldNormal);
+    int VGBIndex = getNormalIndex(input.worldNormal);
 
     atomicAABB(input.worldPos, voxelIndexU, VGBIndex);
     atomicNormalG(input.worldNormal, voxelIndexU, VGBIndex);
@@ -273,6 +273,8 @@ VSout_Cube vertexMain_Cube(uint vertexIndex: SV_VertexID, int instanceIndex : SV
         //Slightly reduce the depth to prevent depth conflicts in subsequent wireframes
         output.sv_position = mul(float4(output.worldPos.xy, output.worldPos.z * 0.99f, 1.0f), sceneInfo.viewProjMatrix);
         output.color = normalize(max(voxelData.sumNormal_G.xyz / voxelData.sumNormal_G.w, 0.0f));
+
+        //if (VGBIndex == 3 && voxelIndex == 12047) output.color = float3(10.0f, 0.0f, 0.0f);
     }
     return output;
 }

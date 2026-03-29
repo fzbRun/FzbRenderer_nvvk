@@ -66,7 +66,7 @@ void computeMain_initSVOArray(uint threadIndex: SV_DispatchThreadID) {
 
     SVONodeData_E nodeData_E;
     nodeData_E.irradiance = float3(0.0f);
-    nodeData_E.notIgnoreRatio = 1.0f;
+    nodeData_E.pdf = 1.0f;
     nodeData_E.meanNormal = float4(0.0f);
     nodeData_E.aabb.minimum.x = 3.402823466e+38F;
     nodeData_E.aabb.minimum.y = 3.402823466e+38F;

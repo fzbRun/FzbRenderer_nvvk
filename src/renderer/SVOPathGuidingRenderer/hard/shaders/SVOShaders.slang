@@ -60,7 +60,7 @@ void computeMain_initSVOArray(uint threadIndex: SV_DispatchThreadID) {
 
     SVONodeData_E nodeData_E;
     nodeData_E.irradiance = float3(0.0f);
-    nodeData_E.notIgnoreRatio = 1.0f;
+    nodeData_E.pdf = 1.0f;
     nodeData_E.meanNormal = float4(0.0f);
     nodeData_E.aabb.minimum.x = 3.402823466e+38F;
     nodeData_E.aabb.minimum.y = 3.402823466e+38F;
@@ -217,13 +217,13 @@ void computeMain_createSVOArray(uint threadIndex: SV_DispatchThreadID, uint thre
             }
         }
 
-        if (pushConst.frameIndex == 0) {
-            if (octreeIndex == 7 && nodeIndex == 6) printf("octreeIndex: %d, indivisible: %d\n", octreeIndex, indivisible);
-            if (octreeIndex == 8 && nodeIndex == 54) printf("octreeIndex: %d, indivisible: %d\n", octreeIndex, indivisible);
-            if (octreeIndex == 9 && nodeIndex == 438) printf("octreeIndex: %d, indivisible: %d\n", octreeIndex, indivisible);
-            if (octreeIndex == 10 && nodeIndex == 3508) printf("octreeIndex: %d, indivisible: %d\n", octreeIndex, indivisible);
-            if (octreeIndex == 11 && nodeIndex == 28064) printf("octreeIndex: %d, indivisible: %d\n", octreeIndex, indivisible);
-        }
+        //if (pushConst.frameIndex == 0) {
+        //    if (octreeIndex == 19 && nodeIndex == 2) printf("octreeIndex: %d, indivisible: %d, nodeIndex: %d\n", octreeIndex, indivisible, lastLayerNodeCountSum_G + threadIndex);
+        //    if (octreeIndex == 20 && nodeIndex == 23) printf("octreeIndex: %d, indivisible: %d, nodeIndex: %d\n", octreeIndex, indivisible, lastLayerNodeCountSum_G + threadIndex);
+        //    if (octreeIndex == 21 && nodeIndex == 188) printf("octreeIndex: %d, indivisible: %d, nodeIndex: %d\n", octreeIndex, indivisible, lastLayerNodeCountSum_G + threadIndex);
+        //    if (octreeIndex == 22 && nodeIndex == 1505) printf("octreeIndex: %d, indivisible: %d, nodeIndex: %d\n", octreeIndex, indivisible, lastLayerNodeCountSum_G + threadIndex);
+        //    if (octreeIndex == 23 && nodeIndex == 12047) printf("octreeIndex: %d, indivisible: %d, nodeIndex: %d\n", octreeIndex, indivisible, lastLayerNodeCountSum_G + threadIndex);
+        //}
     }
 
     uint layerNodeCount_E = groupFatherLayerDivisibleNodeCount_E * 8;

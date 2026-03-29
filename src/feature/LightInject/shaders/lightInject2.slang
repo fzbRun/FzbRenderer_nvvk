@@ -120,7 +120,7 @@ void rayClosestHitMain(inout LightInjectHitPayload payload, in BuiltInTriangleIn
     int voxelIndex = getVoxelIndex(hitState.pos, pushConst.VGBStartPos_Size.xyz, pushConst.VGBVoxelSize.xyz, (int)pushConst.VGBStartPos_Size.w);
 
     float3 geoNormal = payload.isExt ? callablePayload.hitNormal : -callablePayload.hitNormal;
-    int VGBIndex = getVGBIndex(geoNormal);
+    int VGBIndex = getNormalIndex(geoNormal);
 
     float3 irradiance = payload.radiance * max(hitState.cosineON, 0.0f) + material.emissive;
     uint lightNum = min(sceneInfo.numLights, NEE_MAX_SAMPLE_NUM);

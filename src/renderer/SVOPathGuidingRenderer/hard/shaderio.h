@@ -8,8 +8,8 @@
 #define FZBRENDERER_PATHGUIDING_SHADER_IO_H
 NAMESPACE_SHADERIO_BEGIN()
 
-#define SVO_PATHGUIDING_THREADGROUP_SIZE_X 32
-#define SVO_PATHGUIDING_THREADGROUP_SIZE_Y 32
+#define SVO_PATHGUIDING_THREADGROUP_SIZE_X 16
+#define SVO_PATHGUIDING_THREADGROUP_SIZE_Y 16
 struct SVOPathGuidingPushConstant
 {
 	float4 VGBStartPos_Size;
@@ -78,8 +78,8 @@ struct VGBVoxelData_SVOPG {
 	AABBI aabbI;
 };
 //-------------------------------------------SVO----------------------------------------
-#define SVOSize_G 5000	//512 * 6
-#define SVOSize_E 800
+#define SVOSize_G 4000	//512 * 6
+#define SVOSize_E 100
 #if SVOSize_G > SVOSize_E
 #define SVOSize SVOSize_G
 #else
@@ -117,8 +117,8 @@ struct SVOGlobalInfo_SVOPG {
 	SVOLayerInfo layerInfos_E[MAX_OCTREE_DEPTH];
 };
 //-------------------------------------------SVOWeight----------------------------------------
-#define SVOIndivisibleNodeCount_G 2000
-#define SVOIndivisibleNodeCount_E 500
+#define SVOIndivisibleNodeCount_G 1600
+#define SVOIndivisibleNodeCount_E 100
 
 #define HITTEST_COUNT 8
 #define OUTGOING_COUNT 64

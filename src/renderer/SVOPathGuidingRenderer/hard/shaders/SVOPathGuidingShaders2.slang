@@ -23,7 +23,7 @@ groupshared GlobalInfo_SOVPG groupGlobalInfo;
 #define GroupNodeInfoCount_E SVOSize_E
 groupshared SVONodeInfo_G_SVOPG groupNodeInfos_G[GroupNodeInfoCount_G]; // 32KB
 groupshared SVONodeInfo_E_SVOPG groupNodeInfos_E[GroupNodeInfoCount_E]; // 25KB
-groupshared float groupNodeNotIgnoreRatios_E[SVOIndivisibleNodeCount_E];
+groupshared float groupNodePdfs_E[SVOIndivisibleNodeCount_E];
 
 bool traceRay(RayDesc ray, inout HitPayload_SVOPG payload)
 {
@@ -147,9 +147,9 @@ bool SphericalRectangleSample(AABB aabb, float3 hitPos, inout uint randomSeed, i
     }
     return true;
 }
-int getNodeAABB_E_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload) {
+bool getNodeAABB_E_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload) {
     float3 geoNormal = payload.isExt ? payload.hitNormal : -payload.hitNormal;
-    uint normalIndex = getVGBIndex(geoNormal);
+    uint normalIndex = getNormalIndex(geoNormal);
 
     uint nodeIndex_G = normalIndex * 8, nodeLabel_G = 0, nodeIndexSum_G = 0, layerIndex_G = 1;
     bool hitIndivisible = false, hitNode = false;
@@ -193,7 +193,7 @@ int getNodeAABB_E_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload) {
             if (!hitNode || hitIndivisible) break;
         }
     }
-    if (!hitIndivisible) return 0;
+    if (!hitIndivisible) return false;
 
     float pdf = 1.0f;
     float weightSampleProbability = rand(payload.randomSeed);
@@ -231,21 +231,12 @@ int getNodeAABB_E_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload) {
             }
             randomNumber -= probability;
         }
-        if (!hitNode) {
-            //if (pushConst.frameIndex == 0) {
-            //    printf("layerIndex: %d, nodeLabel_G: %d, outgoingIndex: %d, randomNumber: %f\n",
-            //        layerIndex_E, nodeLabel_G, outgoingIndex, randomNumber
-            //    );
-            //}
-        }
         if (!hitNode || hitIndivisible) break;
     }
-    if (!hitIndivisible) {
-        return 1;
-    }
+    if (!hitIndivisible) return false;
 
-    payload.pdf = pdf * groupNodeNotIgnoreRatios_E[nodeLabel_E - 1];
-    return 2;
+    payload.pdf = pdf * groupNodePdfs_E[nodeLabel_E - 1];
+    return true;
 }
 
 void BSDFSample(inout HitPayload_SVOPG payload) {
@@ -307,7 +298,7 @@ void computeMain_SVOPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
             nodeIndex -= layerNodeCount;
             nodeLabelSum += groupSVOLayerInfos_E[layerIndex].indivisibleNodeCount;
         }
-        if (indivisible) groupNodeNotIgnoreRatios_E[nodeLabelSum + label - 1] = nodeData_E.notIgnoreRatio;
+        if (indivisible) groupNodePdfs_E[nodeLabelSum + label - 1] = nodeData_E.pdf;
     }
     GroupMemoryBarrierWithGroupSync();
 
@@ -366,20 +357,20 @@ void computeMain_SVOPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
         } else {
             accumulatedRadiance += payload.material.emissive * bsdf_cosine_pdf;
             AABB nodeAABB_E;
-            //bool useSVOPG = getNodeAABB_E_SVOPG(nodeAABB_E, payload);
-            //if (useSVOPG) useSVOPG = SphericalRectangleSample(nodeAABB_E, payload.hitPos, payload.randomSeed, payload.incidence, payload.pdf);
-            //if (useSVOPG) {
-            //    payload.bsdf = getBSDF(payload.material, payload.incidence, payload.hitNormal, payload.outgoing, payload.TBN, payload.isExt);
-            //    if (dot(payload.incidence, payload.hitNormal) * dot(payload.outgoing, payload.hitNormal) < 0.0f) payload.isExt = !payload.isExt;
-            //}
-            ////else BSDFSample(payload);
-            //else break;
+            bool useSVOPG = getNodeAABB_E_SVOPG(nodeAABB_E, payload);
+            if (useSVOPG) useSVOPG = SphericalRectangleSample(nodeAABB_E, payload.hitPos, payload.randomSeed, payload.incidence, payload.pdf);
+            if (useSVOPG) {
+                payload.bsdf = getBSDF(payload.material, payload.incidence, payload.hitNormal, payload.outgoing, payload.TBN, payload.isExt);
+                if (dot(payload.incidence, payload.hitNormal) * dot(payload.outgoing, payload.hitNormal) < 0.0f) payload.isExt = !payload.isExt;
+            }
+            //else BSDFSample(payload);
+            else break;
 
-            int useSVOPG = getNodeAABB_E_SVOPG(nodeAABB_E, payload);
-            if (useSVOPG == 2) accumulatedRadiance = float3(10.0f, 0.0f, 0.0f);
-            else if (useSVOPG == 1) accumulatedRadiance = float3(0.0f, 10.0f, 0.0f);
-            else accumulatedRadiance = float3(0.0f, 0.0f, 10.0f);
-            break;
+            //int useSVOPG = getNodeAABB_E_SVOPG(nodeAABB_E, payload);
+            //if (useSVOPG == 2) accumulatedRadiance = float3(10.0f, 0.0f, 0.0f);
+            //else if (useSVOPG == 1) accumulatedRadiance = float3(0.0f, 10.0f, 0.0f);
+            //else accumulatedRadiance = float3(0.0f, 0.0f, 10.0f);
+            //break;
 
             float cosine = dot(payload.hitNormal, payload.incidence);
             if (payload.material.type == MaterialType::Dielectric || payload.material.type == MaterialType::RoughDielectric) cosine = abs(cosine);

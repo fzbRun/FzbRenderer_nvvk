@@ -36,7 +36,7 @@ int getVoxelIndex(float3 worldPos, float3 voxelGroupStartPos, float3 voxelSize, 
     return voxelIndexU;
 }
 
-inline int getVGBIndex(float3 normal) {
+inline int getNormalIndex(float3 normal) {
     float3 absNormal = abs(normal);
     //float maxAxis = max(max(absNormal.x, absNormal.y), absNormal.z);
     //int3 mask = int3(absNormal == maxAxis);

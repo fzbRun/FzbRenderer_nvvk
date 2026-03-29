@@ -45,7 +45,7 @@ struct OctreeNodeData_G {
 };
 struct OctreeNodeData_E {
 	float3 irradiance;
-	float notIgnoreRatio;
+	float pdf;
 	float4 meanNormal;
 	AABB aabb;
 	uint32_t indivisible;

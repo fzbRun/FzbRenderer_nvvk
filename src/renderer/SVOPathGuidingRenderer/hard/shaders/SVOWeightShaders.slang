@@ -641,7 +641,7 @@ PSout fragmentMain(VSout input) {
     }
     if (!hitIndivisibleNode) return { float4(0.0f) };
 
-    probability *= nodeData.notIgnoreRatio;
+    probability *= nodeData.pdf;
     return { float4(0.0f, probability * 10.0f, 0.0f, 1.0f) };
 }
 #endif

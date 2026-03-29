@@ -3,7 +3,7 @@
 	<resolution width = "1280" height = "720" />
 	<sceneXML path = "./bearBox" />	<!--开头不能加/，但可以是./或不加--><!--simpleTest bearBox veach-ajar-->
 
-	<renderer type = "SVOPathGuiding">  <!--SVOPathGuiding PathTracing  Deferred-->
+	<renderer type = "PathTracing">  <!--SVOPathGuiding PathTracing  Deferred-->
 		<maxDepth value = "6" />
 		<useNEE value = "true" />
 		<RasterVoxelization>
@@ -15,7 +15,7 @@
 		<Octree>
 			<entropyThreshold value="0.5, 0.7" />
 			<irradianceRelRatioThreshold value="0.75" />
-			<clusteringLevel value="3" />
+			<clusteringLevel value="2" />
 		</Octree>
 		<SVO>
 			
