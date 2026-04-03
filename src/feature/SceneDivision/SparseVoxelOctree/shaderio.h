@@ -8,6 +8,7 @@
 
 #define THREADGROUP_SIZE 512u
 #define THREADGROUP_SIZE2 256u
+#define THREADGROUP_SIZE3 1024u
 #define WARP_SIZE 32u
 #define SVONodeCount_E_Layer1 8
 #define SVONodeCount_E_Layer2 64

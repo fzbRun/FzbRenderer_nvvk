@@ -3,7 +3,7 @@
 	<resolution width = "1280" height = "720" />
 	<sceneXML path = "./bearBox" />	<!--开头不能加/，但可以是./或不加--><!--simpleTest bearBox veach-ajar-->
 
-	<renderer type = "PathTracing">  <!--SVOPathGuiding PathTracing  Deferred-->
+	<renderer type = "SVOPathGuiding">  <!--SVOPathGuiding PathTracing  Deferred-->
 		<maxDepth value = "6" />
 		<useNEE value = "true" />
 		<RasterVoxelization>

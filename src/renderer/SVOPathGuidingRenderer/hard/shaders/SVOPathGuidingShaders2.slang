@@ -147,9 +147,19 @@ bool SphericalRectangleSample(AABB aabb, float3 hitPos, inout uint randomSeed, i
     }
     return true;
 }
+
+float3 offsetPos(float r, uint seed, float3x3 TBN) {
+    float angle = rand(seed) * 2.0f * 3.14159265359f;
+    float cosA = cos(angle);
+    float sinA = sin(angle);
+    float3 randomDir = cosA * TBN[0] + sinA * TBN[1];
+    return r * rand(seed) * randomDir;
+}
 bool getNodeAABB_E_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload) {
     float3 geoNormal = payload.isExt ? payload.hitNormal : -payload.hitNormal;
     uint normalIndex = getNormalIndex(geoNormal);
+
+    float3 hitPos = payload.hitPos + offsetPos(pushConst.voxelLength, payload.randomSeed, payload.TBN);
 
     uint nodeIndex_G = normalIndex * 8, nodeLabel_G = 0, nodeIndexSum_G = 0, layerIndex_G = 1;
     bool hitIndivisible = false, hitNode = false;
@@ -157,10 +167,10 @@ bool getNodeAABB_E_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload) {
         hitNode = false;
         for (int nodeOffset = 0; nodeOffset < 8; ++nodeOffset) {
             SVONodeInfo_G_SVOPG nodeInfo_G = groupNodeInfos_G[nodeIndex_G + nodeOffset];
-            if (checkPointInAABB(payload.hitPos, nodeInfo_G.aabb)) {
+            if (checkPointInAABB(hitPos, nodeInfo_G.aabb)) {
                 if ((nodeInfo_G.label_indivisible & 1u) == 1){
                     hitIndivisible = true;
-                    nodeLabel_G += nodeInfo_G.label_indivisible  >> 1;
+                    nodeLabel_G += nodeInfo_G.label_indivisible >> 1;
                 } else {
                     nodeLabel_G += groupSVOLayerInfos_G[layerIndex_G].indivisibleNodeCount;
                     nodeIndexSum_G += groupSVOLayerInfos_G[layerIndex_G - 1].divisibleNodeCount * 8;
@@ -177,7 +187,7 @@ bool getNodeAABB_E_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload) {
             hitNode = false;
             for (int nodeOffset = 0; nodeOffset < 8; ++nodeOffset) {
                 SVONodeData_G nodeData_G = SVO_G[nodeIndex_G + nodeOffset];
-                if (checkPointInAABB(payload.hitPos, nodeData_G.aabb)) {
+                if (checkPointInAABB(hitPos, nodeData_G.aabb)) {
                     if (nodeData_G.indivisible == 1) {
                         hitIndivisible = true;
                         nodeLabel_G += nodeData_G.label;
@@ -361,7 +371,7 @@ void computeMain_SVOPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
             if (useSVOPG) useSVOPG = SphericalRectangleSample(nodeAABB_E, payload.hitPos, payload.randomSeed, payload.incidence, payload.pdf);
             if (useSVOPG) {
                 payload.bsdf = getBSDF(payload.material, payload.incidence, payload.hitNormal, payload.outgoing, payload.TBN, payload.isExt);
-                if (dot(payload.incidence, payload.hitNormal) * dot(payload.outgoing, payload.hitNormal) < 0.0f) payload.isExt = !payload.isExt;
+                //if (dot(payload.incidence, payload.hitNormal) * dot(payload.outgoing, payload.hitNormal) < 0.0f) payload.isExt = !payload.isExt;
             }
             //else BSDFSample(payload);
             else break;

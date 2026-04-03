@@ -23,6 +23,8 @@ struct HitPayload_SVOWeight {
     float3 hitPos;
     float hit;
     float3 normal;
+    float3 sampleDir;
+    float3 irradiance;
 };
 
 //---------------------------------------------groupsharedMemory-----------------------------------------
@@ -35,8 +37,11 @@ groupshared uint groupIndivisibleNodeCount_E;
 groupshared uint groupTotalNodeCount_G;
 groupshared uint groupTotalNodeCount_E;
 
-groupshared IndivisibleNodeData_E groupNodeDatas_E[(THREADGROUP_SIZE + OUTGOING_COUNT - 1) / (OUTGOING_COUNT) + 1];
-groupshared IndivisibleNodeData_G groupNodeDatas_G[(THREADGROUP_SIZE + OUTGOING_COUNT - 1) / (OUTGOING_COUNT) + 1];
+#define MAX_INDIVISIBLE_NODE_E_COUNT 2 // if indivisibleNodeCount_G > (THREADGROUP_SIZE / OUTGOING_COUNT), indivisibleNodeCount_E <= 2
+groupshared IndivisibleNodeData_E groupNodeDatas_E[MAX_INDIVISIBLE_NODE_E_COUNT];
+#define MAX_INDIVISIBLE_NODE_G_COUNT THREADGROUP_SIZE / OUTGOING_COUNT
+groupshared IndivisibleNodeData_G groupNodeDatas_G[MAX_INDIVISIBLE_NODE_G_COUNT];
+groupshared HitPayload_SVOWeight groupHitPayloads[MAX_INDIVISIBLE_NODE_E_COUNT * MAX_INDIVISIBLE_NODE_G_COUNT * HITTEST_COUNT];
 
 groupshared SVOLayerInfo groupParentLayerInfo_E;
 groupshared uint groupPreviousLayerNodeCountSum_E;
@@ -262,7 +267,7 @@ void computeMain_initWeights(uint threadIndex: SV_DispatchThreadID, uint groupTh
     SVOWeightSums[threadIndex] = 0.0f;
 
     if (threadIndex == 0)
-        GlobalInfo[0].cmd.x = (groupIndivisibleNodeCount_E * OUTGOING_COUNT * groupIndivisibleNodeCount_G + THREADGROUP_SIZE - 1) / THREADGROUP_SIZE;
+        GlobalInfo[0].cmd.x = (groupIndivisibleNodeCount_E * groupIndivisibleNodeCount_G * OUTGOING_COUNT  + THREADGROUP_SIZE - 1) / THREADGROUP_SIZE;
 }
 
 [numthreads(THREADGROUP_SIZE, 1, 1)]
@@ -320,36 +325,26 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
     }
     GroupMemoryBarrierWithGroupSync();
 
-    if (threadIndex == 0) {
-        uint SVOMaxLayerNodeCount = SVOGlobalInfo[0].layerInfos_E[groupSVOLayerMaxLayer_E - 1].divisibleNodeCount * 8;
-        uint threadTotalCount = OUTGOING_COUNT * indivisibleNodeCount_G * SVOMaxLayerNodeCount;
-        GlobalInfo[0].cmd.x = (threadTotalCount + THREADGROUP_SIZE - 1) / THREADGROUP_SIZE;
-    }
-    if (threadIndex >= groupIndivisibleNodeCount_E * indivisibleNodeCount_G * OUTGOING_COUNT) return;
+    for (int i = groupThreadIndex; i < currentGroupNodeECount * currentGoupNodeGCount * HITTEST_COUNT; i += THREADGROUP_SIZE) {
+        uint nodeLabel_E = i / (currentGoupNodeGCount * HITTEST_COUNT);
+        IndivisibleNodeData_E nodeData_E = groupNodeDatas_E[nodeLabel_E];
 
-    uint groupNodeLabel_E = threadIndex / threadCount_perNodeE - currentGroupNodeStartLabel_E;
-    IndivisibleNodeData_E nodeData_E = groupNodeDatas_E[groupNodeLabel_E];
+        uint nodeLabel_G = (i / HITTEST_COUNT) % currentGoupNodeGCount;
+        IndivisibleNodeData_G nodeData_G = groupNodeDatas_G[nodeLabel_G];
 
-    uint groupNodeLabel_G = ((threadIndex / threadCount_perNodeG) - currentGroupNodeStartLabel_G) % indivisibleNodeCount_G;
-    IndivisibleNodeData_G nodeData_G = groupNodeDatas_G[groupNodeLabel_G];
+        uint hitTestIndex = nodeLabel_E * currentGoupNodeGCount * HITTEST_COUNT + nodeLabel_G * HITTEST_COUNT + i % HITTEST_COUNT;
+        uint seed = xxhash32(uint3(threadIndex, hitTestIndex, pushConst.frameIndex));
 
-    float3 meanNormal_E = nodeData_E.normal; bool singleSide_E = nodeData_E.singleSide == 1;
-    float3 meanNormal_G = nodeData_G.normal; bool singleSide_G = nodeData_G.singleSide == 1;
+        float3 meanNormal_E = nodeData_E.normal; bool singleSide_E = nodeData_E.singleSide == 1;
+        float3 meanNormal_G = nodeData_G.normal; bool singleSide_G = nodeData_G.singleSide == 1;
 
-    float3x3 TBN_G = nodeData_G.TBN;
+        float3x3 TBN_G = nodeData_G.TBN;
 
-    uint seed = xxhash32(uint3(threadIndex, groupThreadIndex, pushConst.frameIndex));
-
-    uint outgoingIndex = threadIndex % OUTGOING_COUNT;
-    float3 outgoing = fibSpherePoint(outgoingIndex, OUTGOING_COUNT);
-
-    float3 halfSize_E = (nodeData_E.aabb.maximum - nodeData_E.aabb.minimum) * 0.5f;
-    float3 nodeCenter_E = nodeData_E.aabb.minimum + halfSize_E;
-    float3 halfSize_G = (nodeData_G.aabb.maximum - nodeData_G.aabb.minimum) * 0.5f;
-    float3 nodeCenter_G = nodeData_G.aabb.minimum + halfSize_G;
-    RayDesc ray;
-    float weight = 0.0f;
-    for (int hitTestIndex = 0; hitTestIndex < HITTEST_COUNT; ++hitTestIndex) {
+        float3 halfSize_E = (nodeData_E.aabb.maximum - nodeData_E.aabb.minimum) * 0.5f;
+        float3 nodeCenter_E = nodeData_E.aabb.minimum + halfSize_E;
+        float3 halfSize_G = (nodeData_G.aabb.maximum - nodeData_G.aabb.minimum) * 0.5f;
+        float3 nodeCenter_G = nodeData_G.aabb.minimum + halfSize_G;
+        
         float3 samplePoint_E = singleSide_E ? sample_hemisphere_mean(seed) : sample_sphere_mean(seed);
         samplePoint_E = mul(samplePoint_E, nodeData_E.TBN); // slang is right multiplication
         samplePoint_E = getAABBPoint(samplePoint_E, nodeCenter_E, halfSize_E);
@@ -362,10 +357,11 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
 
         if (singleSide_E && dot(sampleDir, meanNormal_E) <= 0.0f) continue;
         if (singleSide_G && dot(-sampleDir, meanNormal_G) <= 0.0f) continue;
-        //if (hitPayload.material.type != MaterialType::Dielectric && hitPayload.material.type != MaterialType::RoughDielectric) {
-        //    if (dot(outgoing, sampleDir) <= 0.0f) continue;
-        //}
+        // if (hitPayload.material.type != MaterialType::Dielectric && hitPayload.material.type != MaterialType::RoughDielectric) {
+        //     if (dot(outgoing, sampleDir) <= 0.0f) continue;
+        // }
 
+        RayDesc ray;
         ray.Direction = sampleDir;
         ray.Origin = samplePoint_E + sampleDir * 0.00001f;
         ray.TMin = 0.001;
@@ -374,44 +370,50 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
         HitPayload_SVOWeight hitPayload;
         traceRay(ray, hitPayload, nodeData_G.aabb);
 
-        if (hitPayload.hit <= 0.0f) continue;
-        float cosine = dot(-sampleDir, hitPayload.normal);
+        hitPayload.sampleDir = sampleDir;
+        hitPayload.irradiance = nodeData_E.irradiance;
+        groupHitPayloads[hitTestIndex] = hitPayload;
+    }
+    GroupMemoryBarrierWithGroupSync();
+    if (threadIndex >= groupIndivisibleNodeCount_E * indivisibleNodeCount_G * OUTGOING_COUNT) return;
 
+    uint outgoingIndex = groupThreadIndex & (OUTGOING_COUNT - 1);
+    float3 outgoing = fibSpherePoint(outgoingIndex, OUTGOING_COUNT);
+    uint nodeLabel_E = threadIndex / (indivisibleNodeCount_G * OUTGOING_COUNT) - currentGroupNodeStartLabel_E;
+    uint nodeLabel_G = (groupThreadIndex / OUTGOING_COUNT) % currentGoupNodeGCount;
+    float weight = 0.0f;
+    for (int hitTestIndex = 0; hitTestIndex < HITTEST_COUNT; ++hitTestIndex) {
+        uint hitPayloadIndex = nodeLabel_E * currentGoupNodeGCount * HITTEST_COUNT + nodeLabel_G * HITTEST_COUNT + hitTestIndex;
+        HitPayload_SVOWeight hitPayload = groupHitPayloads[hitPayloadIndex];
+        if (hitPayload.hit <= 0.0f) continue;
+
+        float cosine = dot(-hitPayload.sampleDir, hitPayload.normal);
         bool isExt = true;
         if (hitPayload.material.type != MaterialType::Dielectric && hitPayload.material.type != MaterialType::RoughDielectric) {
             if (cosine <= 0.0f || dot(outgoing, hitPayload.normal) <= 0.0f) continue;
-        } else if (dot(hitPayload.normal, -ray.Direction) < 0.0f) isExt = false;
+        } else if (cosine < 0.0f) isExt = false;
 
         float3 tangent, bitangent;
         orthonormalBasis(hitPayload.normal, tangent, bitangent);
-        TBN_G = float3x3(tangent, bitangent, hitPayload.normal);
+        float3x3 TBN_G = float3x3(tangent, bitangent, hitPayload.normal);
 
-        float3 bsdf = getBSDF(hitPayload.material, -sampleDir, hitPayload.normal, outgoing, TBN_G, isExt);
-        float3 weight3 = nodeData_E.irradiance * cosine * bsdf; // notIgnoreRatio is made by irradiance length, so use length here;
+        float3 bsdf = getBSDF(hitPayload.material, -hitPayload.sampleDir, hitPayload.normal, outgoing, TBN_G, isExt);
+        float3 weight3 = hitPayload.irradiance * cosine * bsdf; // notIgnoreRatio is made by irradiance length, so use length here;
         weight += 0.299 * weight3.x + 0.587 * weight3.y + 0.114 * weight3.z;
     }
-    weight /= HITTEST_COUNT;
-
-    //bool hasSample = checkPointInAABB(pushConst.samplePos, nodeData_G.aabb);
-    //bool nodeCondition = meanNormal_E.z > 0.0f;
-    //if (pushConst.frameIndex == 15 && hasSample && nodeCondition && outgoingIndex == 36) {
-    //    uint weightIndex = outgoingIndex * indivisibleNodeCount_G * totalNodeCount_E +
-    //                       (nodeData_G.nodeLabel - 1) * totalNodeCount_E + nodeData_E.nodeIndex;
-    //    printf("weightIndex: %d, weight: %f, nodeLabel_G: %d, nodeIndex_E: %d, normal_E: %f %f %f outgoing: %f %f %f\naabb: %f %f %f %f %f %f\n\n",
-    //        weightIndex, weight, nodeData_G.nodeLabel, nodeData_E.nodeIndex,
-    //        meanNormal_E.x, meanNormal_E.y, meanNormal_E.z,
-    //        outgoing.x, outgoing.y, outgoing.z,
-    //        nodeData_G.aabb.minimum.x, nodeData_G.aabb.minimum.y, nodeData_G.aabb.minimum.z,
-    //        nodeData_G.aabb.maximum.x, nodeData_G.aabb.maximum.y, nodeData_G.aabb.maximum.z,
-    //    );
-    //}
-
-    if (weight == 0.0f) return;
-
+    nodeLabel_G = groupNodeDatas_G[nodeLabel_G].nodeLabel;
+    uint nodeIndex_E = groupNodeDatas_E[nodeLabel_E].nodeIndex;
     uint weightIndex = outgoingIndex * indivisibleNodeCount_G * totalNodeCount_E +
-                       (nodeData_G.nodeLabel - 1) * totalNodeCount_E + nodeData_E.nodeIndex;
+                       (nodeLabel_G - 1) * totalNodeCount_E + nodeIndex_E;
     SVOWeights[weightIndex] = weight;
+
+    if (threadIndex == 0) {
+        uint SVOMaxLayerNodeCount = SVOGlobalInfo[0].layerInfos_E[groupSVOLayerMaxLayer_E - 1].divisibleNodeCount * 8;
+        uint threadTotalCount = OUTGOING_COUNT * indivisibleNodeCount_G * SVOMaxLayerNodeCount;
+        GlobalInfo[0].cmd.x = (threadTotalCount + THREADGROUP_SIZE - 1) / THREADGROUP_SIZE;
+    }
 }
+
 
 [numthreads(THREADGROUP_SIZE, 1, 1)]
 [shader("compute")]

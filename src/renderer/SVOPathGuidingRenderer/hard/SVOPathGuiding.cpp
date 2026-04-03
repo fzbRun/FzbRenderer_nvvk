@@ -159,6 +159,7 @@ void FzbRenderer::SVOPathGuidingRenderer::preRender() {
 	pushConstant.VGBStartPos_Size = shaderio::float4(rasterVoxelization->setting.pushConstant.voxelGroupStartPos, rasterVoxelization->setting.pushConstant.voxelSize_Count.w);
 	pushConstant.frameIndex = std::min(Application::frameIndex, maxFrames - 1);
 	pushConstant.time = Application::sceneResource.time;
+	pushConstant.voxelLength = std::sqrt(shaderio::dot(shaderio::float3(rasterVoxelization->setting.pushConstant.voxelSize_Count), shaderio::float3(rasterVoxelization->setting.pushConstant.voxelSize_Count)));
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 	asManager.updateToplevelAS(cmd);
 

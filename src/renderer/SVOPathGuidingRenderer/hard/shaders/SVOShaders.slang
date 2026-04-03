@@ -23,7 +23,7 @@ void computeMain_initSVOArray(uint threadIndex: SV_DispatchThreadID) {
         globalInfo.layerInfos_E[0].divisibleNodeCount = 1;
         globalInfo.layerInfos_E[0].indivisibleNodeCount = 0;
 
-        for (int i = 1; i <= pushConst.maxDepth_Octree; ++i) {
+        for (int i = 1; i < MAX_OCTREE_DEPTH; ++i) {
             globalInfo.layerInfos_G[i].divisibleNodeCount = 0;
             globalInfo.layerInfos_G[i].indivisibleNodeCount = 0;
             globalInfo.layerInfos_E[i].divisibleNodeCount = 0;

@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include <common/Shader/shaderStructType.h>
@@ -16,6 +17,7 @@ struct SVOPathGuidingPushConstant
 	int frameIndex = 0;
 	int maxDepth = 3;
 	float time;
+	float voxelLength;
 	SceneInfo* sceneInfoAddress;
 	uint2 sceneSize;
 	uint2 threadGroupCount;

@@ -332,8 +332,7 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
         }
         sampleProbability = WaveReadLaneAt(sampleProbability, blockFirstWarpLane);
         for (int offset = 1; offset < 8; ++offset) {
-            uint targetLane = blockFirstWarpLane + offset;
-            sampleProbability -= WaveReadLaneAt(pdf, targetLane);
+            sampleProbability -= WaveReadLaneAt(pdf, blockFirstWarpLane + offset);
             if (sampleProbability <= 0.0f) {
                 sampleWarpLane += offset;
                 break;
@@ -351,8 +350,8 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
         if (warpLane == sampleWarpLane) {
             nodeData_E.irradiance = mergeIrradiance;
             nodeData_E.pdf *= pdf;
-            //nodeData_E.meanNormal = float4(meanNormal, 1.0f);
-            //nodeData_E.aabb = mergeAABB;
+            //nodeData_E.meanNormal = float4(mergeNormal, 1.0f);
+            // nodeData_E.aabb = mergeAABB;
             nodeData_E.indivisible = 1;
             nodeData_E.label = 0;
             OctreeArray_E[pushConst.currentDepth - 1][blockIndex] = nodeData_E;

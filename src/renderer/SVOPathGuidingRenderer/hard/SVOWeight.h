@@ -10,7 +10,7 @@
 #define FZBRENDERER_SVO_WEIGHT_H
 
 namespace FzbRenderer {
-struct SVOWeightSetting{
+struct SVOWeightSetting {
 	std::shared_ptr<SVO_SVOPG> svo;
 	AccelerationStructureManager* asManager;
 };

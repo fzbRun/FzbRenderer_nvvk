@@ -72,7 +72,7 @@
 			<ext_Ior value="1.0" />
 		</bsdf>
 		<bsdf type="roughConductor" id="Pot3BSDF">
-			<roughness value="0.01" />
+			<roughness value="0.1" />
 			<eta value="1.91, 1.31, 0.82" />
 			<k value="8.05, 6.93, 5.99" />
 		</bsdf>
@@ -259,14 +259,14 @@
 				<matrix value="-0.0891049 0 7.7898e-009 -1.95645 0 0.0891049 0 0.648205 -7.7898e-009 0 -0.0891049 -2.67687 0 0 0 1"/>
 			</transform>
 			<meshRef id = "Pot" />
-			<materialRef id = "Pot2BSDF_RoughDieletric" />
+			<materialRef id = "Pot2BSDF" />
 		</instance>
 		<instance>
 			<transform name="to_world">
 				<matrix value="-0.0891049 0 7.7898e-009 -1.95645 0 0.0891049 0 0.648205 -7.7898e-009 0 -0.0891049 -2.67687 0 0 0 1"/>
 			</transform>
 			<meshRef id = "PotLid" />
-			<materialRef id = "Pot2BSDF_RoughDieletric" />
+			<materialRef id = "Pot2BSDF" />
 		</instance>
 
 		<instance>

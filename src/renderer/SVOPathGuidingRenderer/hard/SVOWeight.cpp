@@ -1,3 +1,4 @@
+
 #include "SVOWeight.h"
 #include <common/Shader/Shader.h>
 #include <nvutils/timers.hpp>
@@ -82,7 +83,7 @@ void SVOWeight::uiRender() {
 	}
 	ImGui::End();
 
-	if(show) Application::viewportImage = gBuffers.getDescriptorSet(0);
+	if (show) Application::viewportImage = gBuffers.getDescriptorSet(0);
 #endif
 };
 void SVOWeight::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
@@ -264,7 +265,7 @@ void SVOWeight::createDescriptorSet() {
 		staticDescPack.makeWrite(shaderio::StaticBindingPoints_SVOWeight::eSVOGlobalInfo_SVOWeight, 0, 0, 1);
 	write.append(SVOLayerInfosWrite, setting.svo->SVOGlobalInfo, 0, setting.svo->SVOGlobalInfo.bufferSize);
 
-	VkWriteDescriptorSet globalInfoWrite = 
+	VkWriteDescriptorSet globalInfoWrite =
 		staticDescPack.makeWrite(shaderio::StaticBindingPoints_SVOWeight::eGlobalInfo_SVOWeight, 0, 0, 1);
 	write.append(globalInfoWrite, GlobalInfoBuffer, 0, GlobalInfoBuffer.bufferSize);
 
@@ -459,10 +460,10 @@ void SVOWeight::getProbability(VkCommandBuffer cmd) {
 	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getProbability);
 
-	for(int countdown = 0; countdown < setting.svo->setting.octree->setting.OctreeDepth; ++countdown) {
+	for (int countdown = 0; countdown < setting.svo->setting.octree->setting.OctreeDepth; ++countdown) {
 		pushConstant.countdown = countdown;
 		vkCmdPushConstants2(cmd, &pushInfo);
-	
+
 		vkCmdDispatchIndirect(cmd, GlobalInfoBuffer.buffer, 0);
 		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 	}
