@@ -40,8 +40,9 @@ void raygenMain()
 
     const uint rayFlags = 0; // RAY_FLAG_CULL_BACK_FACING_TRIANGLES;
     const float2 pixelCenter = launchID + float2(0.5f, 0.5f);
-    const float2 clipCoords = launchID / launchSize * 2.0 - 1.0;
-    const float4 viewCoords = mul(float4(clipCoords, 1.0, 1.0), sceneInfo.projInvMatrix);
+    const float2 clipCoords = pixelCenter / launchSize * 2.0 - 1.0;
+    float4 viewCoords = mul(float4(clipCoords, 1.0, 1.0), sceneInfo.projInvMatrix);
+    viewCoords /= viewCoords.w;
 
     RayDesc ray;
     ray.Origin = sceneInfo.cameraPosition; // mul(float4(0.0, 0.0, 0.0, 1.0), sceneInfo.viewInvMatrix).xyz;
@@ -82,11 +83,11 @@ void raygenMain()
     uint32_t pathCount = 0;
     while (payload.bounceDepth < maxPathDepth && (payload.bsdf.x + payload.bsdf.y + payload.bsdf.z > 0.0f))
     {
-#ifdef PathTracingMotionBlur
+    #ifdef PathTracingMotionBlur
         TraceMotionRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, pushConst.time, payload);
-#else
+    #else
         TraceRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, payload);
-#endif
+    #endif
 
         if (payload.bounceDepth == MISS_DEPTH) weights_bsdfSample[pathCount] = 1.0f;
         else if (pathCount > 0) {
@@ -184,10 +185,9 @@ void rayClosestHitMain(inout LightInjectHitPayload payload, in BuiltInTriangleIn
     Mesh mesh = sceneInfo.meshes[instance.meshIndex];
     BSDFMaterial material = sceneInfo.materials[instance.materialIndex];
 
-    HitState hitState = getHitStateWithPositionFetch(barycentrics);
-
-    float cosineON = dot(hitState.normal, -payload.rayDirection);
-    if (cosineON < 0) hitState.normal = -hitState.normal;
+    HitState hitState = getHitStateWithPositionFetch(barycentrics, payload.rayDirection);
+    if (material.type != MaterialType::Dielectric && material.type != MaterialType::RoughDielectric)
+        material.emissive *= max(hitState.cosineON, 0.0f);
 
     CallablePayload callablePayload;
     callablePayload.material = material;
@@ -281,8 +281,8 @@ void conductorMaterialMain(inout CallablePayload payload) {
         if (radiance_nee.x + radiance_nee.y + radiance_nee.z < 0.001f) continue;
 
         float3 sampleDir = payload.sampleDir_nee[i];
-        float3 h = normalize(sampleDir + payload.outgoing);
-        float3 bsdf = float3(1.0f);
+        float3 h = normalize(sampleDir + payload.incidence);
+        float3 bsdf = payload.material.albedo;
         if (abs(dot(h, payload.hitNormal)) < 0.95f) bsdf = float3(0.0f);
 
         float pdf_directLightSample = payload.radiancePdf_nee[i];
@@ -313,13 +313,13 @@ void dielectricMaterialMain(inout CallablePayload payload) {
         float3 sampleDir = payload.sampleDir_nee[i];
         float3 bsdf = float3(0.0f);
         if (dot(sampleDir, payload.hitNormal) > 0.0f) {
-            float3 h = normalize(sampleDir + payload.outgoing);
+            float3 h = normalize(sampleDir + payload.incidence);
             if (abs(dot(h, payload.hitNormal)) > 0.99f) {
                 bsdf = F;
                 pdf_bsdfSample = 1.0f;
             }
         } else {
-            float3 h = normalize(eta * payload.outgoing + sampleDir);
+            float3 h = normalize(eta * payload.incidence + sampleDir);
             if (abs(dot(h, payload.hitNormal)) > 0.99f) {
                 bsdf = 1.0f - F;
                 pdf_bsdfSample = 1.0f;
@@ -353,7 +353,7 @@ void roughConductorMaterialMain(inout CallablePayload payload) {
 
         float3 sampleDir = payload.sampleDir_nee[i];
 
-        float3 h = normalize(sampleDir + payload.outgoing);
+        float3 h = normalize(sampleDir + payload.incidence);
         float3 h_tangentSpace = mul(payload.TBN, h); // h需要在切线空间中
         // 因为TBN可能不准，导致出现细微的小于0的z，导致出错。上面的h不用这样是因为hvd_ggx_sample_vndf必然生成z大于0的h
         if (h_tangentSpace.z <= 0.001f) continue;

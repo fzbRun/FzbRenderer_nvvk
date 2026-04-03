@@ -69,11 +69,10 @@ FzbRenderer::Application::Application(nvapp::ApplicationCreateInfo& appInfo, nvv
 
 	getAppInfoFromXML(appInfo);
 
-	if (!appInfo.headless)
+	appInfo.vSync = false;
+	appInfo.preferredVsyncOffMode = VK_PRESENT_MODE_MAILBOX_KHR;
+	if (!appInfo.headless) {
 		nvvk::addSurfaceExtensions(vkContextInitInfo.instanceExtensions, &vkContextInitInfo.deviceExtensions);
-	else {
-		appInfo.vSync = false;
-		appInfo.preferredVsyncOffMode = VK_PRESENT_MODE_MAILBOX_KHR;
 	}
 
 #ifdef NDEBUG

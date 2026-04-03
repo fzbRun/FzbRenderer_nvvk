@@ -9,6 +9,18 @@
 #define FZBRENDERER_ACCELERATION_STRUCTURE_H
 
 namespace FzbRenderer {
+struct AccelerationStructureCreateInfo {
+	VkCommandBuffer cmd = nullptr;
+	VkAccelerationStructureTypeKHR asType;
+	VkAccelerationStructureGeometryKHR asGeometry;
+	VkAccelerationStructureBuildRangeInfoKHR asBuildRangeInfo;
+	VkAccelerationStructureBuildGeometryInfoKHR asBuildInfo;
+	VkAccelerationStructureBuildSizesInfoKHR asBuildSize;
+	VkBuildAccelerationStructureFlagsKHR flags;
+	nvvk::Buffer* indirectDataBuffer;
+	nvvk::AccelerationStructure* accelStruct;
+};
+
 class AccelerationStructureManager {
 public:
 	void init();
@@ -22,18 +34,25 @@ public:
 	void createTopLevelAS_nvvk();
 	void createTopLevelMotionAS_nvvk();
 
-	void updateToplevelAS();
-	void updateTopLevelAS_nvvk();
+	void updateToplevelAS(VkCommandBuffer cmd = nullptr);
+	void updateTopLevelAS_nvvk(VkCommandBuffer cmd = nullptr);
 	void updateTopLevelMotionAS_nvvk();
+
+	VkPhysicalDeviceAccelerationStructurePropertiesKHR asProperties;
 
 	std::vector<VkAccelerationStructureInstanceKHR> staticTlasInstances;
 	std::vector<nvvk::VkAccelerationStructureMotionInstanceNVPad> motionInstances;
+
+	VkDeviceSize maxScratchBufferSize = 0;
+	nvvk::Buffer scratchBuffer;
 
 	std::vector<nvvk::AccelerationStructure> blasAccel;
 	nvvk::AccelerationStructure              tlasAccel;
 
 	nvvk::AccelerationStructureHelper asBuilder{};
 private:
+	void tlasSubmitUpdateAndWait(VkCommandBuffer cmd, const std::vector<VkAccelerationStructureInstanceKHR>& tlasInstances);
+
 	/*
 	1. 获取mesh的顶点数据，放入VkAccelerationStructureGeometryTrianglesDataKHR，得到一个几何数据
 	2. 将几何的信息放入VkAccelerationStructureGeometryKHR
@@ -67,6 +86,15 @@ private:
 	5. 调用createAccelerationStructure创建加速结构
 	*/
 	void createTopLevelAS();
+	//----------------------------------间接调用----------------------------------------------
+public:
+	void createAccelerationStructureBuildInfo(AccelerationStructureCreateInfo& createInfo);
+	void createBottomLevelAS_indirect(VkCommandBuffer cmd = nullptr, VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR);
+
+	std::vector<nvvk::Buffer> blasIndirectDataBuffers;	//每个BLAS一个间接命令缓冲
+	nvvk::Buffer tlasIndirectDataBuffer;		//TLAS一个间接命令缓冲
+private:
+	void createAccelerationStructure_indirect(AccelerationStructureCreateInfo& createInfo);
 };
 }
 

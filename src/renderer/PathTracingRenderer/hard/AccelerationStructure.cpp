@@ -13,6 +13,7 @@ void AccelerationStructureManager::init() {
 	createTopLevelMotionAS_nvvk();
 #else
 	createBottomLevelAS_nvvk();
+	//createBottomLevelAS_indirect();
 	createTopLevelAS_nvvk();
 #endif
 }
@@ -21,6 +22,11 @@ void AccelerationStructureManager::clean() {
 	for (int i = 0; i < blasAccel.size(); ++i) Application::allocator.destroyBuffer(blasAccel[i].buffer);
 	Application::allocator.destroyBuffer(tlasAccel.buffer);
 
+	Application::allocator.destroyBuffer(scratchBuffer);
+	for (int i = 0; i < blasIndirectDataBuffers.size(); ++i) Application::allocator.destroyBuffer(blasIndirectDataBuffers[i]);
+	Application::allocator.destroyBuffer(tlasIndirectDataBuffer);
+
+	asBuilder.m_uploader->releaseStaging();
 	asBuilder.deinitAccelerationStructures();
 	asBuilder.deinit();
 }
@@ -227,14 +233,49 @@ void AccelerationStructureManager::createTopLevelMotionAS_nvvk() {
 	LOGI("Top-level accleration motion structures built successfully\n");
 }
 
-void AccelerationStructureManager::updateToplevelAS() {
+void AccelerationStructureManager::updateToplevelAS(VkCommandBuffer cmd) {
 #ifdef PathTracingMotionBlur
 	updateTopLevelMotionAS_nvvk();
 #else
-	updateTopLevelAS_nvvk();
+	updateTopLevelAS_nvvk(cmd);
 #endif
 }
-void AccelerationStructureManager::updateTopLevelAS_nvvk() {
+void AccelerationStructureManager::tlasSubmitUpdateAndWait(VkCommandBuffer cmd, const std::vector<VkAccelerationStructureInstanceKHR>& tlasInstances) {
+	VkDevice device = asBuilder.m_alloc->getDevice();
+
+	bool sizeChanged = (tlasInstances.size() != asBuilder.tlasSize);
+
+	// Update the instance buffer
+	asBuilder.m_uploader->appendBuffer(asBuilder.tlasInstancesBuffer, 0, std::span(tlasInstances));
+	asBuilder.m_uploader->cmdUploadAppended(cmd);
+
+	// Make sure the copy of the instance buffer are copied before triggering the acceleration structure build
+	nvvk::accelerationStructureBarrier(cmd, VK_ACCESS_TRANSFER_WRITE_BIT,
+		VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR | VK_ACCESS_2_SHADER_READ_BIT);
+
+	if (asBuilder.tlasScratchBuffer.buffer == VK_NULL_HANDLE)
+	{
+		NVVK_CHECK(asBuilder.m_alloc->createBuffer(asBuilder.tlasScratchBuffer, asBuilder.tlasBuildData.sizeInfo.buildScratchSize,
+			VK_BUFFER_USAGE_2_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT,
+			VMA_MEMORY_USAGE_AUTO, {}, asBuilder.m_accelStructProps.minAccelerationStructureScratchOffsetAlignment));
+		NVVK_DBG_NAME(asBuilder.tlasScratchBuffer.buffer);
+	}
+
+	// Building or updating the top-level acceleration structure
+	if (sizeChanged)
+	{
+		asBuilder.tlasBuildData.cmdBuildAccelerationStructure(cmd, asBuilder.tlas.accel, asBuilder.tlasScratchBuffer.address);
+		asBuilder.tlasSize = tlasInstances.size();
+	}
+	else
+	{
+		asBuilder.tlasBuildData.cmdUpdateAccelerationStructure(cmd, asBuilder.tlas.accel, asBuilder.tlasScratchBuffer.address);
+	}
+
+	nvvk::accelerationStructureBarrier(cmd, VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
+		VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR);
+}
+void AccelerationStructureManager::updateTopLevelAS_nvvk(VkCommandBuffer cmd) {
 	if (Application::sceneResource.instances.size() == Application::sceneResource.staticInstanceCount) return;
 
 	FzbRenderer::Scene& sceneResource = Application::sceneResource;
@@ -271,7 +312,8 @@ void AccelerationStructureManager::updateTopLevelAS_nvvk() {
 	}
 
 	NVVK_CHECK(vkDeviceWaitIdle(Application::app->getDevice()));	//等待GPU指令处理完成
-	asBuilder.tlasSubmitUpdateAndWait(tlasInstances);
+	if (cmd) tlasSubmitUpdateAndWait(cmd, tlasInstances);
+	else asBuilder.tlasSubmitUpdateAndWait(tlasInstances);
 }
 void AccelerationStructureManager::updateTopLevelMotionAS_nvvk() {
 	if (Application::sceneResource.randomInstanceCount == 0) return;
@@ -391,6 +433,7 @@ void AccelerationStructureManager::createAccelerationStructure(VkAccelerationStr
 
 	Application::allocator.destroyBuffer(scratchBuffer);
 }
+
 void AccelerationStructureManager::createBottomLevelAS() {
 	SCOPED_TIMER(__FUNCTION__);
 	LOGI("Ready to build %zu bottom-level acceleration structures\n", Application::sceneResource.meshes.size());
@@ -473,4 +516,106 @@ void AccelerationStructureManager::createTopLevelAS() {
 
 	LOGI("Top-level accleration structures built successfully\n");
 	Application::allocator.destroyBuffer(tlasInstancesBuffer);
+}
+
+void AccelerationStructureManager::createAccelerationStructureBuildInfo(AccelerationStructureCreateInfo& createInfo) {
+	VkDevice device = Application::app->getDevice();
+	auto alignUp = [](auto value, size_t alignment) noexcept { return ((value + alignment - 1) & ~(alignment - 1)); };
+
+	std::vector<uint32_t> maxPrimCount(1);
+	maxPrimCount[0] = createInfo.asBuildRangeInfo.primitiveCount;
+
+	createInfo.asBuildInfo = {
+		.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+		.type = createInfo.asType,
+		.flags = createInfo.flags,
+		.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
+		.geometryCount = 1,
+		.pGeometries = &createInfo.asGeometry
+	};
+
+	//根据buildInfo计算出需要的存储空间大小(AS的存储空间以及创建AS所需要的临时空间）
+	createInfo.asBuildSize = { .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR };
+	vkGetAccelerationStructureBuildSizesKHR(device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &createInfo.asBuildInfo, maxPrimCount.data(), &createInfo.asBuildSize);
+
+	//buildScratchSize是创建AS所需的临时空间，minAccelerationStructureScratchOffsetAlignment是硬件要求的最小对齐
+	VkDeviceSize scratchSize = alignUp(createInfo.asBuildSize.buildScratchSize, asProperties.minAccelerationStructureScratchOffsetAlignment);
+	maxScratchBufferSize = std::max(maxScratchBufferSize, scratchSize);
+}
+void AccelerationStructureManager::createAccelerationStructure_indirect(AccelerationStructureCreateInfo& createInfo) {
+	VkDevice device = Application::app->getDevice();
+	auto alignUp = [](auto value, size_t alignment) noexcept { return ((value + alignment - 1) & ~(alignment - 1)); };
+
+	//---------------------------------------------创建需要的空间---------------------------------------------------
+	if (scratchBuffer.buffer == nullptr) {
+		NVVK_CHECK(Application::allocator.createBuffer(scratchBuffer, maxScratchBufferSize,
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_2_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR,
+			VMA_MEMORY_USAGE_AUTO, {}, asProperties.minAccelerationStructureScratchOffsetAlignment));
+	}
+
+	VkAccelerationStructureCreateInfoKHR asCreateInfo{
+		.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
+		.size = createInfo.asBuildSize.accelerationStructureSize,
+		.type = createInfo.asType,
+	};
+	NVVK_CHECK(Application::allocator.createAcceleration(*createInfo.accelStruct, asCreateInfo));		//申请空间
+	//--------------------------------------------创建间接数据-------------------------------------------------
+	uint8_t* indirectData = createInfo.indirectDataBuffer->mapping;
+
+	createInfo.asBuildInfo.dstAccelerationStructure = createInfo.accelStruct->accel;
+	createInfo.asBuildInfo.scratchData.deviceAddress = scratchBuffer.address;
+
+	NVVK_CHECK(Application::stagingUploader.appendBuffer(*createInfo.indirectDataBuffer, 0, sizeof(VkAccelerationStructureBuildRangeInfoKHR), &createInfo.asBuildRangeInfo));
+
+	VkDeviceAddress rangeAddress = createInfo.indirectDataBuffer->address;
+	uint32_t indirectStride = (uint32_t)sizeof(VkAccelerationStructureBuildRangeInfoKHR);
+	const uint32_t* pMaxPrimCounts = &createInfo.asBuildRangeInfo.primitiveCount;
+
+	NVVK_CHECK(vkDeviceWaitIdle(Application::app->getDevice()));	//等待GPU指令处理完成
+	VkCommandBuffer cmd = createInfo.cmd == nullptr ? Application::app->createTempCmdBuffer() : createInfo.cmd;
+	Application::stagingUploader.cmdUploadAppended(cmd);
+	nvvk::accelerationStructureBarrier(cmd, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR);
+	vkCmdBuildAccelerationStructuresIndirectKHR(cmd, 1, &createInfo.asBuildInfo, &rangeAddress, &indirectStride, &pMaxPrimCounts);
+	if (createInfo.cmd == nullptr) Application::app->submitAndWaitTempCmdBuffer(cmd);
+	else nvvk::accelerationStructureBarrier(cmd, VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR, VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR);
+}
+void AccelerationStructureManager::createBottomLevelAS_indirect(VkCommandBuffer cmd, VkBuildAccelerationStructureFlagsKHR flags) {
+	SCOPED_TIMER(__FUNCTION__);
+	LOGI("Ready to build %zu bottom-level acceleration structures\n", Application::sceneResource.meshes.size());
+
+	asProperties = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR };
+	VkPhysicalDeviceProperties2 prop2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+	prop2.pNext = &asProperties;
+	vkGetPhysicalDeviceProperties2(Application::app->getPhysicalDevice(), &prop2);
+
+	uint32_t meshCount = Application::sceneResource.meshes.size();
+	std::vector<AccelerationStructureCreateInfo> createInfos(meshCount);
+	for (uint32_t blasId = 0; blasId < Application::sceneResource.meshes.size(); ++blasId) {
+		primitiveToGeometry(Application::sceneResource.meshes[blasId], createInfos[blasId].asGeometry, createInfos[blasId].asBuildRangeInfo);
+
+		createInfos[blasId].cmd = cmd;
+		createInfos[blasId].asType = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+		createInfos[blasId].flags = flags;
+		createAccelerationStructureBuildInfo(createInfos[blasId]);
+	}
+
+	for (int i = 0; i < blasAccel.size(); ++i) Application::allocator.destroyBuffer(blasAccel[i].buffer);
+	blasAccel.resize(Application::sceneResource.meshes.size());
+	for(int i = 0; i < blasIndirectDataBuffers.size(); ++i) Application::allocator.destroyBuffer(blasIndirectDataBuffers[i]);
+	blasIndirectDataBuffers.resize(Application::sceneResource.meshes.size());
+
+	//本身满足对齐要求
+	size_t blasIndirectCmdSize = sizeof(VkAccelerationStructureBuildRangeInfoKHR);
+	for (uint32_t blasId = 0; blasId < Application::sceneResource.meshes.size(); ++blasId) {
+		Application::allocator.createBuffer(blasIndirectDataBuffers[blasId], blasIndirectCmdSize,
+			VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+
+		createInfos[blasId].indirectDataBuffer = &blasIndirectDataBuffers[blasId];
+		createInfos[blasId].accelStruct = &blasAccel[blasId];
+
+		createAccelerationStructure_indirect(createInfos[blasId]);
+		NVVK_DBG_NAME(blasAccel[blasId].accel);
+	}
+
+	LOGI("Bottom-level acceleration structures built successfully\n");
 }

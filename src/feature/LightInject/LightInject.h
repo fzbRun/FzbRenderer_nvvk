@@ -8,10 +8,12 @@
 
 namespace FzbRenderer {
 struct LightInjectSetting{
-	nvvk::Buffer VGB;
+	std::vector<nvvk::Buffer> VGBs;
 	glm::vec3 VGBStartPos;
 	glm::vec3 VGBVoxelSize;
 	float VGBSize;
+	shaderio::float3 sceneStartPos;
+	shaderio::float3 sceneSize;
 	PathTracingContext* ptContext;
 	AccelerationStructureManager* asManager;
 };

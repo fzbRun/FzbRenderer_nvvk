@@ -66,8 +66,13 @@
 		<bsdf type="diffuse" id="Pot2BSDF">
 			<albedo value="0.8, 0.8, 0.8" />
 		</bsdf>
+		<bsdf type="roughDielectric" id="Pot2BSDF_RoughDieletric">
+			<roughness value="0.2" />
+			<int_ior value="1.5" />
+			<ext_Ior value="1.0" />
+		</bsdf>
 		<bsdf type="roughConductor" id="Pot3BSDF">
-			<roughness value="0.01" />
+			<roughness value="0.1" />
 			<eta value="1.91, 1.31, 0.82" />
 			<k value="8.05, 6.93, 5.99" />
 		</bsdf>

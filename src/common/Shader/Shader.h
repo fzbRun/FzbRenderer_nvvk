@@ -9,6 +9,7 @@
 
 namespace FzbRenderer{
 	VkShaderModuleCreateInfo compileSlangShader(const std::filesystem::path& shaderSource, const std::span<const uint32_t>& spirv);
+	VkShaderModuleCreateInfo compileSlangShader(std::filesystem::path& shaderPath, std::vector<uint32_t>& shaderBuffer);
 	void saveShaderToFile(const VkShaderModuleCreateInfo& shaderInfo, std::filesystem::path& shaderSource);
 	bool validateSPIRVFile(std::filesystem::path& shaderSource);
 }

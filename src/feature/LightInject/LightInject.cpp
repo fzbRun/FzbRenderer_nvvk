@@ -7,6 +7,8 @@
 #include <nvgui/property_editor.hpp>
 #include <nvvk/compute_pipeline.hpp>
 
+#define LIGHTINJECT_SAMPLEPOINTCOUNT 8192
+
 FzbRenderer::LightInject::LightInject(pugi::xml_node& featureNode) {
 #ifndef NDEBUG
 	Application::vkContext->getPhysicalDeviceFeatures_notConst().geometryShader = VK_TRUE;
@@ -119,9 +121,13 @@ void FzbRenderer::LightInject::preRender() {
 	pushConstant.frameIndex = Application::frameIndex;
 	pushConstant.time = Application::sceneResource.time;
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
+	pushConstant.sceneStartPos = setting.sceneStartPos;
+	pushConstant.sceneSize = setting.sceneSize;
 }
 void FzbRenderer::LightInject::render(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
+
+	updateDataPerFrame(cmd);
 
 	{
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipeline);
@@ -151,8 +157,13 @@ void FzbRenderer::LightInject::render(VkCommandBuffer cmd) {
 		vkCmdPushConstants2(cmd, &pushInfo);
 
 		const nvvk::SBTGenerator::Regions& regions = sbtGenerator.getSBTRegions();
-		const VkExtent2D& size = Application::app->getViewportSize();
-		vkCmdTraceRaysKHR(cmd, &regions.raygen, &regions.miss, &regions.hit, &regions.callable, size.width, size.height, 1);
+		
+		float sceneMinSize = std::min(setting.sceneSize.x, std::min(setting.sceneSize.y, setting.sceneSize.z));
+		shaderio::uint3 sizeAxis = setting.sceneSize / sceneMinSize;
+		uint32_t minAxisSampleCount = std::cbrt(LIGHTINJECT_SAMPLEPOINTCOUNT / (sizeAxis.x * sizeAxis.y * sizeAxis.z));
+		shaderio::uint3 sampleCount = sizeAxis * minAxisSampleCount;
+
+		vkCmdTraceRaysKHR(cmd, &regions.raygen, &regions.miss, &regions.hit, &regions.callable, sampleCount.x, sampleCount.y, sampleCount.z);
 	}
 }
 void FzbRenderer::LightInject::postProcess(VkCommandBuffer cmd) {
@@ -176,7 +187,7 @@ void FzbRenderer::LightInject::createDescriptorSetLayout() {
 	bindings.addBinding({
 		.binding = shaderio::StaticBindingPoints_LightInject::eVGB_LightInject,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = 1,
+		.descriptorCount = (uint32_t)setting.VGBs.size(),
 		.stageFlags = VK_SHADER_STAGE_ALL });
 
 	staticDescPack.init(bindings, Application::app->getDevice(), 1, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
@@ -211,8 +222,9 @@ void FzbRenderer::LightInject::createDescriptorSet() {
 	//write.append(OutImageWrite, gBuffers.getColorImageView(0), VK_IMAGE_LAYOUT_GENERAL);
 
 	VkWriteDescriptorSet    VGBWrite =
-		staticDescPack.makeWrite(shaderio::StaticBindingPoints_LightInject::eVGB_LightInject, 0, 0, 1);
-	write.append(VGBWrite, setting.VGB, 0, setting.VGB.bufferSize);
+		staticDescPack.makeWrite(shaderio::StaticBindingPoints_LightInject::eVGB_LightInject, 0, 0, setting.VGBs.size());
+	nvvk::Buffer* VGBsPtr = setting.VGBs.data();
+	write.append(VGBWrite, VGBsPtr);
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }
@@ -226,7 +238,7 @@ void FzbRenderer::LightInject::createPipeline() {
 
 	addPathTracingSlangMacro();
 	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
-	std::filesystem::path shaderSource = shaderPath / "lightInject.slang";
+	std::filesystem::path shaderSource = shaderPath / "lightInject2.slang";
 	shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
 
 	enum StageIndices {
@@ -404,12 +416,12 @@ void FzbRenderer::LightInject::compileAndCreateShaders() {
 #endif
 }
 void FzbRenderer::LightInject::updateDataPerFrame(VkCommandBuffer cmd) {
-	scene.sceneInfo = Application::sceneResource.sceneInfo;
-	nvvk::cmdBufferMemoryBarrier(cmd, { scene.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-								   VK_PIPELINE_STAGE_2_TRANSFER_BIT });
-	vkCmdUpdateBuffer(cmd, scene.bSceneInfo.buffer, 0, sizeof(shaderio::SceneInfo), &scene.sceneInfo);
-	nvvk::cmdBufferMemoryBarrier(cmd, { scene.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-									   VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT });
+	//scene.sceneInfo = Application::sceneResource.sceneInfo;
+	//nvvk::cmdBufferMemoryBarrier(cmd, { scene.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+	//							   VK_PIPELINE_STAGE_2_TRANSFER_BIT });
+	//vkCmdUpdateBuffer(cmd, scene.bSceneInfo.buffer, 0, sizeof(shaderio::SceneInfo), &scene.sceneInfo);
+	//nvvk::cmdBufferMemoryBarrier(cmd, { scene.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+	//								   VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT });
 }
 
 #ifndef NDEBUG
@@ -454,7 +466,7 @@ void FzbRenderer::LightInject::debug_Cube(VkCommandBuffer cmd) {
 		.size = sizeof(shaderio::LightInjectPushConstant),
 		.pValues = &pushConstant,
 	};
-	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)scene.bSceneInfo.address;
+	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 	vkCmdPushConstants2(cmd, &pushInfo);
 
 	VkVertexInputBindingDescription2EXT bindingDescription{};
@@ -468,7 +480,7 @@ void FzbRenderer::LightInject::debug_Cube(VkCommandBuffer cmd) {
 	const nvvk::Buffer& v = scene.bDatas[bufferIndex];
 
 	vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(mesh.indexType));
-	vkCmdDrawIndexed(cmd, triMesh.indices.count, pow(pushConstant.VGBStartPos_Size.w, 3), 0, 0, 0);
+	vkCmdDrawIndexed(cmd, triMesh.indices.count, pow(pushConstant.VGBStartPos_Size.w, 3) * 6, 0, 0, 0);
 
 	vkCmdEndRendering(cmd);
 

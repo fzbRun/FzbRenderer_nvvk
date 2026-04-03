@@ -1,0 +1,63 @@
+<scene>
+	<sensor type="perspective">
+		<fov value="60"/>
+		<transform type = "lookAt">
+			<matrix value="1 0 0 0 0 1 0 1 0 0 1 4 0 0 0 1"/>
+			<eye value = "-0.8, 0.2, 4.5" />
+			<center value = "0, 0.0, -1.0" />
+			<up value = "0.00000, 1.00000, 0.00000" />
+		</transform>
+	</sensor>
+	<bsdfs>
+		<bsdf type="diffuse" id="DiffuseBSDF1">
+			<albedo value="0.8, 0.8, 0.8, 1.0" />
+		</bsdf>
+		<bsdf type="diffuse" id="DiffuseBSDF2">
+			<albedo value="0.8, 0.8, 0.8, 1.0" />
+			<emissive value = "10.0, 10.0, 10.0" />
+		</bsdf>
+		<bsdf type="roughDielectric" id="RoughDieletric">
+			<roughness value="0.2" />
+			<int_ior value="1.5" />
+			<ext_Ior value="1.0" />
+		</bsdf>
+		<bsdf type="dielectric" id="dieletric">
+			<int_ior value="1.5" />
+			<ext_Ior value="1.0" />
+		</bsdf>
+	</bsdfs>
+	<meshes>
+		<mesh type="plane" id="Plane">
+		</mesh>
+		<mesh type="cube" id="Cube">
+		</mesh>
+	</meshes>
+	<instances>
+		<instance>
+			<transform name="to_world">
+				<translate value="-2.0, 0.0, 0.0"/>
+			</transform>
+			<meshRef id = "Cube" />
+			<materialRef id = "DiffuseBSDF1" />
+		</instance>
+		<instance id="Plane">
+			<transform name="to_world">
+				<translate value="1.0, 1.0, 1.0"/>
+				<rotate value="0, -90, 0" />
+			</transform>
+			<meshRef id = "Plane" />
+			<materialRef id = "DiffuseBSDF2" />
+		</instance>
+	</instances>
+
+	<lights>
+		<useSky value = "true" />
+		<backgroundColor value = "0.0, 0.0, 0.0" />
+		<light type="area" id="Light">
+			<emissive value = "1.0, 1.0, 1.0" />
+			<intensity value = "10.0" />
+			<SphericalRectangleSample value="true" />
+			<instanceRef id="Plane"/>
+		</light>
+	</lights>
+</scene>

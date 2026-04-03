@@ -56,9 +56,11 @@ void FzbRenderer::RasterVoxelization::init() {
 			aabb.maximum.y = std::max(meshAABB.maximum.y, aabb.maximum.y);
 			aabb.maximum.z = std::max(meshAABB.maximum.z, aabb.maximum.z);
 		}
+		setting.sceneSize = aabb.maximum - aabb.minimum;
+		setting.sceneStartPos = aabb.minimum;
 
 		//放大一点，防止边界处的数据错误（比方说2个voxel，那么右边界的索引是2不是1;不然会导致2->0，0voxel本没有数据先有了数据）
-		glm::vec3 distance = (aabb.maximum - aabb.minimum) * 1.1f;		
+		glm::vec3 distance = setting.sceneSize * 1.1f;
 		float maxDistance = std::max(distance.x, std::max(distance.y, distance.z));
 		glm::vec3 center = (aabb.maximum + aabb.minimum) * 0.5f;
 		glm::vec3 minimum = center - distance * 0.5f;
@@ -318,12 +320,12 @@ void FzbRenderer::RasterVoxelization::compileAndCreateShaders() {
 #endif
 }
 void FzbRenderer::RasterVoxelization::updateDataPerFrame(VkCommandBuffer cmd) {
-	scene.sceneInfo = Application::sceneResource.sceneInfo;
-	nvvk::cmdBufferMemoryBarrier(cmd, { scene.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-								   VK_PIPELINE_STAGE_2_TRANSFER_BIT });
-	vkCmdUpdateBuffer(cmd, scene.bSceneInfo.buffer, 0, sizeof(shaderio::SceneInfo), &scene.sceneInfo);
-	nvvk::cmdBufferMemoryBarrier(cmd, { scene.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-									   VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT });
+	//scene.sceneInfo = Application::sceneResource.sceneInfo;
+	//nvvk::cmdBufferMemoryBarrier(cmd, { scene.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+	//							   VK_PIPELINE_STAGE_2_TRANSFER_BIT });
+	//vkCmdUpdateBuffer(cmd, scene.bSceneInfo.buffer, 0, sizeof(shaderio::SceneInfo), &scene.sceneInfo);
+	//nvvk::cmdBufferMemoryBarrier(cmd, { scene.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+	//								   VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT });
 }
 
 void FzbRenderer::RasterVoxelization::clean() {
@@ -441,11 +443,9 @@ void FzbRenderer::RasterVoxelization::uiRender() {
 }
 void FzbRenderer::RasterVoxelization::resize(VkCommandBuffer cmd, const VkExtent2D& size) {};
 
-void FzbRenderer::RasterVoxelization::preRender() {
+void FzbRenderer::RasterVoxelization::preRender(VkCommandBuffer cmd) {
 #ifndef NDEBUG
 	if (Application::frameIndex != 1) return;
-	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT);
 	VkBufferCopy2 copyRegionInfo{
 		.sType = VK_STRUCTURE_TYPE_BUFFER_COPY_2,
 		.srcOffset = 0,
@@ -460,13 +460,15 @@ void FzbRenderer::RasterVoxelization::preRender() {
 		.pRegions = &copyRegionInfo,
 	};
 	vkCmdCopyBuffer2(cmd, &copyBufferInfo);
-	Application::app->submitAndWaitTempCmdBuffer(cmd);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
 	
 	memcpy(&fragmentCount_host, fragmentCountStageBuffer.mapping, sizeof(uint32_t));
 #endif
 }
 void FzbRenderer::RasterVoxelization::render(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd, "RasterVoxelization_render");
+
+	updateDataPerFrame(cmd);
 
 	bindDescriptorSetsInfo = {
 	.sType = VK_STRUCTURE_TYPE_BIND_DESCRIPTOR_SETS_INFO,
@@ -492,6 +494,7 @@ void FzbRenderer::RasterVoxelization::render(VkCommandBuffer cmd) {
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
 #ifndef NDEBUG
 	resetFragmentCount(cmd);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
 	createVGB_ThreeView(cmd);
 #else
 	createVGB(cmd);
@@ -624,7 +627,6 @@ void FzbRenderer::RasterVoxelization::createVGB_ThreeView(VkCommandBuffer cmd) {
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1,
 		staticDescPack.getSetPtr(), 0, nullptr);
 
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);	//clearVGB和resetFragmentCount
 	vkCmdBeginRendering(cmd, &renderingInfo);
 
 	//使用VK_EXT_SHADER_OBJECT_EXTENSION_NAME后可以不需要pipeline，直接通过命令设置渲染设置和着色器
@@ -715,7 +717,7 @@ void FzbRenderer::RasterVoxelization::debug_Cube(VkCommandBuffer cmd) {
 	const shaderio::Mesh& mesh = scene.meshes[0];
 	const shaderio::TriangleMesh& triMesh = mesh.triMesh;
 
-	setting.pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)scene.bSceneInfo.address;
+	setting.pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 	vkCmdPushConstants2(cmd, &pushInfo);
 
 	uint32_t bufferIndex = scene.getMeshBufferIndex(0);
@@ -771,7 +773,7 @@ void FzbRenderer::RasterVoxelization::debug_Wireframe(VkCommandBuffer cmd) {
 	const shaderio::Mesh& mesh = scene.meshes[wireframeMeshIndex];
 	const shaderio::TriangleMesh& triMesh = mesh.triMesh;
 
-	setting.pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)scene.bSceneInfo.address;
+	setting.pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 	vkCmdPushConstants2(cmd, &pushInfo);
 
 	uint32_t bufferIndex = scene.getMeshBufferIndex(wireframeMeshIndex);

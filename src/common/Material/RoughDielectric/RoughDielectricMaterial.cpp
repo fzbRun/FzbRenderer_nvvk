@@ -5,7 +5,7 @@
 void FzbRenderer::RoughDielectricMaterial::getMaterialInfoFromSceneInfoXML(
 	pugi::xml_node& bsdfNode,
 	shaderio::BSDFMaterial& material) {
-	material.type = shaderio::RoughDeielectric;
+	material.type = shaderio::RoughDielectric;
 	if (pugi::xml_node roughnessNode = bsdfNode.child("roughness"))
 		material.roughness = std::stof(roughnessNode.attribute("value").value());
 

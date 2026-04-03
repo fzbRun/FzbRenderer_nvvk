@@ -7,6 +7,7 @@
 #include <bit>
 #include <nvvk/default_structs.hpp>
 #include <nvgui/property_editor.hpp>
+#include <renderer/SVOPathGuidingRenderer/hard/RasterVoxelizationSVOPG.h>
 
 using namespace FzbRenderer;
 
@@ -30,10 +31,10 @@ void Octree::init(OctreeSetting setting) {
 	createOctreeArray();
 
 #ifndef NDEBUG
-	clusterLevelCount = setting.OctreeDepth - this->setting.clusteringLevel;
+	clusterLevelCount = this->setting.OctreeDepth - this->setting.clusteringLevel;
 	Feature::createGBuffer(false, false, clusterLevelCount * 2);
 
-	for (int i = this->setting.clusteringLevel; i < setting.OctreeDepth; ++i)
+	for (int i = this->setting.clusteringLevel; i < this->setting.OctreeDepth; ++i)
 		pushConstant.showOctreeNodeTotalCount += pow(8, i);
 
 	nvutils::PrimitiveMesh primitive = FzbRenderer::MeshSet::createWireframe();
@@ -134,14 +135,19 @@ void Octree::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 	gBuffers.update(cmd, size);
 };
 void Octree::preRender() {
+	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
+	pushConstant.voxelVolume = setting.VGBVoxelSize.x * setting.VGBVoxelSize.y * setting.VGBVoxelSize.z;
 #ifndef NDEBUG
+	pushConstant.VGBStartPos_Size = glm::vec4(setting.VGBStartPos, setting.VGBSize);
 	pushConstant.frameIndex = Application::frameIndex;
 	pushConstant.clusteringLevel = setting.clusteringLevel;
-	pushConstant.VGBStartPos_Size = glm::vec4(setting.VGBStartPos, setting.VGBSize);
+	pushConstant.normalIndex = RasterVoxelization_SVOPG::normalIndex;
 #endif
 }
 void Octree::render(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd, "Octree_render");
+
+	updateDataPerFrame(cmd);
 
 	bindDescriptorSetsInfo = {
 		.sType = VK_STRUCTURE_TYPE_BIND_DESCRIPTOR_SETS_INFO,
@@ -166,43 +172,48 @@ void Octree::render(VkCommandBuffer cmd) {
 
 	vkCmdPushConstants2(cmd, &pushInfo);
 
-	//假设光照注入已经完成，那么要初始化OctreeArray
 	initOctreeArray(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	createOctreeArray(cmd);
 
 }
 void Octree::postProcess(VkCommandBuffer cmd) {
+#ifndef NDEBUG
 	debug_wirefame(cmd);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-	debug_mergeResult(cmd);
+	//nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	////debug_mergeResult(cmd);
+#endif
 };
 
 void Octree::createOctreeArray() {
 	uint32_t VGBSize = uint32_t(setting.VGBSize);
 	setting.OctreeDepth = std::countr_zero(VGBSize);	//start from 0
-	OctreeArray_G.resize(setting.OctreeDepth + 1);
+	OctreeArray_G.resize((setting.OctreeDepth + 1) * 6);
 	OctreeArray_E.resize(setting.OctreeDepth + 1);
 
 	nvvk::StagingUploader& stagingUploader = Application::stagingUploader;
 	nvvk::ResourceAllocator* allocator = stagingUploader.getResourceAllocator();
 
-	uint32_t bufferSize = sizeof(shaderio::VGBVoxelData);
-	for (int depth = 0; depth <= setting.OctreeDepth; ++depth) {
-		allocator->createBuffer(OctreeArray_G[depth], bufferSize,
-			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-		NVVK_DBG_NAME(OctreeArray_G[depth].buffer);
+	for (int normalIndex = 0; normalIndex < 6; ++normalIndex) {
+		uint32_t startIndex = normalIndex * (setting.OctreeDepth + 1);
+		for (int depth = 0; depth <= setting.OctreeDepth; ++depth) {
+			uint32_t bufferSize = sizeof(shaderio::OctreeNodeData_G) * std::pow(8, depth);
 
+			allocator->createBuffer(OctreeArray_G[startIndex + depth], bufferSize,
+				VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+			NVVK_DBG_NAME(OctreeArray_G[startIndex + depth].buffer);
+		}
+	}
+	for (int depth = 0; depth <= setting.OctreeDepth; ++depth) {
+		uint32_t bufferSize = sizeof(shaderio::OctreeNodeData_G) * std::pow(8, depth);
+		bufferSize = sizeof(shaderio::OctreeNodeData_E) * std::pow(8, depth);
 		allocator->createBuffer(OctreeArray_E[depth], bufferSize,
 			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 		NVVK_DBG_NAME(OctreeArray_E[depth].buffer);
-
-		bufferSize *= 8;
 	}
 
 	pushConstant.maxDepth = setting.OctreeDepth;
-
-	//由renderer对创建buffer的命令进行提交
+	pushConstant.OctreeNodeTotalCount = (pow(8, (pushConstant.maxDepth + 1)) - 1) / 7;
 }
 void Octree::createDescriptorSetLayout() {
 	SCOPED_TIMER(__FUNCTION__);
@@ -210,17 +221,22 @@ void Octree::createDescriptorSetLayout() {
 	bindings.addBinding({
 		.binding = shaderio::BindingPoints_Octree::eVGB_Octree,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = 1,
+		.descriptorCount = (uint32_t)setting.VGBs.size(),
 		.stageFlags = VK_SHADER_STAGE_ALL});
+	bindings.addBinding({
+		.binding = shaderio::BindingPoints_Octree::eVGBMaterialInfos_Octree,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
 		.binding = shaderio::BindingPoints_Octree::eOctreeArray_G_Octree,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = 8,	//max 128x128x128
+		.descriptorCount = (uint32_t)OctreeArray_G.size(),	//max 128x128x128
 		.stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
 		.binding = shaderio::BindingPoints_Octree::eOctreeArray_E_Octree,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = 8,
+		.descriptorCount = (uint32_t)OctreeArray_E.size(),
 		.stageFlags = VK_SHADER_STAGE_ALL });
 #ifndef NDEBUG
 	bindings.addBinding({
@@ -245,8 +261,13 @@ void Octree::createDescriptorSetLayout() {
 void Octree::createDescriptorSet() {
 	nvvk::WriteSetContainer write{};
 	VkWriteDescriptorSet    VGBWrite =
-		staticDescPack.makeWrite(shaderio::BindingPoints_Octree::eVGB_Octree, 0, 0, 1);
-	write.append(VGBWrite, setting.VGB, 0, setting.VGB.bufferSize);
+		staticDescPack.makeWrite(shaderio::BindingPoints_Octree::eVGB_Octree, 0, 0, setting.VGBs.size());
+	nvvk::Buffer* VGBsPtr = setting.VGBs.data();
+	write.append(VGBWrite, VGBsPtr);
+
+	VkWriteDescriptorSet    VGBMaterialInfoWrite =
+		staticDescPack.makeWrite(shaderio::BindingPoints_Octree::eVGBMaterialInfos_Octree, 0, 0, 1);
+	write.append(VGBMaterialInfoWrite, setting.VGBMaterialInfos, 0, setting.VGBMaterialInfos.bufferSize);
 
 	VkWriteDescriptorSet    OctreeArrayWrite =
 		staticDescPack.makeWrite(shaderio::BindingPoints_Octree::eOctreeArray_G_Octree, 0, 0, OctreeArray_G.size());
@@ -275,6 +296,10 @@ void Octree::compileAndCreateShaders() {
 	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
 	std::filesystem::path shaderSource = shaderPath / "Octree.slang";
 	VkShaderModuleCreateInfo shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
+
+#ifndef NDEBUG
+	Application::slangCompiler.clearMacros();
+#endif
 
 	const VkPushConstantRange pushConstantRange{
 		.stageFlags = VK_SHADER_STAGE_ALL ,
@@ -354,15 +379,7 @@ void Octree::compileAndCreateShaders() {
 	NVVK_DBG_NAME(computeShader_MergeResult);
 #endif
 }
-void Octree::updateDataPerFrame(VkCommandBuffer cmd) {
-	scene.sceneInfo = Application::sceneResource.sceneInfo;
-
-	nvvk::cmdBufferMemoryBarrier(cmd, { scene.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-								   VK_PIPELINE_STAGE_2_TRANSFER_BIT });
-	vkCmdUpdateBuffer(cmd, scene.bSceneInfo.buffer, 0, sizeof(shaderio::SceneInfo), &scene.sceneInfo);
-	nvvk::cmdBufferMemoryBarrier(cmd, { scene.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-									   VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT });
-}
+void Octree::updateDataPerFrame(VkCommandBuffer cmd) {}
 
 void Octree::initOctreeArray(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
@@ -381,31 +398,33 @@ void Octree::createOctreeArray(VkCommandBuffer cmd) {
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createOctreeArray);
 
 	uint32_t totalVoxelCount = pow(setting.VGBSize, 3);
-	VkExtent2D groupSize = nvvk::getGroupCounts({ totalVoxelCount, 1 }, VkExtent2D{ 256, 1 });
+	VkExtent2D groupSize = nvvk::getGroupCounts({ totalVoxelCount * 6, 1 }, VkExtent2D{ THREADGROUP_SIZE2, 1 });
 	for (int i = pushConstant.maxDepth; i > setting.clusteringLevel; --i) {
 		pushConstant.currentDepth = i;
+		pushConstant.currentLayerNodeCount = totalVoxelCount;
 		vkCmdPushConstants2(cmd, &pushInfo);
 
 		vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
 		if(i > 1) nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
 		totalVoxelCount /= 8;
-		groupSize = nvvk::getGroupCounts({ totalVoxelCount, 1 }, VkExtent2D{ 256, 1 });
+		groupSize = nvvk::getGroupCounts({ totalVoxelCount * 6, 1 }, VkExtent2D{ THREADGROUP_SIZE2, 1 });
 	}
 
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createOctreeArray2);
-
+	
 	totalVoxelCount = pow(8, setting.clusteringLevel);
-	groupSize = nvvk::getGroupCounts({ totalVoxelCount, 1 }, VkExtent2D{ 512, 1 });
+	groupSize = nvvk::getGroupCounts({ totalVoxelCount * 6, 1 }, VkExtent2D{ THREADGROUP_SIZE, 1 });
 	for (int i = setting.clusteringLevel; i > 0; --i) {
 		pushConstant.currentDepth = i;
+		pushConstant.currentLayerNodeCount = totalVoxelCount;
 		vkCmdPushConstants2(cmd, &pushInfo);
-
+	
 		vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
 		if(i > 1) nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-
+	
 		totalVoxelCount /= 8;
-		groupSize = nvvk::getGroupCounts({ totalVoxelCount, 1 }, VkExtent2D{ 512, 1 });
+		groupSize = nvvk::getGroupCounts({ totalVoxelCount * 6, 1 }, VkExtent2D{ THREADGROUP_SIZE, 1 });
 	}
 }
 
@@ -497,7 +516,7 @@ void Octree::debug_wirefame(VkCommandBuffer cmd) {
 	const shaderio::Mesh& mesh = scene.meshes[wireframeMeshIndex];
 	const shaderio::TriangleMesh& triMesh = mesh.triMesh;
 
-	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)scene.bSceneInfo.address;
+	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 	vkCmdPushConstants2(cmd, &pushInfo);
 
 	uint32_t bufferIndex = scene.getMeshBufferIndex(wireframeMeshIndex);
@@ -505,7 +524,8 @@ void Octree::debug_wirefame(VkCommandBuffer cmd) {
 
 	vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(mesh.indexType));
 
-	vkCmdDrawIndexed(cmd, triMesh.indices.count, pushConstant.showOctreeNodeTotalCount * 2, 0, 0, 0);
+	uint32_t instanceCount = pushConstant.showOctreeNodeTotalCount * 7;
+	vkCmdDrawIndexed(cmd, triMesh.indices.count, instanceCount, 0, 0, 0);
 
 	vkCmdEndRendering(cmd);
 

@@ -1,7 +1,13 @@
 #include "feature/PathTracing/shaders/pathTracingCommon.slang"
+#include "feature/SceneDivision/RasterVoxelization/shaderio.h"
+#include "feature/SceneDivision/SparseVoxelOctree/shaderio.h"
 #include "renderer/SVOPathGuidingRenderer/hard/shaderio.h"
 
 [[vk::push_constant]] ConstantBuffer<SVOPathGuidingPushConstant, ScalarDataLayout> pushConst;
+[[vk::binding(StaticBindingPoints_SVOPG::eVGB_SVOPG)]] StructuredBuffer<VGBVoxelData, ScalarDataLayout> VGB;
+[[vk::binding(StaticBindingPoints_SVOPG::eSVO_G_SVOPG)]] StructuredBuffer<SVONodeData_G, ScalarDataLayout> SVO_G[];
+[[vk::binding(StaticBindingPoints_SVOPG::eSVO_E_SVOPG)]] StructuredBuffer<SVONodeData_E, ScalarDataLayout> SVO_E[];
+[[vk::binding(StaticBindingPoints_SVOPG::eWeights_SVOPG)]] StructuredBuffer<float> SVOWeights;
 #ifndef NDEBUG
 [[vk::binding(StaticBindingPoints_SVOPG::eDepthImage_SVOPG, 0)]] RWTexture2D<float> depthImage; // VK_FORMAT_D32_SFLOAT
 #endif
@@ -22,7 +28,8 @@ void raygenMain()
     const uint rayFlags = 0; // RAY_FLAG_CULL_BACK_FACING_TRIANGLES;
     const float2 pixelCenter = launchID + subpixel_jitter;
     const float2 clipCoords = launchID / launchSize * 2.0 - 1.0;
-    const float4 viewCoords = mul(float4(clipCoords, 1.0, 1.0), sceneInfo.projInvMatrix);
+    float4 viewCoords = mul(float4(clipCoords, 1.0, 1.0), sceneInfo.projInvMatrix);
+    viewCoords /= viewCoords.w;
 
     RayDesc ray;
     ray.Origin = sceneInfo.cameraPosition; // mul(float4(0.0, 0.0, 0.0, 1.0), sceneInfo.viewInvMatrix).xyz;
@@ -47,25 +54,25 @@ void raygenMain()
     // Iterative reflection loop
     while (payload.bounceDepth < pushConst.maxDepth && (payload.bsdf_cosine.x + payload.bsdf_cosine.y + payload.bsdf_cosine.z > 0.0f))
     {
-#ifdef PathTracingMotionBlur
+    #ifdef PathTracingMotionBlur
         TraceMotionRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, pushConst.time, payload);
-#else
+    #else
         TraceRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, payload);
-#endif
+    #endif
         accumulatedRadiance += payload.radiance;
 
         float randomNumber = rand(payload.randomSeed);
         if (randomNumber >= RR) break;
         payload.pdf *= RR;
 
-#ifndef NDEBUG
+    #ifndef NDEBUG
         if (payload.bounceDepth == 1) {
             float3 hitPos = payload.rayOrigin + 0.01f * ray.Direction;
             float4 clipPos = mul(float4(hitPos, 1.0f), sceneInfo.viewProjMatrix);
             float depth = clipPos.z / clipPos.w; // any hitPoint must in our cameraView
             depthImage[int2(launchID)] = depth;
         } else if (payload.bounceDepth == MISS_DEPTH) depthImage[int2(launchID)] = 1.0f;
-#endif
+    #endif
 
         ray.Origin = payload.rayOrigin;
         ray.Direction = payload.rayDirection;
@@ -94,10 +101,12 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
     Mesh mesh = sceneInfo.meshes[instance.meshIndex];
     BSDFMaterial material = sceneInfo.materials[instance.materialIndex];
 
-    HitState hitState = getHitStateWithPositionFetch(barycentrics);
+    HitState hitState = getHitStateWithPositionFetch(barycentrics, payload.rayDirection);
 
     float cosineON = dot(hitState.normal, -payload.rayDirection);
     if (cosineON < 0) hitState.normal = -hitState.normal;
+    if (material.type != MaterialType::Dielectric && material.type != MaterialType::RoughDielectric)
+        material.emissive *= max(cosineON, 0.0f);
 
     CallablePayload callablePayload;
     callablePayload.material = material;
@@ -152,29 +161,22 @@ void diffuseMaterialMain(inout CallablePayload payload) {
 
 [shader("callable")]
 void conductorMaterialMain(inout CallablePayload payload) {
-    payload.bsdf = 1.0f;
+    payload.bsdf = payload.material.albedo;
     payload.pdf = 1.0f;
     payload.incidence = reflect(-payload.outgoing, payload.hitNormal);
 }
 
 [shader("callable")]
 void dielectricMaterialMain(inout CallablePayload payload) {
-    float eta = payload.material.eta.x;
-    if (!payload.isExt) eta = 1.0f / eta;
-
-    float3 F;
-    PopulateCallablePayload_DielectricMaterial(payload, F, eta);
+    PopulateCallablePayload_DielectricMaterial(payload);
 }
 
 [shader("callable")]
 void roughConductorMaterialMain(inout CallablePayload payload) {
-    float3 outgoing_tangentSpace;
-    PopulateCallablePayload_RoughConductorMaterial(payload, outgoing_tangentSpace);
+    PopulateCallablePayload_RoughConductorMaterial(payload);
 }
 
 [shader("callable")]
 void roughDielectricMaterialMain(inout CallablePayload payload) {
-    float3 outgoing_tangentSpace;
-    float eta;
-    PopulateCallablePayload_RoughDielectricMaterial(payload, outgoing_tangentSpace, eta);
+    PopulateCallablePayload_RoughDielectricMaterial(payload);
 }

@@ -9,7 +9,8 @@
 
 namespace FzbRenderer {
 struct OctreeSetting{
-	nvvk::Buffer VGB;
+	std::vector<nvvk::Buffer> VGBs;
+	nvvk::Buffer VGBMaterialInfos;
 	glm::vec3 VGBStartPos;
 	glm::vec3 VGBVoxelSize;
 	float VGBSize;
@@ -17,7 +18,10 @@ struct OctreeSetting{
 	uint32_t OctreeDepth = 6;	//排除根节点，从第一层开始
 	uint32_t clusteringLevel = 4;	//聚类到第二层停止，即8x8
 
+#ifndef NDEBUG
 	float lineWidth = 2.0f;
+	int normalIndex;
+#endif
 };
 
 class Octree : public Feature{

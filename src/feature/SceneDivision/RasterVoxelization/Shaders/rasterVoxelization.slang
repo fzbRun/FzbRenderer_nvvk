@@ -25,6 +25,7 @@ void computeMain_clearVGB(uint3 dispatchId: SV_DispatchThreadID) {
     voxelData.irradiance = float4(0.0f);
     voxelData.sumNormal_G = float4(0.0f);
     voxelData.sumNormal_E = float4(0.0f);
+    voxelData.materialIndex_Count = 0;
 
     VGB[dispatchId.x] = voxelData;
 }
@@ -111,7 +112,11 @@ void geometryMain(
 }
 
 int getVoxelIndex(float3 worldPos) {
-    int3 voxelIndex = int3((worldPos - pushConst.voxelGroupStartPos) / pushConst.voxelSize_Count.xyz);
+    /*
+    We determine whether a pos is located in a node by checking whether it is contained within the aabb of the node in the order of 0-7.
+    Therefore, we should assign the pos of the boundary to the smaller node to avoid issues caused by floating-point number comparisons
+    */
+    int3 voxelIndex = int3((worldPos - pushConst.voxelGroupStartPos) * 0.999f / pushConst.voxelSize_Count.xyz);
     int voxelCount = uint(pushConst.voxelSize_Count.w);
     int voxelTotalCount = voxelCount * voxelCount * voxelCount;
     int voxelIndexU = 0;
@@ -213,12 +218,39 @@ void atomicNormalG(float3 normal, int voxelIndexU) {
     InterlockedAdd<float>(VGB[voxelIndexU].sumNormal_G.y, normal_G.y);
     InterlockedAdd<float>(VGB[voxelIndexU].sumNormal_G.z, normal_G.z);
 }
+void atomicMaterialTypeCount(uint materialIndex, int voxelIndexU) {
+    uint preVal = 0;
+    uint newVal = uint(materialIndex) << 26; ++newVal;
+    uint curVal;
+    InterlockedCompareExchange(VGB[voxelIndexU].materialIndex_Count, preVal, newVal, curVal);
+    while (curVal != preVal) {
+        preVal = curVal;
+
+        uint voxelMaterialIndex = preVal >> 26;
+        uint voxelMaterialCount = preVal & 0x07FFFFFF;
+        newVal = preVal;
+        if (materialIndex == voxelMaterialIndex) ++newVal;
+        else {
+            if (voxelMaterialCount == 0) {
+                newVal = uint(materialIndex) << 26;
+                ++newVal;       //2^26 is too big to exceed
+            }
+            else --newVal;
+        }
+
+        InterlockedCompareExchange(VGB[voxelIndexU].materialIndex_Count, preVal, newVal, curVal);
+    }
+}
 
 [shader("pixel")]
 void fragmentMain(GSout input) {
     int voxelIndexU = getVoxelIndex(input.worldPos);
     atomicAABB(input.worldPos, voxelIndexU);
     atomicNormalG(input.worldNormal, voxelIndexU);
+
+    SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+    Instance instanceInfo = sceneInfo.instances[pushConst.instanceIndex];
+    atomicMaterialTypeCount(instanceInfo.materialIndex, voxelIndexU);
 }
 
 #ifndef NDEBUG
@@ -273,6 +305,11 @@ PSout_ThreeView fragmentMain_ThreeView(GSout_ThreeView input) {
 
     atomicAABB(input.worldPos, voxelIndexU);
     atomicNormalG(input.worldNormal, voxelIndexU);
+
+    SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+    Instance instanceInfo = sceneInfo.instances[pushConst.instanceIndex];
+    //MaterialType instanceMaterialType = sceneInfo.materials[instanceInfo.materialIndex].type;
+    atomicMaterialTypeCount(instanceInfo.materialIndex, voxelIndexU);
 
     if (pushConst.frameIndex == 0) InterlockedAdd<uint>(fragmentCountBuffer[0], 1);
 

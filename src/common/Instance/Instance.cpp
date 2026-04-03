@@ -51,9 +51,9 @@ void InstanceSet::getTransformMatrixFromXML(pugi::xml_node& transformNode){
 	}
 	if (pugi::xml_node rotateNode = transformNode.child("rotate")) {
 		glm::vec3 rotateAngle = glm::radians(FzbRenderer::getRGBFromString(rotateNode.attribute("value").value()));
-		if (rotateAngle.x > 0.01f) baseMatrix = glm::rotate(baseMatrix, rotateAngle.x, glm::vec3(1, 0, 0));
-		if (rotateAngle.y > 0.01f) baseMatrix = glm::rotate(baseMatrix, rotateAngle.y, glm::vec3(0, 1, 0));
-		if (rotateAngle.z > 0.01f) baseMatrix = glm::rotate(baseMatrix, rotateAngle.z, glm::vec3(0, 0, 1));
+		if (rotateAngle.x != 0.0f) baseMatrix = glm::rotate(baseMatrix, rotateAngle.x, glm::vec3(1, 0, 0));
+		if (rotateAngle.y != 0.0f) baseMatrix = glm::rotate(baseMatrix, rotateAngle.y, glm::vec3(0, 1, 0));
+		if (rotateAngle.z != 0.0f) baseMatrix = glm::rotate(baseMatrix, rotateAngle.z, glm::vec3(0, 0, 1));
 	}
 	if (pugi::xml_node scaleNode = transformNode.child("scale")) {
 		glm::vec3 scaleValue = FzbRenderer::getRGBFromString(scaleNode.attribute("value").value());

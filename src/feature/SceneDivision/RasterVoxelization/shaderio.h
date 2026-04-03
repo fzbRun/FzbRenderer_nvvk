@@ -17,13 +17,15 @@ enum RasterVoxelizationBindingPoints
 
 struct RasterVoxelizationPushConstant
 {
-	//float3x3 normalMatrix;
 	float4x4 VP[3];
 	float4 voxelSize_Count;
 	float3 voxelGroupStartPos;
 	int instanceIndex;
-	int frameIndex;		//debug
-	SceneInfo* sceneInfoAddress;           // Address of the scene information buffer
+	SceneInfo* sceneInfoAddress;
+#ifndef NDEBUG
+	int frameIndex;
+	int normalIndex;
+#endif
 };
 
 struct AABBU {
@@ -45,6 +47,7 @@ struct VGBVoxelData {
 	float4 sumNormal_G;
 	float4 sumNormal_E;
 	AABBU aabbU;
+	uint32_t materialIndex_Count;	//first 26 bite is materialCount, last 6 bite is materialIndex(assume max 64 material)
 };
 
 NAMESPACE_SHADERIO_END()

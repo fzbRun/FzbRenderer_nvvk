@@ -42,7 +42,7 @@ public:
 
 	void resetFrame() { Application::frameIndex = 0; };
 
-	int maxFrames = MAX_FRAME / 2;
+	int maxFrames = (MAX_FRAME) / 2;
 
 	PathTracingContext ptContext;
 
