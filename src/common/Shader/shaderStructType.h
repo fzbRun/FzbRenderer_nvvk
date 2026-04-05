@@ -7,6 +7,10 @@
 #ifndef FZBRENDERER_SHADERSTRUCTTYPE_H
 #define FZBRENDERER_SHADERSTRUCTTYPE_H
 
+#ifndef WARP_SIZE
+#define WARP_SIZE 32
+#endif
+
 NAMESPACE_SHADERIO_BEGIN()
 //-------------------------------------------------------Instance------------------------------------------------------------
 struct Instance {

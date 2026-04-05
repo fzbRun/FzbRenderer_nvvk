@@ -167,19 +167,19 @@ void SVOWeight::createWeightArray() {
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(indivisibleNodeInfosBuffer_E.buffer);
 
-	uint32_t weightCount = OUTGOING_COUNT * SVOIndivisibleNodeCount_G * SVOSize_E;
+	uint32_t weightCount = OUTGOING_COUNT * SVOIndivisibleNodeCount_G * (SVOSize_E + 8);	//has layer 0
 	bufferSize = weightCount * sizeof(float);
 	allocator->createBuffer(weightBuffer, bufferSize,
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(weightBuffer.buffer);
 
-	weightCount = OUTGOING_COUNT * SVOIndivisibleNodeCount_G * SVOSize_E / 8;
+	weightCount = OUTGOING_COUNT * SVOIndivisibleNodeCount_G * (SVOSize_E + 8 + 7) / 8;
 	bufferSize = weightCount * sizeof(float);
 	allocator->createBuffer(weightSumsBuffer, bufferSize,
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(weightSumsBuffer.buffer);
 
-	pushConstant.layerNodeMaxCount_E = SVOSize_E;
+	pushConstant.clusterLayer_E = setting.svo->setting.octree->setting.clusteringLevel;
 }
 void SVOWeight::createDescriptorSetLayout() {
 	SCOPED_TIMER(__FUNCTION__);
@@ -460,8 +460,8 @@ void SVOWeight::getProbability(VkCommandBuffer cmd) {
 	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getProbability);
 
-	for (int countdown = 0; countdown < setting.svo->setting.octree->setting.OctreeDepth; ++countdown) {
-		pushConstant.countdown = countdown;
+	for (int layerIndex = setting.svo->setting.octree->setting.clusteringLevel; layerIndex >= 0; --layerIndex) {
+		pushConstant.currentLayer_E = layerIndex;
 		vkCmdPushConstants2(cmd, &pushInfo);
 
 		vkCmdDispatchIndirect(cmd, GlobalInfoBuffer.buffer, 0);

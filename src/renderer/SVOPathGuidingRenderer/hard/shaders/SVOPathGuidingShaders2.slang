@@ -159,7 +159,7 @@ bool getNodeAABB_E_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload) {
     float3 geoNormal = payload.isExt ? payload.hitNormal : -payload.hitNormal;
     uint normalIndex = getNormalIndex(geoNormal);
 
-    float3 hitPos = payload.hitPos + offsetPos(pushConst.voxelLength, payload.randomSeed, payload.TBN);
+    float3 hitPos = payload.hitPos; // + offsetPos(pushConst.voxelLength, payload.randomSeed, payload.TBN);
 
     uint nodeIndex_G = normalIndex * 8, nodeLabel_G = 0, nodeIndexSum_G = 0, layerIndex_G = 1;
     bool hitIndivisible = false, hitNode = false;
@@ -211,13 +211,13 @@ bool getNodeAABB_E_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload) {
     pdf *= weightSampleProbability;
     //uint outgoingIndex = inverseSF(payload.outgoing, OUTGOING_COUNT);
 
-    uint totalNodeCount_E = groupGlobalInfo.totalNodeCount_E;
-    uint weightStartIndex = outgoingIndex * groupGlobalInfo.indivisibleNodeCount_G * totalNodeCount_E +
-                            (nodeLabel_G - 1) * totalNodeCount_E;
+    uint totalNodeWeightCount_E = groupGlobalInfo.totalNodeCount_E + 8;
+    uint weightStartIndex = outgoingIndex * groupGlobalInfo.indivisibleNodeCount_G * totalNodeWeightCount_E +
+                            (nodeLabel_G - 1) * totalNodeWeightCount_E;
 
     hitIndivisible = false, hitNode = false;
-    uint layerIndex_E = 1, nodeIndex_E = 0, nodeIndexSum_E = 0, nodeLabel_E = 0;
-    for (; layerIndex_E <= groupGlobalInfo.SVOMaxLayer_E; ++layerIndex_E) {
+    uint layerIndex_E = 0, nodeIndex_E = 0, nodeIndexSum_E = 0, nodeLabel_E = 0;
+    for (; layerIndex_E <= pushConst.clusterLayer_E; ++layerIndex_E) {
         hitNode = false;
         float randomNumber = rand(payload.randomSeed);
         for (uint nodeOffset = 0; nodeOffset < 8; ++nodeOffset) {
@@ -226,6 +226,12 @@ bool getNodeAABB_E_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload) {
 
             if (randomNumber <= probability) {
                 pdf *= probability;
+                if (layerIndex_E == 0) {
+                    weightStartIndex += 8;
+                    nodeIndex_E = nodeOffset * 8;
+                    hitNode = true;
+                    break;
+                }
                 SVONodeInfo_E_SVOPG nodeInfo_E = groupNodeInfos_E[nodeIndex_E + nodeOffset];
                 if ((nodeInfo_E.label_indivisible & 1u) == 1) {
                     aabb = nodeInfo_E.aabb;
@@ -276,7 +282,6 @@ void computeMain_SVOPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
         if (groupThreadIndex_linear == 0) {
             GlobalInfo_SOVPG globalInfo;
             globalInfo.SVOMaxLayer_G = weightGlobalInfo.SVOMaxLayer_G;
-            globalInfo.SVOMaxLayer_E = weightGlobalInfo.SVOMaxLayer_E;
             globalInfo.indivisibleNodeCount_G = weightGlobalInfo.indivisibleNodeCount_G;
             globalInfo.totalNodeCount_E = weightGlobalInfo.totalNodeCount_E;
             groupGlobalInfo = globalInfo;

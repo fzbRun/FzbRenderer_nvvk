@@ -176,7 +176,7 @@ void SVO_SVOPG::createSVOArray() {
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(SVODivisibleNodeInfos_G.buffer);
 
-	bufferSize = sizeof(shaderio::uint2) * SVOSize_E;
+	bufferSize = sizeof(shaderio::uint4) * SVOSize_E;
 	allocator->createBuffer(SVODivisibleNodeInfos_E, bufferSize,
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(SVODivisibleNodeInfos_E.buffer);
@@ -187,7 +187,7 @@ void SVO_SVOPG::createSVOArray() {
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(SVOThreadGroupInfos.buffer);
 
-	pushConstant.maxDepth_Octree = OctreeDepth;
+	pushConstant.maxLayer_Octree = OctreeDepth;
 }
 void SVO_SVOPG::createDescriptorSetLayout() {
 	SCOPED_TIMER(__FUNCTION__);
@@ -380,8 +380,8 @@ void SVO_SVOPG::createSVOArray(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
 
 	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
-	for (int depth = 1; depth <= pushConstant.maxDepth_Octree; ++depth) {
-		pushConstant.currentDepth_SVO = depth;
+	for (int layerIndex = 2; layerIndex <= pushConstant.maxLayer_Octree + 1; ++layerIndex) {
+		pushConstant.currentLayer_SVO = layerIndex;
 		vkCmdPushConstants2(cmd, &pushInfo);
 
 		vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createSVOArray);
@@ -455,8 +455,8 @@ void SVO_SVOPG::debug_wirefame(VkCommandBuffer cmd) {
 
 	VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
 	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;		//使用PathGuiding的深度纹理
-	//depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
-	depthAttachment.imageView = depthImageView;	//gBuffers.getDepthImageView();	//
+	depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
+	depthAttachment.imageView = gBuffers.getDepthImageView();	//depthImageView;
 
 	VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
 	renderingInfo.renderArea = { {0, 0}, gBuffers.getSize() };

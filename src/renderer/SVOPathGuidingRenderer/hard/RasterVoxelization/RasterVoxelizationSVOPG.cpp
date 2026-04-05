@@ -120,7 +120,7 @@ void RasterVoxelization_SVOPG::uiRender() {
 		}
 		PE::end();
 		//---------------------------------------normalIndex--------------------------------------
-		std::vector<std::string> normalIndexNames = { "right", "left", "up", "bottom", "forward", "back"};
+		std::vector<std::string> normalIndexNames = { "left", "right", "bottom", "up", "back", "forward"};
 
 		std::vector<const char*> normalIndexNames_pointers;
 		for (const auto& normalIndexName : normalIndexNames)

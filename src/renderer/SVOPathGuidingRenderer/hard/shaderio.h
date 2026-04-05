@@ -2,8 +2,6 @@
 #pragma once
 
 #include <common/Shader/shaderStructType.h>
-#include <feature/SceneDivision/RasterVoxelization/shaderio.h>
-#include <feature/SceneDivision/SparseVoxelOctree/shaderio.h>
 
 #ifndef FZBRENDERER_PATHGUIDING_SHADER_IO_H
 #define FZBRENDERER_PATHGUIDING_SHADER_IO_H
@@ -42,7 +40,6 @@ enum DynamicBindingPoints_SVOPG {
 
 struct GlobalInfo_SOVPG {
 	uint SVOMaxLayer_G;
-	uint SVOMaxLayer_E;
 	uint indivisibleNodeCount_G;
 	uint totalNodeCount_E;
 };
@@ -54,39 +51,16 @@ struct SVONodeInfo_E_SVOPG {
 	uint label_indivisible;
 	AABB aabb;
 };
-//-------------------------------------------SVORasterVoxelization----------------------------------------
-enum RasterVoxelizationBindingPoints_SVOPG
-{
-	eTextures_SVOPG = 0,
-	eVGB_SVOPG,
-	eVGBMaterialInfo_SVOPG,
-	eFragmentCountBuffer_SVOPG,
-	eWireframeMap_SVOPG,
-	eBaseMap_SVOPG,
-};
-
-struct VGBMaterialInfo_SVOPG {
-	uint materialCount[MAX_MATERIAL_COUNT];
-};
-
-struct AABBI {
-	int4 minimum;
-	int4 maximum;
-};
-struct VGBVoxelData_SVOPG {
-	float4 irradiance;
-	float4 sumNormal_G;
-	float4 sumNormal_E;
-	AABBI aabbI;
-};
+/*
 //-------------------------------------------SVO----------------------------------------
 #define SVOSize_G 4000	//512 * 6
-#define SVOSize_E 100
+#define SVOSize_E 500
 #if SVOSize_G > SVOSize_E
 #define SVOSize SVOSize_G
 #else
 #define SVOSize SVOSize_E
 #endif
+#define MAX_SVO_LAYER MAX_OCTREE_DEPTH + 1
 
 enum class BindingPoints_SVOPG {
 	eOctreeArray_G_SVOPG = 0,
@@ -100,8 +74,8 @@ enum class BindingPoints_SVOPG {
 };
 
 struct SVOPushConstant_SVOPG {
-	uint32_t maxDepth_Octree;
-	uint32_t currentDepth_SVO;
+	uint32_t maxLayer_Octree;		//Octree max layerIndex, 32x32x32 is 5
+	uint32_t currentLayer_SVO;
 #ifndef NDEBUG
 	float frameIndex;
 	SceneInfo* sceneInfoAddress;
@@ -115,20 +89,20 @@ struct SVOGlobalInfo_SVOPG {
 #endif
 	uint32_t totalNodeCount_G;
 	uint32_t totalNodeCount_E;
-	SVOLayerInfo layerInfos_G[MAX_OCTREE_DEPTH];
-	SVOLayerInfo layerInfos_E[MAX_OCTREE_DEPTH];
+	SVOLayerInfo layerInfos_G[MAX_SVO_LAYER];
+	SVOLayerInfo layerInfos_E[MAX_SVO_LAYER];
 };
 //-------------------------------------------SVOWeight----------------------------------------
 #define SVOIndivisibleNodeCount_G 1600
-#define SVOIndivisibleNodeCount_E 100
+#define SVOIndivisibleNodeCount_E 300
 
 #define HITTEST_COUNT 8
 #define OUTGOING_COUNT 64
 struct SVOWeightPushConstant {
 	uint32_t frameIndex;
-	uint32_t layerNodeMaxCount_E;
+	uint32_t clusterLayer_E;
+	uint32_t currentLayer_E;
 	SceneInfo* sceneInfoAddress;
-	uint32_t countdown;
 #ifndef NDEBUG
 	float3 samplePos;
 	float3 outgoing;
@@ -152,7 +126,6 @@ struct SVOWeightGlobalInfo {
 	uint indivisibleNodeCount_G;
 	uint indivisibleNodeCount_E;
 	uint SVOMaxLayer_G;
-	uint SVOMaxLayer_E;
 	uint totalNodeCount_E;
 #ifndef NDEBUG
 	AABB sampelNodeAABB;
@@ -167,20 +140,18 @@ struct SVOIndivisibleNodeInfo {
 };
 struct IndivisibleNodeData_E {
 	float3 normal;
-	uint singleSide;
 	float3x3 TBN;
+	float3 irradiance;
 	uint nodeIndex;
-	float irradiance;
 	AABB aabb;
 };
 struct IndivisibleNodeData_G {
 	float3 normal;
-	uint singleSide;
 	float3x3 TBN;
 	uint nodeLabel;
 	uint materialType;
 	AABB aabb;
 };
-
+*/
 NAMESPACE_SHADERIO_END()
 #endif

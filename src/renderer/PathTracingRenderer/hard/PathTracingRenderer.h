@@ -8,7 +8,6 @@
 #include <nvvk/staging.hpp>
 #include "common/Shader/shaderStructType.h"
 #include "./shaderio.h"
-#include <feature/SceneDivision/RasterVoxelization/RasterVoxelization.h>
 #include "common/Application/Application.h"
 #include "AccelerationStructure.h"
 #include <feature/PathTracing/PathTracing.h>

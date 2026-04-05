@@ -1,0 +1,76 @@
+#pragma once
+
+#include <common/Shader/shaderStructType.h>
+
+#ifndef FZBRENDERER_OCTREE_SVOPG_SHADERIO_H
+#define FZBRENDERER_OCTREE_SVOPG_SHADERIO_H
+
+#define MAX_OCTREE_LAYER 8
+
+NAMESPACE_SHADERIO_BEGIN()
+
+enum class BindingPoints_Octree_SVOPG : uint32_t {
+	eVGB = 0,
+	eVGBMaterialInfos,
+	eOctreeArray_G,
+	eOctreeArray_E,
+	eOctree_E,
+	eBlockInfos_G,
+	eBlockInfos_E,
+	eHasDataBlockIndices_G,
+	eHasDataBlockIndices_E,
+	eHasDataBlockCount,
+	eGlobalInfo,
+	eWireframeMap,
+	eBaseMap,
+};
+
+struct OctreePushConstant_SVOPG {
+	uint32_t octreeMaxLayer;
+	uint32_t currentLayer;
+	float voxelVolume;
+	uint32_t octreeNodeTotalCount;
+	uint32_t currentLayerNodeCount;
+	uint32_t currentLayerBlockCount;
+	uint32_t VGBVoxelTotalCount;
+	SceneInfo* sceneInfoAddress;
+#ifndef NDEBUG
+	float4 VGBStartPos_Size;
+	float frameIndex;
+	uint32_t showOctreeNodeTotalCount;
+	int normalIndex;
+#endif
+};
+
+#define OCTREE_CLUSTER_LAYER 2
+#define OCTREE_NODECOUNT_E 440 //8 + 48 + 384
+struct OctreeNodeData_G {
+	float4 meanNormal;
+	AABB aabb;
+	uint32_t indivisible;
+	uint32_t label;
+	uint32_t materialIndex;
+};
+struct OctreeNodeData_E {
+	float3 irradiance;
+	float pdf;
+	float4 meanNormal;
+	AABB aabb;
+	uint32_t indivisible;
+	uint32_t label;
+};
+
+struct HasDataOctreeBlockCount {
+	uint32_t count_G;
+	uint32_t count_E;
+};
+struct OctreeGlobalInfo {
+	DispatchIndirectCommand cmd;
+};
+
+#define INITOCTREE_CS_THREADGROUP_SIZE 1024
+#define CREATEOCTREE_CS_THREADGROUP_SIZE 256
+
+NAMESPACE_SHADERIO_END()
+
+#endif
