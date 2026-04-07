@@ -1,10 +1,10 @@
 #pragma once
 
-#include "../../../feature/Feature.h"
-#include "../../../feature/PathTracing/PathTracing.h"
+#include "feature/Feature.h"
+#include "feature/PathTracing/PathTracing.h"
 #include "./shaderio.h"
-#include "RasterVoxelizationSVOPG.h"
-#include "SVO.h"
+#include "../RasterVoxelization/RasterVoxelizationSVOPG.h"
+#include "../SVO/SVO.h"
 
 #ifndef FZBRENDERER_SVO_WEIGHT_H
 #define FZBRENDERER_SVO_WEIGHT_H
@@ -12,6 +12,7 @@
 namespace FzbRenderer {
 struct SVOWeightSetting {
 	std::shared_ptr<SVO_SVOPG> svo;
+	std::shared_ptr<Octree_SVOPG> octree;
 	AccelerationStructureManager* asManager;
 };
 
@@ -46,7 +47,6 @@ public:
 	nvvk::Buffer indivisibleNodeInfosBuffer_G;
 	nvvk::Buffer indivisibleNodeInfosBuffer_E;
 	nvvk::Buffer weightBuffer;
-	nvvk::Buffer weightSumsBuffer;
 
 	VkShaderEXT computeShader_getIndivisibleNode{};
 	VkShaderEXT computeShader_initWeights{};
@@ -56,8 +56,6 @@ private:
 	shaderio::SVOWeightPushConstant pushConstant;
 	VkPushConstantsInfo pushInfo;
 	VkShaderModuleCreateInfo shaderCode;
-
-	VkPhysicalDeviceRayQueryFeaturesKHR rayqueryFeature{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR };
 
 	void getIndivisibleNode(VkCommandBuffer cmd);
 	void initWeights(VkCommandBuffer cmd);

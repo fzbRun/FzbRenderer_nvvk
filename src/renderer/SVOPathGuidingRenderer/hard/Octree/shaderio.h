@@ -14,7 +14,7 @@ enum class BindingPoints_Octree_SVOPG : uint32_t {
 	eVGBMaterialInfos,
 	eOctreeArray_G,
 	eOctreeArray_E,
-	eOctree_E,
+	eNodeData_E,
 	eBlockInfos_G,
 	eBlockInfos_E,
 	eHasDataBlockIndices_G,
@@ -30,8 +30,8 @@ struct OctreePushConstant_SVOPG {
 	uint32_t currentLayer;
 	float voxelVolume;
 	uint32_t octreeNodeTotalCount;
-	uint32_t currentLayerNodeCount;
 	uint32_t currentLayerBlockCount;
+	uint32_t currentLayerNodeCount;
 	uint32_t VGBVoxelTotalCount;
 	SceneInfo* sceneInfoAddress;
 #ifndef NDEBUG
@@ -43,7 +43,10 @@ struct OctreePushConstant_SVOPG {
 };
 
 #define OCTREE_CLUSTER_LAYER 2
-#define OCTREE_NODECOUNT_E 440 //8 + 48 + 384
+#define OCTREE_NODECOUNT_E 440		//8 + 48 + 384
+#define NODECOUNT_E 384
+static const uint OctreeLayerInfo_E[3] = { 8, 48, 384 };
+static const uint OctreeLayerStartIndex_E[3] = { 0, 8, 56 };
 struct OctreeNodeData_G {
 	float4 meanNormal;
 	AABB aabb;
@@ -57,7 +60,6 @@ struct OctreeNodeData_E {
 	float4 meanNormal;
 	AABB aabb;
 	uint32_t indivisible;
-	uint32_t label;
 };
 
 struct HasDataOctreeBlockCount {

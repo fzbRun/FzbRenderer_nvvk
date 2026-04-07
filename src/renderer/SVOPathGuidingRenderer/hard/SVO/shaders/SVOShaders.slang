@@ -1,5 +1,5 @@
 #include "common/Shader/shaderStructType.h"
-#include "renderer/SVOPathGuidingRenderer/hard/shaderio.h"
+#include "renderer/SVOPathGuidingRenderer/hard/SVO/shaderio.h"
 
 [[vk::push_constant]] ConstantBuffer<SVOPushConstant_SVOPG> pushConst;
 [[vk::binding(BindingPoints_SVOPG::eOctreeArray_G_SVOPG)]] StructuredBuffer<OctreeNodeData_G, ScalarDataLayout> OctreeArray_G[];

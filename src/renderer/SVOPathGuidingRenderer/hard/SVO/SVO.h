@@ -2,14 +2,14 @@
 
 #include "feature/Feature.h"
 #include "./shaderio.h"
-#include <feature/SceneDivision/Octree/Octree.h>
+#include "../Octree/OctreeSVOPG.h"
 
 #ifndef FZBRENDERER_SVOPATHGUIDING_SVO_H
 #define FZBRENDERER_SVOPATHGUIDING_SVO_H
 
 namespace FzbRenderer {
 struct SVOSetting_SVOPG {
-	std::shared_ptr<Octree> octree;
+	std::shared_ptr<Octree_SVOPG> octree;
 };
 
 class SVO_SVOPG : public Feature {
@@ -42,7 +42,6 @@ public:
 	VkPushConstantsInfo pushInfo;
 
 	nvvk::Buffer SVO_G;		//buffer per normal
-	nvvk::Buffer SVO_E;
 
 	nvvk::Buffer SVOGlobalInfo;
 
@@ -51,8 +50,6 @@ public:
 	VkShaderEXT computeShader_offsetLabelMultiBlock{};	//多个线程组需要跨线程组进行通信
 private:
 	nvvk::Buffer SVODivisibleNodeInfos_G;		//每层可细分节点的索引
-	nvvk::Buffer SVODivisibleNodeInfos_E;
-
 	nvvk::Buffer SVOThreadGroupInfos;
 
 #ifndef NDEBUG
@@ -67,7 +64,6 @@ public:
 	VkShaderEXT fragmentShader_Wireframe{};
 
 	bool showWireframeMap_G = false;
-	bool showWireframeMap_E = false;
 #endif
 };
 }

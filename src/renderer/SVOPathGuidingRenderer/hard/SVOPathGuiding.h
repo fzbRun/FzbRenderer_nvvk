@@ -5,9 +5,8 @@
 #include "./RasterVoxelization/RasterVoxelizationSVOPG.h"
 #include "./LightInject/LightInjectSVOPG.h"
 #include "./Octree/OctreeSVOPG.h"
-//#include <feature/SceneDivision/SparseVoxelOctree/SparseVoxelOctree.h>
-//#include "SVOWeight.h"
-//#include "SVO.h"
+#include "./SVO/SVO.h"
+#include "Weight/SVOWeight.h"
 
 #ifndef FZBRENDERER_SVO_PATHGUIDING_H
 #define FZBRENDERER_SVO_PATHGUIDING_H
@@ -44,8 +43,8 @@ public:
 	std::shared_ptr<RasterVoxelization_SVOPG> rasterVoxelization;
 	std::shared_ptr<LightInject_SVOPG> lightInject;
 	std::shared_ptr<Octree_SVOPG> octree;
-	//std::shared_ptr<FzbRenderer::SVO_SVOPG> svo;
-	//std::shared_ptr<FzbRenderer::SVOWeight> svoWeight;
+	std::shared_ptr<SVO_SVOPG> svo;
+	std::shared_ptr<SVOWeight> svoWeight;
 
 private:
 	VkShaderEXT computeShader_SVOPathGuiding{};

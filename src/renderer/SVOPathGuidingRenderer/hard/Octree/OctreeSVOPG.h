@@ -52,11 +52,10 @@ public:
 
 	OctreeSetting_SVOPG setting;
 
-	std::vector<nvvk::Buffer> OctreeArray_G;
+	std::vector<nvvk::Buffer> OctreeArray_G;	//layer0: 6  layer1£º 48 ¡­¡­
 	std::vector<nvvk::Buffer> OctreeArray_E;
 
-	nvvk::Buffer Octree_E;
-	//nvvk::Buffer SVO_G;
+	nvvk::Buffer NodeData_E;
 private:
 	nvvk::Buffer blockInfoBuffer_G;
 	nvvk::Buffer blockInfoBuffer_E;
