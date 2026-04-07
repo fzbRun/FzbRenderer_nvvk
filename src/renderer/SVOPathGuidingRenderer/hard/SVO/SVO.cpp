@@ -29,10 +29,8 @@ void SVO_SVOPG::init(SVOSetting_SVOPG setting) {
 void SVO_SVOPG::clean() {
 	Feature::clean();
 	Application::allocator.destroyBuffer(SVO_G);
-	Application::allocator.destroyBuffer(SVO_E);
 	Application::allocator.destroyBuffer(SVOGlobalInfo);
 	Application::allocator.destroyBuffer(SVODivisibleNodeInfos_G);
-	Application::allocator.destroyBuffer(SVODivisibleNodeInfos_E);
 	Application::allocator.destroyBuffer(SVOThreadGroupInfos);
 
 	VkDevice device = Application::app->getDevice();
@@ -75,11 +73,10 @@ void SVO_SVOPG::uiRender() {
 				}))
 			{
 				showWireframeMap_G = !showWireframeMap_G;
-				showWireframeMap_E = false;
 			}
 		}
 		PE::end();
-
+		/*
 		if (PE::begin()) {
 			if (PE::entry("IlluminationSVOResult", [&] {
 				static const ImVec4 highlightColor = ImVec4(118.f / 255.f, 185.f / 255.f, 0.f, 1.f);
@@ -102,11 +99,11 @@ void SVO_SVOPG::uiRender() {
 			}
 		}
 		PE::end();
+		*/
 	}
 	ImGui::End();
 
 	if (showWireframeMap_G) Application::viewportImage = gBuffers.getDescriptorSet(0);
-	if (showWireframeMap_E) Application::viewportImage = gBuffers.getDescriptorSet(1);
 #endif
 }
 void SVO_SVOPG::preRender() {
@@ -151,7 +148,7 @@ void SVO_SVOPG::postProcess(VkCommandBuffer cmd) {
 }
 
 void SVO_SVOPG::createSVOArray() {
-	uint32_t OctreeDepth = setting.octree->setting.OctreeDepth;		//这个depth是从0开始的
+	uint32_t octreeMaxLayer = setting.octree->setting.OctreeLayerCount;		//这个depth是从0开始的
 
 	nvvk::StagingUploader& stagingUploader = Application::stagingUploader;
 	nvvk::ResourceAllocator* allocator = stagingUploader.getResourceAllocator();
@@ -161,33 +158,23 @@ void SVO_SVOPG::createSVOArray() {
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(SVO_G.buffer);
 
-	bufferSize = sizeof(shaderio::SVONodeData_E) * SVOSize_E;
-	allocator->createBuffer(SVO_E, bufferSize,
-		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-	NVVK_DBG_NAME(SVO_E.buffer);
-
 	allocator->createBuffer(SVOGlobalInfo, sizeof(shaderio::SVOGlobalInfo_SVOPG),
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT
 		| VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT);
 	NVVK_DBG_NAME(SVOGlobalInfo.buffer);
 
-	bufferSize = sizeof(shaderio::uint4) * SVOSize_G;
+	bufferSize = sizeof(shaderio::uint2) * SVOSize_G;
 	allocator->createBuffer(SVODivisibleNodeInfos_G, bufferSize,
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(SVODivisibleNodeInfos_G.buffer);
 
-	bufferSize = sizeof(shaderio::uint2) * SVOSize_E;
-	allocator->createBuffer(SVODivisibleNodeInfos_E, bufferSize,
-		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-	NVVK_DBG_NAME(SVODivisibleNodeInfos_E.buffer);
-
 	uint32_t maxLayerNodeCount = SVOSize;
-	bufferSize = sizeof(shaderio::SVOThreadGroupInfo) * (maxLayerNodeCount / THREADGROUP_SIZE);
+	bufferSize = sizeof(shaderio::SVOThreadGroupInfo) * (maxLayerNodeCount / CREATESVO_CS_THREADGROUP_SIZE);
 	allocator->createBuffer(SVOThreadGroupInfos, bufferSize,
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(SVOThreadGroupInfos.buffer);
 
-	pushConstant.maxDepth_Octree = OctreeDepth;
+	pushConstant.svoMaxLayer = octreeMaxLayer + 1;
 }
 void SVO_SVOPG::createDescriptorSetLayout() {
 	SCOPED_TIMER(__FUNCTION__);
@@ -199,17 +186,7 @@ void SVO_SVOPG::createDescriptorSetLayout() {
 		.descriptorCount = (uint32_t)setting.octree->OctreeArray_G.size(),
 		.stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
-		.binding = (uint32_t)shaderio::BindingPoints_SVOPG::eOctreeArray_E_SVOPG,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = (uint32_t)setting.octree->OctreeArray_E.size(),
-		.stageFlags = VK_SHADER_STAGE_ALL });
-	bindings.addBinding({
 		.binding = (uint32_t)shaderio::BindingPoints_SVOPG::eSVO_G_SVOPG,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = 1,
-		.stageFlags = VK_SHADER_STAGE_ALL });
-	bindings.addBinding({
-		.binding = (uint32_t)shaderio::BindingPoints_SVOPG::eSVO_E_SVOPG,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
@@ -220,11 +197,6 @@ void SVO_SVOPG::createDescriptorSetLayout() {
 		.stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
 		.binding = (uint32_t)shaderio::BindingPoints_SVOPG::eSVODivisibleNodeIndices_G_SVOPG,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = 1,
-		.stageFlags = VK_SHADER_STAGE_ALL });
-	bindings.addBinding({
-		.binding = (uint32_t)shaderio::BindingPoints_SVOPG::eSVODivisibleNodeIndices_E_SVOPG,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
@@ -248,18 +220,9 @@ void SVO_SVOPG::createDescriptorSet() {
 	nvvk::Buffer* OctreeArrayPtr = setting.octree->OctreeArray_G.data();
 	write.append(OctreeArrayWrite, OctreeArrayPtr);
 
-	OctreeArrayWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_SVOPG::eOctreeArray_E_SVOPG, 0, 0, setting.octree->OctreeArray_E.size());
-	OctreeArrayPtr = setting.octree->OctreeArray_E.data();
-	write.append(OctreeArrayWrite, OctreeArrayPtr);
-
 	VkWriteDescriptorSet SVOArrayWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_SVOPG::eSVO_G_SVOPG, 0, 0, 1);
 	write.append(SVOArrayWrite, SVO_G, 0, SVO_G.bufferSize);;
-
-	SVOArrayWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_SVOPG::eSVO_E_SVOPG, 0, 0, 1);
-	write.append(SVOArrayWrite, SVO_E, 0, SVO_E.bufferSize);;
 
 	VkWriteDescriptorSet SVOGlobalInfoWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_SVOPG::eSVOGlobalInfo_SVOPG, 0, 0, 1);
@@ -268,10 +231,6 @@ void SVO_SVOPG::createDescriptorSet() {
 	VkWriteDescriptorSet SVODivisibleNodeIndicesWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_SVOPG::eSVODivisibleNodeIndices_G_SVOPG, 0, 0, 1);
 	write.append(SVODivisibleNodeIndicesWrite, SVODivisibleNodeInfos_G, 0, SVODivisibleNodeInfos_G.bufferSize);
-
-	SVODivisibleNodeIndicesWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_SVOPG::eSVODivisibleNodeIndices_E_SVOPG, 0, 0, 1);
-	write.append(SVODivisibleNodeIndicesWrite, SVODivisibleNodeInfos_E, 0, SVODivisibleNodeInfos_E.bufferSize);
 
 	VkWriteDescriptorSet SVOThreadGroupInfosWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_SVOPG::eSVOThreadGroupInfos_SVOPG, 0, 0, 1);
@@ -283,7 +242,7 @@ void SVO_SVOPG::compileAndCreateShaders() {
 	SCOPED_TIMER(__FUNCTION__);
 
 	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
-	std::filesystem::path shaderSource = shaderPath / "SVOShaders.slang";
+	std::filesystem::path shaderSource = shaderPath / "SVO.slang";
 	std::vector<uint32_t> shaderBuffer;
 	VkShaderModuleCreateInfo shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
 
@@ -361,7 +320,6 @@ void SVO_SVOPG::compileAndCreateShaders() {
 	NVVK_DBG_NAME(fragmentShader_Wireframe);
 #endif
 }
-
 void SVO_SVOPG::updateDataPerFrame(VkCommandBuffer cmd) {}
 
 void SVO_SVOPG::initSVOArray(VkCommandBuffer cmd) {
@@ -373,15 +331,15 @@ void SVO_SVOPG::initSVOArray(VkCommandBuffer cmd) {
 	vkCmdPushConstants2(cmd, &pushInfo);
 
 	uint32_t maxLayerNodeCount = SVOSize;
-	VkExtent2D groupSize = nvvk::getGroupCounts({ maxLayerNodeCount, 1 }, VkExtent2D{ THREADGROUP_SIZE, 1 });
+	VkExtent2D groupSize = nvvk::getGroupCounts({ maxLayerNodeCount, 1 }, VkExtent2D{ INITSVO_CS_THREADGROUP_SIZE, 1 });
 	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
 }
 void SVO_SVOPG::createSVOArray(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
 
 	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
-	for (int depth = 1; depth <= pushConstant.maxDepth_Octree; ++depth) {
-		pushConstant.currentDepth_SVO = depth;
+	for (int layerIndex = 3; layerIndex <= pushConstant.svoMaxLayer; ++layerIndex) {
+		pushConstant.currentLayer = layerIndex;
 		vkCmdPushConstants2(cmd, &pushInfo);
 
 		vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createSVOArray);
@@ -396,7 +354,7 @@ void SVO_SVOPG::createSVOArray(VkCommandBuffer cmd) {
 
 #ifndef NDEBUG
 void SVO_SVOPG::debugPrepare() {
-	Feature::createGBuffer(true, false, 2);
+	Feature::createGBuffer(true, false, 1);
 
 	nvutils::PrimitiveMesh primitive = FzbRenderer::MeshSet::createWireframe();
 	FzbRenderer::MeshSet meshSet = FzbRenderer::MeshSet("Wireframe", primitive);
@@ -404,7 +362,7 @@ void SVO_SVOPG::debugPrepare() {
 
 	scene.createSceneInfoBuffer();
 
-	shaderio::SVOGloablInfo_SVO globalInfo;
+	shaderio::SVOGlobalInfo_SVOPG globalInfo;
 	globalInfo.cmd = { 1, 1, 1 };
 
 	const shaderio::Mesh& mesh = scene.meshes[0];
@@ -415,7 +373,7 @@ void SVO_SVOPG::debugPrepare() {
 	};
 
 	nvvk::StagingUploader& stagingUploader = Application::stagingUploader;
-	NVVK_CHECK(stagingUploader.appendBuffer(SVOGlobalInfo, 0, std::span<const shaderio::SVOGloablInfo_SVO>({ globalInfo })));
+	NVVK_CHECK(stagingUploader.appendBuffer(SVOGlobalInfo, 0, std::span<const shaderio::SVOGlobalInfo_SVOPG>({ globalInfo })));
 }
 
 void SVO_SVOPG::resize(
@@ -440,7 +398,7 @@ void SVO_SVOPG::resize(
 void SVO_SVOPG::debug_wirefame(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
 
-	uint32_t wireframeMapCount = 2;
+	uint32_t wireframeMapCount = 1;
 	std::vector<VkRenderingAttachmentInfo> colorAttachments(wireframeMapCount);
 	for (int i = 0; i < wireframeMapCount; ++i) {
 		nvvk::cmdImageMemoryBarrier(cmd,
@@ -454,9 +412,9 @@ void SVO_SVOPG::debug_wirefame(VkCommandBuffer cmd) {
 	}
 
 	VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
-	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;		//使用PathGuiding的深度纹理
-	//depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
-	depthAttachment.imageView = depthImageView;	//gBuffers.getDepthImageView();	//
+	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;		//使用PathGuiding的深度纹理
+	depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
+	depthAttachment.imageView = gBuffers.getDepthImageView();	//depthImageView;
 
 	VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
 	renderingInfo.renderArea = { {0, 0}, gBuffers.getSize() };
@@ -475,7 +433,7 @@ void SVO_SVOPG::debug_wirefame(VkCommandBuffer cmd) {
 	graphicsDynamicPipeline.rasterizationState.lineWidth = 2.0f;
 	graphicsDynamicPipeline.rasterizationState.polygonMode = VK_POLYGON_MODE_LINE;
 	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_TRUE;
-	graphicsDynamicPipeline.depthStencilState.depthWriteEnable = VK_FALSE;
+	graphicsDynamicPipeline.depthStencilState.depthWriteEnable = VK_TRUE;
 
 	graphicsDynamicPipeline.colorWriteMasks.resize(wireframeMapCount);
 	graphicsDynamicPipeline.colorBlendEquations.resize(wireframeMapCount);
@@ -513,7 +471,7 @@ void SVO_SVOPG::debug_wirefame(VkCommandBuffer cmd) {
 
 	vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(mesh.indexType));
 
-	vkCmdDrawIndexedIndirect(cmd, SVOGlobalInfo.buffer, offsetof(shaderio::SVOGloablInfo_SVO, drawCmd), 1, 0);
+	vkCmdDrawIndexedIndirect(cmd, SVOGlobalInfo.buffer, offsetof(shaderio::SVOGlobalInfo_SVOPG, drawCmd), 1, 0);
 
 	vkCmdEndRendering(cmd);
 

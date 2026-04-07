@@ -35,7 +35,6 @@ struct OctreePushConstant {
 #endif
 };
 
-#define MAX_MATERIAL_TYPE_COUNT 5
 struct OctreeNodeData_G {
 	float4 meanNormal;
 	AABB aabb;

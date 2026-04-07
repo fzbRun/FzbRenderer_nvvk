@@ -9,6 +9,9 @@ void PathTracingContext::setContextInfo() {
 	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, &accelFeature });
 	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, &rtPipelineFeature });
 	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME });
+
+	rayqueryFeature.rayQuery = VK_TRUE;
+	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_KHR_RAY_QUERY_EXTENSION_NAME, &rayqueryFeature });
 #ifdef PathTracingMotionBlur
 	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_NV_RAY_TRACING_MOTION_BLUR_EXTENSION_NAME, &rtMotionBlurFeatures });
 #endif

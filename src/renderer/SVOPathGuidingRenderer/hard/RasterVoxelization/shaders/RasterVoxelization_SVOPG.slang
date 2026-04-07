@@ -1,5 +1,5 @@
 #include "common/Shader/shaderStructType.h"
-#include "renderer/SVOPathGuidingRenderer/hard/shaderio.h"
+#include "renderer/SVOPathGuidingRenderer/hard/RasterVoxelization/shaderio.h"
 #include "renderer/SVOPathGuidingRenderer/hard/shaders/SVOPGCommon.slang"
 #include "nvshaders/functions.h.slang"
 #include "common/Shader/Slang/commonFunction.slang"

@@ -4,17 +4,19 @@
 #include <common/Shader/Shader.h>
 #include <nvvk/compute_pipeline.hpp>
 
-FzbRenderer::SVOPathGuidingRenderer::SVOPathGuidingRenderer(pugi::xml_node& rendererNode) {
+using namespace FzbRenderer;
+
+SVOPathGuidingRenderer::SVOPathGuidingRenderer(pugi::xml_node& rendererNode) {
 	ptContext.setContextInfo();
 
 	if (pugi::xml_node maxDepthNode = rendererNode.child("maxDepth"))
 		pushConstant.maxDepth = std::stoi(maxDepthNode.attribute("value").value());
 	if (pugi::xml_node rasterVoxelizationNode = rendererNode.child("RasterVoxelization"))
-		rasterVoxelization = std::make_shared<FzbRenderer::RasterVoxelization_SVOPG>(rasterVoxelizationNode);
+		rasterVoxelization = std::make_shared<RasterVoxelization_SVOPG>(rasterVoxelizationNode);
 	if (pugi::xml_node lightInjectNode = rendererNode.child("LightInject"))
-		lightInject = std::make_shared<FzbRenderer::LightInject>(lightInjectNode);
+		lightInject = std::make_shared<LightInject_SVOPG>(lightInjectNode);
 	if (pugi::xml_node octreeNode = rendererNode.child("Octree"))
-		octree = std::make_shared<FzbRenderer::Octree>(octreeNode);
+		octree = std::make_shared<Octree_SVOPG>(octreeNode);
 	if (pugi::xml_node svoNode = rendererNode.child("SVO"))
 		svo = std::make_shared<FzbRenderer::SVO_SVOPG>(svoNode);
 	if (pugi::xml_node svoWeightNode = rendererNode.child("SVOWeight"))
@@ -27,7 +29,7 @@ void FzbRenderer::SVOPathGuidingRenderer::init() {
 
 	rasterVoxelization->init();
 
-	LightInjectSetting lightInjectSetting{
+	LightInjectSetting_SVOPG lightInjectSetting{
 		.VGBs = rasterVoxelization->VGBs,
 		.VGBStartPos = rasterVoxelization->setting.pushConstant.voxelGroupStartPos,
 		.VGBVoxelSize = glm::vec3(rasterVoxelization->setting.pushConstant.voxelSize_Count),
@@ -39,7 +41,7 @@ void FzbRenderer::SVOPathGuidingRenderer::init() {
 	};
 	lightInject->init(lightInjectSetting);
 
-	OctreeSetting octreeSetting{
+	OctreeSetting_SVOPG octreeSetting{
 		.VGBs = rasterVoxelization->VGBs,
 		.VGBMaterialInfos = rasterVoxelization->VGBMaterialInfos,
 		.VGBStartPos = lightInjectSetting.VGBStartPos,
@@ -58,9 +60,11 @@ void FzbRenderer::SVOPathGuidingRenderer::init() {
 
 	SVOWeightSetting svoWeightSetting{
 		.svo = svo,
+		.octree = octree,
 		.asManager = &asManager
 	};
 	svoWeight->init(svoWeightSetting);
+
 
 	IF_DEBUG(Feature::createGBuffer(true, true, 1), Feature::createGBuffer(false, true, 1));
 	createDescriptorSetLayout();
@@ -138,7 +142,7 @@ void FzbRenderer::SVOPathGuidingRenderer::resize(VkCommandBuffer cmd, const VkEx
 	
 	#ifndef NDEBUG
 	VkWriteDescriptorSet    depthImageWrite =
-		staticDescPack.makeWrite(shaderio::StaticBindingPoints_SVOPG::eDepthImage_SVOPG, 0, 0, 1);
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOPG::eDepthImage, 0, 0, 1);
 	write.append(depthImageWrite, gBuffers.getDepthImageView(), VK_IMAGE_LAYOUT_GENERAL);
 	#endif
 	
@@ -201,10 +205,10 @@ void FzbRenderer::SVOPathGuidingRenderer::render(VkCommandBuffer cmd) {
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
 		VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
-	rasterVoxelization->postProcess(cmd);
-	lightInject->postProcess(cmd);
-	octree->postProcess(cmd);
-	svo->postProcess(cmd);
+	//rasterVoxelization->postProcess(cmd);
+	//lightInject->postProcess(cmd);
+	//octree->postProcess(cmd);
+	//svo->postProcess(cmd);
 	//svoWeight->postProcess(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
 };
@@ -222,28 +226,28 @@ void FzbRenderer::SVOPathGuidingRenderer::createDescriptorSetLayout() {
 			.descriptorCount = 1,
 			.stageFlags = VK_SHADER_STAGE_ALL});
 	bindings.addBinding({
-		.binding = shaderio::StaticBindingPoints_SVOPG::eSVO_G_SVOPG,
+		.binding = (uint32_t)shaderio::StaticBindingPoints_SVOPG::eSVO_G,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
-		.binding = shaderio::StaticBindingPoints_SVOPG::eSVO_E_SVOPG,
+		.binding = (uint32_t)shaderio::StaticBindingPoints_SVOPG::eNodeData_E,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
-		.binding = shaderio::StaticBindingPoints_SVOPG::eGlobalInfo_SVOPG,
+		.binding = (uint32_t)shaderio::StaticBindingPoints_SVOPG::eGlobalInfo,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
-		.binding = shaderio::StaticBindingPoints_SVOPG::eWeights_SVOPG,
+		.binding = (uint32_t)shaderio::StaticBindingPoints_SVOPG::eWeights,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
 #ifndef NDEBUG
 	bindings.addBinding({
-		.binding = shaderio::StaticBindingPoints_SVOPG::eDepthImage_SVOPG,
+		.binding = (uint32_t)shaderio::StaticBindingPoints_SVOPG::eDepthImage,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
@@ -278,20 +282,21 @@ void FzbRenderer::SVOPathGuidingRenderer::createDescriptorSet() {
 	}
 
 	VkWriteDescriptorSet SVOArrayWrite =
-		staticDescPack.makeWrite(shaderio::StaticBindingPoints_SVOPG::eSVO_G_SVOPG, 0, 0, 1);
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOPG::eSVO_G, 0, 0, 1);
 	write.append(SVOArrayWrite, svo->SVO_G, 0, svo->SVO_G.bufferSize);
 	
 	SVOArrayWrite =
-		staticDescPack.makeWrite(shaderio::StaticBindingPoints_SVOPG::eSVO_E_SVOPG, 0, 0, 1);
-	write.append(SVOArrayWrite, svo->SVO_E, 0, svo->SVO_E.bufferSize);
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOPG::eNodeData_E, 0, 0, 1);
+	write.append(SVOArrayWrite, octree->NodeData_E, 0, octree->NodeData_E.bufferSize);
 	
 	VkWriteDescriptorSet globalInfoWrite =
-		staticDescPack.makeWrite(shaderio::StaticBindingPoints_SVOPG::eGlobalInfo_SVOPG, 0, 0, 1);
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOPG::eGlobalInfo, 0, 0, 1);
 	write.append(globalInfoWrite, svoWeight->GlobalInfoBuffer, 0, svoWeight->GlobalInfoBuffer.bufferSize);
 	
 	VkWriteDescriptorSet weightsWrite =
-		staticDescPack.makeWrite(shaderio::StaticBindingPoints_SVOPG::eWeights_SVOPG, 0, 0, 1);
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOPG::eWeights, 0, 0, 1);
 	write.append(weightsWrite, svoWeight->weightBuffer, 0, svoWeight->weightBuffer.bufferSize);
+
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }
@@ -317,7 +322,7 @@ void FzbRenderer::SVOPathGuidingRenderer::createShader() {
 	SCOPED_TIMER(__FUNCTION__);
 
 	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
-	std::filesystem::path shaderSource = shaderPath / "SVOPathGuidingShaders2.slang";
+	std::filesystem::path shaderSource = shaderPath / "SVOPathGuiding.slang";
 	VkShaderModuleCreateInfo shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
 
 	const VkPushConstantRange pushConstantRange{
@@ -502,6 +507,7 @@ void FzbRenderer::SVOPathGuidingRenderer::compileAndCreateShaders() {
 	rasterVoxelization->compileAndCreateShaders();
 	lightInject->compileAndCreateShaders();
 	octree->compileAndCreateShaders();
+	svo->compileAndCreateShaders();
 };
 void FzbRenderer::SVOPathGuidingRenderer::updateDataPerFrame(VkCommandBuffer cmd) {}
 
