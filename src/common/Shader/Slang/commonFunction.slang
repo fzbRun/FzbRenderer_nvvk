@@ -2,6 +2,13 @@
 #include "nvshaders/constants.h.slang"
 #include "nvshaders/random.h.slang"
 
+//---------------------------------------------------debug---------------------------------------------------
+void printfAABB(AABB aabb) {
+    printf("aabb: %f %f %f %f %f %f\n",
+        aabb.minimum.x, aabb.minimum.y, aabb.minimum.z,
+        aabb.maximum.x, aabb.maximum.y, aabb.maximum.z,
+    );
+}
 //---------------------------------------------------Number---------------------------------------------------
 int FloatToOrderedInt(float v)
 {
@@ -55,7 +62,11 @@ float2x2 Inverse2x2(float2x2 m) {
 }
 //---------------------------------------------------AABB---------------------------------------------------
 inline bool checkPointInAABB(float3 pos, AABB aabb) {
-    return all((pos - aabb.minimum >= -0.00001f) && (aabb.maximum - pos >= -0.00001f));
+    return all((pos - aabb.minimum >= 0.0f) && (aabb.maximum - pos >= 0.0f));
+}
+inline float getDistanceToAABB(float3 pos, AABB aabb) {
+    float3 center = (aabb.maximum + aabb.minimum) * 0.5f;
+    return length(center - pos);
 }
 inline float3 getAABBPoint(float3 sampleDir, float3 aabbCenter, float3 aabbHalfSize) {
     float3 invDir = 1.0f / max(abs(sampleDir), 1e-6f);
@@ -66,6 +77,13 @@ inline float3 getAABBPoint(float3 sampleDir, float3 aabbCenter, float3 aabbHalfS
     float3 tCandidate = aabbHalfSize2 * invDir;
     float t = min(min(tCandidate.x, tCandidate.y), tCandidate.z);
     return aabbCenter + sampleDir * t * signHalfSize;
+}
+float PointToAABBDistance(float3 pos, AABB aabb)
+{
+    float dx = max(aabb.minimum.x - pos.x, max(0.0f, pos.x - aabb.maximum.x));
+    float dy = max(aabb.minimum.y - pos.y, max(0.0f, pos.y - aabb.maximum.y));
+    float dz = max(aabb.minimum.z - pos.z, max(0.0f, pos.z - aabb.maximum.z));
+    return sqrt(dx * dx + dy * dy + dz * dz);
 }
 //------------------------------------------------SphericalFibonacci---------------------------------------------
 #define M_PHI 1.618033988749895

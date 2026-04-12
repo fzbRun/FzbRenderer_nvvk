@@ -412,9 +412,9 @@ void SVO_SVOPG::debug_wirefame(VkCommandBuffer cmd) {
 	}
 
 	VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
-	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;		//使用PathGuiding的深度纹理
-	depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
-	depthAttachment.imageView = gBuffers.getDepthImageView();	//depthImageView;
+	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;		//使用PathGuiding的深度纹理
+	//depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
+	depthAttachment.imageView = depthImageView;	// gBuffers.getDepthImageView();	//depthImageView;
 
 	VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
 	renderingInfo.renderArea = { {0, 0}, gBuffers.getSize() };

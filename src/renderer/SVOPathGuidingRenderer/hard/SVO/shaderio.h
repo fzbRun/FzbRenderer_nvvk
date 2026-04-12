@@ -7,7 +7,7 @@
 #define FZBRENDERER_SVO_SVOPG_SHADER_IO_H
 NAMESPACE_SHADERIO_BEGIN()
 
-#define SVOSize_G 4000
+#define SVOSize_G 6000
 #if SVOSize_G > OCTREE_NODECOUNT_E
 #define SVOSize SVOSize_G
 #else
@@ -23,8 +23,17 @@ enum class BindingPoints_SVOPG {
 	eSVOThreadGroupInfos_SVOPG
 };
 
-typedef OctreeNodeData_G SVONodeData_G;
 typedef OctreeNodeData_E SVONodeData_E;
+
+#define NEARBY_NODE_COUNT 4	//must 2 exponent
+struct SVONodeData_G {
+	float4 meanNormal;
+	AABB aabb;
+	uint32_t indivisible;
+	uint32_t label;
+	uint32_t materialIndex;
+	int nearbyNodeIndices[NEARBY_NODE_COUNT];
+};
 
 struct SVOPushConstant_SVOPG {
 	uint32_t svoMaxLayer;		//Octree max layerIndex, 32x32x32 is 5

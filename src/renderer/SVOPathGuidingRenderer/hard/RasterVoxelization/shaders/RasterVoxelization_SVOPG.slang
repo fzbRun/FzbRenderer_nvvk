@@ -7,7 +7,7 @@
 [[vk::push_constant]] ConstantBuffer<RasterVoxelizationPushConstant> pushConst;
 [[vk::binding(RasterVoxelizationBindingPoints_SVOPG::eTextures_SVOPG)]] Sampler2D textures[];
 [[vk::binding(RasterVoxelizationBindingPoints_SVOPG::eVGB_SVOPG)]] RWStructuredBuffer<VGBVoxelData_SVOPG, ScalarDataLayout> VGBs[]; // globallycoherent volatile
-[[vk::binding(RasterVoxelizationBindingPoints_SVOPG::eVGBMaterialInfo_SVOPG)]] RWStructuredBuffer<VGBMaterialInfo_SVOPG> VGBMaterialInfos;
+[[vk::binding(RasterVoxelizationBindingPoints_SVOPG::eVGBMaterialInfo_SVOPG)]] RWStructuredBuffer<VGBMaterialInfo_SVOPG> VGBMaterialInfos[];
 #ifndef NDEBUG
 [[vk::binding(RasterVoxelizationBindingPoints_SVOPG::eFragmentCountBuffer_SVOPG)]] RWStructuredBuffer<uint32_t> fragmentCountBuffer;
 [[vk::binding(RasterVoxelizationBindingPoints_SVOPG::eWireframeMap_SVOPG)]] RWTexture2D<float4> wireframeMap;
@@ -32,6 +32,10 @@ void computeMain_clearVGB(uint threadIndex: SV_DispatchThreadID) {
     uint normalIndex = threadIndex / voxelCount;
     uint voxelIndex = threadIndex & (voxelCount - 1);
     VGBs[normalIndex][voxelIndex] = voxelData;
+
+    uint materialCount[MAX_MATERIAL_COUNT];
+    for (int i = 0; i < MAX_MATERIAL_COUNT; i++) materialCount[i] = 0;
+    VGBMaterialInfos[normalIndex][voxelIndex].materialCount = materialCount;
 }
 //----------------------------------------------createVGB--------------------------------------------
 struct VSout
@@ -159,7 +163,7 @@ void atomicMaterialTypeCount(uint materialIndex, int voxelIndexU, int VGBIndex) 
 }
 */
 void atomicMaterialTypeCount(uint materialIndex, int voxelIndexU, int VGBIndex) {
-    InterlockedAdd<uint>(VGBMaterialInfos[voxelIndexU].materialCount[materialIndex], 1);
+    InterlockedAdd<uint>(VGBMaterialInfos[VGBIndex][voxelIndexU].materialCount[materialIndex], 1);
 }
 
 [shader("pixel")]
@@ -231,7 +235,6 @@ PSout_ThreeView fragmentMain_ThreeView(GSout_ThreeView input) {
 
     SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
     Instance instanceInfo = sceneInfo.instances[pushConst.instanceIndex];
-    // MaterialType instanceMaterialType = sceneInfo.materials[instanceInfo.materialIndex].type;
     atomicMaterialTypeCount(instanceInfo.materialIndex, voxelIndexU, VGBIndex);
 
     if (pushConst.frameIndex == 0) InterlockedAdd<uint>(fragmentCountBuffer[0], 1);
@@ -260,21 +263,35 @@ VSout_Cube vertexMain_Cube(uint vertexIndex: SV_VertexID, int instanceIndex : SV
 
     VGBVoxelData_SVOPG voxelData = VGBs[VGBIndex][voxelIndex];
 
+    AABB nodeAabb;
+    nodeAabb.minimum.x = OrderedIntToFloat(voxelData.aabbI.minimum.x);
+    nodeAabb.minimum.y = OrderedIntToFloat(voxelData.aabbI.minimum.y);
+    nodeAabb.minimum.z = OrderedIntToFloat(voxelData.aabbI.minimum.z);
+    nodeAabb.maximum.x = OrderedIntToFloat(voxelData.aabbI.maximum.x);
+    nodeAabb.maximum.y = OrderedIntToFloat(voxelData.aabbI.maximum.y);
+    nodeAabb.maximum.z = OrderedIntToFloat(voxelData.aabbI.maximum.z);
+
+    //int3 voxelIndexXYZ = int3((nodeAabb.minimum - pushConst.voxelGroupStartPos) / pushConst.voxelSize_Count.xyz);
+    //float3 voxelStartPos = (float3)voxelIndexXYZ * pushConst.voxelSize_Count.xyz + pushConst.voxelGroupStartPos;
+    //float3 voxelEndPos = voxelStartPos + pushConst.voxelSize_Count.xyz;
+    //nodeAabb.minimum = nodeAabb.minimum - (nodeAabb.minimum - voxelStartPos) * sign(nodeAabb.maximum - nodeAabb.minimum);
+    //nodeAabb.maximum = nodeAabb.maximum + (voxelEndPos - nodeAabb.maximum) * sign(nodeAabb.maximum - nodeAabb.minimum);
+    //nodeAabb.minimum = max(nodeAabb.minimum, voxelStartPos);
+    //nodeAabb.maximum = min(nodeAabb.maximum, voxelEndPos);
+
     if (VGBIndex != pushConst.normalIndex) voxelData.sumNormal_G.w = 0.0f;
 
     VSout_Cube output;
     if (voxelData.sumNormal_G.w == 0.0f) output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
     else {
-        output.worldPos.x = ((vertexIndex & 3) * 2) % 6 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.x) : OrderedIntToFloat(voxelData.aabbI.maximum.x);
-        output.worldPos.y = (vertexIndex & 3) <= 1 ? OrderedIntToFloat(voxelData.aabbI.minimum.y) : OrderedIntToFloat(voxelData.aabbI.maximum.y);
-        output.worldPos.z = vertexIndex / 4 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.z) : OrderedIntToFloat(voxelData.aabbI.maximum.z);
+        output.worldPos.x = ((vertexIndex & 3) * 2) % 6 == 0 ? nodeAabb.minimum.x : nodeAabb.maximum.x;
+        output.worldPos.y = (vertexIndex & 3) <= 1 ? nodeAabb.minimum.y : nodeAabb.maximum.y;
+        output.worldPos.z = vertexIndex / 4 == 0 ? nodeAabb.minimum.z : nodeAabb.maximum.z;
 
         SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
         //Slightly reduce the depth to prevent depth conflicts in subsequent wireframes
         output.sv_position = mul(float4(output.worldPos.xy, output.worldPos.z * 0.99f, 1.0f), sceneInfo.viewProjMatrix);
         output.color = normalize(max(voxelData.sumNormal_G.xyz / voxelData.sumNormal_G.w, 0.0f));
-
-        //if (VGBIndex == 3 && voxelIndex == 12047) output.color = float3(10.0f, 0.0f, 0.0f);
     }
     return output;
 }

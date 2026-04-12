@@ -98,7 +98,10 @@ void FzbRenderer::SVOPathGuidingRenderer::uiRender() {
 	if (ImGui::Begin("SVOPathGuidingSettings"))
 	{
 		ImGui::SeparatorText("Jitter");
-		UIModified |= ImGui::SliderInt("Max Frames", &maxFrames, 1, MAX_FRAME);
+		//UIModified |= ImGui::SliderInt("Max Frames", &maxFrames, 1, MAX_FRAME);
+		PE::begin();
+		UIModified |= PE::DragInt("Max Frames", &maxFrames);
+		PE::end();
 		ImGui::TextDisabled("Frame: %d", pushConstant.frameIndex);
 	
 		ImGui::SeparatorText("Bounces");
@@ -152,7 +155,8 @@ void FzbRenderer::SVOPathGuidingRenderer::resize(VkCommandBuffer cmd, const VkEx
 	lightInject->resize(cmd, size);
 	IF_DEBUG(octree->resize(cmd, size, gBuffers, eImgTonemapped), octree->resize(cmd, size));
 	IF_DEBUG(svo->resize(cmd, size, gBuffers, eImgTonemapped), svo->resize(cmd, size));
-	svoWeight->resize(cmd, size);
+	IF_DEBUG(svoWeight->resize(cmd, size, gBuffers, eImgTonemapped), svoWeight->resize(cmd, size));
+	
 };
 void FzbRenderer::SVOPathGuidingRenderer::preRender() {
 	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
@@ -205,11 +209,11 @@ void FzbRenderer::SVOPathGuidingRenderer::render(VkCommandBuffer cmd) {
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
 		VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
-	//rasterVoxelization->postProcess(cmd);
+	rasterVoxelization->postProcess(cmd);
 	//lightInject->postProcess(cmd);
-	//octree->postProcess(cmd);
-	//svo->postProcess(cmd);
-	//svoWeight->postProcess(cmd);
+	octree->postProcess(cmd);
+	svo->postProcess(cmd);
+	svoWeight->postProcess(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
 };
 

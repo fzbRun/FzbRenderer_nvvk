@@ -365,7 +365,10 @@ void FzbRenderer::PathTracingRenderer::uiRender() {
 	if (ImGui::Begin("PathTracingSettings"))
 	{
 		ImGui::SeparatorText("Jitter");
-		UIModified |= ImGui::SliderInt("Max Acc Frames", &maxFrames, 1, MAX_FRAME);
+		//UIModified |= ImGui::SliderInt("Max Acc Frames", &maxFrames, 1, MAX_FRAME);
+		PE::begin();
+		UIModified |= PE::DragInt("Max Frames", &maxFrames);
+		PE::end();
 		ImGui::TextDisabled("Current PathTracing Frame: %d", pushValues.frameIndex);
 		ImGui::TextDisabled("Current Renderer Frame: %d", Application::frameIndex);
 

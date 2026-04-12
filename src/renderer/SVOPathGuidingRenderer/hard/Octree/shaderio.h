@@ -34,8 +34,9 @@ struct OctreePushConstant_SVOPG {
 	uint32_t currentLayerNodeCount;
 	uint32_t VGBVoxelTotalCount;
 	SceneInfo* sceneInfoAddress;
-#ifndef NDEBUG
 	float4 VGBStartPos_Size;
+	float4 VGBVoxelSize;
+#ifndef NDEBUG
 	float frameIndex;
 	uint32_t showOctreeNodeTotalCount;
 	int normalIndex;
@@ -50,9 +51,11 @@ static const uint OctreeLayerStartIndex_E[3] = { 0, 8, 56 };
 struct OctreeNodeData_G {
 	float4 meanNormal;
 	AABB aabb;
+	float fillRate;
 	uint32_t indivisible;
 	uint32_t label;
-	uint32_t materialIndex;
+	uint materialCountSum;
+	uint materialCounts[MAX_MATERIAL_COUNT];
 };
 struct OctreeNodeData_E {
 	float3 irradiance;

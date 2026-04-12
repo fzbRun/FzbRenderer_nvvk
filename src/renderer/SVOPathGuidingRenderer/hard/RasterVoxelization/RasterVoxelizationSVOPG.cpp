@@ -19,6 +19,11 @@ RasterVoxelization_SVOPG::RasterVoxelization_SVOPG(pugi::xml_node& featureNode) 
 	atomicFloatFeatures.shaderBufferFloat32AtomicAdd = VK_TRUE;
 	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME, &atomicFloatFeatures });
 
+	conservativeRasterFeature.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_CONSERVATIVE_STATE_CREATE_INFO_EXT;
+	conservativeRasterFeature.conservativeRasterizationMode = VK_CONSERVATIVE_RASTERIZATION_MODE_OVERESTIMATE_EXT;
+	conservativeRasterFeature.extraPrimitiveOverestimationSize = 0.5f;
+	//Application::vkContextInitInfo.deviceExtensions.push_back({ VK_EXT_CONSERVATIVE_RASTERIZATION_EXTENSION_NAME });
+
 	if (pugi::xml_node resolutionNode = featureNode.child("resolution")) {
 		glm::vec2 resolution = FzbRenderer::getfloat2FromString(resolutionNode.attribute("value").value());
 		setting.resolution = VkExtent2D(resolution.x, resolution.y);
@@ -42,6 +47,7 @@ RasterVoxelization_SVOPG::RasterVoxelization_SVOPG(pugi::xml_node& featureNode) 
 void RasterVoxelization_SVOPG::init() {
 #ifndef NDEBUG
 	Feature::createGBuffer(true, true, 2, setting.resolution);		//第一张图：threeView，多视口；第二张图：Cube；第三张图(后处理图)：wireframe	//不随窗口分辨率
+	//Feature::createGBuffer(true, true, 2, {1, 1});
 	//---------------------------------------------cube----------------------------------------
 	nvutils::PrimitiveMesh primitive = FzbRenderer::MeshSet::createCube(false, false);
 	FzbRenderer::MeshSet mesh = FzbRenderer::MeshSet("Cube", primitive);
@@ -65,7 +71,7 @@ void RasterVoxelization_SVOPG::init() {
 void RasterVoxelization_SVOPG::clean() {
 	Feature::clean();
 	for(int i = 0; i < 6; ++i) Application::allocator.destroyBuffer(VGBs[i]);
-	Application::allocator.destroyBuffer(VGBMaterialInfos);
+	for(int i = 0; i < 6; ++i) Application::allocator.destroyBuffer(VGBMaterialInfos[i]);
 
 	VkDevice device = Application::app->getDevice();
 	vkDestroyShaderEXT(device, computeShader_clearVGB, nullptr);
@@ -312,17 +318,22 @@ void RasterVoxelization_SVOPG::createVGBs() {
 
 	uint32_t voxelTotalCount = std::pow(setting.pushConstant.voxelSize_Count.w, 3);
 	uint32_t VGBByteSize = voxelTotalCount * sizeof(shaderio::VGBVoxelData_SVOPG);
-	VGBs.resize(6);
+	uint32_t VGBMaterialInfosBufferSize = voxelTotalCount * sizeof(shaderio::VGBMaterialInfo_SVOPG);
+	if (Application::sceneResource.materials.size() > MAX_MATERIAL_COUNT) {
+		printf("Scene Material Count: %d, except maxCount: %d", (uint32_t)Application::sceneResource.materials.size(), MAX_MATERIAL_COUNT);
+		throw std::runtime_error("");
+	}
+		
+	VGBs.resize(6); VGBMaterialInfos.resize(6);
 	for (int i = 0; i < 6; ++i) {
 		allocator->createBuffer(VGBs[i], VGBByteSize,
 			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 		NVVK_DBG_NAME(VGBs[i].buffer);
-	}
 
-	uint32_t VGBMaterialInfosBufferSize = voxelTotalCount * sizeof(shaderio::VGBMaterialInfo_SVOPG);
-	allocator->createBuffer(VGBMaterialInfos, VGBMaterialInfosBufferSize,
-		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-	NVVK_DBG_NAME(VGBMaterialInfos.buffer);
+		allocator->createBuffer(VGBMaterialInfos[i], VGBMaterialInfosBufferSize,
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+		NVVK_DBG_NAME(VGBMaterialInfos[i].buffer);
+	}
 }
 void RasterVoxelization_SVOPG::createDescriptorSetLayout() {
 	nvvk::DescriptorBindings bindings;
@@ -340,7 +351,7 @@ void RasterVoxelization_SVOPG::createDescriptorSetLayout() {
 		| VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
 	bindings.addBinding({ .binding = shaderio::RasterVoxelizationBindingPoints_SVOPG::eVGBMaterialInfo_SVOPG,
 					 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-					 .descriptorCount = 1,
+					 .descriptorCount = (uint32_t)VGBMaterialInfos.size(),
 					 .stageFlags = VK_SHADER_STAGE_ALL },
 		VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
 		| VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
@@ -383,8 +394,9 @@ void RasterVoxelization_SVOPG::createDescriptorSet() {
 	write.append(VGBWrite, VGBsPtr);
 
 	VkWriteDescriptorSet    VGBMaterialInfoWrite =
-		staticDescPack.makeWrite(shaderio::RasterVoxelizationBindingPoints_SVOPG::eVGBMaterialInfo_SVOPG, 0, 0, 1);
-	write.append(VGBMaterialInfoWrite, VGBMaterialInfos, 0, VGBMaterialInfos.bufferSize);
+		staticDescPack.makeWrite(shaderio::RasterVoxelizationBindingPoints_SVOPG::eVGBMaterialInfo_SVOPG, 0, 0, VGBMaterialInfos.size());
+	nvvk::Buffer* VGBMaterialInfosPtr = VGBMaterialInfos.data();
+	write.append(VGBMaterialInfoWrite, VGBMaterialInfosPtr);
 
 #ifndef NDEBUG
 	//-------------------------------------------threeView----------------------------------------
@@ -607,10 +619,14 @@ void RasterVoxelization_SVOPG::resize(
 	VkCommandBuffer cmd, const VkExtent2D& size,
 	nvvk::GBuffer& gBuffers_other, uint32_t baseMapIndex
 ) {
+	//gBuffers.update(cmd, size);
+
 	nvvk::WriteSetContainer write{};
 	VkWriteDescriptorSet baseMapWrite = staticDescPack.makeWrite(shaderio::RasterVoxelizationBindingPoints_SVOPG::eBaseMap_SVOPG, 0, 0, 1);
 	write.append(baseMapWrite, gBuffers_other.getColorImageView(baseMapIndex), VK_IMAGE_LAYOUT_GENERAL);
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
+
+	depthImageView = gBuffers_other.getDepthImageView();
 }
 
 void RasterVoxelization_SVOPG::resetFragmentCount(VkCommandBuffer cmd) {
@@ -661,7 +677,10 @@ void RasterVoxelization_SVOPG::createVGB_ThreeView(VkCommandBuffer cmd) {
 	graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
 	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;
 	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_FALSE;
+	//graphicsDynamicPipeline.rasterizationState.rasterizerDiscardEnable = VK_FALSE;
 	graphicsDynamicPipeline.cmdApplyAllStates(cmd);
+	//vkCmdSetConservativeRasterizationModeEXT(cmd, VK_CONSERVATIVE_RASTERIZATION_MODE_OVERESTIMATE_EXT);
+	//vkCmdSetExtraPrimitiveOverestimationSizeEXT(cmd, 0.75f);
 	vkCmdSetDepthBoundsTestEnable(cmd, VK_FALSE);	//depthBoundsTestEnable是根据min、max depth进行测试，相当于自定义裁剪的z的范围
 
 	float width = float(setting.resolution.width) * 0.5f;
@@ -701,6 +720,7 @@ void RasterVoxelization_SVOPG::createVGB_ThreeView(VkCommandBuffer cmd) {
 	}
 
 	vkCmdEndRendering(cmd);
+	//vkCmdSetConservativeRasterizationModeEXT(cmd, VK_CONSERVATIVE_RASTERIZATION_MODE_DISABLED_EXT);
 
 	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(RasterVoxelizationGBuffer_SVOPG::ThreeViewMap_SVOPG), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
 }
@@ -767,9 +787,10 @@ void RasterVoxelization_SVOPG::debug_Wireframe(VkCommandBuffer cmd) {
 	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 	colorAttachment.imageView = gBuffers.getColorImageView(RasterVoxelizationGBuffer_SVOPG::WireframeMap_SVOPG);
 	colorAttachment.clearValue = { .color = {0.0f, 0.0f, 0.0f, 0.0f} };
+
 	VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
-	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;		//使用cube的深度缓冲
 	depthAttachment.imageView = gBuffers.getDepthImageView();
+	depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
 
 	VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
 	renderingInfo.renderArea = { {0, 0}, setting.resolution };

@@ -172,7 +172,7 @@ bool getNodeAABB_E_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload) {
         for (; layerIndex_G <= groupGlobalInfo.SVOMaxLayer_G && nodeIndex_G < GroupNodeInfoCount_G; ++layerIndex_G) {
             hitNode = false;
             for (int nodeOffset = 0; nodeOffset < 8; ++nodeOffset) {
-                NodeInfo_G nodeInfo_G = groupNodeInfos_G[nodeIndex_G + nodeOffset];
+                nodeInfo_G = groupNodeInfos_G[nodeIndex_G + nodeOffset];
                 nodeLayerLabel = (nodeInfo_G.label_indivisible >> 1) - 1;
                 if (checkPointInAABB(hitPos, nodeInfo_G.aabb)) {
                     if ((nodeInfo_G.label_indivisible & 1u) == 1) {
@@ -249,6 +249,373 @@ bool getNodeAABB_E_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload) {
 
     return true;
 }
+
+float3 offsetPos(float r, uint seed, float3x3 TBN) {
+    float angle = rand(seed) * 2.0f * 3.14159265359f;
+    float cosA = cos(angle);
+    float sinA = sin(angle);
+    float3 randomDir = cosA * TBN[0] + sinA * TBN[1];
+    return r * rand(seed) * randomDir;
+}
+bool getNodeAABB_E_jittering_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload) {
+    float3 geoNormal = payload.isExt ? payload.hitNormal : -payload.hitNormal;
+    uint normalIndex = getNormalIndex(geoNormal);
+
+    float3 hitPos = payload.hitPos; // + offsetPos(pushConst.voxelLength, payload.randomSeed, payload.TBN);
+
+    SVONodeData_G nodeData_G;
+    NodeInfo_G nodeInfo_G = groupNodeInfos_G[normalIndex];
+    uint nodeLabel_G = (nodeInfo_G.label_indivisible >> 1);
+    bool indivisible = (nodeInfo_G.label_indivisible & 1u) == 1;
+    bool hitIndivisible = false, hitNode = false;
+    if (!indivisible) {
+        uint nodeLayerLabel = nodeLabel_G - 1;
+        nodeLabel_G = groupSVOLayerInfos_G[1].indivisibleNodeCount;
+        uint nodeIndexSum_G = 8;
+        uint nodeIndex_G = nodeLayerLabel * 8 + nodeIndexSum_G;
+        uint layerIndex_G = 2;
+        for (; layerIndex_G <= groupGlobalInfo.SVOMaxLayer_G && nodeIndex_G < GroupNodeInfoCount_G; ++layerIndex_G) {
+            hitNode = false;
+            for (int nodeOffset = 0; nodeOffset < 8; ++nodeOffset) {
+                nodeInfo_G = groupNodeInfos_G[nodeIndex_G + nodeOffset];
+                nodeLayerLabel = (nodeInfo_G.label_indivisible >> 1) - 1;
+
+                if (checkPointInAABB(hitPos, nodeInfo_G.aabb)) {
+                    if ((nodeInfo_G.label_indivisible & 1u) == 1) {
+                        hitIndivisible = true;
+                        nodeLabel_G += nodeLayerLabel;
+                        nodeIndex_G += nodeOffset;
+                    } else {
+                        nodeLabel_G += groupSVOLayerInfos_G[layerIndex_G].indivisibleNodeCount;
+                        nodeIndexSum_G += groupSVOLayerInfos_G[layerIndex_G - 1].divisibleNodeCount * 8;
+                        nodeIndex_G = nodeIndexSum_G + nodeLayerLabel * 8;
+                    }
+                    hitNode = true;
+                    break;
+                }
+            }
+            if (!hitNode) {
+                float weights[8]; float weightSum = 0.0f;
+                for (int nodeOffset = 0; nodeOffset < 8; ++nodeOffset) {
+                    nodeInfo_G = groupNodeInfos_G[nodeIndex_G + nodeOffset];
+                    if (nodeInfo_G.aabb.minimum.x > 1e10f) {
+                        weights[nodeOffset] = 0.0f;
+                        continue;
+                    }
+
+                    float3 nodeAABBCenter = (nodeInfo_G.aabb.minimum + nodeInfo_G.aabb.maximum) * 0.5f;
+                    float3 distance3 = hitPos - nodeAABBCenter + 0.00001f;
+                    weights[nodeOffset] = 1.0f / max(sqrt(dot(distance3, distance3)), 1e-6);
+                    weightSum += weights[nodeOffset];
+                }
+                float randomNumber = rand(payload.randomSeed);
+                for (int nodeOffset = 0; nodeOffset < 8; ++nodeOffset) {
+                    float probability = weights[nodeOffset] / weightSum;
+                    if (randomNumber <= probability) {
+                        nodeInfo_G = groupNodeInfos_G[nodeIndex_G + nodeOffset];
+                        nodeLayerLabel = (nodeInfo_G.label_indivisible >> 1) - 1;
+                        if ((nodeInfo_G.label_indivisible & 1u) == 1) {
+                            hitIndivisible = true;
+                            nodeLabel_G += nodeLayerLabel;
+                            nodeIndex_G += nodeOffset;
+                        } else {
+                            nodeLabel_G += groupSVOLayerInfos_G[layerIndex_G].indivisibleNodeCount;
+                            nodeIndexSum_G += groupSVOLayerInfos_G[layerIndex_G - 1].divisibleNodeCount * 8;
+                            nodeIndex_G = nodeIndexSum_G + nodeLayerLabel * 8;
+                        }
+                        //hitPos = (nodeInfo_G.aabb.minimum + nodeInfo_G.aabb.maximum) * 0.5f;
+                        hitNode = true;
+                        break;
+                    }
+                    randomNumber -= probability;
+                }
+            }
+            if (hitIndivisible) break;
+        }
+        if (hitIndivisible) nodeData_G = SVO_G[nodeIndex_G];
+        else if (hitNode && !hitIndivisible) {
+            for (; layerIndex_G <= groupGlobalInfo.SVOMaxLayer_G; ++layerIndex_G) {
+                hitNode = false;
+                for (int nodeOffset = 0; nodeOffset < 8; ++nodeOffset) {
+                    nodeData_G = SVO_G[nodeIndex_G + nodeOffset];
+
+                    if (checkPointInAABB(hitPos, nodeData_G.aabb)) {
+                        if (nodeData_G.indivisible == 1) {
+                            hitIndivisible = true;
+                            nodeLabel_G += nodeData_G.label - 1;
+                        } else {
+                            nodeLabel_G += groupSVOLayerInfos_G[layerIndex_G].indivisibleNodeCount;
+                            nodeIndexSum_G += groupSVOLayerInfos_G[layerIndex_G - 1].divisibleNodeCount * 8;
+                            nodeIndex_G = nodeIndexSum_G + (nodeData_G.label - 1) * 8;
+                        }
+                        hitNode = true;
+                        break;
+                    }
+                }
+                if (!hitNode) {
+                    float weights[8]; float weightSum = 0.0f;
+                    for (int nodeOffset = 0; nodeOffset < 8; ++nodeOffset) {
+                        nodeData_G = SVO_G[nodeIndex_G + nodeOffset];
+                        if (nodeData_G.aabb.minimum.x > 1e10f) {
+                            weights[nodeOffset] = 0.0f;
+                            continue;
+                        }
+
+                        float3 nodeAABBCenter = (nodeData_G.aabb.minimum + nodeData_G.aabb.maximum) * 0.5f;
+                        float3 distance3 = hitPos - nodeAABBCenter + 0.00001f;
+                        weights[nodeOffset] = 1.0f / max(sqrt(dot(distance3, distance3)), 1e-6);
+                        weightSum += weights[nodeOffset];
+                    }
+                    float randomNumber = rand(payload.randomSeed);
+                    for (int nodeOffset = 0; nodeOffset < 8; ++nodeOffset) {
+                        float probability = weights[nodeOffset] / weightSum;
+                        if (randomNumber <= probability) {
+                            nodeData_G = SVO_G[nodeIndex_G + nodeOffset];
+                            if (nodeData_G.indivisible == 1) {
+                                hitIndivisible = true;
+                                nodeLabel_G += nodeData_G.label - 1;
+                            } else {
+                                nodeLabel_G += groupSVOLayerInfos_G[layerIndex_G].indivisibleNodeCount;
+                                nodeIndexSum_G += groupSVOLayerInfos_G[layerIndex_G - 1].divisibleNodeCount * 8;
+                                nodeIndex_G = nodeIndexSum_G + (nodeData_G.label - 1) * 8;
+                            }
+                            //hitPos = (nodeData_G.aabb.minimum + nodeData_G.aabb.maximum) * 0.5f;
+                            hitNode = true;
+                            break;
+                        }
+                        randomNumber -= probability;
+                    }
+                }
+                if (hitIndivisible) break;
+            }
+        }
+    } else {
+        hitIndivisible = true;
+        nodeData_G = SVO_G[nodeLabel_G - 1];
+    }
+    if (!hitIndivisible) return false;
+
+    float pdf = 1.0f;
+    {
+        float weights[NEARBY_NODE_COUNT + 1];
+        uint labels[NEARBY_NODE_COUNT + 1];
+        labels[0] = nodeLabel_G;
+        float3 nodeAABBCenter = (nodeData_G.aabb.minimum + nodeData_G.aabb.maximum) * 0.5f;
+        float3 distance3 = hitPos - nodeAABBCenter + 0.00001f;
+        weights[0] = 1.0f / max(sqrt(dot(distance3, distance3)), 1e-6);
+        float weightSum = weights[0];
+        uint nearbyNodeCount = 0;
+        for (; nearbyNodeCount < NEARBY_NODE_COUNT; ++nearbyNodeCount) {
+            int nodeIndex = nodeData_G.nearbyNodeIndices[nearbyNodeCount];
+            if (nodeIndex == -1) break;
+
+            SVONodeData_G nodeData_G_nearby = SVO_G[nodeIndex];
+            nodeAABBCenter = (nodeData_G_nearby.aabb.minimum + nodeData_G_nearby.aabb.maximum) * 0.5f;
+            distance3 = hitPos - nodeAABBCenter + 0.00001f;
+            weights[nearbyNodeCount + 1] = 1.0f / max(sqrt(dot(distance3, distance3)), 1e-6);
+            weightSum += weights[nearbyNodeCount + 1];
+
+            labels[nearbyNodeCount + 1] = nodeData_G_nearby.label - 1;
+        }
+        float randomNumber = rand(payload.randomSeed);
+        for (int i = 0; i < nearbyNodeCount + 1; ++i) {
+            float probability = weights[i] / weightSum;
+            if (randomNumber <= probability) {
+                nodeLabel_G = labels[i];
+                pdf *= probability;
+                break;
+            }
+            randomNumber -= probability;
+        }
+    }
+
+    float weightSampleProbability = rand(payload.randomSeed);
+    uint outgoingIndex = inverseSF(payload.outgoing, OUTGOING_COUNT, weightSampleProbability);
+    pdf *= weightSampleProbability;
+    // uint outgoingIndex = inverseSF(payload.outgoing, OUTGOING_COUNT);
+
+    uint weightStartIndex = outgoingIndex * groupGlobalInfo.indivisibleNodeCount_G * OCTREE_NODECOUNT_E +
+                            nodeLabel_G * OCTREE_NODECOUNT_E;
+
+    uint nodeIndex_E = 0, nodeOffset; bool getNode = false;
+    for (uint layerIndex_E = 0; layerIndex_E <= OCTREE_CLUSTER_LAYER; ++layerIndex_E) {
+        getNode = false;
+        float randomNumber = rand(payload.randomSeed);
+        for (nodeOffset = 0; nodeOffset < 8; ++nodeOffset) {
+            uint weightIndex = weightStartIndex + nodeIndex_E + nodeOffset;
+            float probability = SVOWeights[weightIndex];
+
+            if (randomNumber <= probability) {
+                pdf *= probability;
+                if (layerIndex_E != OCTREE_CLUSTER_LAYER)
+                    nodeIndex_E = OctreeLayerStartIndex_E[layerIndex_E + 1] + (nodeIndex_E - OctreeLayerStartIndex_E[layerIndex_E] + nodeOffset) * 8;
+                getNode = true;
+                break;
+            }
+            randomNumber -= probability;
+        }
+        if (getNode == false) break;
+    }
+    if (getNode == false) return false;
+    nodeIndex_E = nodeIndex_E + nodeOffset - OctreeLayerStartIndex_E[OCTREE_CLUSTER_LAYER];
+
+    NodeInfo_E nodeInfo_E = groupNodeInfos_E[nodeIndex_E];
+    aabb = nodeInfo_E.aabb;
+    payload.pdf = pdf * nodeInfo_E.pdf;
+
+    //if (pushConst.frameIndex == 0 && payload.pdf == 0.0f)
+    //    printf("pdf: %f, nodeInfo_E.pdf: %f aabb: %f %f %f %f %f %f\n", 
+    //        pdf, nodeInfo_E.pdf, 
+    //        aabb.minimum.x, aabb.minimum.y, aabb.minimum.z,
+    //        aabb.maximum.x, aabb.maximum.y, aabb.maximum.z
+    //    );
+
+    return true;
+}
+
+bool getNodeAABB_E_jittering2_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload) {
+    float3 geoNormal = payload.isExt ? payload.hitNormal : -payload.hitNormal;
+    uint normalIndex = getNormalIndex(geoNormal);
+
+    float3 hitPos = payload.hitPos;
+    float pdf = 1.0f;
+
+    SVONodeData_G nodeData_G;
+    NodeInfo_G nodeInfo_G = groupNodeInfos_G[normalIndex];
+    uint nodeLabel_G = (nodeInfo_G.label_indivisible >> 1);
+    bool indivisible = (nodeInfo_G.label_indivisible & 1u) == 1;
+    bool hitIndivisible = false, hitNode = false;
+    if (!indivisible) {
+        uint nodeLayerLabel = nodeLabel_G - 1;
+        nodeLabel_G = groupSVOLayerInfos_G[1].indivisibleNodeCount;
+        uint nodeIndexSum_G = 8;
+        uint nodeIndex_G = nodeLayerLabel * 8 + nodeIndexSum_G;
+        uint layerIndex_G = 2;
+        for (; layerIndex_G <= groupGlobalInfo.SVOMaxLayer_G && nodeIndex_G < GroupNodeInfoCount_G; ++layerIndex_G) {
+            hitNode = false;
+            float weights[8]; float weightSum = 0.0f;
+            for (int nodeOffset = 0; nodeOffset < 8; ++nodeOffset) {
+                nodeInfo_G = groupNodeInfos_G[nodeIndex_G + nodeOffset];
+                if (nodeInfo_G.aabb.minimum.x > 1e10f) {
+                    weights[nodeOffset] = 0.0f;
+                    continue;
+                }
+
+                float3 nodeAABBCenter = (nodeInfo_G.aabb.minimum + nodeInfo_G.aabb.maximum) * 0.5f;
+                float3 distance3 = hitPos - nodeAABBCenter + 0.00001f;
+                float distanceSq = max(sqrt(dot(distance3, distance3)), 1e-6);
+                weights[nodeOffset] = 1.0f / distanceSq;  //high layer no sqrt
+                weightSum += weights[nodeOffset];
+
+                float randomNumber = rand(payload.randomSeed);
+                for (int nodeOffset = 0; nodeOffset < 8; ++nodeOffset) {
+                    if (weights[nodeOffset] == 0.0f) continue;
+                    float probability = weights[nodeOffset] / weightSum;
+                    if (randomNumber <= probability) {
+                        nodeInfo_G = groupNodeInfos_G[nodeIndex_G + nodeOffset];
+                        nodeLayerLabel = (nodeInfo_G.label_indivisible >> 1) - 1;
+                        if ((nodeInfo_G.label_indivisible & 1u) == 1) {
+                            hitIndivisible = true;
+                            nodeLabel_G += nodeLayerLabel;
+                            nodeIndex_G += nodeOffset;
+                        } else {
+                            nodeLabel_G += groupSVOLayerInfos_G[layerIndex_G].indivisibleNodeCount;
+                            nodeIndexSum_G += groupSVOLayerInfos_G[layerIndex_G - 1].divisibleNodeCount * 8;
+                            nodeIndex_G = nodeIndexSum_G + nodeLayerLabel * 8;
+                        }
+                        pdf *= probability;
+                        hitNode = true;
+                        break;
+                    }
+                    randomNumber -= probability;
+                }
+            }
+            if (hitIndivisible) break;
+        }
+        if (hitIndivisible) nodeData_G = SVO_G[nodeIndex_G];
+        else if (hitNode && !hitIndivisible) {
+            for (; layerIndex_G <= groupGlobalInfo.SVOMaxLayer_G; ++layerIndex_G) {
+                hitNode = false;
+                float weights[8]; float weightSum = 0.0f;
+                for (int nodeOffset = 0; nodeOffset < 8; ++nodeOffset) {
+                    nodeData_G = SVO_G[nodeIndex_G + nodeOffset];
+                    if (nodeData_G.aabb.minimum.x > 1e10f) {
+                        weights[nodeOffset] = 0.0f;
+                        continue;
+                    }
+
+                    float3 nodeAABBCenter = (nodeData_G.aabb.minimum + nodeData_G.aabb.maximum) * 0.5f;
+                    float3 distance3 = hitPos - nodeAABBCenter + 0.00001f;
+                    weights[nodeOffset] = 1.0f / max(sqrt(dot(distance3, distance3)), 1e-6);    //low layer has sqrt
+                    weightSum += weights[nodeOffset];
+                }
+                float randomNumber = rand(payload.randomSeed);
+                for (int nodeOffset = 0; nodeOffset < 8; ++nodeOffset) {
+                    if (weights[nodeOffset] == 0.0f) continue;
+                    float probability = weights[nodeOffset] / weightSum;
+                    if (randomNumber <= probability) {
+                        nodeData_G = SVO_G[nodeIndex_G + nodeOffset];
+                        if (nodeData_G.indivisible == 1) {
+                            hitIndivisible = true;
+                            nodeLabel_G += nodeData_G.label - 1;
+                        } else {
+                            nodeLabel_G += groupSVOLayerInfos_G[layerIndex_G].indivisibleNodeCount;
+                            nodeIndexSum_G += groupSVOLayerInfos_G[layerIndex_G - 1].divisibleNodeCount * 8;
+                            nodeIndex_G = nodeIndexSum_G + (nodeData_G.label - 1) * 8;
+                        }
+                        pdf *= probability;
+                        hitNode = true;
+                        break;
+                    }
+                    randomNumber -= probability;
+                }
+                if (hitIndivisible) break;
+            }
+        }
+    } else {
+        hitIndivisible = true;
+        nodeData_G = SVO_G[nodeLabel_G - 1];
+    }
+    if (!hitIndivisible) return false;
+
+    pdf = 1.0f;
+    float weightSampleProbability = rand(payload.randomSeed);
+    uint outgoingIndex = inverseSF(payload.outgoing, OUTGOING_COUNT, weightSampleProbability);
+    pdf *= weightSampleProbability;
+    // uint outgoingIndex = inverseSF(payload.outgoing, OUTGOING_COUNT);
+
+    uint weightStartIndex = outgoingIndex * groupGlobalInfo.indivisibleNodeCount_G * OCTREE_NODECOUNT_E +
+                            nodeLabel_G * OCTREE_NODECOUNT_E;
+
+    uint nodeIndex_E = 0, nodeOffset; bool getNode = false;
+    for (uint layerIndex_E = 0; layerIndex_E <= OCTREE_CLUSTER_LAYER; ++layerIndex_E) {
+        getNode = false;
+        float randomNumber = rand(payload.randomSeed);
+        for (nodeOffset = 0; nodeOffset < 8; ++nodeOffset) {
+            uint weightIndex = weightStartIndex + nodeIndex_E + nodeOffset;
+            float probability = SVOWeights[weightIndex];
+
+            if (randomNumber <= probability) {
+                pdf *= probability;
+                if (layerIndex_E != OCTREE_CLUSTER_LAYER)
+                    nodeIndex_E = OctreeLayerStartIndex_E[layerIndex_E + 1] + (nodeIndex_E - OctreeLayerStartIndex_E[layerIndex_E] + nodeOffset) * 8;
+                getNode = true;
+                break;
+            }
+            randomNumber -= probability;
+        }
+        if (getNode == false) break;
+    }
+    if (getNode == false) return false;
+    nodeIndex_E = nodeIndex_E + nodeOffset - OctreeLayerStartIndex_E[OCTREE_CLUSTER_LAYER];
+
+    NodeInfo_E nodeInfo_E = groupNodeInfos_E[nodeIndex_E];
+    aabb = nodeInfo_E.aabb;
+    payload.pdf = pdf * nodeInfo_E.pdf;
+
+    return true;
+}
+
 void BSDFSample(inout HitPayload_SVOPG payload) {
     if (payload.material.type == MaterialType::Diffuse) PopulateCallablePayload_DiffuseMaterial(payload);
     else if (payload.material.type == MaterialType::Conductor) {
@@ -334,7 +701,7 @@ void computeMain_SVOPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
     float RR = 0.8f;
 
     uint bounceDepth = 0;
-    while (bounceDepth < pushConst.maxDepth && (bsdf_cosine_pdf.x + bsdf_cosine_pdf.y + bsdf_cosine_pdf.z > 0.0f)) {
+    while (bounceDepth < pushConst.maxDepth) {
         bool hit = traceRay(ray, payload);
 
         #ifndef NDEBUG
@@ -352,7 +719,7 @@ void computeMain_SVOPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
         } else {
             accumulatedRadiance += payload.material.emissive * bsdf_cosine_pdf;
             AABB nodeAABB_E;
-            bool useSVOPG = getNodeAABB_E_SVOPG(nodeAABB_E, payload);
+            bool useSVOPG = getNodeAABB_E_jittering2_SVOPG(nodeAABB_E, payload);    //getNodeAABB_E_SVOPG(nodeAABB_E, payload);
             if (useSVOPG) useSVOPG = SphericalRectangleSample(nodeAABB_E, payload.hitPos, payload.randomSeed, payload.incidence, payload.pdf);
             if (useSVOPG) {
                 payload.bsdf = getBSDF(payload.material, payload.incidence, payload.hitNormal, payload.outgoing, payload.TBN, payload.isExt);
@@ -361,7 +728,7 @@ void computeMain_SVOPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
             // else BSDFSample(payload);
             else break;
 
-            //bool useSVOPG = getNodeAABB_E_SVOPG(nodeAABB_E, payload);
+            //bool useSVOPG = getNodeAABB_E_jittering_SVOPG(nodeAABB_E, payload);
             //if (useSVOPG == false) accumulatedRadiance = float3(10.0f, 0.0f, 0.0f);
             //else if (useSVOPG == true) accumulatedRadiance = float3(0.0f, 10.0f, 0.0f);
             //break;
@@ -370,6 +737,17 @@ void computeMain_SVOPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
             if (payload.material.type == MaterialType::Dielectric || payload.material.type == MaterialType::RoughDielectric) cosine = abs(cosine);
             bsdf_cosine_pdf *= payload.bsdf * cosine / payload.pdf;
             payload.outgoing = -payload.incidence;
+
+            //if (any(isnan(bsdf_cosine_pdf)) || any(isinf(bsdf_cosine_pdf))) {
+            //    if (pushConst.frameIndex == 0)
+            //        printf("payload.bsdf: %f %f %f, pdf: %f\n",
+            //            payload.bsdf.x, payload.bsdf.y, payload.bsdf.z,
+            //            payload.pdf
+            //        );
+            //}
+
+            bool end = any(bsdf_cosine_pdf < 0.0f) || all(bsdf_cosine_pdf <= 0.0f) || any(isnan(bsdf_cosine_pdf)) || any(isinf(bsdf_cosine_pdf));
+            if (end) break;
 
             float randomNumber = rand(payload.randomSeed);
             if (randomNumber >= RR) break;

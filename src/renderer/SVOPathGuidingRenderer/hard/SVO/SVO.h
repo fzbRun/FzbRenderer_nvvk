@@ -42,7 +42,6 @@ public:
 	VkPushConstantsInfo pushInfo;
 
 	nvvk::Buffer SVO_G;		//buffer per normal
-
 	nvvk::Buffer SVOGlobalInfo;
 
 	VkShaderEXT computeShader_initSVOArray{};

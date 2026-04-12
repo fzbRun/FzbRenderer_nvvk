@@ -128,8 +128,9 @@ void Octree_SVOPG::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 void Octree_SVOPG::preRender() {
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 	pushConstant.voxelVolume = setting.VGBVoxelSize.x * setting.VGBVoxelSize.y * setting.VGBVoxelSize.z;
-#ifndef NDEBUG
 	pushConstant.VGBStartPos_Size = glm::vec4(setting.VGBStartPos, setting.VGBSize);
+	pushConstant.VGBVoxelSize = glm::vec4(setting.VGBVoxelSize, 1.0f);
+#ifndef NDEBUG
 	pushConstant.frameIndex = Application::frameIndex;
 	pushConstant.normalIndex = RasterVoxelization_SVOPG::normalIndex;
 #endif
@@ -238,7 +239,7 @@ void Octree_SVOPG::createDescriptorSetLayout() {
 	bindings.addBinding({
 		.binding = (uint32_t)shaderio::BindingPoints_Octree_SVOPG::eVGBMaterialInfos,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = 1,
+		.descriptorCount = (uint32_t)setting.VGBMaterialInfos.size(),
 		.stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
 		.binding = (uint32_t)shaderio::BindingPoints_Octree_SVOPG::eOctreeArray_G,
@@ -313,8 +314,9 @@ void Octree_SVOPG::createDescriptorSet() {
 	write.append(VGBWrite, VGBsPtr);
 
 	VkWriteDescriptorSet    VGBMaterialInfoWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_SVOPG::eVGBMaterialInfos, 0, 0, 1);
-	write.append(VGBMaterialInfoWrite, setting.VGBMaterialInfos, 0, setting.VGBMaterialInfos.bufferSize);
+		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_SVOPG::eVGBMaterialInfos, 0, 0, setting.VGBMaterialInfos.size());
+	nvvk::Buffer* VGBMaterialInfosPtr = setting.VGBMaterialInfos.data();
+	write.append(VGBMaterialInfoWrite, VGBMaterialInfosPtr);
 
 	VkWriteDescriptorSet    OctreeArrayWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_SVOPG::eOctreeArray_G, 0, 0, OctreeArray_G.size());
@@ -577,9 +579,9 @@ void Octree_SVOPG::debug_wirefame(VkCommandBuffer cmd) {
 		colorAttachments[i].clearValue = { .color = {0.0f, 0.0f, 0.0f, 0.0f} };
 	}
 	VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
-	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;		//使用PathGuiding的深度纹理
-	depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
-	depthAttachment.imageView = gBuffers.getDepthImageView();	//depthImageView;
+	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;		//使用PathGuiding的深度纹理
+	//depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
+	depthAttachment.imageView = depthImageView;	// gBuffers.getDepthImageView();	//depthImageView;
 
 	VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
 	renderingInfo.renderArea = { {0, 0}, gBuffers.getSize() };

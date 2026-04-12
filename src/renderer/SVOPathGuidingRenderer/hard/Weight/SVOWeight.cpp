@@ -31,16 +31,21 @@ void SVOWeight::clean() {
 	Application::allocator.destroyBuffer(indivisibleNodeInfosBuffer_G);
 	Application::allocator.destroyBuffer(indivisibleNodeInfosBuffer_E);
 	Application::allocator.destroyBuffer(weightBuffer);
+	Application::allocator.destroyBuffer(nearbyNodeInfosBuffer);
 
 	vkDestroyShaderEXT(device, computeShader_getIndivisibleNode, nullptr);
 	vkDestroyShaderEXT(device, computeShader_initWeights, nullptr);
 	vkDestroyShaderEXT(device, computeShader_getWeights, nullptr);
 	vkDestroyShaderEXT(device, computeShader_getProbability, nullptr);
+	vkDestroyShaderEXT(device, computeShader_getNearbyNodes, nullptr);
+	vkDestroyShaderEXT(device, computeShader_getNearbyNodes2, nullptr);
 
 #ifndef NDEBUG
 	vkDestroyShaderEXT(device, computeShader_getSampleNodeInfo, nullptr);
 	vkDestroyShaderEXT(device, vertexShader_visualization, nullptr);
 	vkDestroyShaderEXT(device, fragmentShader_visualization, nullptr);
+	vkDestroyShaderEXT(device, vertexShader_nearby, nullptr);
+	vkDestroyShaderEXT(device, fragmentShader_nearby, nullptr);
 #endif
 }
 void SVOWeight::uiRender() {
@@ -52,7 +57,7 @@ void SVOWeight::uiRender() {
 		if (PE::begin()) {
 			if (PE::entry("SVO Weight Debug Map", [&] {
 				static const ImVec4 highlightColor = ImVec4(118.f / 255.f, 185.f / 255.f, 0.f, 1.f);
-				ImVec4 selectedColor = show ? highlightColor : ImGui::GetStyleColorVec4(ImGuiCol_Button);
+				ImVec4 selectedColor = showWeightMap ? highlightColor : ImGui::GetStyleColorVec4(ImGuiCol_Button);
 				ImVec4 hoveredColor = ImVec4(selectedColor.x * 1.2f, selectedColor.y * 1.2f, selectedColor.z * 1.2f, 1.f);
 				ImGui::PushStyleColor(ImGuiCol_Button, selectedColor);
 				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, hoveredColor);
@@ -66,7 +71,8 @@ void SVOWeight::uiRender() {
 				return result;
 				}))
 			{
-				show = !show;
+				showWeightMap = !showWeightMap;
+				showNearbyMap = false;
 			}
 		}
 		PE::end();
@@ -75,10 +81,38 @@ void SVOWeight::uiRender() {
 		UIModified |= PE::DragFloat3("samplePos", (float*)&samplePoint);
 		UIModified |= PE::DragFloat3("outgoing", (float*)&outgoing);
 		PE::end();
+
+		if (PE::begin()) {
+			if (PE::entry("SVO NearbyNode Debug Map", [&] {
+				static const ImVec4 highlightColor = ImVec4(118.f / 255.f, 185.f / 255.f, 0.f, 1.f);
+				ImVec4 selectedColor = showNearbyMap ? highlightColor : ImGui::GetStyleColorVec4(ImGuiCol_Button);
+				ImVec4 hoveredColor = ImVec4(selectedColor.x * 1.2f, selectedColor.y * 1.2f, selectedColor.z * 1.2f, 1.f);
+				ImGui::PushStyleColor(ImGuiCol_Button, selectedColor);
+				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, hoveredColor);
+				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(5, 5));
+
+				bool result = ImGui::ImageButton("##but", (ImTextureID)gBuffers.getDescriptorSet(1),
+					ImVec2(100 * gBuffers.getAspectRatio(), 100));
+
+				ImGui::PopStyleColor(2);
+				ImGui::PopStyleVar();
+				return result;
+				}))
+			{
+				showNearbyMap = !showNearbyMap;
+				showWeightMap = false;
+			}
+		}
+		PE::end();
+
+		PE::begin();
+		UIModified |= PE::DragInt("sampleNodeLabel", &pushConstant.sampleNodeLabel);
+		PE::end();
 	}
 	ImGui::End();
 
-	if (show) Application::viewportImage = gBuffers.getDescriptorSet(0);
+	if (showWeightMap) Application::viewportImage = gBuffers.getDescriptorSet(0);
+	if (showNearbyMap) Application::viewportImage = gBuffers.getDescriptorSet(1);
 #endif
 };
 void SVOWeight::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
@@ -129,6 +163,7 @@ void SVOWeight::render(VkCommandBuffer cmd) {
 	getIndivisibleNode(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 	initWeights(cmd);
+	getNearbyNodeInfos(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 	getWeights(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
@@ -136,7 +171,8 @@ void SVOWeight::render(VkCommandBuffer cmd) {
 }
 void SVOWeight::postProcess(VkCommandBuffer cmd) {
 #ifndef NDEBUG
-	debug_visualization(cmd);
+	//debug_visualization(cmd);
+	debug_nearby(cmd);
 #endif
 };
 
@@ -166,6 +202,11 @@ void SVOWeight::createWeightArray() {
 	allocator->createBuffer(weightBuffer, bufferSize,
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(weightBuffer.buffer);
+
+	bufferSize = SVOIndivisibleNodeCount_G * (SVOIndivisibleNodeCount_G / GETNEARBYNODES_CS_THREADGROUP_SIZE) * sizeof(shaderio::SVOIndivisibleNodeNearbyNodeInfo);
+	allocator->createBuffer(nearbyNodeInfosBuffer, bufferSize,
+		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+	NVVK_DBG_NAME(nearbyNodeInfosBuffer.buffer);
 }
 void SVOWeight::createDescriptorSetLayout() {
 	SCOPED_TIMER(__FUNCTION__);
@@ -203,6 +244,11 @@ void SVOWeight::createDescriptorSetLayout() {
 		.stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
 		.binding = (uint32_t)shaderio::StaticBindingPoints_SVOWeight::eSVOWeights,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_SVOWeight::eSVO_IndivisibleNodeNearbyNodeInfos,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
@@ -261,6 +307,10 @@ void SVOWeight::createDescriptorSet() {
 	VkWriteDescriptorSet weightsWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOWeight::eSVOWeights, 0, 0, 1);
 	write.append(weightsWrite, weightBuffer, 0, weightBuffer.bufferSize);
+
+	VkWriteDescriptorSet nearbyNodeInfosWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOWeight::eSVO_IndivisibleNodeNearbyNodeInfos, 0, 0, 1);
+	write.append(nearbyNodeInfosWrite, nearbyNodeInfosBuffer, 0, nearbyNodeInfosBuffer.bufferSize);
 
 #ifndef NDEBUG
 	if (!Application::sceneResource.textures.empty()) {
@@ -363,6 +413,30 @@ void SVOWeight::compileAndCreateShaders() {
 		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_getProbability);
 		NVVK_DBG_NAME(computeShader_getProbability);
 	}
+	//--------------------------------------------------------------------------------------
+	{
+		vkDestroyShaderEXT(device, computeShader_getNearbyNodes, nullptr);
+
+		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		shaderInfo.nextStage = 0;
+		shaderInfo.pName = "computeMain_getNearbyNodes";
+		shaderInfo.codeSize = shaderCode.codeSize;
+		shaderInfo.pCode = shaderCode.pCode;
+		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_getNearbyNodes);
+		NVVK_DBG_NAME(computeShader_getNearbyNodes);
+	}
+	//--------------------------------------------------------------------------------------
+	{
+		vkDestroyShaderEXT(device, computeShader_getNearbyNodes2, nullptr);
+
+		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		shaderInfo.nextStage = 0;
+		shaderInfo.pName = "computeMain_getNearbyNodes2";
+		shaderInfo.codeSize = shaderCode.codeSize;
+		shaderInfo.pCode = shaderCode.pCode;
+		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_getNearbyNodes2);
+		NVVK_DBG_NAME(computeShader_getNearbyNodes2);
+	}
 
 #ifndef NDEBUG
 	vkDestroyShaderEXT(device, computeShader_getSampleNodeInfo, nullptr);
@@ -393,6 +467,25 @@ void SVOWeight::compileAndCreateShaders() {
 	shaderInfo.pCode = shaderCode.pCode;
 	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &fragmentShader_visualization);
 	NVVK_DBG_NAME(fragmentShader_visualization);
+	//--------------------------------------------------------------------------------------
+	vkDestroyShaderEXT(device, vertexShader_nearby, nullptr);
+	vkDestroyShaderEXT(device, fragmentShader_nearby, nullptr);
+
+	shaderInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+	shaderInfo.nextStage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	shaderInfo.pName = "vertexMain_nearby";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &vertexShader_nearby);
+	NVVK_DBG_NAME(vertexShader_nearby);
+
+	shaderInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	shaderInfo.nextStage = 0;
+	shaderInfo.pName = "fragmentMain_nearby";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &fragmentShader_nearby);
+	NVVK_DBG_NAME(fragmentShader_nearby);
 #endif
 }
 void SVOWeight::updateDataPerFrame(VkCommandBuffer cmd) {
@@ -421,6 +514,18 @@ void SVOWeight::initWeights(VkCommandBuffer cmd) {
 
 	vkCmdDispatchIndirect(cmd, GlobalInfoBuffer.buffer, 0);
 }
+void SVOWeight::getNearbyNodeInfos(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
+
+	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getNearbyNodes);
+	vkCmdDispatchIndirect(cmd, GlobalInfoBuffer.buffer, offsetof(shaderio::SVOWeightGlobalInfo, cmd2));
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getNearbyNodes2);
+	vkCmdDispatchIndirect(cmd, GlobalInfoBuffer.buffer, offsetof(shaderio::SVOWeightGlobalInfo, cmd2));
+}
+
 void SVOWeight::getWeights(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
 
@@ -448,7 +553,22 @@ void SVOWeight::getProbability(VkCommandBuffer cmd) {
 
 #ifndef NDEBUG
 void SVOWeight::debugPrepare() {
-	Feature::createGBuffer(true, false, 1);
+	Feature::createGBuffer(true, false, 2);
+
+	nvutils::PrimitiveMesh primitive = FzbRenderer::MeshSet::createCube();
+	FzbRenderer::MeshSet meshSet = FzbRenderer::MeshSet("Cube", primitive);
+	scene.addMeshSet(meshSet);
+
+	scene.createSceneInfoBuffer();
+
+	pushConstant.sampleNodeLabel = 230;
+}
+void SVOWeight::resize(
+	VkCommandBuffer cmd, const VkExtent2D& size,
+	nvvk::GBuffer& gBuffers_other, uint32_t baseMapIndex
+) {
+	gBuffers.update(cmd, size);
+	depthImageView = gBuffers_other.getDepthImageView();
 }
 
 void SVOWeight::debug_visualization(VkCommandBuffer cmd) {
@@ -521,5 +641,60 @@ void SVOWeight::debug_visualization(VkCommandBuffer cmd) {
 
 	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(0),
 									  VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
+}
+void SVOWeight::debug_nearby(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
+
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(1), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
+
+	VkRenderingAttachmentInfo colorAttachment = DEFAULT_VkRenderingAttachmentInfo;
+	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	colorAttachment.imageView = gBuffers.getColorImageView(1);
+	colorAttachment.clearValue = { .color = {Application::sceneResource.sceneInfo.backgroundColor.x,
+											Application::sceneResource.sceneInfo.backgroundColor.y,
+											Application::sceneResource.sceneInfo.backgroundColor.z, 1.0f} };
+
+	VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
+	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+	depthAttachment.imageView = depthImageView;	// gBuffers.getDepthImageView();
+	//depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
+
+	VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
+	renderingInfo.renderArea = { {0, 0}, gBuffers.getSize() };
+	renderingInfo.colorAttachmentCount = 1;
+	renderingInfo.pColorAttachments = &colorAttachment;
+	renderingInfo.pDepthAttachment = &depthAttachment;
+
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1,
+		staticDescPack.getSetPtr(), 0, nullptr);
+
+	vkCmdBeginRendering(cmd, &renderingInfo);
+
+	graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
+	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
+	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_TRUE;
+	graphicsDynamicPipeline.depthStencilState.depthWriteEnable = VK_FALSE;
+	graphicsDynamicPipeline.cmdApplyAllStates(cmd);
+	graphicsDynamicPipeline.cmdSetViewportAndScissor(cmd, gBuffers.getSize());
+	graphicsDynamicPipeline.cmdBindShaders(cmd, { .vertex = vertexShader_nearby, .fragment = fragmentShader_nearby });
+
+	VkVertexInputBindingDescription2EXT bindingDescription{};
+	VkVertexInputAttributeDescription2EXT attributeDescription = {};
+	vkCmdSetVertexInputEXT(cmd, 0, nullptr, 0, nullptr);
+
+	const shaderio::Mesh& mesh = scene.meshes[0];
+	const shaderio::TriangleMesh& triMesh = mesh.triMesh;
+
+	vkCmdPushConstants2(cmd, &pushInfo);
+
+	uint32_t bufferIndex = scene.getMeshBufferIndex(0);
+	const nvvk::Buffer& v = scene.bDatas[bufferIndex];
+
+	vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(mesh.indexType));
+	vkCmdDrawIndexed(cmd, triMesh.indices.count, SVOSize_G, 0, 0, 0);
+
+	vkCmdEndRendering(cmd);
+
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(RasterVoxelizationGBuffer_SVOPG::CubeMap_SVOPG), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
 }
 #endif
