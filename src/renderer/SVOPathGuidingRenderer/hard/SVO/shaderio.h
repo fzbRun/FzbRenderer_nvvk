@@ -7,7 +7,7 @@
 #define FZBRENDERER_SVO_SVOPG_SHADER_IO_H
 NAMESPACE_SHADERIO_BEGIN()
 
-#define SVOSize_G 6000
+#define SVOSize_G 8000
 #if SVOSize_G > OCTREE_NODECOUNT_E
 #define SVOSize SVOSize_G
 #else

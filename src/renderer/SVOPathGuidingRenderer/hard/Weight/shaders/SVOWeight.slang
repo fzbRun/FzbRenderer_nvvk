@@ -16,10 +16,10 @@
 
 struct IndivisibleNodeData_E {
     float3 normal;
+    float E;
     float3x3 TBN;
-    float3 irradiance;
-    uint nodeIndex;
     AABB aabb;
+    uint nodeIndex;
 };
 struct IndivisibleNodeData_G {
     float3 normal;
@@ -33,8 +33,8 @@ struct HitPayload_SVOWeight {
     float3 hitPos;
     float hit;
     float3 normal;
+    float E;
     float3 sampleDir;
-    float3 irradiance;
     float weight;
 };
 
@@ -156,10 +156,10 @@ void computeMain_getIndivisibleNode(uint threadIndex: SV_DispatchThreadID, uint 
     GroupMemoryBarrierWithGroupSync();
 
     int indivisibleNodeCount_G = groupIndivisibleNodeCount_G;
-    if (groupIndivisibleNodeCount_G > SVOIndivisibleNodeCount_G) {
+    if (indivisibleNodeCount_G > SVOIndivisibleNodeCount_G) {
         if (threadIndex == 0) {
-            printf("Error: G indivisibleNodeCount_G exceeds the maximum node count. maxNodeCount: %u,    currentNodeCount: %u\n",
-                   SVOIndivisibleNodeCount_G, GlobalInfo[0].indivisibleNodeCount_G);
+            printf("Error: G indivisibleNodeCount_G exceeds the maximum node count. maxNodeCount: %u, currentNodeCount: %u\n",
+                   SVOIndivisibleNodeCount_G, indivisibleNodeCount_G);
             GlobalInfo[0].indivisibleNodeCount_G = 0;
             GlobalInfo[0].indivisibleNodeCount_E = 0;
             GlobalInfo[0].cmd.x = 0;
@@ -193,7 +193,7 @@ void computeMain_getIndivisibleNode(uint threadIndex: SV_DispatchThreadID, uint 
         if (threadIndex < warpCount * 32) {
             if (threadIndex < 384) {
                 SVONodeData_E nodeData = NodeData_E[threadIndex];
-                bool hasData = nodeData.irradiance.x + nodeData.irradiance.y + nodeData.irradiance.z > 0.0f;
+                bool hasData = nodeData.E > 0.0f;
                 indivisible = hasData && nodeData.indivisible == 1;
             }
             warpIndivisibleNodeCount = WaveActiveCountBits(indivisible);
@@ -281,7 +281,7 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
         IndivisibleNodeData_E groupNodeData_E;
         groupNodeData_E.normal = normalize(nodeData.meanNormal.xyz);
         groupNodeData_E.nodeIndex = nodeIndex;
-        groupNodeData_E.irradiance = nodeData.irradiance;
+        groupNodeData_E.E = nodeData.E;
         groupNodeData_E.aabb = nodeData.aabb;
 
         float3 tangent, bitangent;
@@ -325,25 +325,18 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
         uint hitTestIndex = nodeLabel_G_group * HITTEST_COUNT + i % HITTEST_COUNT;
         uint seed = xxhash32(uint3(threadIndex, hitTestIndex, pushConst.frameIndex));
 
-        float3 halfSize_E = (nodeData_E.aabb.maximum - nodeData_E.aabb.minimum) * 0.5f;
-        float3 nodeCenter_E = nodeData_E.aabb.minimum + halfSize_E;
-        float3 halfSize_G = (nodeData_G.aabb.maximum - nodeData_G.aabb.minimum) * 0.5f;
-        float3 nodeCenter_G = nodeData_G.aabb.minimum + halfSize_G;
+        float3 randXYZ = float3(rand(seed), rand(seed), rand(seed));
+        float3 samplePoint_E = randXYZ * (nodeData_E.aabb.maximum - nodeData_E.aabb.minimum) + nodeData_E.aabb.minimum;
 
-        float3 samplePoint_E = sample_hemisphere_mean(seed);
-        samplePoint_E = mul(samplePoint_E, nodeData_E.TBN); // slang is right multiplication
-        samplePoint_E = getAABBPoint(samplePoint_E, nodeCenter_E, halfSize_E);
-
-        float3 samplePoint_G = sample_hemisphere_mean(seed);
-        samplePoint_G = mul(samplePoint_G, nodeData_G.TBN);
-        samplePoint_G = getAABBPoint(samplePoint_G, nodeCenter_G, halfSize_G);
+        randXYZ = float3(rand(seed), rand(seed), rand(seed));
+        float3 samplePoint_G = randXYZ * (nodeData_G.aabb.maximum - nodeData_G.aabb.minimum) + nodeData_G.aabb.minimum;
 
         float3 sampleDir = normalize(samplePoint_G - samplePoint_E);
 
         HitPayload_SVOWeight hitPayload;
         hitPayload.hit = -1.0f;
         hitPayload.sampleDir = sampleDir;
-        hitPayload.irradiance = nodeData_E.irradiance;
+        hitPayload.E = nodeData_E.E;
         hitPayload.weight = 0.0f;
 
         bool normalCheck = dot(sampleDir, nodeData_E.normal) > 0.0f && dot(-sampleDir, nodeData_G.normal) > 0.0f;
@@ -358,8 +351,20 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
             ray.TMax = INFINITE;
 
             traceRay(ray, hitPayload, nodeData_G.aabb);
-            hitPayload.weight = 0.0001f;
+            hitPayload.weight = 0.000001f;
         }
+
+        //if (pushConst.frameIndex == 0) {
+        //    bool printfAble = nodeData_G.nodeLabel == 9;
+        //    printfAble = printfAble && abs(nodeData_E.aabb.maximum.y - 1.95) <= 0.0001f && abs(nodeData_E.aabb.minimum.y - 1.95) <= 0.0001f;
+        //    if (printfAble) {
+        //        printf("\nnodeIndex_E: %d, hit: %f\nsamplePoint_E: %f %f %f, samplePoint_G: %f %f %f\n",
+        //               nodeData_E.nodeIndex, hitPayload.hit,
+        //               samplePoint_E.x, samplePoint_E.y, samplePoint_E.z,
+        //               samplePoint_G.x, samplePoint_G.y, samplePoint_G.z,
+        //        );
+        //    }
+        //}
 
         groupHitPayloads[hitTestIndex] = hitPayload;
     }
@@ -375,6 +380,21 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
         uint hitPayloadIndex = nodeLabel_G_group * HITTEST_COUNT + hitTestIndex;
         HitPayload_SVOWeight hitPayload = groupHitPayloads[hitPayloadIndex];
         weight += hitPayload.weight;
+
+        //if (pushConst.frameIndex == 0) {
+        //    bool printfAble = (threadIndex / OUTGOING_COUNT) % indivisibleNodeCount_G == 8;
+        //    printfAble = printfAble && outgoingIndex == 41;
+        //    IndivisibleNodeData_E nodeData_E = groupNodeDatas_E[nodeLabel_E_group];
+        //    if (printfAble) {
+        //        printf("nodeIndex_E: %d, hit: %f E: %f\naabb: %f %f %f %f  %f %f\n\n",
+        //            nodeData_E.nodeIndex, hitPayload.hit,
+        //            nodeData_E.E,
+        //            nodeData_E.aabb.minimum.x, nodeData_E.aabb.minimum.y, nodeData_E.aabb.minimum.z,
+        //            nodeData_E.aabb.maximum.x, nodeData_E.aabb.maximum.y, nodeData_E.aabb.maximum.z,
+        //        );
+        //    }
+        //}
+
         if (hitPayload.hit <= 0.0f) continue;
 
         float cosine = dot(-hitPayload.sampleDir, hitPayload.normal);
@@ -388,9 +408,37 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
         float3x3 TBN_G = float3x3(tangent, bitangent, hitPayload.normal);
 
         float3 bsdf = getBSDF(hitPayload.material, -hitPayload.sampleDir, hitPayload.normal, outgoing, TBN_G, isExt);
-        float3 weight3 = max(hitPayload.irradiance * cosine * bsdf, 0.0f); // notIgnoreRatio is made by irradiance length, so use length here;
-        weight += 0.299 * weight3.x + 0.587 * weight3.y + 0.114 * weight3.z;
+        float3 weight3 = hitPayload.E * cosine * bsdf; // notIgnoreRatio is made by irradiance length, so use length here;
+        weight += max(0.299 * weight3.x + 0.587 * weight3.y + 0.114 * weight3.z, 0.0f);
+
+        //if (pushConst.frameIndex == 0) {
+        //    bool printfAble = (threadIndex / OUTGOING_COUNT) % indivisibleNodeCount_G == 8;
+        //    printfAble = printfAble && outgoingIndex == 41;
+        //    IndivisibleNodeData_E nodeData_E = groupNodeDatas_E[nodeLabel_E_group];
+        //    //printfAble = printfAble && nodeData_E.nodeIndex == 186;
+        //    if (printfAble) {
+        //        printf("nodeIndex_E: %d, hit: %f\nweight: %f, E: %f, cosine: %f, bsdf: %f %f %f\naabb: %f %f %f %f %f %f\n\n",
+        //            nodeData_E.nodeIndex, hitPayload.hit,
+        //            0.299 * weight3.x + 0.587 * weight3.y + 0.114 * weight3.z,
+        //            nodeData_E.E, cosine, bsdf.x, bsdf.y, bsdf.z,
+        //            nodeData_E.aabb.minimum.x, nodeData_E.aabb.minimum.y, nodeData_E.aabb.minimum.z,
+        //            nodeData_E.aabb.maximum.x, nodeData_E.aabb.maximum.y, nodeData_E.aabb.maximum.z,
+        //        );
+        //    }
+        //}
     }
+    //if (pushConst.frameIndex == 0) {
+    //    bool printfAble = (threadIndex / OUTGOING_COUNT) % indivisibleNodeCount_G == 8;
+    //    printfAble = printfAble && outgoingIndex == 41;
+    //    IndivisibleNodeData_E nodeData_E = groupNodeDatas_E[nodeLabel_E_group];
+    //    if (printfAble) {
+    //        printf("nodeIndex_E: %d weight: %f, E: %f\naabb: %f %f %f %f %f %f\n\n",
+    //                nodeData_E.nodeIndex, weight, nodeData_E.E,
+    //                nodeData_E.aabb.minimum.x, nodeData_E.aabb.minimum.y, nodeData_E.aabb.minimum.z,
+    //                nodeData_E.aabb.maximum.x, nodeData_E.aabb.maximum.y, nodeData_E.aabb.maximum.z,
+    //            );
+    //    }
+    //}
 
     if (weight > 0.0f) {
         uint nodeLabel_G = (threadIndex / OUTGOING_COUNT) % indivisibleNodeCount_G;
@@ -404,14 +452,6 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
         uint threadTotalCount = OUTGOING_COUNT * indivisibleNodeCount_G * NODECOUNT_E;
         GlobalInfo[0].cmd.x = (threadTotalCount + GETPROBABILITY_CS_THREADGROUP_SIZE - 1) / GETPROBABILITY_CS_THREADGROUP_SIZE;
     }
-
-    //if (pushConst.frameIndex == 0) {
-    //    if (outgoingIndex == 23 && (threadIndex / OUTGOING_COUNT) % indivisibleNodeCount_G + 1 == 40) {
-    //        printf("nodeIndex: %d, weight: %f\n",
-    //            groupNodeDatas_E[nodeLabel_E_group].nodeIndex, weight
-    //        );
-    //    }
-    //}
 }
 
 [numthreads(GETPROBABILITY_CS_THREADGROUP_SIZE, 1, 1)]
@@ -442,16 +482,53 @@ void computeMain_getProbability(uint threadIndex: SV_DispatchThreadID, uint thre
         weightSum += WaveReadLaneAt(weightSum, targetLane);
     }
     weightSum = WaveReadLaneAt(weightSum, blockFirstWarplane);
-    float probability = weight / max(weightSum, 0.00001f);
+    float probability = weight / max(weightSum, 1e-20f);
     if (probability > 0.0f) SVOWeights[weightIndex] = probability;
 
     if (layerIndex > 0) {
-        uint fatherWeightIndex = weightStartIndex + OctreeLayerStartIndex_E[layerIndex - 1] + nodeIndex_currentLayer_E / 8;
-        if ((warplane & 7u) == 0 && weightSum > 0.0f) SVOWeights[fatherWeightIndex] = weightSum;
+        if ((warplane & 7u) == 0 && weightSum > 0.0f) {
+            uint fatherWeightIndex = weightStartIndex + OctreeLayerStartIndex_E[layerIndex - 1] + nodeIndex_currentLayer_E / 8;
+            SVOWeights[fatherWeightIndex] = weightSum;
+        }
 
         if (threadIndex == 0)
             GlobalInfo[0].cmd.x = (OUTGOING_COUNT * groupIndivisibleNodeCount_G * OctreeLayerInfo_E[layerIndex - 1] + GETPROBABILITY_CS_THREADGROUP_SIZE - 1) / GETPROBABILITY_CS_THREADGROUP_SIZE;
     }
+    /*
+    if (pushConst.frameIndex == 0 && pushConst.currentLayer_E == 2) {
+        bool printfAble = nodeLable_G == 8;
+        printfAble = printfAble && outgoingIndex == 41;
+        printfAble = printfAble && nodeIndex_currentLayer_E >= 184 && nodeIndex_currentLayer_E <= 191;
+        if (printfAble) {
+            printf("nodeIndex_E: %d\nweight: %f, probability: %f\n\n",
+                   nodeIndex_currentLayer_E,
+                   weight, probability
+                );
+        }
+    }
+    if (pushConst.frameIndex == 0 && pushConst.currentLayer_E == 1) {
+        bool printfAble = nodeLable_G == 8;
+        printfAble = printfAble && outgoingIndex == 41;
+        printfAble = printfAble && nodeIndex_currentLayer_E >= 16 && nodeIndex_currentLayer_E <= 23;
+        if (printfAble) {
+            printf("nodeIndex_E: %d\nweight: %f, probability: %f\n\n",
+                   nodeIndex_currentLayer_E,
+                   weight, probability
+                );
+        }
+    }
+    if (pushConst.frameIndex == 0 && pushConst.currentLayer_E == 0) {
+        bool printfAble = nodeLable_G == 8;
+        printfAble = printfAble && outgoingIndex == 41;
+        printfAble = printfAble && nodeIndex_currentLayer_E >= 0 && nodeIndex_currentLayer_E <= 8;
+        if (printfAble) {
+            printf("nodeIndex_E: %d\nweight: %f, probability: %f\n\n",
+                   nodeIndex_currentLayer_E,
+                   weight, probability
+                );
+        }
+    }
+    */
 }
 //---------------------------------------------getNearbyNode---------------------------------------------------
 [numthreads(GETNEARBYNODES_CS_THREADGROUP_SIZE, 1, 1)]
@@ -618,6 +695,8 @@ void computeMain_getSampleNodeInfo(uint threadIndex: SV_DispatchThreadID, uint t
     SVOLayerInfo layerInfos_G[MAX_SVO_LAYER];
     for (int i = 0; i <= SVOMaxLayer; ++i) layerInfos_G[i] = SVOGlobalInfo[0].layerInfos_G[i];
 
+    /*
+    float3 samplePos = pushConst.samplePos;
     SVONodeData_G nodeData;
     bool hitIndivisibleNode = false;
     uint nodeIndex = 0, nodeOffset = 0, nodeLabelSum = 0;
@@ -627,7 +706,7 @@ void computeMain_getSampleNodeInfo(uint threadIndex: SV_DispatchThreadID, uint t
         for (int layerIndex = 1; layerIndex <= SVOMaxLayer; ++layerIndex) {
             for (nodeOffset = 0; nodeOffset < 8; ++nodeOffset) {
                 nodeData = SVO_G[nodeIndex + nodeOffset];
-                if (checkPointInAABB(pushConst.samplePos, nodeData.aabb)) {
+                if (checkPointInAABB(samplePos, nodeData.aabb)) {
                     if (nodeData.indivisible == 1) hitIndivisibleNode = true;
                     else {
                         nodeSum += layerInfos_G[layerIndex - 1].divisibleNodeCount * 8;
@@ -642,6 +721,12 @@ void computeMain_getSampleNodeInfo(uint threadIndex: SV_DispatchThreadID, uint t
         }
         if (hitIndivisibleNode) break;
     }
+    */
+
+    uint nodeLabel = pushConst.sampleNodeLabel;
+    uint nodeIndex = SVO_IndivisibleNodeInfos_G[nodeLabel - 1];
+    SVONodeData_G nodeData = SVO_G[nodeIndex];
+    bool hitIndivisibleNode = nodeData.indivisible == 1;
 
     if (hitIndivisibleNode) GlobalInfo[0].sampelNodeAABB = nodeData.aabb;
     else {
@@ -653,12 +738,12 @@ void computeMain_getSampleNodeInfo(uint threadIndex: SV_DispatchThreadID, uint t
         nodeData.aabb.maximum.z = -3.402823466e+38F;
         GlobalInfo[0].sampelNodeAABB = nodeData.aabb;
     }
-    GlobalInfo[0].sampelNodeLabel = nodeData.label + nodeLabelSum;
+    GlobalInfo[0].sampelNodeLabel = nodeLabel;
 
     if (pushConst.frameIndex == 0) {
         AABB aabb = GlobalInfo[0].sampelNodeAABB;
         printf("nodeIndex: %d, sampleNodeLabel: %d\nsampleNodeAABB:\n %f %f %f\n%f %f %f\nnormal: %f %f %f\n",
-               nodeIndex + nodeOffset, nodeData.label + nodeLabelSum,
+               nodeIndex, nodeLabel,
             aabb.minimum.x, aabb.minimum.y, aabb.minimum.z,
                aabb.maximum.x, aabb.maximum.y, aabb.maximum.z,
             nodeData.meanNormal.x, nodeData.meanNormal.y, nodeData.meanNormal.z,
@@ -750,11 +835,35 @@ PSout fragmentMain(VSout input) {
     if (hitNode) {
         pdf *= SVOWeights[weightIndex + 8 + nodeIndex / 8];
         pdf *= SVOWeights[weightIndex + normalIndex];
+
+        // if (nodeIndex == 339 && pushConst.frameIndex == 0) {
+        //     for (int layerIndex = OCTREE_CLUSTER_LAYER; layerIndex >= 0; --layerIndex) {
+        //         float pdf = SVOWeights[weightIndex + OctreeLayerStartIndex_E[layerIndex] + nodeIndex];
+        //         printf("layerIndex: %d, nodeIndex: %d, pdf: %f\n", layerIndex, nodeIndex, pdf);
+        //         nodeIndex /= 8;
+        //     }
+        //
+        //     return { float4(10.0f, 10.0f, 0.0f, 1.0f) };
+        // }
+        //if (nodeIndex / 8 == 23) return { float4(10.0f, 10.0f, 0.0f, 1.0f) };
     }
     else return { float4(0.0f) };
 
-    probability *= nodeData.pdf;
-    return { float4(0.0f, probability * 10.0f, 0.0f, 1.0f) };
+    pdf *= nodeData.pdf;
+
+    //if (pdf > 0.005f) {
+    //    if (pushConst.frameIndex == 2) {
+    //        printf("nodeIndex: %d, pdf: %f, nodePdf: %f, E: %f\naabb: %f %f %f %f %f %f\n\n",
+    //            nodeIndex, pdf, nodeData.pdf, nodeData.E,
+    //            nodeData.aabb.minimum.x, nodeData.aabb.minimum.y, nodeData.aabb.minimum.z,
+    //            nodeData.aabb.maximum.x, nodeData.aabb.maximum.y, nodeData.aabb.maximum.z,
+    //        );
+    //    }
+    //    return { float4(pdf * 10.0f, pdf * 10.0f, 0.0f, 1.0f) };
+    //}
+
+
+    return { float4(0.0f, pdf * 100.0f, 0.0f, 1.0f) };
 }
 
 struct VSout_nearby {

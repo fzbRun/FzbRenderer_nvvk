@@ -171,8 +171,8 @@ void SVOWeight::render(VkCommandBuffer cmd) {
 }
 void SVOWeight::postProcess(VkCommandBuffer cmd) {
 #ifndef NDEBUG
-	//debug_visualization(cmd);
-	debug_nearby(cmd);
+	debug_visualization(cmd);
+	//debug_nearby(cmd);
 #endif
 };
 
@@ -561,7 +561,7 @@ void SVOWeight::debugPrepare() {
 
 	scene.createSceneInfoBuffer();
 
-	pushConstant.sampleNodeLabel = 230;
+	pushConstant.sampleNodeLabel = 9;	// 281;
 }
 void SVOWeight::resize(
 	VkCommandBuffer cmd, const VkExtent2D& size,

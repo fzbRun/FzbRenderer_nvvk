@@ -11,8 +11,6 @@ struct NEEHitPayload {
     float pdf_bsdfSample;
 
     float3 bsdf_cosine;
-    float pdf;
-    float weight;
 
     bool isExt;
 
@@ -55,8 +53,6 @@ void raygenMain()
     payload.radiance_directLightSample = float3(0, 0, 0);
     payload.pdf_bsdfSample  = 1.0f;
     payload.bsdf_cosine = float3(1.0f);
-    payload.pdf = 1.0f;
-    payload.weight = 1.0f;
     payload.isExt = true;
     payload.rayOrigin = ray.Origin;
     payload.rayDirection = ray.Direction;
@@ -64,6 +60,7 @@ void raygenMain()
 
     float3 accumulatedRadiance = float3(0, 0, 0);
     float RR = 0.8f;
+    float RRPdf = 1.0f;
 
     float weight_bsdf = 1.0f;
     uint lightNum = min(sceneInfo.numLights, NEE_MAX_SAMPLE_NUM);
@@ -87,17 +84,16 @@ void raygenMain()
                 pdf_directLightSample = getPdf_directionLightSample(ray.Origin, ray.Direction, light);
                 break; // bsdf sample only in one direct light, other light's pdf is 0
             }
-            weight_bsdf = payload.pdf_bsdfSample / (payload.pdf_bsdfSample + pdf_directLightSample + 0.0001f);
-            payload.weight *= weight_bsdf;
+            weight_bsdf /= (payload.pdf_bsdfSample + pdf_directLightSample + 0.0001f);
         }
 
-        accumulatedRadiance += payload.radiance_emissive + payload.radiance_directLightSample;
+        accumulatedRadiance += (payload.radiance_emissive + payload.radiance_directLightSample) * weight_bsdf / RRPdf;
 
         float randomNumber = rand(payload.randomSeed);
         if (randomNumber >= RR) break;
-        payload.pdf *= RR;
+        RRPdf *= RR;
     }
-    //accumulatedRadiance = accumulatedRadiance - payload.radiance_directLightSample;
+    //accumulatedRadiance = accumulatedRadiance - payload.radiance_directLightSample * weight_bsdf / RRPdf;
 
     if (any(isnan(accumulatedRadiance)) || any(isinf(accumulatedRadiance))) return;
     // When the maximum frame rate is reached, the original image will decay by ((maxframe-1)/maxframe)^k < 1, and the final image will turn black
@@ -153,15 +149,14 @@ void rayClosestHitMain(inout NEEHitPayload payload, in BuiltInTriangleIntersecti
 
     payload.randomSeed = callablePayload.randomSeed;
 
-    payload.radiance_emissive = material.emissive * payload.weight * payload.bsdf_cosine / payload.pdf;
-    payload.radiance_directLightSample = callablePayload.radianceSum_nee * payload.weight * payload.bsdf_cosine / payload.pdf;
+    payload.radiance_emissive = material.emissive * payload.bsdf_cosine;
+    payload.radiance_directLightSample = callablePayload.radianceSum_nee * payload.bsdf_cosine;
 
     payload.pdf_bsdfSample = callablePayload.pdf;
 
     payload.rayDirection = callablePayload.incidence;
     payload.rayOrigin = hitState.pos + payload.rayDirection * 0.001f;
     payload.bsdf_cosine *= callablePayload.bsdf * abs(dot(hitState.normal, payload.rayDirection));;
-    payload.pdf *= callablePayload.pdf;
     payload.isExt = callablePayload.isExt;
 
     payload.bounceDepth++;
@@ -174,9 +169,9 @@ void rayMissMain(inout NEEHitPayload payload)
     if (sceneInfo.useSky == 1)
     {
         float3 skyColor = evalSimpleSky(sceneInfo.skySimpleParam, WorldRayDirection());
-        payload.radiance_emissive += skyColor * payload.bsdf_cosine / payload.pdf;
+        payload.radiance_emissive += skyColor * payload.bsdf_cosine;
     }
-    else payload.radiance_emissive += sceneInfo.backgroundColor * payload.bsdf_cosine / payload.pdf;
+    else payload.radiance_emissive += sceneInfo.backgroundColor * payload.bsdf_cosine;
 
     payload.radiance_directLightSample = float3(0.0f);
     payload.bounceDepth = MISS_DEPTH; // Stop

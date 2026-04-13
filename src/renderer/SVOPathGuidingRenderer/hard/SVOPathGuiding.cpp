@@ -210,7 +210,7 @@ void FzbRenderer::SVOPathGuidingRenderer::render(VkCommandBuffer cmd) {
 		VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
 	rasterVoxelization->postProcess(cmd);
-	//lightInject->postProcess(cmd);
+	lightInject->postProcess(cmd);
 	octree->postProcess(cmd);
 	svo->postProcess(cmd);
 	svoWeight->postProcess(cmd);

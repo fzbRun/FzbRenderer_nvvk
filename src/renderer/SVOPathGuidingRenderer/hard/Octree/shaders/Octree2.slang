@@ -104,7 +104,7 @@ void computeMain_initOctreeArray(uint threadIndex: SV_DispatchThreadID, uint gro
     for (int i = 0; i < MAX_MATERIAL_COUNT; ++i) nodeData_G.materialCounts[i] = 0;
 
     OctreeNodeData_E nodeData_E;
-    nodeData_E.irradiance = float3(0.0f);
+    nodeData_E.E = 0.0f;
     nodeData_E.pdf = 1.0f;
     nodeData_E.meanNormal = float4(0.0f);
     nodeData_E.indivisible = 1;
@@ -148,7 +148,7 @@ void computeMain_initOctreeArray(uint threadIndex: SV_DispatchThreadID, uint gro
         //-----------------------------------------------E--------------------------------------------
         bool hasData_E = hasData_G && voxelData.sumNormal_E.w > 0.0f;
         if (hasData_E) {
-            nodeData_E.irradiance = voxelData.irradiance.xyz;
+            nodeData_E.E = length(voxelData.irradiance.xyz / voxelData.irradiance.w);
             nodeData_E.meanNormal = voxelData.sumNormal_E / voxelData.sumNormal_E.w;
             nodeData_E.aabb = nodeAabb;
         }
@@ -371,7 +371,7 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
             if (warpLane == blockFirstWarpLane) {
                 nodeData_G.fillRate = aabbVolumeSum / mergeAABBVolume;
                 indivisible = materialEntropy < 0.2f && 
-                              length(mergeNormal) > 0.5f &&
+                              length(mergeNormal) > 0.707f &&
                               (nodeData_G.fillRate >= 0.7 ||
                               (mergeAABBVolume - aabbVolumeSum) < pushConst.voxelVolume * (pushConst.octreeMaxLayer - OCTREE_CLUSTER_LAYER) * 4);
                 /*
@@ -407,51 +407,64 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
         uint fatherNodeIndex = nodeIndex / 8;
         OctreeNodeData_E nodeData_E = OctreeArray_E[pushConst.currentLayer][nodeIndex];
 
-        bool hasData = nodeData_E.irradiance.x + nodeData_E.irradiance.y + nodeData_E.irradiance.z > 0.0f;
+        bool hasData = nodeData_E.E > 0.0f;
         uint32_t warpHasDataMask = WaveActiveBallot(hasData).x;
         uint32_t blockHasDataNodeCount = countbits(warpHasDataMask & blockNodeMask);
         if (blockHasDataNodeCount == 1) {
             if (hasData) OctreeArray_E[pushConst.currentLayer - 1][fatherNodeIndex] = nodeData_E;
         } else {
-            float irradianceValue = length(nodeData_E.irradiance);
-            float irradianceSum = irradianceValue;
+            float mergeE = nodeData_E.E;
             for (int offset = 4; offset > 0; offset /= 2) {
                 uint targetLane = warpLane + offset;
-                irradianceSum += WaveReadLaneAt(irradianceSum, targetLane);
+                mergeE += WaveReadLaneAt(mergeE, targetLane);
             }
-            irradianceSum = WaveReadLaneAt(irradianceSum, blockFirstWarpLane);
-            float pdf = irradianceValue / irradianceSum;
+            mergeE = WaveReadLaneAt(mergeE, blockFirstWarpLane);
 
-            uint32_t sampleWarpLane = blockFirstWarpLane;
-            float sampleProbability = 1.0f;
-            if (warpLane == blockFirstWarpLane) {
-                uint randomSeed = xxhash32(uint3(threadIndex, groupThreadIndex, (uint)pushConst.frameIndex));
-                sampleProbability = rand(randomSeed) - pdf;
-            }
-            sampleProbability = WaveReadLaneAt(sampleProbability, blockFirstWarpLane);
-            for (int offset = 1; offset < 8; ++offset) {
-                sampleProbability -= WaveReadLaneAt(pdf, blockFirstWarpLane + offset);
-                if (sampleProbability <= 0.0f) {
-                    sampleWarpLane += offset;
-                    break;
+            if (pushConst.currentLayer > 100) {
+                AABB mergeAABB = nodeData_E.aabb;
+                atomicMergeAABB(mergeAABB);
+
+                float3 mergeNormal = nodeData_E.meanNormal.xyz; // get mergeNormal
+                for (int offset = 4; offset > 0; offset /= 2) {
+                    uint targetLane = warpLane + offset;
+                    mergeNormal.x += WaveReadLaneAt(mergeNormal.x, targetLane);
+                    mergeNormal.y += WaveReadLaneAt(mergeNormal.y, targetLane);
+                    mergeNormal.z += WaveReadLaneAt(mergeNormal.z, targetLane);
                 }
-            }
-            //--------------------------------calc mergeNode data------------------------------------------
-            float3 mergeIrradiance = nodeData_E.irradiance.xyz;
-            for (int offset = 4; offset > 0; offset /= 2) {
-                uint targetLane = warpLane + offset;
-                mergeIrradiance.x += WaveReadLaneAt(mergeIrradiance.x, targetLane);
-                mergeIrradiance.y += WaveReadLaneAt(mergeIrradiance.y, targetLane);
-                mergeIrradiance.z += WaveReadLaneAt(mergeIrradiance.z, targetLane);
-            }
-            //--------------------------------------assignment------------------------------------------------
-            if (warpLane == sampleWarpLane) {
-                nodeData_E.irradiance = mergeIrradiance;
-                nodeData_E.pdf *= pdf;
-                // nodeData_E.meanNormal = float4(mergeNormal, 1.0f);
-                //  nodeData_E.aabb = mergeAABB;
-                nodeData_E.indivisible = 1;
-                OctreeArray_E[pushConst.currentLayer - 1][fatherNodeIndex] = nodeData_E;
+                mergeNormal /= blockHasDataNodeCount;
+
+                if (warpLane == blockFirstWarpLane) {
+                    nodeData_E.E = mergeE;
+                    nodeData_E.pdf = 1.0f;
+                    nodeData_E.meanNormal = float4(mergeNormal, 1.0f);
+                    nodeData_E.aabb = mergeAABB;
+                    nodeData_E.indivisible = 1;
+                    OctreeArray_E[pushConst.currentLayer - 1][fatherNodeIndex] = nodeData_E;
+                }
+            } else {
+                float probability = nodeData_E.E / mergeE;
+
+                uint32_t sampleWarpLane = blockFirstWarpLane;
+                float sampleProbability = 1.0f;
+                if (warpLane == blockFirstWarpLane) {
+                    uint randomSeed = xxhash32(uint3(threadIndex, groupThreadIndex, (uint)pushConst.frameIndex));
+                    sampleProbability = rand(randomSeed);
+                }
+                sampleProbability = WaveReadLaneAt(sampleProbability, blockFirstWarpLane);
+                for (int offset = 0; offset < 8; ++offset) {
+                    sampleProbability -= WaveReadLaneAt(probability, blockFirstWarpLane + offset);
+                    if (sampleProbability <= 0.0f) {
+                        sampleWarpLane += offset;
+                        break;
+                    }
+                }
+
+                if (warpLane == sampleWarpLane) {
+                    nodeData_E.E = mergeE;
+                    nodeData_E.pdf *= probability;
+                    nodeData_E.indivisible = 1;
+                    OctreeArray_E[pushConst.currentLayer - 1][fatherNodeIndex] = nodeData_E;
+                }
             }
         }
 
@@ -579,7 +592,7 @@ VSout_Wireframe vertexMain_Wireframe(uint vertexIndex: SV_VertexID, int instance
     } else {
         OctreeNodeData_E octreeData_E = OctreeArray_E[layerIndex][nodeIndex];
         nodeAABB = octreeData_E.aabb;
-        invisible = (octreeData_E.irradiance.x + octreeData_E.irradiance.y + octreeData_E.irradiance.z > 0.0f) && octreeData_E.indivisible == 1;
+        invisible = (octreeData_E.E > 0.0f) && octreeData_E.indivisible == 1;
     }
 
     if (normalIndex != pushConst.normalIndex) invisible = 0;

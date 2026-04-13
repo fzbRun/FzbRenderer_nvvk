@@ -503,8 +503,10 @@ bool getNodeAABB_E_jittering2_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payl
 
                 float3 nodeAABBCenter = (nodeInfo_G.aabb.minimum + nodeInfo_G.aabb.maximum) * 0.5f;
                 float3 distance3 = hitPos - nodeAABBCenter + 0.00001f;
-                float distanceSq = max(sqrt(dot(distance3, distance3)), 1e-6);
-                weights[nodeOffset] = 1.0f / distanceSq;  //high layer no sqrt
+                float distance = max(sqrt(dot(distance3, distance3)), 1e-6);
+                float weight = 1.0f / distance;
+                weight = pow(weight, int((1.0f - payload.material.roughness) * 6) + 1);
+                weights[nodeOffset] = weight;
                 weightSum += weights[nodeOffset];
 
                 float randomNumber = rand(payload.randomSeed);
@@ -546,7 +548,10 @@ bool getNodeAABB_E_jittering2_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payl
 
                     float3 nodeAABBCenter = (nodeData_G.aabb.minimum + nodeData_G.aabb.maximum) * 0.5f;
                     float3 distance3 = hitPos - nodeAABBCenter + 0.00001f;
-                    weights[nodeOffset] = 1.0f / max(sqrt(dot(distance3, distance3)), 1e-6);    //low layer has sqrt
+                    float distance = max(sqrt(dot(distance3, distance3)), 1e-6);
+                    float weight = 1.0f / distance;
+                    weight = pow(weight, int((1.0f - payload.material.roughness) * 6) + 1);
+                    weights[nodeOffset] = weight;
                     weightSum += weights[nodeOffset];
                 }
                 float randomNumber = rand(payload.randomSeed);

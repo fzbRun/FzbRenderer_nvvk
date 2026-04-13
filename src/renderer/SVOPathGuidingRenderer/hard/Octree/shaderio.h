@@ -58,7 +58,7 @@ struct OctreeNodeData_G {
 	uint materialCounts[MAX_MATERIAL_COUNT];
 };
 struct OctreeNodeData_E {
-	float3 irradiance;
+	float E;
 	float pdf;
 	float4 meanNormal;
 	AABB aabb;

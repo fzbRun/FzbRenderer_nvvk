@@ -78,8 +78,8 @@ private:
 	void debug_nearby(VkCommandBuffer cmd);
 
 	//glm::vec3 samplePoint = glm::vec3(-1.5f, 1.0f, 0.5f);
-	glm::vec3 samplePoint = glm::vec3(1.0f, 1.7f, 0.5f);
-	//glm::vec3 samplePoint = glm::vec3(-2.2f, 1.0f, -4.5f);
+	//glm::vec3 samplePoint = glm::vec3(1.0f, 1.7f, 0.5f);
+	glm::vec3 samplePoint = glm::vec3(-2.2f, 1.0f, -4.5f);
 	glm::vec3 outgoing = glm::vec3(0.0f, 1.0f, -1.0f);
 
 	VkShaderEXT computeShader_getSampleNodeInfo{};
