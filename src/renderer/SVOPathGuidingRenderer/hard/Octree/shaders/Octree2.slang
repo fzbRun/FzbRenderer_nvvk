@@ -370,7 +370,7 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
             bool indivisible = true;
             if (warpLane == blockFirstWarpLane) {
                 nodeData_G.fillRate = aabbVolumeSum / mergeAABBVolume;
-                indivisible = materialEntropy < 0.2f && 
+                indivisible = //materialEntropy < 0.2f && 
                               length(mergeNormal) > 0.707f &&
                               (nodeData_G.fillRate >= 0.7 ||
                               (mergeAABBVolume - aabbVolumeSum) < pushConst.voxelVolume * (pushConst.octreeMaxLayer - OCTREE_CLUSTER_LAYER) * 4);

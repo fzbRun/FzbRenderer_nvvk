@@ -6,6 +6,7 @@
 #include <nvgui/property_editor.hpp>
 #include <nvvk/compute_pipeline.hpp>
 #include "feature/PathTracing/shaderio.h"
+#include <random>
 
 using namespace FzbRenderer;
 
@@ -122,6 +123,11 @@ void SVOWeight::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 };
 void SVOWeight::preRender() {
 	if (Application::sceneResource.cameraChange) Application::frameIndex = 0;
+
+	float angle = FzbRenderer::rand(Application::frameIndex) * glm::four_over_pi<float>();
+	randomRotateMatrix = glm::mat3(glm::rotate(glm::mat4(1.0f), angle, glm::vec3(0, 0, 1)));
+	pushConstant.randomRotateMatrix = randomRotateMatrix;
+
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 
 #ifndef NDEBUG
@@ -172,7 +178,7 @@ void SVOWeight::render(VkCommandBuffer cmd) {
 void SVOWeight::postProcess(VkCommandBuffer cmd) {
 #ifndef NDEBUG
 	debug_visualization(cmd);
-	//debug_nearby(cmd);
+	debug_nearby(cmd);
 #endif
 };
 
@@ -561,7 +567,7 @@ void SVOWeight::debugPrepare() {
 
 	scene.createSceneInfoBuffer();
 
-	pushConstant.sampleNodeLabel = 9;	// 281;
+	pushConstant.sampleNodeLabel = 38;	// 354; 9
 }
 void SVOWeight::resize(
 	VkCommandBuffer cmd, const VkExtent2D& size,

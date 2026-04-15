@@ -83,7 +83,7 @@ float PointToAABBDistance(float3 pos, AABB aabb)
     float dx = max(aabb.minimum.x - pos.x, max(0.0f, pos.x - aabb.maximum.x));
     float dy = max(aabb.minimum.y - pos.y, max(0.0f, pos.y - aabb.maximum.y));
     float dz = max(aabb.minimum.z - pos.z, max(0.0f, pos.z - aabb.maximum.z));
-    return sqrt(dx * dx + dy * dy + dz * dz);
+    return sqrt(max(dx * dx + dy * dy + dz * dz, 1e-6f));
 }
 //------------------------------------------------SphericalFibonacci---------------------------------------------
 #define M_PHI 1.618033988749895
@@ -134,7 +134,7 @@ uint inverseSF(float3 p, float n, inout float probability) {
     float F0 = round(Fk), F1 = round(Fk * M_PHI);
     float2x2 B = float2x2(
                 2 * M_PI * madfrac(F0 + 1, M_PHI - 1) - 2 * M_PI * (M_PHI - 1),
-                          2 * M_PI * madfrac(F1 + 1, M_PHI - 1) - 2 * M_PI * (M_PHI - 1),
+                2 * M_PI * madfrac(F1 + 1, M_PHI - 1) - 2 * M_PI * (M_PHI - 1),
                 -2 * F0 / n,
                 -2 * F1 / n);
     float2x2 invB = Inverse2x2(B);
@@ -181,9 +181,10 @@ uint inverseSF(float3 p, float n, inout float probability) {
                 float3 q = fibSpherePoint(idx, n);
 
                 float delta = distance(q, p);
-
                 float t = max(0.0, 1.0 - delta / h);
                 float w = 3.0 * t * t - 2.0 * t * t * t;
+
+                //float w = max(dot(q, p), 0.0f);
 
                 if (w > 0.0) {
                     totalWeight += w;
@@ -195,17 +196,17 @@ uint inverseSF(float3 p, float n, inout float probability) {
             probability = 1.0f;
             return 0;
         }
-        for (int i = 0; i < 9; ++i) weights[i] /= totalWeight;
         for (int i = 0; i < 9; ++i) {
-            if (probability <= weights[i]) {
+            float probability_i = weights[i] / totalWeight;
+            if (probability <= probability_i) {
                 idx_result = idxs[i];
                 break;
             }
-            probability -= weights[i];
+            probability -= probability_i;
         }
         probability = 0.0f;
         for (int i = 0; i < 9; ++i) {
-            if (idxs[i] == idx_result) probability += weights[i];
+            if (idxs[i] == idx_result) probability += weights[i] / totalWeight;
         }
         return idx_result;
     }
@@ -213,6 +214,159 @@ uint inverseSF(float3 p, float n, inout float probability) {
     probability = 1.0f;
     return 0;
 }
+//------------------------------------------------Low difference sequence---------------------------------------------
+float RadicalInverse_VdC(uint bits)
+{
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+    return float(bits) * 2.3283064365386963e-10; // / 0x100000000
+}
+float2 Hammersley(uint i, uint N)
+{
+    return float2(float(i) / float(N), RadicalInverse_VdC(i));
+}
+float3 hammersleySpherePoint(int i, int n) {
+    float2 randomNumber = Hammersley(i, n);
+    float phi = M_TWO_PI * randomNumber.x;
+    float cosTheta = 1.0f - 2.0f * randomNumber.y;
+    float sinTheta = sqrt(1.0f - cosTheta * cosTheta);
+    return float3(sinTheta * cos(phi), sinTheta * sin(phi), cosTheta);
+}
+
+uint reverseBits(uint bits)
+{
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+    return bits;
+}
+int inverseSH(float3 dir, int n)
+{
+    dir = normalize(dir);
+
+    float phi = atan2(dir.y, dir.x);
+    if (phi < 0.0f) phi += M_TWO_PI;
+    int i_phi = int(round((phi / M_TWO_PI) * n)) % n;
+
+    float cosTheta = clamp(dir.z, -1.0f, 1.0f);
+    float v = (1.0f - cosTheta) * 0.5f;
+    uint bits = uint(v * 4294967296.0f); // 2^32
+    int i_theta = int(reverseBits(bits)) % n;
+
+    int best_i = 0;
+    float best_dot = -2.0f;
+
+    int candidates[12];
+    int count = 0;
+    for (int d = -2; d <= 2; ++d)
+    {
+        int c1 = (i_phi + d + n) % n;
+        int c2 = (i_theta + d + n) % n;
+        candidates[count++] = c1;
+        candidates[count++] = c2;
+    }
+
+    for (int j = 0; j < count; ++j)
+    {
+        int i = candidates[j];
+        bool dup = false;
+        for (int k = 0; k < j; ++k) if (candidates[k] == i) { dup = true; break; }
+        if (dup) continue;
+
+        float2 uv = Hammersley(i, n);
+        float p_phi = M_TWO_PI * uv.x;
+        float p_cos = 1.0f - 2.0f * uv.y;
+        float p_sin = sqrt(1.0f - p_cos * p_cos);
+        float3 p = float3(p_sin * cos(p_phi), p_sin * sin(p_phi), p_cos);
+
+        float dot_p = dot(dir, p);
+        if (dot_p > best_dot)
+        {
+            best_dot = dot_p;
+            best_i = i;
+        }
+    }
+
+    return best_i;
+}
+
+int inverseSH(float3 dir, int n, inout float probability) {
+    dir = normalize(dir);
+
+    float phi = atan2(dir.y, dir.x);
+    if (phi < 0.0f) phi += M_TWO_PI;
+    int i_phi = int(round((phi / M_TWO_PI) * n)) % n;
+
+    float cosTheta = clamp(dir.z, -1.0f, 1.0f);
+    float v = (1.0f - cosTheta) * 0.5f;
+    uint bits = uint(v * 4294967296.0f); // 2^32
+    int i_theta = int(reverseBits(bits)) % n;
+
+    int best_i = 0;
+    float best_dot = -2.0f;
+
+    int candidates[6];
+    int count = 0;
+    for (int d = -1; d <= 1; ++d)
+    {
+        int c1 = (i_phi + d + n) % n;
+        int c2 = (i_theta + d + n) % n;
+        candidates[count++] = c1;
+        candidates[count++] = c2;
+    }
+
+    float h = sqrt(4.0 * M_PI / n);
+    float weights[6]; float weightSum = 0.0f;
+    for (int j = 0; j < count; ++j) {
+        weights[j] = 0.0f;
+
+        int i = candidates[j];
+        bool dup = false;
+        for (int k = 0; k < j; ++k) {
+            if (candidates[k] == i) {
+                weightSum += weights[k];
+                weights[k] *= 2.0f;
+                dup = true; break;
+            }
+        }
+        if (dup) continue;
+
+        float2 uv = Hammersley(i, n);
+        float p_phi = M_TWO_PI * uv.x;
+        float p_cos = 1.0f - 2.0f * uv.y;
+        float p_sin = sqrt(1.0f - p_cos * p_cos);
+        float3 p = float3(p_sin * cos(p_phi), p_sin * sin(p_phi), p_cos);
+
+        float delta = distance(dir, p);
+        float t = max(0.0, 1.0 - delta / h);
+        weights[j] = 3.0 * t * t - 2.0 * t * t * t;
+
+        //weights[j] = max(dot(dir, p), 0.0f);
+
+        weightSum += weights[j];
+    }
+    if (weightSum == 0.0f) {
+        probability = 1.0f;
+        return 0;
+    }
+    for (int j = 0; j < count; ++j) {
+        float probability_j = weights[j] / weightSum;
+        if (probability <= probability_j) {
+            best_i = candidates[j];
+            probability = probability_j;
+            break;
+        }
+        probability -= probability_j;
+    }
+
+    return best_i;
+}
+
 //------------------------------------------------sphereMeanSample---------------------------------------------
 float3 sample_hemisphere_mean(inout uint seed) {
     float r1 = rand(seed); float r2 = rand(seed); // mean sample hemisphere
@@ -377,4 +531,3 @@ float3 sphericalRectangleSample(Quadrilateral_initialization quadrangle, float u
 
     return xu * quadrangle.x + yv * quadrangle.y + quadrangle.z0 * quadrangle.z; // Î´¹éÒ»»¯
 }
-

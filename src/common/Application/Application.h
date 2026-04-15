@@ -16,6 +16,7 @@
 #include <nvutils/camera_manipulator.hpp>
 #include <common/Mesh/nvvk/gltf_utils.hpp>
 #include <nvvk/acceleration_structures.hpp>
+#include <random>
 
 #ifndef FZB_APPLICATION_H
 #define FZB_APPLICATION_H

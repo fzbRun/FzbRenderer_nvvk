@@ -372,7 +372,7 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
     if (threadIndex >= groupIndivisibleNodeCount_E * indivisibleNodeCount_G * OUTGOING_COUNT) return;
 
     uint outgoingIndex = groupThreadIndex & (OUTGOING_COUNT - 1);
-    float3 outgoing = fibSpherePoint(outgoingIndex, OUTGOING_COUNT);
+    float3 outgoing = mul(getOutgoing(outgoingIndex, OUTGOING_COUNT), pushConst.randomRotateMatrix);
     uint nodeLabel_E_group = threadIndex / (indivisibleNodeCount_G * OUTGOING_COUNT) - currentGroupNodeStartLabel_E; // groupIndex
     uint nodeLabel_G_group = threadIndex / OUTGOING_COUNT - currentGroupNodeStartLabel_G;       // groupIndex
     float weight = 0.0f;
@@ -564,8 +564,8 @@ void computeMain_getNearbyNodes(uint threadIndex: SV_DispatchThreadID, uint thre
 
     float3 nodeCenter1 = (nodeData1.aabb.maximum + nodeData1.aabb.minimum) * 0.5f;
     float distance = PointToAABBDistance(nodeCenter1, nodeData2.aabb);
-    distance *= 1.0f / max(dot(nodeData1.normal, normalize(nodeData2.meanNormal.xyz)), 0.001f);
-    distance *= nodeData1.materialIndex == nodeData2.materialIndex ? 1.0f : 100.0f;
+    distance *= 1.0f / max(dot(nodeData1.normal, normalize(nodeData2.meanNormal.xyz)), 0.00001f);
+    distance *= nodeData1.materialIndex == nodeData2.materialIndex ? 1.0f : 100000.0f;
 
     if (indivisibleNodeLabel1 == nodeLabel2) distance = 1e30f;
     int distanceI = FloatToOrderedInt(distance);
@@ -750,7 +750,8 @@ void computeMain_getSampleNodeInfo(uint threadIndex: SV_DispatchThreadID, uint t
         );
 
         float3 nodeCenter = (aabb.maximum + aabb.minimum) * 0.5f;
-        uint outgoingIndex = inverseSF(normalize(pushConst.sceneInfoAddress[0].cameraPosition - nodeCenter), OUTGOING_COUNT);
+        float3 outgoing = mul(pushConst.randomRotateMatrix, normalize(pushConst.sceneInfoAddress[0].cameraPosition - nodeCenter));
+        uint outgoingIndex = inverseOutgoing(outgoing, OUTGOING_COUNT);
         printf("outgoingIndex: %d\n", outgoingIndex);
     }
 }
@@ -810,8 +811,8 @@ PSout fragmentMain(VSout input) {
 
     float3 view = normalize(pushConst.sceneInfoAddress[0].cameraPosition - pos);
     float probability = rand(input.randomSeed);
-    // uint outgoingIndex = inverseSF(view, OUTGOING_COUNT, probabality);
-    uint outgoingIndex = inverseSF(view, OUTGOING_COUNT);
+    // uint outgoingIndex = inverseOutgoing(view, OUTGOING_COUNT, probabality);
+    uint outgoingIndex = inverseOutgoing(mul(pushConst.randomRotateMatrix, view), OUTGOING_COUNT);
     uint weightIndex = outgoingIndex * globalInfo.indivisibleNodeCount_G * OCTREE_NODECOUNT_E +
                        (globalInfo.sampelNodeLabel - 1) * OCTREE_NODECOUNT_E;
 
@@ -879,7 +880,7 @@ VSout_nearby vertexMain_nearby(uint vertexIndex: SV_VertexID, int instanceIndex:
     SVOWeightGlobalInfo globalInfo = GlobalInfo[0];
     if (pushConst.sampleNodeLabel >= globalInfo.indivisibleNodeCount_G) return output;
 
-    uint sampleNodeIndex = SVO_IndivisibleNodeInfos_G[pushConst.sampleNodeLabel];
+    uint sampleNodeIndex = SVO_IndivisibleNodeInfos_G[pushConst.sampleNodeLabel - 1];
     SVONodeData_G nodeData = SVO_G[sampleNodeIndex];
     bool show = instanceIndex == sampleNodeIndex;
     if (show) output.color = float4(1.0f, 0.0f, 0.0f, 1.0f);

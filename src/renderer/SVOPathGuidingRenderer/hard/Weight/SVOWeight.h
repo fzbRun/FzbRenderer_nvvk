@@ -43,6 +43,8 @@ public:
 	VkPipeline rtPipeline{};
 	VkPipelineLayout rtPipelineLayout{};
 
+	shaderio::float3x3 randomRotateMatrix;
+
 	nvvk::Buffer GlobalInfoBuffer;
 	nvvk::Buffer indivisibleNodeInfosBuffer_G;
 	nvvk::Buffer indivisibleNodeInfosBuffer_E;

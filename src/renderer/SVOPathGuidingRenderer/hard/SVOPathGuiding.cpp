@@ -177,6 +177,8 @@ void FzbRenderer::SVOPathGuidingRenderer::preRender() {
 	svo->preRender();
 	svoWeight->preRender();
 
+	pushConstant.randomRotateMatrix = svoWeight->randomRotateMatrix;
+
 	Application::app->submitAndWaitTempCmdBuffer(cmd);
 }
 void FzbRenderer::SVOPathGuidingRenderer::render(VkCommandBuffer cmd) {

@@ -10,6 +10,7 @@ NAMESPACE_SHADERIO_BEGIN()
 #define SVO_PATHGUIDING_THREADGROUP_SIZE_Y 16
 struct SVOPathGuidingPushConstant
 {
+	float3x3 randomRotateMatrix;
 	float4 VGBStartPos_Size;
 	int frameIndex = 0;
 	int maxDepth = 6;

@@ -221,7 +221,6 @@ void geometryMain_ThreeView(
         output.worldNormal = input[i].worldNormal;
         outputStream.Append(output);
     }
-
     outputStream.RestartStrip();
 }
 

@@ -13,7 +13,18 @@ NAMESPACE_SHADERIO_BEGIN()
 
 #define HITTEST_COUNT 8
 #define OUTGOING_COUNT 64
+
+#define OUTGOING_TYPE 0
+#if OUTGOING_TYPE == 0
+#define getOutgoing fibSpherePoint
+#define inverseOutgoing inverseSF
+#else 
+#define getOutgoing hammersleySpherePoint
+#define inverseOutgoing inverseSH
+#endif
+
 struct SVOWeightPushConstant {
+	float3x3 randomRotateMatrix;
 	uint32_t frameIndex;
 	uint32_t currentLayer_E;
 	SceneInfo* sceneInfoAddress;
