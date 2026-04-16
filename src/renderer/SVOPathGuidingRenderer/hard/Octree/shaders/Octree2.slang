@@ -420,7 +420,14 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
             }
             mergeE = WaveReadLaneAt(mergeE, blockFirstWarpLane);
 
-            if (pushConst.currentLayer > 100) {
+            //if (pushConst.frameIndex == 0 && mergeE > 1000000.0f) {
+            //    printf("layerIndex: %d\nnodeIndex: %d, mergeE: %f E: %f\n",
+            //        pushConst.currentLayer,
+            //        nodeIndex, mergeE, nodeData_E.E
+            //    );
+            //}
+
+            if (pushConst.currentLayer > 10) {
                 AABB mergeAABB = nodeData_E.aabb;
                 atomicMergeAABB(mergeAABB);
 

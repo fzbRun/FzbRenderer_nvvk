@@ -169,6 +169,8 @@ void FzbRenderer::SVOPathGuidingRenderer::preRender() {
 	pushConstant.time = Application::sceneResource.time;
 	pushConstant.voxelLength = std::sqrt(shaderio::dot(shaderio::float3(rasterVoxelization->setting.pushConstant.voxelSize_Count), shaderio::float3(rasterVoxelization->setting.pushConstant.voxelSize_Count)));
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
+	pushConstant.maxOctreeLayer = octree->setting.OctreeLayerCount;
+	pushConstant.VGBVoxelSize = shaderio::float3(rasterVoxelization->setting.pushConstant.voxelSize_Count);
 	asManager.updateToplevelAS(cmd);
 
 	rasterVoxelization->preRender(cmd);
@@ -328,7 +330,7 @@ void FzbRenderer::SVOPathGuidingRenderer::createShader() {
 	SCOPED_TIMER(__FUNCTION__);
 
 	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
-	std::filesystem::path shaderSource = shaderPath / "SVOPathGuiding.slang";
+	std::filesystem::path shaderSource = shaderPath / "SVOPathGuiding2.slang";
 	VkShaderModuleCreateInfo shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
 
 	const VkPushConstantRange pushConstantRange{

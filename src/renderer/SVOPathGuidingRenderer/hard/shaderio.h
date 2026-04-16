@@ -11,11 +11,13 @@ NAMESPACE_SHADERIO_BEGIN()
 struct SVOPathGuidingPushConstant
 {
 	float3x3 randomRotateMatrix;
-	float4 VGBStartPos_Size;
-	int frameIndex = 0;
 	int maxDepth = 6;
 	float time;
 	float voxelLength;
+	float4 VGBStartPos_Size;
+	float3 VGBVoxelSize;
+	int maxOctreeLayer;
+	int frameIndex = 0;
 	SceneInfo* sceneInfoAddress;
 	uint2 sceneSize;
 	uint2 threadGroupCount;

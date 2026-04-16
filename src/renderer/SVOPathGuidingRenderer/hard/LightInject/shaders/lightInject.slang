@@ -48,7 +48,7 @@ void raygenMain()
     payload.rayOrigin = ray.Origin;
     payload.rayDirection = ray.Direction;
 
-    const uint maxPathDepth = 3;
+    const uint maxPathDepth = 10;
     while (payload.bounceDepth < maxPathDepth) {
         #ifdef PathTracingMotionBlur
         TraceMotionRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, pushConst.time, payload);
@@ -122,6 +122,8 @@ void rayClosestHitMain(inout LightInjectHitPayload payload, in BuiltInTriangleIn
 
     payload.randomSeed = callablePayload.randomSeed;
     payload.radiance = payload.radiance * callablePayload.bsdf * hitState.cosineON + callablePayload.radianceSum_nee + material.emissive;
+    payload.radiance = min(payload.radiance, sceneInfo.lights[0].color * sceneInfo.lights[0].intensity * 2.0f);
+
     payload.rayDirection = callablePayload.incidence;
     payload.rayOrigin = hitState.pos + 0.001f * payload.rayDirection;
     payload.isExt = callablePayload.isExt;

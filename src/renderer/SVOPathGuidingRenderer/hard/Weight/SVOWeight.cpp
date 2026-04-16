@@ -567,7 +567,7 @@ void SVOWeight::debugPrepare() {
 
 	scene.createSceneInfoBuffer();
 
-	pushConstant.sampleNodeLabel = 38;	// 354; 9
+	pushConstant.sampleNodeLabel = 193;	// 39;354; 81;9
 }
 void SVOWeight::resize(
 	VkCommandBuffer cmd, const VkExtent2D& size,

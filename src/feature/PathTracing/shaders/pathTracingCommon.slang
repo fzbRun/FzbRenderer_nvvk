@@ -848,3 +848,29 @@ float getPdf_RoughDielectric(float eta, float3 albedo, float roughness, float3 i
         return (1.0f - F_oneChanel) * D_costhetaNH * cosineIH / (weight * weight + 1e-10f);
     } else return F_oneChanel * D_costhetaNH / (abs(4.0f * cosineOH) + 1e-10f);
 }
+float getPdf(BSDFMaterial material, float3 incidence, float3 normal, float3 outgoing, float3x3 TBN, bool isExt) {
+    float pdf = 1.0f;
+    if (material.type == MaterialType::Diffuse) pdf = getPdf_Diffuse(incidence, normal);
+    else if (material.type == MaterialType::Conductor) pdf = getPdf_Conductor(incidence, normal, outgoing);
+    else if (material.type == MaterialType::Dielectric) {
+        float eta = material.eta.x;
+        if (!isExt) eta = 1.0f / eta;
+        pdf = getPdf_Dielectric(eta, material.albedo, incidence, normal, outgoing);
+    }
+    else if (material.type == MaterialType::RoughConductor)
+        pdf = getPdf_RoughConductor(material.roughness, incidence, normal, outgoing, TBN);
+    else if (material.type == MaterialType::RoughDielectric) {
+        float eta = material.eta.x;
+        if (!isExt) eta = 1.0f / eta;
+        pdf = getPdf_RoughDielectric(eta, material.albedo, material.roughness, incidence, normal, outgoing, TBN);
+    }
+    return pdf;
+}
+//------------------------------------------BSDF Sample---------------------------------------------------
+void BSDF_SAMPLE(inout CallablePayload payload) {
+    if (payload.material.type == MaterialType::Diffuse) PopulateCallablePayload_DiffuseMaterial(payload);
+    else if (payload.material.type == MaterialType::Conductor) PopulateCallablePayload_ConductorMaterial(payload);
+    else if (payload.material.type == MaterialType::Dielectric) PopulateCallablePayload_DielectricMaterial(payload);
+    else if (payload.material.type == MaterialType::RoughConductor) PopulateCallablePayload_RoughConductorMaterial(payload);
+    else if (payload.material.type == MaterialType::RoughDielectric) PopulateCallablePayload_RoughDielectricMaterial(payload);
+}

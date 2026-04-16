@@ -565,7 +565,10 @@ void computeMain_getNearbyNodes(uint threadIndex: SV_DispatchThreadID, uint thre
     float3 nodeCenter1 = (nodeData1.aabb.maximum + nodeData1.aabb.minimum) * 0.5f;
     float distance = PointToAABBDistance(nodeCenter1, nodeData2.aabb);
     distance *= 1.0f / max(dot(nodeData1.normal, normalize(nodeData2.meanNormal.xyz)), 0.00001f);
-    distance *= nodeData1.materialIndex == nodeData2.materialIndex ? 1.0f : 100000.0f;
+    //distance *= nodeData1.materialIndex == nodeData2.materialIndex ? 1.0f : 100000.0f;
+
+    uint randomSeed = pushConst.frameIndex;
+    distance += rand(randomSeed) * 0.0001f;
 
     if (indivisibleNodeLabel1 == nodeLabel2) distance = 1e30f;
     int distanceI = FloatToOrderedInt(distance);
@@ -590,7 +593,7 @@ void computeMain_getNearbyNodes(uint threadIndex: SV_DispatchThreadID, uint thre
             groupNearbyNodeIndics[i] = nodeIndex2;
             distanceI = 2147483647;
 
-            //if (pushConst.frameIndex == 0 && indivisibleNodeLabel1 == pushConst.sampleNodeLabel) {
+            //if (pushConst.frameIndex == 0 && indivisibleNodeLabel1 == pushConst.sampleNodeLabel - 1) {
             //    printf("nodeIndex2: %d, distance: %f\nnormal1: %f %f %f, normal2: %f %f %f\n",
             //           nodeIndex2, distance,
             //           nodeData1.normal.x, nodeData1.normal.y, nodeData1.normal.z,
@@ -663,12 +666,12 @@ void computeMain_getNearbyNodes2(uint threadIndex: SV_DispatchThreadID, uint thr
     uint nodeIndex = groupIndivisibleNodeIndics[warpIndex];
     for (int i = 0; i < NEARBY_NODE_COUNT; ++i) {
         float minDistance = WaveActiveMin(distance);
-        if (minDistance > 1.0f) {
-            if (warpLane == 0) {
-                for (int j = i; j < NEARBY_NODE_COUNT; ++j) SVO_G[nodeIndex].nearbyNodeIndices[j] = -1;
-            }
-            break;
-        }
+        //if (minDistance > 1.0f) {
+        //    if (warpLane == 0) {
+        //        for (int j = i; j < NEARBY_NODE_COUNT; ++j) SVO_G[nodeIndex].nearbyNodeIndices[j] = -1;
+        //    }
+        //    break;
+        //}
         uint minDistanceLabel = WavePrefixCountBits(distance == minDistance);
         if (distance == minDistance && minDistanceLabel == 0) {
             SVO_G[nodeIndex].nearbyNodeIndices[i] = nearbyNodeIndex;
@@ -878,7 +881,7 @@ VSout_nearby vertexMain_nearby(uint vertexIndex: SV_VertexID, int instanceIndex:
     output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
 
     SVOWeightGlobalInfo globalInfo = GlobalInfo[0];
-    if (pushConst.sampleNodeLabel >= globalInfo.indivisibleNodeCount_G) return output;
+    if (pushConst.sampleNodeLabel - 1 >= globalInfo.indivisibleNodeCount_G) return output;
 
     uint sampleNodeIndex = SVO_IndivisibleNodeInfos_G[pushConst.sampleNodeLabel - 1];
     SVONodeData_G nodeData = SVO_G[sampleNodeIndex];
@@ -886,10 +889,10 @@ VSout_nearby vertexMain_nearby(uint vertexIndex: SV_VertexID, int instanceIndex:
     if (show) output.color = float4(1.0f, 0.0f, 0.0f, 1.0f);
     else output.color = float4(0.0f, 1.0f, 0.0f, 1.0f);
 
-    //if (instanceIndex == 0 && vertexIndex == 0 && pushConst.frameIndex == 0) {
-    //    printf("sampleNodeIndex: %d\n", sampleNodeIndex);
-    //    for (int i = 0; i < NEARBY_NODE_COUNT; ++i) printf("nearbyNodeIndex: %d\n", nodeData.nearbyNodeIndices[i]);
-    //}
+    if (instanceIndex == 0 && vertexIndex == 0 && pushConst.frameIndex == 0) {
+        printf("sampleNodeIndex: %d\n", sampleNodeIndex);
+        for (int i = 0; i < NEARBY_NODE_COUNT; ++i) printf("nearbyNodeIndex: %d\n", nodeData.nearbyNodeIndices[i]);
+    }
 
     uint nodeIndex = instanceIndex;
     for (int i = 0; i < NEARBY_NODE_COUNT; ++i) {
