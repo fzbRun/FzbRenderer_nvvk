@@ -21,12 +21,14 @@ enum class BindingPoints_SVOPG {
 	eSVO_G_SVOPG,
 	eSVOGlobalInfo_SVOPG,
 	eSVODivisibleNodeIndices_G_SVOPG,
-	eSVOThreadGroupInfos_SVOPG
+	eSVOThreadGroupInfos_SVOPG,
+	eNodeData_E,
+	eIndivisibleNodeIndfos_G,
+	eIndivisibleNodeIndfos_E,
 };
 
 typedef OctreeNodeData_E SVONodeData_E;
 
-#define NEARBY_NODE_COUNT 4	//must 2 exponent
 struct SVONodeData_G {
 	float4 meanNormal;
 	AABB aabb;
@@ -56,8 +58,6 @@ struct SVOLayerInfo {
 struct SVOThreadGroupInfo {
 	uint threadGroupDivisibleNodeCount_G;
 	uint threadGroupIndivisibleNodeCount_G;
-	uint threadGroupDivisibleNodeCount_E;
-	uint threadGroupIndivisibleNodeCount_E;
 };
 
 struct SVOGlobalInfo_SVOPG {
@@ -66,11 +66,16 @@ struct SVOGlobalInfo_SVOPG {
 	DrawIndexedIndirectCommand drawCmd;
 #endif
 	uint32_t totalNodeCount_G;
+	uint32_t indivisibleNodeCount_G;
+	uint32_t indivisibleNodeCount_E;
+	uint32_t SVOMaxLayer_G;
 	SVOLayerInfo layerInfos_G[MAX_SVO_LAYER];
 };
 
 #define INITSVO_CS_THREADGROUP_SIZE 512
 #define CREATESVO_CS_THREADGROUP_SIZE 512
+
+#define GETINDIVISIBLENODEINFO_CS_THREADGROUP_SIZE 512
 
 NAMESPACE_SHADERIO_END()
 #endif

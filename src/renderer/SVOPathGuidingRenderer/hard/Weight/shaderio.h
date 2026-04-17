@@ -1,16 +1,15 @@
 #pragma once
 
 #include <common/Shader/shaderStructType.h>
-#include "renderer/SVOPathGuidingRenderer/hard/Octree/shaderio.h"
-#include "renderer/SVOPathGuidingRenderer/hard/SVO/shaderio.h"
 #include "renderer/SVOPathGuidingRenderer/hard/shaderio.h"
+#include "renderer/SVOPathGuidingRenderer/hard/Octree/shaderio.h"
+#ifdef USE_SVO
+#include "renderer/SVOPathGuidingRenderer/hard/SVO/shaderio.h"
+#endif
 
 #ifndef FZBRENDERER_SVOWeight_SHADER_IO_H
 #define FZBRENDERER_SVOWeight_SHADER_IO_H
 NAMESPACE_SHADERIO_BEGIN()
-
-#define SVOIndivisibleNodeCount_G 1024
-#define SVOIndivisibleNodeCount_E OCTREE_NODECOUNT_E
 
 #define HITTEST_COUNT 8
 #define OUTGOING_COUNT 64
@@ -40,7 +39,7 @@ struct SVOWeightPushConstant {
 enum class StaticBindingPoints_SVOWeight {
 	eSVO_G = 2,
 	eNodeData_E,
-	eSVOGlobalInfo,
+	eTreeGlobalInfo,
 	eGlobalInfo,
 	eSVO_IndivisibleNodeInfos_G,
 	eSVO_IndivisibleNodeInfos_E,
@@ -58,7 +57,12 @@ struct SVOWeightGlobalInfo {
 	AABB sampelNodeAABB;
 	uint sampelNodeLabel;
 #endif
+
+#ifdef USE_SVO
 	SVOLayerInfo layerInfos_G[MAX_SVO_LAYER];
+#else
+	OctreeLayerInfo layerInfos_G[MAX_OCTREE_LAYER];
+#endif
 };
 struct SVOIndivisibleNodeInfo {
 	uint32_t layerIndex;
@@ -70,7 +74,6 @@ struct SVOIndivisibleNodeNearbyNodeInfo {
 	float nearbyNodeDistances[NEARBY_NODE_COUNT];
 };
 
-#define GETINDIVISIBLENODEINFO_CS_THREADGROUP_SIZE 512
 #define INITWEIGHT_CS_THREADGROUP_SIZE 512
 #define GETWEIGHT_CS_THREADGROUP_SIZE 512
 #define GETPROBABILITY_CS_THREADGROUP_SIZE 512

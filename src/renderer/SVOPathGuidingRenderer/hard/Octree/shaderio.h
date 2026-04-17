@@ -7,6 +7,7 @@
 #define FZBRENDERER_OCTREE_SVOPG_SHADERIO_H
 
 #define MAX_OCTREE_LAYER 8
+#define IndivisibleNodeCount_G 1024
 
 NAMESPACE_SHADERIO_BEGIN()
 
@@ -26,8 +27,10 @@ enum class BindingPoints_Octree_SVOPG : uint32_t {
 	eHasDataBlockIndices_E,
 	eHasDataBlockCount,
 	eGlobalInfo,
-	eWireframeMap,
-	eBaseMap,
+#ifndef USE_SVO
+	eDivisibleNodeInfos_G,
+	eThreadGroupInfos,
+#endif
 };
 
 struct OctreePushConstant_SVOPG {
@@ -77,12 +80,28 @@ struct HasDataOctreeBlockCount {
 	uint32_t count_G;
 	uint32_t count_E;
 };
+
+struct OctreeLayerInfo {
+	uint32_t divisibleNodeCount;
+	uint32_t indivisibleNodeCount;
+};
+
 struct OctreeGlobalInfo {
 	DispatchIndirectCommand cmd;
+#ifndef USE_SVO
+	OctreeLayerInfo layerInfos_G[MAX_OCTREE_LAYER];
+#endif
+};
+
+struct OctreeThreadGroupInfo {
+	uint threadGroupDivisibleNodeCount_G;
+	uint threadGroupIndivisibleNodeCount_G;
 };
 
 #define INITOCTREE_CS_THREADGROUP_SIZE 1024
 #define CREATEOCTREE_CS_THREADGROUP_SIZE 256
+
+#define GETOCTREELABEL_CS_THREADGROUP_SIZE 1024
 
 NAMESPACE_SHADERIO_END()
 

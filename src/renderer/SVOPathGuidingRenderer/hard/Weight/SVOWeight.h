@@ -4,14 +4,20 @@
 #include "feature/PathTracing/PathTracing.h"
 #include "./shaderio.h"
 #include "../RasterVoxelization/RasterVoxelizationSVOPG.h"
+#include "../Octree/OctreeSVOPG.h"
+
+#ifdef USE_SVO
 #include "../SVO/SVO.h"
+#endif
 
 #ifndef FZBRENDERER_SVO_WEIGHT_H
 #define FZBRENDERER_SVO_WEIGHT_H
 
 namespace FzbRenderer {
 struct SVOWeightSetting {
+	#ifdef USE_SVO
 	std::shared_ptr<SVO_SVOPG> svo;
+	#endif
 	std::shared_ptr<Octree_SVOPG> octree;
 	AccelerationStructureManager* asManager;
 };
@@ -46,12 +52,9 @@ public:
 	shaderio::float3x3 randomRotateMatrix;
 
 	nvvk::Buffer GlobalInfoBuffer;
-	nvvk::Buffer indivisibleNodeInfosBuffer_G;
-	nvvk::Buffer indivisibleNodeInfosBuffer_E;
 	nvvk::Buffer weightBuffer;
 	nvvk::Buffer nearbyNodeInfosBuffer;
 
-	VkShaderEXT computeShader_getIndivisibleNode{};
 	VkShaderEXT computeShader_initWeights{};
 	VkShaderEXT computeShader_getWeights{};
 	VkShaderEXT computeShader_getProbability{};
@@ -64,7 +67,6 @@ private:
 	VkPushConstantsInfo pushInfo;
 	VkShaderModuleCreateInfo shaderCode;
 
-	void getIndivisibleNode(VkCommandBuffer cmd);
 	void initWeights(VkCommandBuffer cmd);
 	void getNearbyNodeInfos(VkCommandBuffer cmd);
 	void getWeights(VkCommandBuffer cmd);

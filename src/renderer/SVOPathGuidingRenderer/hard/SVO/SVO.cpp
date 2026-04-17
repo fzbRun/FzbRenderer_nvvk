@@ -32,11 +32,14 @@ void SVO_SVOPG::clean() {
 	Application::allocator.destroyBuffer(SVOGlobalInfo);
 	Application::allocator.destroyBuffer(SVODivisibleNodeInfos_G);
 	Application::allocator.destroyBuffer(SVOThreadGroupInfos);
+	Application::allocator.destroyBuffer(indivisibleNodeInfosBuffer_G);
+	Application::allocator.destroyBuffer(indivisibleNodeInfosBuffer_E);
 
 	VkDevice device = Application::app->getDevice();
 	vkDestroyShaderEXT(device, computeShader_initSVOArray, nullptr);
 	vkDestroyShaderEXT(device, computeShader_createSVOArray, nullptr);
 	vkDestroyShaderEXT(device, computeShader_offsetLabelMultiBlock, nullptr);
+	vkDestroyShaderEXT(device, computeShader_getIndivisibleInfos, nullptr);
 
 #ifndef NDEBUG
 	vkDestroyShaderEXT(device, vertexShader_Wireframe, nullptr);
@@ -140,6 +143,8 @@ void SVO_SVOPG::render(VkCommandBuffer cmd) {
 	initSVOArray(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 	createSVOArray(cmd);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	getSVOIndivisibleInfos(cmd);
 }
 void SVO_SVOPG::postProcess(VkCommandBuffer cmd) {
 #ifndef NDEBUG
@@ -174,6 +179,16 @@ void SVO_SVOPG::createSVOArray() {
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(SVOThreadGroupInfos.buffer);
 
+	bufferSize = IndivisibleNodeCount_G * sizeof(uint32_t);
+	allocator->createBuffer(indivisibleNodeInfosBuffer_G, bufferSize,
+		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+	NVVK_DBG_NAME(indivisibleNodeInfosBuffer_G.buffer);
+
+	bufferSize = NODECOUNT_E * sizeof(uint32_t);
+	allocator->createBuffer(indivisibleNodeInfosBuffer_E, bufferSize,
+		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+	NVVK_DBG_NAME(indivisibleNodeInfosBuffer_E.buffer);
+
 	pushConstant.svoMaxLayer = octreeMaxLayer + 1;
 }
 void SVO_SVOPG::createDescriptorSetLayout() {
@@ -202,6 +217,22 @@ void SVO_SVOPG::createDescriptorSetLayout() {
 		.stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
 		.binding = (uint32_t)shaderio::BindingPoints_SVOPG::eSVOThreadGroupInfos_SVOPG,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::BindingPoints_SVOPG::eNodeData_E,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::BindingPoints_SVOPG::eIndivisibleNodeIndfos_G,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::BindingPoints_SVOPG::eIndivisibleNodeIndfos_E,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
@@ -235,6 +266,18 @@ void SVO_SVOPG::createDescriptorSet() {
 	VkWriteDescriptorSet SVOThreadGroupInfosWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_SVOPG::eSVOThreadGroupInfos_SVOPG, 0, 0, 1);
 	write.append(SVOThreadGroupInfosWrite, SVOThreadGroupInfos, 0, SVOThreadGroupInfos.bufferSize);
+
+	VkWriteDescriptorSet NodeData_EWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_SVOPG::eNodeData_E, 0, 0, 1);
+	write.append(NodeData_EWrite, setting.octree->NodeData_E, 0, setting.octree->NodeData_E.bufferSize);
+
+	VkWriteDescriptorSet IndivisibleNodeInfosWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_SVOPG::eIndivisibleNodeIndfos_G, 0, 0, 1);
+	write.append(IndivisibleNodeInfosWrite, indivisibleNodeInfosBuffer_G, 0, indivisibleNodeInfosBuffer_G.bufferSize);
+
+	IndivisibleNodeInfosWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_SVOPG::eIndivisibleNodeIndfos_E, 0, 0, 1);
+	write.append(IndivisibleNodeInfosWrite, indivisibleNodeInfosBuffer_E, 0, indivisibleNodeInfosBuffer_E.bufferSize);
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }
@@ -298,6 +341,18 @@ void SVO_SVOPG::compileAndCreateShaders() {
 		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_offsetLabelMultiBlock);
 		NVVK_DBG_NAME(computeShader_offsetLabelMultiBlock);
 	}
+	//--------------------------------------------------------------------------------------
+	{
+		vkDestroyShaderEXT(device, computeShader_getIndivisibleInfos, nullptr);
+
+		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		shaderInfo.nextStage = 0;
+		shaderInfo.pName = "computeMain_getIndivisibleInfos";
+		shaderInfo.codeSize = shaderCode.codeSize;
+		shaderInfo.pCode = shaderCode.pCode;
+		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_getIndivisibleInfos);
+		NVVK_DBG_NAME(computeShader_getIndivisibleInfos);
+	}
 
 #ifndef NDEBUG
 	vkDestroyShaderEXT(device, vertexShader_Wireframe, nullptr);
@@ -350,6 +405,17 @@ void SVO_SVOPG::createSVOArray(VkCommandBuffer cmd) {
 		vkCmdDispatchIndirect(cmd, SVOGlobalInfo.buffer, 0);
 		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 	}
+}
+void SVO_SVOPG::getSVOIndivisibleInfos(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
+
+	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getIndivisibleInfos);
+
+	vkCmdPushConstants2(cmd, &pushInfo);
+
+	VkExtent2D groupSize = nvvk::getGroupCounts({ SVOSize_G, 1 }, VkExtent2D{ GETINDIVISIBLENODEINFO_CS_THREADGROUP_SIZE, 1 });
+	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
 }
 
 #ifndef NDEBUG

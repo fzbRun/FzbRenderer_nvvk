@@ -44,6 +44,16 @@ void Octree_SVOPG::clean() {
 	Application::allocator.destroyBuffer(GlobalInfoBuffer);
 
 	VkDevice device = Application::app->getDevice();
+
+	#ifndef USE_SVO
+	Application::allocator.destroyBuffer(divisibleNodeInfos_G);
+	Application::allocator.destroyBuffer(threadGroupInfos);
+
+	vkDestroyShaderEXT(device, computeShader_getOctreeLabel1, nullptr);
+	vkDestroyShaderEXT(device, computeShader_getOctreeLabel2, nullptr);
+	vkDestroyShaderEXT(device, computeShader_getOctreeLabel3, nullptr);
+	#endif
+
 	vkDestroyShaderEXT(device, computeShader_initOctreeArray, nullptr);
 	vkDestroyShaderEXT(device, computeShader_initHasDataBlockInfo, nullptr);
 	vkDestroyShaderEXT(device, computeShader_getGlobalInfo, nullptr);
@@ -157,6 +167,10 @@ void Octree_SVOPG::render(VkCommandBuffer cmd) {
 	initOctreeArray(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT);
 	createOctreeArray(cmd);
+#ifndef USE_SVO
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	getOctreeLabel(cmd);
+#endif
 }
 void Octree_SVOPG::postProcess(VkCommandBuffer cmd) {
 #ifndef NDEBUG
@@ -224,6 +238,19 @@ void Octree_SVOPG::createOctreeArray() {
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_2_INDIRECT_BUFFER_BIT);
 	NVVK_DBG_NAME(GlobalInfoBuffer.buffer);
 
+	#ifndef USE_SVO
+	bufferSize = sizeof(shaderio::uint2) * (1 << (3 * (setting.OctreeLayerCount - 1)));
+	allocator->createBuffer(divisibleNodeInfos_G, bufferSize,
+		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+	NVVK_DBG_NAME(divisibleNodeInfos_G.buffer);
+
+	uint32_t maxLayerNodeCount = (1 << (3 * setting.OctreeLayerCount));
+	bufferSize = sizeof(shaderio::OctreeThreadGroupInfo) * (maxLayerNodeCount / GETOCTREELABEL_CS_THREADGROUP_SIZE);
+	allocator->createBuffer(threadGroupInfos, bufferSize,
+		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+	NVVK_DBG_NAME(threadGroupInfos.buffer);
+	#endif
+
 	pushConstant.octreeMaxLayer = setting.OctreeLayerCount;
 	pushConstant.octreeNodeTotalCount = int(pow(8, setting.OctreeLayerCount + 1) - 1) / 7 * 6;
 	pushConstant.VGBVoxelTotalCount = VGBSize * VGBSize * VGBSize;
@@ -290,18 +317,18 @@ void Octree_SVOPG::createDescriptorSetLayout() {
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
-#ifndef NDEBUG
+	#ifndef USE_SVO
 	bindings.addBinding({
-		.binding = (uint32_t)shaderio::BindingPoints_Octree_SVOPG::eWireframeMap,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-		.descriptorCount = showLayerCount * 2,
-		.stageFlags = VK_SHADER_STAGE_ALL });
-	bindings.addBinding({
-		.binding = (uint32_t)shaderio::BindingPoints_Octree_SVOPG::eBaseMap,
-		.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+		.binding = (uint32_t)shaderio::BindingPoints_Octree_SVOPG::eDivisibleNodeInfos_G,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
-#endif
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::BindingPoints_Octree_SVOPG::eThreadGroupInfos,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+	#endif
 
 	staticDescPack.init(bindings, Application::app->getDevice(), 1, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
 		VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT);
@@ -361,6 +388,16 @@ void Octree_SVOPG::createDescriptorSet() {
 	VkWriteDescriptorSet    GlobalInfoWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_SVOPG::eGlobalInfo, 0, 0, 1);
 	write.append(GlobalInfoWrite, GlobalInfoBuffer, 0, GlobalInfoBuffer.bufferSize);
+
+	#ifndef USE_SVO
+	VkWriteDescriptorSet    LabelInfoWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_SVOPG::eDivisibleNodeInfos_G, 0, 0, 1);
+	write.append(LabelInfoWrite, divisibleNodeInfos_G, 0, divisibleNodeInfos_G.bufferSize);
+
+	LabelInfoWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_SVOPG::eThreadGroupInfos, 0, 0, 1);
+	write.append(LabelInfoWrite, threadGroupInfos, 0, threadGroupInfos.bufferSize);
+	#endif
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }
@@ -450,6 +487,39 @@ void Octree_SVOPG::compileAndCreateShaders() {
 	shaderInfo.pCode = shaderCode.pCode;
 	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_createOctreeArray2);
 	NVVK_DBG_NAME(computeShader_createOctreeArray2);
+#ifndef USE_SVO
+	//--------------------------------------------------------------------------------------
+	vkDestroyShaderEXT(device, computeShader_getOctreeLabel1, nullptr);
+
+	shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	shaderInfo.nextStage = 0;
+	shaderInfo.pName = "computeMain_getOctreeLabel1";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_getOctreeLabel1);
+	NVVK_DBG_NAME(computeShader_getOctreeLabel1);
+	//--------------------------------------------------------------------------------------
+	vkDestroyShaderEXT(device, computeShader_getOctreeLabel2, nullptr);
+
+	shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	shaderInfo.nextStage = 0;
+	shaderInfo.pName = "computeMain_getOctreeLabel2";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_getOctreeLabel2);
+	NVVK_DBG_NAME(computeShader_getOctreeLabel2);
+	//--------------------------------------------------------------------------------------
+	vkDestroyShaderEXT(device, computeShader_getOctreeLabel3, nullptr);
+
+	shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	shaderInfo.nextStage = 0;
+	shaderInfo.pName = "computeMain_getOctreeLabel3";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_getOctreeLabel3);
+	NVVK_DBG_NAME(computeShader_getOctreeLabel3);
+#endif
+
 #ifndef NDEBUG
 	//--------------------------------------------------------------------------------------
 	vkDestroyShaderEXT(device, vertexShader_Wireframe, nullptr);
@@ -534,6 +604,31 @@ void Octree_SVOPG::createOctreeArray(VkCommandBuffer cmd) {
 		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	}
 }
+#ifndef USE_SVO
+void Octree_SVOPG::getOctreeLabel(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
+
+	vkCmdPushConstants2(cmd, &pushInfo);
+
+	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getOctreeLabel1);
+	vkCmdDispatch(cmd, 1, 1, 1);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+
+	for (int layerIndex = 2; layerIndex <= pushConstant.octreeMaxLayer; ++layerIndex) {
+		pushConstant.currentLayer = layerIndex;
+		vkCmdPushConstants2(cmd, &pushInfo);
+
+		vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getOctreeLabel2);
+		vkCmdDispatchIndirect(cmd, GlobalInfoBuffer.buffer, 0);
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+
+		vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getOctreeLabel3);
+		vkCmdDispatchIndirect(cmd, GlobalInfoBuffer.buffer, 0);
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+	}
+}
+#endif
 
 #ifndef NDEBUG
 void Octree_SVOPG::debugPrepare() {
@@ -559,13 +654,13 @@ void Octree_SVOPG::resize(
 
 	depthImageView = gBuffers_other.getDepthImageView();
 
-	for (int i = 0; i < showLayerCount * 2; ++i) {
-		VkWriteDescriptorSet wireframeMapWrite = staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_SVOPG::eWireframeMap, 0, i, 1);
-		write.append(wireframeMapWrite, gBuffers.getColorImageView(i), VK_IMAGE_LAYOUT_GENERAL);
-	}
-
-	VkWriteDescriptorSet baseMapWrite = staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_SVOPG::eBaseMap, 0, 0, 1);
-	write.append(baseMapWrite, gBuffers_other.getColorImageView(baseMapIndex), VK_IMAGE_LAYOUT_GENERAL);
+	//for (int i = 0; i < showLayerCount * 2; ++i) {
+	//	VkWriteDescriptorSet wireframeMapWrite = staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_SVOPG::eWireframeMap, 0, i, 1);
+	//	write.append(wireframeMapWrite, gBuffers.getColorImageView(i), VK_IMAGE_LAYOUT_GENERAL);
+	//}
+	//
+	//VkWriteDescriptorSet baseMapWrite = staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_SVOPG::eBaseMap, 0, 0, 1);
+	//write.append(baseMapWrite, gBuffers_other.getColorImageView(baseMapIndex), VK_IMAGE_LAYOUT_GENERAL);
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }

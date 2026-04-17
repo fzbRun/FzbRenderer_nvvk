@@ -58,7 +58,6 @@ public:
 
 	std::vector<nvvk::Buffer> OctreeArray_G;	//layer0: 6  layer1： 48 ……
 	std::vector<nvvk::Buffer> OctreeArray_E;
-
 	nvvk::Buffer NodeData_E;
 private:
 	nvvk::Buffer blockInfoBuffer_G;
@@ -68,6 +67,18 @@ private:
 	nvvk::Buffer hasDataBlockCountBuffer;
 
 	nvvk::Buffer GlobalInfoBuffer;
+
+#ifndef USE_SVO
+	void getOctreeLabel(VkCommandBuffer cmd);
+
+	nvvk::Buffer divisibleNodeInfos_G;		//每层可细分节点的索引
+	nvvk::Buffer threadGroupInfos;
+	nvvk::Buffer indivisibleNodeInfos_G;
+
+	VkShaderEXT computeShader_getOctreeLabel1{};
+	VkShaderEXT computeShader_getOctreeLabel2{};
+	VkShaderEXT computeShader_getOctreeLabel3{};
+#endif
 
 	VkShaderEXT computeShader_initOctreeArray{};
 	VkShaderEXT computeShader_initHasDataBlockInfo{};
