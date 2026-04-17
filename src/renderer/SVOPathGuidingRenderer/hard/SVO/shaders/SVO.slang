@@ -35,7 +35,10 @@ void computeMain_initSVOArray(uint threadIndex: SV_DispatchThreadID, uint thread
         nodeData_init.aabb.maximum.z = -3.402823466e+38F;
         nodeData_init.indivisible = 1;
         nodeData_init.label = 0;
+
+        #ifdef CLUSTER_WITH_MATERIAL
         nodeData_init.materialIndex = 0;
+        #endif
         //[unroll]
         //for (int i = 0; i < NEARBY_NODE_COUNT; ++i)
         //    nodeData_init.nearbyNodeIndices[i] = -1;
@@ -64,11 +67,15 @@ void computeMain_initSVOArray(uint threadIndex: SV_DispatchThreadID, uint thread
                 nodeData.label = divisibleLabel + 1;
                 groupDivisibleNodeIndices_layer1[divisibleLabel] = threadIndex;
             }
+            #ifdef CLUSTER_WITH_MATERIAL
             uint materialIndex = 0; uint maxMaterialCount = 0;
             for (int i = 0; i < MAX_MATERIAL_COUNT; ++i) {
                 if (nodeData.materialCounts[i] > maxMaterialCount) materialIndex = i;
             }
             SVO_G[threadIndex] = { nodeData.meanNormal, nodeData.aabb, nodeData.indivisible, nodeData.label, materialIndex };
+            #else
+            SVO_G[threadIndex] = { nodeData.meanNormal, nodeData.aabb, nodeData.indivisible, nodeData.label };
+            #endif
 
             if (threadIndex == 0) groupDivisibleNodeCount_layer1 = divisibleNodeCount_layer1;
         }
@@ -97,11 +104,15 @@ void computeMain_initSVOArray(uint threadIndex: SV_DispatchThreadID, uint thread
                     SVODivisibleNodeInfos_G[divisibleLabel] = nodeIndex;
                 }
 
+                #ifdef CLUSTER_WITH_MATERIAL
                 uint materialIndex = 0; uint maxMaterialCount = 0;
                 for (int i = 0; i < MAX_MATERIAL_COUNT; ++i) {
                     if (nodeData.materialCounts[i] > maxMaterialCount) materialIndex = i;
                 }
                 SVO_G[8 + threadIndex] = { nodeData.meanNormal, nodeData.aabb, nodeData.indivisible, nodeData.label, materialIndex };
+                #else
+                SVO_G[8 + threadIndex] = { nodeData.meanNormal, nodeData.aabb, nodeData.indivisible, nodeData.label };
+                #endif
             }
         } else {
             uint warpIndex = threadIndex / 32;
@@ -142,11 +153,15 @@ void computeMain_initSVOArray(uint threadIndex: SV_DispatchThreadID, uint thread
                 }
                 if (divisible) SVODivisibleNodeInfos_G[nodeData.label - 1] = nodeIndex;
 
+                #ifdef CLUSTER_WITH_MATERIAL
                 uint materialIndex = 0; uint maxMaterialCount = 0;
                 for (int i = 0; i < MAX_MATERIAL_COUNT; ++i) {
                     if (nodeData.materialCounts[i] > maxMaterialCount) materialIndex = i;
                 }
                 SVO_G[8 + threadIndex] = SVO_G[threadIndex] = { nodeData.meanNormal, nodeData.aabb, nodeData.indivisible, nodeData.label, materialIndex };
+                #else
+                SVO_G[8 + threadIndex] = SVO_G[threadIndex] = { nodeData.meanNormal, nodeData.aabb, nodeData.indivisible, nodeData.label };
+                #endif
             }
         }
 
@@ -239,11 +254,15 @@ void computeMain_createSVOArray(uint threadIndex: SV_DispatchThreadID, uint thre
             nodeIndex = fatherNodeIndex * 8 + blockLane;
             OctreeNodeData_G octreeNodeData = OctreeArray_G[pushConst.currentLayer - 1][nodeIndex];
 
+            #ifdef CLUSTER_WITH_MATERIAL
             uint materialIndex = 0; uint maxMaterialCount = 0;
             for (int i = 0; i < MAX_MATERIAL_COUNT; ++i) {
                 if (octreeNodeData.materialCounts[i] > maxMaterialCount) materialIndex = i;
             }
             nodeData = { octreeNodeData.meanNormal, octreeNodeData.aabb, octreeNodeData.indivisible, octreeNodeData.label, materialIndex };
+            #else
+            nodeData = { octreeNodeData.meanNormal, octreeNodeData.aabb, octreeNodeData.indivisible, octreeNodeData.label };
+            #endif
             hasData = nodeData.meanNormal.w > 0.0f;
         }
 

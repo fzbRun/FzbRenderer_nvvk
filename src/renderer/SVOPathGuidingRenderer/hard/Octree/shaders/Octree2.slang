@@ -1,10 +1,14 @@
-#include "renderer/SVOPathGuidingRenderer/hard/Octree/shaderio.h"
-#include "renderer/SVOPathGuidingRenderer/hard/RasterVoxelization/shaderio.h"
 #include "common/Shader/Slang/commonFunction.slang"
+#include "renderer/SVOPathGuidingRenderer/hard/RasterVoxelization/shaderio.h"
+#include "renderer/SVOPathGuidingRenderer/hard/Octree/shaderio.h"
 
 [[vk::push_constant]] ConstantBuffer<OctreePushConstant_SVOPG> pushConst;
 [[vk::binding(BindingPoints_Octree_SVOPG::eVGB)]] StructuredBuffer<VGBVoxelData_SVOPG, ScalarDataLayout> VGBs[];
+
+#ifdef CLUSTER_WITH_MATERIAL
 [[vk::binding(BindingPoints_Octree_SVOPG::eVGBMaterialInfos)]] StructuredBuffer<VGBMaterialInfo_SVOPG, ScalarDataLayout> VGBMaterialInfos_Octree[];
+#endif
+
 [[vk::binding(BindingPoints_Octree_SVOPG::eOctreeArray_G)]] RWStructuredBuffer<OctreeNodeData_G, ScalarDataLayout> OctreeArray_G[];
 [[vk::binding(BindingPoints_Octree_SVOPG::eOctreeArray_E)]] RWStructuredBuffer<OctreeNodeData_E, ScalarDataLayout> OctreeArray_E[];
 [[vk::binding(BindingPoints_Octree_SVOPG::eNodeData_E)]] RWStructuredBuffer<OctreeNodeData_E, ScalarDataLayout> NodeData_E;
@@ -100,8 +104,11 @@ void computeMain_initOctreeArray(uint threadIndex: SV_DispatchThreadID, uint gro
     nodeData_G.aabb = aabb;
     nodeData_G.fillRate = 1.0f;
     nodeData_G.meanNormal = float4(0.0f);
+
+    #ifdef CLUSTER_WITH_MATERIAL
     nodeData_G.materialCountSum = 0;
     for (int i = 0; i < MAX_MATERIAL_COUNT; ++i) nodeData_G.materialCounts[i] = 0;
+    #endif
 
     OctreeNodeData_E nodeData_E;
     nodeData_E.E = 0.0f;
@@ -120,9 +127,11 @@ void computeMain_initOctreeArray(uint threadIndex: SV_DispatchThreadID, uint gro
         bool hasData_G = voxelData.sumNormal_G.w > 0.0f;
         AABB nodeAabb;
         if (hasData_G) {
+            #ifdef CLUSTER_WITH_MATERIAL
             VGBMaterialInfo_SVOPG voxelMaterialInfos = VGBMaterialInfos_Octree[VGBIndex][voxelIndex];
             for (int i = 0; i < MAX_MATERIAL_COUNT; ++i) nodeData_G.materialCountSum += voxelMaterialInfos.materialCount[i];
             nodeData_G.materialCounts = voxelMaterialInfos.materialCount;
+            #endif
 
             nodeAabb.minimum.x = OrderedIntToFloat(voxelData.aabbI.minimum.x);
             nodeAabb.minimum.y = OrderedIntToFloat(voxelData.aabbI.minimum.y);
@@ -324,6 +333,7 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
                 aabbVolumeSum += WaveReadLaneAt(aabbVolumeSum, targetLane);
             }
 
+            #ifdef CLUSTER_WITH_MATERIAL
             for (int i = 0; i < MAX_MATERIAL_COUNT; ++i) {
                 for (int offset = 4; offset > 0; offset /= 2) {
                     uint targetLane = warpLane + offset;
@@ -366,12 +376,15 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
                 }
             }
             */
+            #endif
 
             bool indivisible = true;
             if (warpLane == blockFirstWarpLane) {
                 nodeData_G.fillRate = aabbVolumeSum / mergeAABBVolume;
-                indivisible = //materialEntropy < 0.2f && 
-                              length(mergeNormal) > 0.707f &&
+                #ifdef CLUSTER_WITH_MATERIAL
+                indivisible &= materialEntropy < 0.2f;
+                #endif
+                indivisible &= length(mergeNormal) > 0.707f &&
                               (nodeData_G.fillRate >= 0.7 ||
                               (mergeAABBVolume - aabbVolumeSum) < pushConst.voxelVolume * (pushConst.octreeMaxLayer - OCTREE_CLUSTER_LAYER) * 4);
                 /*

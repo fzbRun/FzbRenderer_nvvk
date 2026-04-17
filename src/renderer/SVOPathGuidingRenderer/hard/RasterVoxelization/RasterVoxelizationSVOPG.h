@@ -51,7 +51,9 @@ public:
 
 	RasterVoxelizationSetting_SVOPG setting;
 	std::vector<nvvk::Buffer> VGBs;
+	#ifdef CLUSTER_WITH_MATERIAL
 	std::vector<nvvk::Buffer> VGBMaterialInfos;
+	#endif
 
 	VkShaderEXT computeShader_clearVGB{};
 	VkShaderEXT vertexShader{};

@@ -3,12 +3,13 @@
 #include <common/Shader/shaderStructType.h>
 #include "renderer/SVOPathGuidingRenderer/hard/Octree/shaderio.h"
 #include "renderer/SVOPathGuidingRenderer/hard/SVO/shaderio.h"
+#include "renderer/SVOPathGuidingRenderer/hard/shaderio.h"
 
 #ifndef FZBRENDERER_SVOWeight_SHADER_IO_H
 #define FZBRENDERER_SVOWeight_SHADER_IO_H
 NAMESPACE_SHADERIO_BEGIN()
 
-#define SVOIndivisibleNodeCount_G 2048
+#define SVOIndivisibleNodeCount_G 1024
 #define SVOIndivisibleNodeCount_E OCTREE_NODECOUNT_E
 
 #define HITTEST_COUNT 8

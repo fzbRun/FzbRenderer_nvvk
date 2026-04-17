@@ -213,8 +213,7 @@ bool getNodeAABB_E_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload, inout 
                     }
 
                     float distance = PointToAABBDistance(hitPos, nodeInfo_G.aabb);
-                    float weight = 1.0f / distance;
-                    weights[nodeOffset] = weight * weight;
+                    weights[nodeOffset] = 1.0f / distance;
                     maxWeight = max(maxWeight, weights[nodeOffset]);
                 }
                 for (int nodeOffset = 0; nodeOffset < 8; ++nodeOffset) {
@@ -264,8 +263,7 @@ bool getNodeAABB_E_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload, inout 
                         }
 
                         float distance = PointToAABBDistance(hitPos, nodeData_G.aabb);
-                        float weight = 1.0f / distance;
-                        weights[nodeOffset] = weight * weight;
+                        weights[nodeOffset] = 1.0f / distance;
                         maxWeight = max(maxWeight, weights[nodeOffset]);
                     }
                     for(int nodeOffset = 0; nodeOffset < 8; ++nodeOffset){

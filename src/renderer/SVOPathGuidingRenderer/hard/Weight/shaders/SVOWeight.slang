@@ -407,8 +407,11 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
         orthonormalBasis(hitPayload.normal, tangent, bitangent);
         float3x3 TBN_G = float3x3(tangent, bitangent, hitPayload.normal);
 
+        float3 weight3 = hitPayload.E * cosine;
+        #ifdef WEIGHT_WITH_MATERIAL
         float3 bsdf = getBSDF(hitPayload.material, -hitPayload.sampleDir, hitPayload.normal, outgoing, TBN_G, isExt);
-        float3 weight3 = hitPayload.E * cosine * bsdf; // notIgnoreRatio is made by irradiance length, so use length here;
+        weight3 *= bsdf;
+        #endif
         weight += max(0.299 * weight3.x + 0.587 * weight3.y + 0.114 * weight3.z, 0.0f);
 
         //if (pushConst.frameIndex == 0) {
@@ -549,7 +552,9 @@ void computeMain_getNearbyNodes(uint threadIndex: SV_DispatchThreadID, uint thre
         IndivisibleNodeData2_G nodeInfo;
         nodeInfo.normal = normalize(nodeData.meanNormal.xyz);
         nodeInfo.aabb = nodeData.aabb;
+        #ifdef CLUSTER_WITH_MATERIAL
         nodeInfo.materialIndex = nodeData.materialIndex;
+        #endif
         groupNodeInfo = nodeInfo;
     }
     GroupMemoryBarrierWithGroupSync();

@@ -43,7 +43,11 @@ void FzbRenderer::SVOPathGuidingRenderer::init() {
 
 	OctreeSetting_SVOPG octreeSetting{
 		.VGBs = rasterVoxelization->VGBs,
+
+		#ifdef CLUSTER_WITH_MATERIAL
 		.VGBMaterialInfos = rasterVoxelization->VGBMaterialInfos,
+		#endif
+
 		.VGBStartPos = lightInjectSetting.VGBStartPos,
 		.VGBVoxelSize = lightInjectSetting.VGBVoxelSize,
 		.VGBSize = lightInjectSetting.VGBSize,

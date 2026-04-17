@@ -2,12 +2,13 @@
 
 #include <common/Shader/shaderStructType.h>
 #include "renderer/SVOPathGuidingRenderer/hard/Octree/shaderio.h"
+#include "renderer/SVOPathGuidingRenderer/hard/shaderio.h"
 
 #ifndef FZBRENDERER_SVO_SVOPG_SHADER_IO_H
 #define FZBRENDERER_SVO_SVOPG_SHADER_IO_H
 NAMESPACE_SHADERIO_BEGIN()
 
-#define SVOSize_G 8000
+#define SVOSize_G 2000
 #if SVOSize_G > OCTREE_NODECOUNT_E
 #define SVOSize SVOSize_G
 #else
@@ -31,7 +32,10 @@ struct SVONodeData_G {
 	AABB aabb;
 	uint32_t indivisible;
 	uint32_t label;
+
+	#ifdef CLUSTER_WITH_MATERIAL
 	uint32_t materialIndex;
+	#endif
 	int nearbyNodeIndices[NEARBY_NODE_COUNT];
 };
 

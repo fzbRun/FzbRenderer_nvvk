@@ -1,13 +1,15 @@
 #include "common/Shader/shaderStructType.h"
-#include "renderer/SVOPathGuidingRenderer/hard/RasterVoxelization/shaderio.h"
-#include "renderer/SVOPathGuidingRenderer/hard/shaders/SVOPGCommon.slang"
 #include "nvshaders/functions.h.slang"
 #include "common/Shader/Slang/commonFunction.slang"
+#include "renderer/SVOPathGuidingRenderer/hard/shaders/SVOPGCommon.slang"
+#include "renderer/SVOPathGuidingRenderer/hard/RasterVoxelization/shaderio.h"
 
 [[vk::push_constant]] ConstantBuffer<RasterVoxelizationPushConstant> pushConst;
 [[vk::binding(RasterVoxelizationBindingPoints_SVOPG::eTextures_SVOPG)]] Sampler2D textures[];
 [[vk::binding(RasterVoxelizationBindingPoints_SVOPG::eVGB_SVOPG)]] RWStructuredBuffer<VGBVoxelData_SVOPG, ScalarDataLayout> VGBs[]; // globallycoherent volatile
+#ifdef CLUSTER_WITH_MATERIAL
 [[vk::binding(RasterVoxelizationBindingPoints_SVOPG::eVGBMaterialInfo_SVOPG)]] RWStructuredBuffer<VGBMaterialInfo_SVOPG> VGBMaterialInfos[];
+#endif
 #ifndef NDEBUG
 [[vk::binding(RasterVoxelizationBindingPoints_SVOPG::eFragmentCountBuffer_SVOPG)]] RWStructuredBuffer<uint32_t> fragmentCountBuffer;
 [[vk::binding(RasterVoxelizationBindingPoints_SVOPG::eWireframeMap_SVOPG)]] RWTexture2D<float4> wireframeMap;
@@ -33,9 +35,11 @@ void computeMain_clearVGB(uint threadIndex: SV_DispatchThreadID) {
     uint voxelIndex = threadIndex & (voxelCount - 1);
     VGBs[normalIndex][voxelIndex] = voxelData;
 
+    #ifdef CLUSTER_WITH_MATERIAL
     uint materialCount[MAX_MATERIAL_COUNT];
     for (int i = 0; i < MAX_MATERIAL_COUNT; i++) materialCount[i] = 0;
     VGBMaterialInfos[normalIndex][voxelIndex].materialCount = materialCount;
+    #endif
 }
 //----------------------------------------------createVGB--------------------------------------------
 struct VSout
@@ -162,9 +166,11 @@ void atomicMaterialTypeCount(uint materialIndex, int voxelIndexU, int VGBIndex) 
     }
 }
 */
+#ifdef CLUSTER_WITH_MATERIAL
 void atomicMaterialTypeCount(uint materialIndex, int voxelIndexU, int VGBIndex) {
     InterlockedAdd<uint>(VGBMaterialInfos[VGBIndex][voxelIndexU].materialCount[materialIndex], 1);
 }
+#endif
 
 [shader("pixel")]
 void fragmentMain(GSout input) {
@@ -174,9 +180,11 @@ void fragmentMain(GSout input) {
     atomicAABB(input.worldPos, voxelIndexU, VGBIndex);
     atomicNormalG(input.worldNormal, voxelIndexU, VGBIndex);
 
+    #ifdef CLUSTER_WITH_MATERIAL
     SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
     Instance instanceInfo = sceneInfo.instances[pushConst.instanceIndex];
     atomicMaterialTypeCount(instanceInfo.materialIndex, voxelIndexU, VGBIndex);
+    #endif
 }
 
 #ifndef NDEBUG
@@ -232,9 +240,11 @@ PSout_ThreeView fragmentMain_ThreeView(GSout_ThreeView input) {
     atomicAABB(input.worldPos, voxelIndexU, VGBIndex);
     atomicNormalG(input.worldNormal, voxelIndexU, VGBIndex);
 
+    #ifdef CLUSTER_WITH_MATERIAL
     SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
     Instance instanceInfo = sceneInfo.instances[pushConst.instanceIndex];
     atomicMaterialTypeCount(instanceInfo.materialIndex, voxelIndexU, VGBIndex);
+    #endif
 
     if (pushConst.frameIndex == 0) InterlockedAdd<uint>(fragmentCountBuffer[0], 1);
 

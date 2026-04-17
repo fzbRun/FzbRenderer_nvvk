@@ -71,7 +71,9 @@ void RasterVoxelization_SVOPG::init() {
 void RasterVoxelization_SVOPG::clean() {
 	Feature::clean();
 	for(int i = 0; i < 6; ++i) Application::allocator.destroyBuffer(VGBs[i]);
+	#ifdef CLUSTER_WITH_MATERIAL
 	for(int i = 0; i < 6; ++i) Application::allocator.destroyBuffer(VGBMaterialInfos[i]);
+	#endif
 
 	VkDevice device = Application::app->getDevice();
 	vkDestroyShaderEXT(device, computeShader_clearVGB, nullptr);
@@ -318,21 +320,26 @@ void RasterVoxelization_SVOPG::createVGBs() {
 
 	uint32_t voxelTotalCount = std::pow(setting.pushConstant.voxelSize_Count.w, 3);
 	uint32_t VGBByteSize = voxelTotalCount * sizeof(shaderio::VGBVoxelData_SVOPG);
+
+	#ifdef CLUSTER_WITH_MATERIAL
 	uint32_t VGBMaterialInfosBufferSize = voxelTotalCount * sizeof(shaderio::VGBMaterialInfo_SVOPG);
 	if (Application::sceneResource.materials.size() > MAX_MATERIAL_COUNT) {
 		printf("Scene Material Count: %d, except maxCount: %d", (uint32_t)Application::sceneResource.materials.size(), MAX_MATERIAL_COUNT);
 		throw std::runtime_error("");
 	}
+	VGBMaterialInfos.resize(6);
+	for (int i = 0; i < 6; ++i) {
+		allocator->createBuffer(VGBMaterialInfos[i], VGBMaterialInfosBufferSize,
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+		NVVK_DBG_NAME(VGBMaterialInfos[i].buffer);
+	}
+	#endif
 		
-	VGBs.resize(6); VGBMaterialInfos.resize(6);
+	VGBs.resize(6); 
 	for (int i = 0; i < 6; ++i) {
 		allocator->createBuffer(VGBs[i], VGBByteSize,
 			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 		NVVK_DBG_NAME(VGBs[i].buffer);
-
-		allocator->createBuffer(VGBMaterialInfos[i], VGBMaterialInfosBufferSize,
-			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-		NVVK_DBG_NAME(VGBMaterialInfos[i].buffer);
 	}
 }
 void RasterVoxelization_SVOPG::createDescriptorSetLayout() {
@@ -349,12 +356,16 @@ void RasterVoxelization_SVOPG::createDescriptorSetLayout() {
 						 .stageFlags = VK_SHADER_STAGE_ALL },
 		VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
 		| VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
+
+	#ifdef CLUSTER_WITH_MATERIAL
 	bindings.addBinding({ .binding = shaderio::RasterVoxelizationBindingPoints_SVOPG::eVGBMaterialInfo_SVOPG,
 					 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 					 .descriptorCount = (uint32_t)VGBMaterialInfos.size(),
 					 .stageFlags = VK_SHADER_STAGE_ALL },
 		VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
 		| VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
+	#endif
+
 #ifndef NDEBUG
 	bindings.addBinding({ .binding = shaderio::RasterVoxelizationBindingPoints_SVOPG::eFragmentCountBuffer_SVOPG,
 					 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -393,12 +404,14 @@ void RasterVoxelization_SVOPG::createDescriptorSet() {
 	nvvk::Buffer* VGBsPtr = VGBs.data();
 	write.append(VGBWrite, VGBsPtr);
 
+	#ifdef CLUSTER_WITH_MATERIAL
 	VkWriteDescriptorSet    VGBMaterialInfoWrite =
 		staticDescPack.makeWrite(shaderio::RasterVoxelizationBindingPoints_SVOPG::eVGBMaterialInfo_SVOPG, 0, 0, VGBMaterialInfos.size());
 	nvvk::Buffer* VGBMaterialInfosPtr = VGBMaterialInfos.data();
 	write.append(VGBMaterialInfoWrite, VGBMaterialInfosPtr);
+	#endif
 
-#ifndef NDEBUG
+	#ifndef NDEBUG
 	//-------------------------------------------threeView----------------------------------------
 	{
 		nvvk::StagingUploader& stagingUploader = Application::stagingUploader;
@@ -420,7 +433,7 @@ void RasterVoxelization_SVOPG::createDescriptorSet() {
 
 	VkWriteDescriptorSet wireframeMapWrite = staticDescPack.makeWrite(shaderio::RasterVoxelizationBindingPoints_SVOPG::eWireframeMap_SVOPG, 0, 0, 1);
 	write.append(wireframeMapWrite, gBuffers.getColorImageView(RasterVoxelizationGBuffer_SVOPG::WireframeMap_SVOPG), VK_IMAGE_LAYOUT_GENERAL);
-#endif
+	#endif
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }

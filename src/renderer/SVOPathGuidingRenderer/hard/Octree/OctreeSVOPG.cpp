@@ -236,11 +236,15 @@ void Octree_SVOPG::createDescriptorSetLayout() {
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = (uint32_t)setting.VGBs.size(),
 		.stageFlags = VK_SHADER_STAGE_ALL });
+
+	#ifdef CLUSTER_WITH_MATERIAL
 	bindings.addBinding({
 		.binding = (uint32_t)shaderio::BindingPoints_Octree_SVOPG::eVGBMaterialInfos,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = (uint32_t)setting.VGBMaterialInfos.size(),
 		.stageFlags = VK_SHADER_STAGE_ALL });
+	#endif
+
 	bindings.addBinding({
 		.binding = (uint32_t)shaderio::BindingPoints_Octree_SVOPG::eOctreeArray_G,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -313,10 +317,12 @@ void Octree_SVOPG::createDescriptorSet() {
 	nvvk::Buffer* VGBsPtr = setting.VGBs.data();
 	write.append(VGBWrite, VGBsPtr);
 
+	#ifdef CLUSTER_WITH_MATERIAL
 	VkWriteDescriptorSet    VGBMaterialInfoWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_SVOPG::eVGBMaterialInfos, 0, 0, setting.VGBMaterialInfos.size());
 	nvvk::Buffer* VGBMaterialInfosPtr = setting.VGBMaterialInfos.data();
 	write.append(VGBMaterialInfoWrite, VGBMaterialInfosPtr);
+	#endif
 
 	VkWriteDescriptorSet    OctreeArrayWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_SVOPG::eOctreeArray_G, 0, 0, OctreeArray_G.size());
