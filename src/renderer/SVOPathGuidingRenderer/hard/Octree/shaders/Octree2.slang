@@ -1,10 +1,14 @@
-#include "renderer/SVOPathGuidingRenderer/hard/Octree/shaderio.h"
-#include "renderer/SVOPathGuidingRenderer/hard/RasterVoxelization/shaderio.h"
 #include "common/Shader/Slang/commonFunction.slang"
+#include "renderer/SVOPathGuidingRenderer/hard/RasterVoxelization/shaderio.h"
+#include "renderer/SVOPathGuidingRenderer/hard/Octree/shaderio.h"
 
 [[vk::push_constant]] ConstantBuffer<OctreePushConstant_SVOPG> pushConst;
 [[vk::binding(BindingPoints_Octree_SVOPG::eVGB)]] StructuredBuffer<VGBVoxelData_SVOPG, ScalarDataLayout> VGBs[];
-[[vk::binding(BindingPoints_Octree_SVOPG::eVGBMaterialInfos)]] StructuredBuffer<VGBMaterialInfo_SVOPG, ScalarDataLayout> VGBMaterialInfos_Octree;
+
+#ifdef CLUSTER_WITH_MATERIAL
+[[vk::binding(BindingPoints_Octree_SVOPG::eVGBMaterialInfos)]] StructuredBuffer<VGBMaterialInfo_SVOPG, ScalarDataLayout> VGBMaterialInfos_Octree[];
+#endif
+
 [[vk::binding(BindingPoints_Octree_SVOPG::eOctreeArray_G)]] RWStructuredBuffer<OctreeNodeData_G, ScalarDataLayout> OctreeArray_G[];
 [[vk::binding(BindingPoints_Octree_SVOPG::eOctreeArray_E)]] RWStructuredBuffer<OctreeNodeData_E, ScalarDataLayout> OctreeArray_E[];
 [[vk::binding(BindingPoints_Octree_SVOPG::eNodeData_E)]] RWStructuredBuffer<OctreeNodeData_E, ScalarDataLayout> NodeData_E;
@@ -98,11 +102,16 @@ void computeMain_initOctreeArray(uint threadIndex: SV_DispatchThreadID, uint gro
     nodeData_G.indivisible = 1;
     nodeData_G.label = 0;
     nodeData_G.aabb = aabb;
-    nodeData_G.materialIndex = 0;
+    nodeData_G.fillRate = 1.0f;
     nodeData_G.meanNormal = float4(0.0f);
 
+    #ifdef CLUSTER_WITH_MATERIAL
+    nodeData_G.materialCountSum = 0;
+    for (int i = 0; i < MAX_MATERIAL_COUNT; ++i) nodeData_G.materialCounts[i] = 0;
+    #endif
+
     OctreeNodeData_E nodeData_E;
-    nodeData_E.irradiance = float3(0.0f);
+    nodeData_E.E = 0.0f;
     nodeData_E.pdf = 1.0f;
     nodeData_E.meanNormal = float4(0.0f);
     nodeData_E.indivisible = 1;
@@ -118,14 +127,11 @@ void computeMain_initOctreeArray(uint threadIndex: SV_DispatchThreadID, uint gro
         bool hasData_G = voxelData.sumNormal_G.w > 0.0f;
         AABB nodeAabb;
         if (hasData_G) {
-            VGBMaterialInfo_SVOPG voxelMaterialInfos = VGBMaterialInfos_Octree[threadIndex];
-            uint materialCount = 0;
-            for (int i = 0; i < MAX_MATERIAL_COUNT; ++i) {
-                if (voxelMaterialInfos.materialCount[i] > materialCount) {
-                    materialCount = voxelMaterialInfos.materialCount[i];
-                    nodeData_G.materialIndex = i;
-                }
-            }
+            #ifdef CLUSTER_WITH_MATERIAL
+            VGBMaterialInfo_SVOPG voxelMaterialInfos = VGBMaterialInfos_Octree[VGBIndex][voxelIndex];
+            for (int i = 0; i < MAX_MATERIAL_COUNT; ++i) nodeData_G.materialCountSum += voxelMaterialInfos.materialCount[i];
+            nodeData_G.materialCounts = voxelMaterialInfos.materialCount;
+            #endif
 
             nodeAabb.minimum.x = OrderedIntToFloat(voxelData.aabbI.minimum.x);
             nodeAabb.minimum.y = OrderedIntToFloat(voxelData.aabbI.minimum.y);
@@ -133,6 +139,17 @@ void computeMain_initOctreeArray(uint threadIndex: SV_DispatchThreadID, uint gro
             nodeAabb.maximum.x = OrderedIntToFloat(voxelData.aabbI.maximum.x);
             nodeAabb.maximum.y = OrderedIntToFloat(voxelData.aabbI.maximum.y);
             nodeAabb.maximum.z = OrderedIntToFloat(voxelData.aabbI.maximum.z);
+
+            //int3 voxelIndexXYZ = int3((nodeAabb.minimum - pushConst.VGBStartPos_Size.xyz) / pushConst.VGBVoxelSize.xyz);
+            //float3 voxelStartPos = (float3)voxelIndexXYZ * pushConst.VGBVoxelSize.xyz + pushConst.VGBStartPos_Size.xyz;
+            //float3 voxelEndPos = voxelStartPos + pushConst.VGBVoxelSize.xyz;
+            //// nodeAabb.minimum = nodeAabb.minimum - (nodeAabb.minimum - voxelStartPos) * 0.1f;
+            //// nodeAabb.maximum = nodeAabb.maximum + (voxelEndPos - nodeAabb.maximum) * 0.1f;
+            //int3 axisSign = sign(nodeAabb.maximum - nodeAabb.minimum);
+            //nodeAabb.minimum = nodeAabb.minimum - (nodeAabb.minimum - voxelStartPos) * axisSign;
+            //nodeAabb.maximum = nodeAabb.maximum + (voxelEndPos - nodeAabb.maximum) * axisSign;
+            //nodeAabb.minimum = max(nodeAabb.minimum, voxelStartPos);
+            //nodeAabb.maximum = min(nodeAabb.maximum, voxelEndPos);
             nodeData_G.aabb = nodeAabb;
 
             nodeData_G.meanNormal = voxelData.sumNormal_G / voxelData.sumNormal_G.w;
@@ -140,7 +157,7 @@ void computeMain_initOctreeArray(uint threadIndex: SV_DispatchThreadID, uint gro
         //-----------------------------------------------E--------------------------------------------
         bool hasData_E = hasData_G && voxelData.sumNormal_E.w > 0.0f;
         if (hasData_E) {
-            nodeData_E.irradiance = voxelData.irradiance.xyz;
+            nodeData_E.E = length(voxelData.irradiance.xyz / voxelData.irradiance.w);
             nodeData_E.meanNormal = voxelData.sumNormal_E / voxelData.sumNormal_E.w;
             nodeData_E.aabb = nodeAabb;
         }
@@ -281,8 +298,8 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
         } else {
             AABB mergeAABB = nodeData_G.aabb;
             atomicMergeAABB(mergeAABB);
-            // get mergeNormal
-            float3 mergeNormal = nodeData_G.meanNormal.xyz;
+
+            float3 mergeNormal = nodeData_G.meanNormal.xyz; // get mergeNormal
             for (int offset = 4; offset > 0; offset /= 2) {
                 uint targetLane = warpLane + offset;
                 mergeNormal.x += WaveReadLaneAt(mergeNormal.x, targetLane);
@@ -291,64 +308,104 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
             }
             mergeNormal /= blockHasDataNodeCount;
 
-            // get mergeAABB's surfaceArea
-            float mergeAABBVolume = 0.0f;
+            float mergeAABBVolume = 0.0f; // get mergeAABB's surfaceArea
             if (warpLane == blockFirstWarpLane) {
                 float3 length = mergeAABB.maximum - mergeAABB.minimum;
-                length += float3(int3(1) - sign(length)); // if x == 0.0, then x = 1.0 else x = x
+                length += float3(int3(1) - sign(length)) * 0.0001f; // if x == 0.0, then x = 1.0 else x = x
                 mergeAABBVolume = length.x * length.y * length.z;
             }
 
             float aabbVolume = 0.0f;
-            // The volume is needed to calculate the scaling factor only when there is lighting.
-            // Although it is said that where there is lighting, there must be geometry, rasterization may not be injected
             if (hasData) {
+                // The volume is needed to calculate the scaling factor only when there is lighting.
+                // Although it is said that where there is lighting, there must be geometry, rasterization may not be injected
                 float3 length = nodeData_G.aabb.maximum - nodeData_G.aabb.minimum;
-                length += float3(int3(1) - sign(length)); // if x == 0.0, then x = 1.0 else x = x
+                int3 axisSign = sign(length);
+                length += float3(int3(1) - axisSign) * 0.0001f; // if x == 0.0, then x = 1.0 else x = x
+                if (all(axisSign == 0)) length = float3(0.0f);
                 aabbVolume = length.x * length.y * length.z;
+                aabbVolume *= nodeData_G.fillRate;
             }
 
-            // get merge node's aabb volume
-            float aabbVolumeSum = aabbVolume;
+            float aabbVolumeSum = aabbVolume; // get merge node's aabb volume
             for (int offset = 4; offset > 0; offset /= 2) {
                 uint targetLane = warpLane + offset;
                 aabbVolumeSum += WaveReadLaneAt(aabbVolumeSum, targetLane);
             }
 
-            uint blockMaterialTypeMask = hasData ? 1u << nodeData_G.materialIndex : 0u;
+            #ifdef CLUSTER_WITH_MATERIAL
+            for (int i = 0; i < MAX_MATERIAL_COUNT; ++i) {
+                for (int offset = 4; offset > 0; offset /= 2) {
+                    uint targetLane = warpLane + offset;
+                    nodeData_G.materialCounts[i] += WaveReadLaneAt(nodeData_G.materialCounts[i], targetLane);
+                }
+            }
             for (int offset = 4; offset > 0; offset /= 2) {
                 uint targetLane = warpLane + offset;
-                blockMaterialTypeMask |= WaveReadLaneAt(blockMaterialTypeMask, targetLane);
+                nodeData_G.materialCountSum += WaveReadLaneAt(nodeData_G.materialCountSum, targetLane);
             }
-            uint blockMaterialTypeCount = countbits(blockMaterialTypeMask);
-
-            int materialType = hasData ? nodeData_G.materialIndex : -1;
-            if (blockMaterialTypeCount > 1) {
-                int materialTypeCount = 0;
-                for (int offset = 0; offset < 8; ++offset) {
-                    uint targetLane = blockFirstWarpLane + offset;
-                    int other_materialType = WaveReadLaneAt(materialType, targetLane);
-                    if (other_materialType == materialType && materialType > -1) ++materialTypeCount;
+            float materialEntropy = 0.0f;
+            if (warpLane == blockFirstWarpLane) {
+                for (int i = 0; i < MAX_MATERIAL_COUNT; ++i) {
+                    float pdf = (float)nodeData_G.materialCounts[i] / nodeData_G.materialCountSum;
+                    if(pdf > 0.0f) materialEntropy -= pdf * log2(pdf);
                 }
-                for (int offset = 0; offset < 8; ++offset) {
-                    uint targetLane = blockFirstWarpLane + offset;
-                    int other_materialTypeCount = WaveReadLaneAt(materialTypeCount, targetLane);
-                    if (other_materialTypeCount > materialTypeCount) materialType = WaveReadLaneAt(materialType, targetLane);
+            }
+            /*
+            if (pushConst.frameIndex == 0 && pushConst.currentLayer == 3) {
+                bool forward = abs(mergeNormal.y) > abs(mergeNormal.x) && abs(mergeNormal.y) > abs(mergeNormal.z);
+                aabbVolumeSum = WaveReadLaneAt(aabbVolumeSum, blockFirstWarpLane);
+                mergeAABBVolume = WaveReadLaneAt(mergeAABBVolume, blockFirstWarpLane);
+                materialEntropy = WaveReadLaneAt(materialEntropy, blockFirstWarpLane);
+                if (forward && fatherNodeIndex == 158) {
+                    printf("\nfatherNodeIndex: %d\naabb: %f %f %f %f %f %f\nfillRate: %f,aabbVolume: %f\n",
+                           fatherNodeIndex,
+                           nodeData_G.aabb.minimum.x, nodeData_G.aabb.minimum.y, nodeData_G.aabb.minimum.z,
+                           nodeData_G.aabb.maximum.x, nodeData_G.aabb.maximum.y, nodeData_G.aabb.maximum.z,
+                           nodeData_G.fillRate, aabbVolume,
+                           
+                    );
+                    if (warpLane == blockFirstWarpLane) {
+                        printf("\ncluster:\nmergeAABB: %f %f %f %f %f %f\nfillRate: %f, aabbVolumeSum: %f, mergeAABBVolume: %f\nmaterailEntropy: %f\n",
+                               mergeAABB.minimum.x, mergeAABB.minimum.y, mergeAABB.minimum.z,
+                               mergeAABB.maximum.x, mergeAABB.maximum.y, mergeAABB.maximum.z,
+                               aabbVolumeSum / mergeAABBVolume, aabbVolumeSum, mergeAABBVolume,
+                               materialEntropy
+                        );
+                    }
                 }
-            } else materialType = firstbitlow(blockMaterialTypeMask);
+            }
+            */
+            #endif
 
             bool indivisible = true;
             if (warpLane == blockFirstWarpLane) {
-                indivisible = blockMaterialTypeCount == 1 && 
-                               length(mergeNormal) > 0.5f &&
-                               aabbVolumeSum / mergeAABBVolume >= 0.45;
-                              //(mergeAABBVolume - aabbVolumeSum) < pushConst.voxelVolume * (pushConst.octreeMaxLayer - pushConst.currentLayer + 1) * 4;
+                nodeData_G.fillRate = aabbVolumeSum / mergeAABBVolume;
+                #ifdef CLUSTER_WITH_MATERIAL
+                indivisible &= materialEntropy < 0.2f;
+                #endif
+                indivisible &= length(mergeNormal) > 0.707f &&
+                              (nodeData_G.fillRate >= 0.7 ||
+                              (mergeAABBVolume - aabbVolumeSum) < pushConst.voxelVolume * (pushConst.octreeMaxLayer - OCTREE_CLUSTER_LAYER) * 4);
+                /*
+                if (pushConst.frameIndex == 0 && pushConst.currentLayer == 3) {
+                    bool forward = abs(mergeNormal.y) > abs(mergeNormal.x) && abs(mergeNormal.y) > abs(mergeNormal.z);
+                    if (forward && fatherNodeIndex == 158) {
+                        printf("\ncluster:%d\nmergeAABB: %f %f %f %f %f %f\nfillRate: %f, aabbVolumeSum: %f,   mergeAABBVolume: %f\nmaterailEntropy: %f\n",
+                               fatherNodeIndex,       
+                               mergeAABB.minimum.x, mergeAABB.minimum.y, mergeAABB.minimum.z,
+                               mergeAABB.maximum.x, mergeAABB.maximum.y, mergeAABB.maximum.z,
+                               nodeData_G.fillRate, aabbVolumeSum, mergeAABBVolume,
+                               materialEntropy
+                        );
+                    }
+                }
+                */
 
                 nodeData_G.indivisible = indivisible;
                 nodeData_G.label = 0;
                 nodeData_G.aabb = mergeAABB;
                 nodeData_G.meanNormal = float4(mergeNormal, 1.0f);
-                nodeData_G.materialIndex = materialType;
                 OctreeArray_G[pushConst.currentLayer - 1][fatherNodeIndex] = nodeData_G;
             }
         }
@@ -363,51 +420,71 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
         uint fatherNodeIndex = nodeIndex / 8;
         OctreeNodeData_E nodeData_E = OctreeArray_E[pushConst.currentLayer][nodeIndex];
 
-        bool hasData = nodeData_E.irradiance.x + nodeData_E.irradiance.y + nodeData_E.irradiance.z > 0.0f;
+        bool hasData = nodeData_E.E > 0.0f;
         uint32_t warpHasDataMask = WaveActiveBallot(hasData).x;
         uint32_t blockHasDataNodeCount = countbits(warpHasDataMask & blockNodeMask);
         if (blockHasDataNodeCount == 1) {
             if (hasData) OctreeArray_E[pushConst.currentLayer - 1][fatherNodeIndex] = nodeData_E;
         } else {
-            float irradianceValue = length(nodeData_E.irradiance);
-            float irradianceSum = irradianceValue;
+            float mergeE = nodeData_E.E;
             for (int offset = 4; offset > 0; offset /= 2) {
                 uint targetLane = warpLane + offset;
-                irradianceSum += WaveReadLaneAt(irradianceSum, targetLane);
+                mergeE += WaveReadLaneAt(mergeE, targetLane);
             }
-            irradianceSum = WaveReadLaneAt(irradianceSum, blockFirstWarpLane);
-            float pdf = irradianceValue / irradianceSum;
+            mergeE = WaveReadLaneAt(mergeE, blockFirstWarpLane);
 
-            uint32_t sampleWarpLane = blockFirstWarpLane;
-            float sampleProbability = 1.0f;
-            if (warpLane == blockFirstWarpLane) {
-                uint randomSeed = xxhash32(uint3(threadIndex, groupThreadIndex, (uint)pushConst.frameIndex));
-                sampleProbability = rand(randomSeed) - pdf;
-            }
-            sampleProbability = WaveReadLaneAt(sampleProbability, blockFirstWarpLane);
-            for (int offset = 1; offset < 8; ++offset) {
-                sampleProbability -= WaveReadLaneAt(pdf, blockFirstWarpLane + offset);
-                if (sampleProbability <= 0.0f) {
-                    sampleWarpLane += offset;
-                    break;
+            //if (pushConst.frameIndex == 0 && mergeE > 1000000.0f) {
+            //    printf("layerIndex: %d\nnodeIndex: %d, mergeE: %f E: %f\n",
+            //        pushConst.currentLayer,
+            //        nodeIndex, mergeE, nodeData_E.E
+            //    );
+            //}
+
+            if (pushConst.currentLayer > 10) {
+                AABB mergeAABB = nodeData_E.aabb;
+                atomicMergeAABB(mergeAABB);
+
+                float3 mergeNormal = nodeData_E.meanNormal.xyz; // get mergeNormal
+                for (int offset = 4; offset > 0; offset /= 2) {
+                    uint targetLane = warpLane + offset;
+                    mergeNormal.x += WaveReadLaneAt(mergeNormal.x, targetLane);
+                    mergeNormal.y += WaveReadLaneAt(mergeNormal.y, targetLane);
+                    mergeNormal.z += WaveReadLaneAt(mergeNormal.z, targetLane);
                 }
-            }
-            //--------------------------------calc mergeNode data------------------------------------------
-            float3 mergeIrradiance = nodeData_E.irradiance.xyz;
-            for (int offset = 4; offset > 0; offset /= 2) {
-                uint targetLane = warpLane + offset;
-                mergeIrradiance.x += WaveReadLaneAt(mergeIrradiance.x, targetLane);
-                mergeIrradiance.y += WaveReadLaneAt(mergeIrradiance.y, targetLane);
-                mergeIrradiance.z += WaveReadLaneAt(mergeIrradiance.z, targetLane);
-            }
-            //--------------------------------------assignment------------------------------------------------
-            if (warpLane == sampleWarpLane) {
-                nodeData_E.irradiance = mergeIrradiance;
-                nodeData_E.pdf *= pdf;
-                // nodeData_E.meanNormal = float4(mergeNormal, 1.0f);
-                //  nodeData_E.aabb = mergeAABB;
-                nodeData_E.indivisible = 1;
-                OctreeArray_E[pushConst.currentLayer - 1][fatherNodeIndex] = nodeData_E;
+                mergeNormal /= blockHasDataNodeCount;
+
+                if (warpLane == blockFirstWarpLane) {
+                    nodeData_E.E = mergeE;
+                    nodeData_E.pdf = 1.0f;
+                    nodeData_E.meanNormal = float4(mergeNormal, 1.0f);
+                    nodeData_E.aabb = mergeAABB;
+                    nodeData_E.indivisible = 1;
+                    OctreeArray_E[pushConst.currentLayer - 1][fatherNodeIndex] = nodeData_E;
+                }
+            } else {
+                float probability = nodeData_E.E / mergeE;
+
+                uint32_t sampleWarpLane = blockFirstWarpLane;
+                float sampleProbability = 1.0f;
+                if (warpLane == blockFirstWarpLane) {
+                    uint randomSeed = xxhash32(uint3(threadIndex, groupThreadIndex, (uint)pushConst.frameIndex));
+                    sampleProbability = rand(randomSeed);
+                }
+                sampleProbability = WaveReadLaneAt(sampleProbability, blockFirstWarpLane);
+                for (int offset = 0; offset < 8; ++offset) {
+                    sampleProbability -= WaveReadLaneAt(probability, blockFirstWarpLane + offset);
+                    if (sampleProbability <= 0.0f) {
+                        sampleWarpLane += offset;
+                        break;
+                    }
+                }
+
+                if (warpLane == sampleWarpLane) {
+                    nodeData_E.E = mergeE;
+                    nodeData_E.pdf *= probability;
+                    nodeData_E.indivisible = 1;
+                    OctreeArray_E[pushConst.currentLayer - 1][fatherNodeIndex] = nodeData_E;
+                }
             }
         }
 
@@ -455,6 +532,8 @@ void computeMain_createOctreeArray2(uint threadIndex: SV_DispatchThreadID, uint 
 struct VSout_Wireframe {
     float4 sv_position : SV_Position;
     uint renderTargetIndex;
+    bool debug_color;
+    float4 color;
 };
 struct PSout_Wireframe
 {
@@ -533,7 +612,7 @@ VSout_Wireframe vertexMain_Wireframe(uint vertexIndex: SV_VertexID, int instance
     } else {
         OctreeNodeData_E octreeData_E = OctreeArray_E[layerIndex][nodeIndex];
         nodeAABB = octreeData_E.aabb;
-        invisible = (octreeData_E.irradiance.x + octreeData_E.irradiance.y + octreeData_E.irradiance.z > 0.0f) && octreeData_E.indivisible == 1;
+        invisible = (octreeData_E.E > 0.0f) && octreeData_E.indivisible == 1;
     }
 
     if (normalIndex != pushConst.normalIndex) invisible = 0;
@@ -551,6 +630,11 @@ VSout_Wireframe vertexMain_Wireframe(uint vertexIndex: SV_VertexID, int instance
     }
     output.renderTargetIndex += layerIndex - OCTREE_CLUSTER_LAYER;
 
+    if (layerIndex == 2 && nodeIndex == 158) {
+        output.debug_color = true;
+        output.color = float4(1.0f);
+    } else output.debug_color = false;
+
     return output;
 }
 [shader("pixel")]
@@ -559,6 +643,7 @@ PSout_Wireframe fragmentMain_Wireframe(VSout_Wireframe input) {
     float4 colors[WireframeMapCount];
     for (int i = 0; i < WireframeMapCount; ++i) colors[i] = float4(0.0f);
     colors[input.renderTargetIndex] = float4(1.0f, 0.0f, 0.0f, 1.0f);
+    if (input.debug_color) colors[input.renderTargetIndex] = input.color;
 
     #if WireframeMapCount > 0
         output.color0 = colors[0];

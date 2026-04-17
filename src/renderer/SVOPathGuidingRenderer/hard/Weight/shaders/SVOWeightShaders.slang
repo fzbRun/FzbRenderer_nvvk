@@ -378,7 +378,7 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
     if (threadIndex >= groupIndivisibleNodeCount_E * indivisibleNodeCount_G * OUTGOING_COUNT) return;
 
     uint outgoingIndex = groupThreadIndex & (OUTGOING_COUNT - 1);
-    float3 outgoing = fibSpherePoint(outgoingIndex, OUTGOING_COUNT);
+    float3 outgoing = getOutgoing(outgoingIndex, OUTGOING_COUNT);
     uint nodeLabel_E_group = threadIndex / (indivisibleNodeCount_G * OUTGOING_COUNT) - currentGroupNodeStartLabel_E; // groupIndex
     uint nodeLabel_G_group = threadIndex / OUTGOING_COUNT - currentGroupNodeStartLabel_G;      //groupIndex
     float weight = 0.0f;

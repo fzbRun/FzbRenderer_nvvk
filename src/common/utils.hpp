@@ -57,7 +57,7 @@ namespace FzbRenderer {
     glm::vec4 getRGBAFromString(std::string str);
 
     void printfMat4(glm::mat4* matrix);
-
+    float rand(uint32_t seed);
     
     nvvk::Buffer createStagingBuffer(size_t bufferSize, size_t dataSize, const void* data);
 }

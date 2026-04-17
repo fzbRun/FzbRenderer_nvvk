@@ -109,6 +109,16 @@ namespace FzbRenderer {
 		);
 	}
 
+	float rand(uint32_t seed) {
+		uint32_t state = seed * 747796405u + 2891336453u;
+		uint32_t word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+		uint32_t rand_bits = (word >> 22u) ^ word;
+
+		// Ó³Éäµ½ [0, 1) ¸¡µãÊý
+		float rand_01 = float(rand_bits) / 4294967296.0f; // 2^32
+		return rand_01;
+	}
+
 	nvvk::Buffer createStagingBuffer(size_t bufferSize, size_t dataSize, const void* data) {
 		nvvk::Buffer stagingBuffer;
 

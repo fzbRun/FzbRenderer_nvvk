@@ -51,7 +51,9 @@ public:
 
 	RasterVoxelizationSetting_SVOPG setting;
 	std::vector<nvvk::Buffer> VGBs;
-	nvvk::Buffer VGBMaterialInfos;
+	#ifdef CLUSTER_WITH_MATERIAL
+	std::vector<nvvk::Buffer> VGBMaterialInfos;
+	#endif
 
 	VkShaderEXT computeShader_clearVGB{};
 	VkShaderEXT vertexShader{};
@@ -59,6 +61,7 @@ public:
 	VkShaderEXT fragmentShader{};
 
 	VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures{};
+	VkPipelineRasterizationConservativeStateCreateInfoEXT conservativeRasterFeature{};
 
 private:
 	void createVGB(VkCommandBuffer cmd);
@@ -88,6 +91,8 @@ private:
 	void debug_Cube(VkCommandBuffer cmd);
 	void debug_Wireframe(VkCommandBuffer cmd);
 	void debug_MergeWireframe(VkCommandBuffer cmd);
+
+	VkImageView depthImageView;
 
 	uint32_t fragmentCount_host = 0;
 	nvvk::Buffer fragmentCountBuffer;

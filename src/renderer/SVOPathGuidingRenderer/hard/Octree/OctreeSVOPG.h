@@ -10,7 +10,11 @@
 namespace FzbRenderer {
 struct OctreeSetting_SVOPG {
 	std::vector<nvvk::Buffer> VGBs;
-	nvvk::Buffer VGBMaterialInfos;
+
+	#ifdef CLUSTER_WITH_MATERIAL
+	std::vector<nvvk::Buffer> VGBMaterialInfos;
+	#endif
+
 	glm::vec3 VGBStartPos;
 	glm::vec3 VGBVoxelSize;
 	float VGBSize;

@@ -207,9 +207,9 @@ bool getNodeAABB_E_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload) {
 
     float pdf = 1.0f;
     float weightSampleProbability = rand(payload.randomSeed);
-    uint outgoingIndex = inverseSF(payload.outgoing, OUTGOING_COUNT, weightSampleProbability);
+    uint outgoingIndex = inverseOutgoing(payload.outgoing, OUTGOING_COUNT, weightSampleProbability);
     pdf *= weightSampleProbability;
-    //uint outgoingIndex = inverseSF(payload.outgoing, OUTGOING_COUNT);
+    // uint outgoingIndex = inverseOutgoing(payload.outgoing, OUTGOING_COUNT);
 
     uint totalNodeWeightCount_E = groupGlobalInfo.totalNodeCount_E + 8;
     uint weightStartIndex = outgoingIndex * groupGlobalInfo.indivisibleNodeCount_G * totalNodeWeightCount_E +

@@ -11,4 +11,5 @@ void FzbRenderer::DiffuseMaterial::getMaterialInfoFromSceneInfoXML(
 		material.albedo = FzbRenderer::getRGBAFromString(albedoNode.attribute("value").value());
 	if (pugi::xml_node emissiveNode = bsdfNode.child("emissive"))
 		material.emissive = FzbRenderer::getRGBFromString(emissiveNode.attribute("value").value());
+	material.roughness = 1.0f;
 }

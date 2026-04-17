@@ -78,7 +78,7 @@
 		</bsdf>
 		<bsdf type="diffuse" id="LightBSDF">
 			<albedo value="0.8, 0.8, 0.8, 1.0" />
-			<emissive value="1000, 1000, 1000" />
+			<emissive value="10, 10, 10" />
 		</bsdf>
 	</bsdfs>
 	<meshes>
@@ -87,6 +87,9 @@
 		</mesh>
 		<mesh type="obj" id="Pot">
 			<filename value = "models/Mesh009.obj" />
+		</mesh>
+		<mesh type="obj" id="teapot">
+			<filename value = "models/teapot.obj" />
 		</mesh>
 		<mesh type="obj" id="Landscape">
 			<filename value="models/Mesh008.obj" />
@@ -240,6 +243,7 @@
 			<meshRef id = "Table" />
 			<materialRef id = "TableBSDF" />
 		</instance>
+		<!--
 		<instance>
 			<transform name="to_world">
 				<matrix value="-0.0757886 0 -0.0468591 -1.95645 0 0.0891049 0 0.648205 0.0468591 0 -0.0757886 -1.77687 0 0 0 1"/>
@@ -276,7 +280,7 @@
 			<meshRef id = "Pot" />
 			<materialRef id = "Pot3BSDF" />
 		</instance>
-		<!--
+
 		<instance type="periodMotion">
 			<transform name="to_world">
 				<matrix value="-0.0837611 0 0.0303939 -1.95645 0 0.0891049 0 0.651268 -0.0303939 0 -0.0837611 -3.57687 0 0 0 1"/>
@@ -290,15 +294,36 @@
 			<meshRef id = "Pot" />
 			<materialRef id = "Pot3BSDF" />
 		</instance>
+		<instance>
+				<transform name="to_world">
+					<matrix value="-0.083761 0 0.0303938 -1.95645 0 0.0891049 0 0.651268 -0.0303938 0 -0.083761 -3.57687 0 0 0 1"/>
+				</transform>
+				<meshRef id = "PotLid" />
+				<materialRef id = "Pot3BSDF" />
+		</instance>
 		-->
-		
 		<instance>
 			<transform name="to_world">
-				<matrix value="-0.083761 0 0.0303938 -1.95645 0 0.0891049 0 0.651268 -0.0303938 0 -0.083761 -3.57687 0 0 0 1"/>
+				<matrix value="0 0 0.125 -1.95645 0 0.175 0 0.900205 -0.125 0 0 -1.77687 0 0 0 1"/>
 			</transform>
-			<meshRef id = "PotLid" />
+			<meshRef id = "teapot" />
+			<materialRef id = "Pot1BSDF" />
+		</instance>
+		<instance>
+			<transform name="to_world">
+				<matrix value="0 0 0.125 -1.95645 0 0.175 0 0.900205 -0.125 0 0 -2.67687 0 0 0 1"/>
+			</transform>
+			<meshRef id = "teapot" />
+			<materialRef id = "Pot2BSDF" />
+		</instance>
+		<instance>
+			<transform name="to_world">
+				<matrix value="0 0 0.125 -1.95645 0 0.175 0 0.900205 -0.125 0 0 -3.57687 0 0 0 1"/>
+			</transform>
+			<meshRef id = "teapot" />
 			<materialRef id = "Pot3BSDF" />
 		</instance>
+
 		<!--
 		<instance id="Light" type="periodMotion">
 			<transform name="to_world">
@@ -316,7 +341,8 @@
 		-->
 		<instance id="Light">
 			<transform name="to_world">
-				<matrix value="0.730445 0 0 -4.4391 0 -1.32136 -1.42138e-007 1.50656 0 1.42138e-007 -1.93037 -4.44377 0 0 0 1" />
+				<!--matrix value="0.730445 0 0 -4.4391 0 -1.32136 -1.42138e-007 1.50656 0 1.42138e-007 -1.93037 -4.44377 0 0 0 1" /-->
+				<matrix value="-0.730445 0 0 -1.4391 0 -1.32136 -1.42138e-007 1.50656 0 0 1.93037 -7.44377 0 0 0 1" />
 			</transform>
 			<meshRef id="custom" type="plane" />
 			<materialRef id="LightBSDF"/>
@@ -329,7 +355,7 @@
 		<backgroundColor value = "0.0, 0.0, 0.0" />
 		<light type="area" id="Light">
 			<emissive value = "1.0, 1.0, 1.0" />
-			<intensity value = "1000.0" />
+			<intensity value = "10.0" />
 			<SphericalRectangleSample value="true" />
 			<instanceRef id="Light"/>
 		</light>

@@ -43,7 +43,11 @@ void FzbRenderer::SVOPathGuidingRenderer::init() {
 
 	OctreeSetting_SVOPG octreeSetting{
 		.VGBs = rasterVoxelization->VGBs,
+
+		#ifdef CLUSTER_WITH_MATERIAL
 		.VGBMaterialInfos = rasterVoxelization->VGBMaterialInfos,
+		#endif
+
 		.VGBStartPos = lightInjectSetting.VGBStartPos,
 		.VGBVoxelSize = lightInjectSetting.VGBVoxelSize,
 		.VGBSize = lightInjectSetting.VGBSize,
@@ -98,7 +102,10 @@ void FzbRenderer::SVOPathGuidingRenderer::uiRender() {
 	if (ImGui::Begin("SVOPathGuidingSettings"))
 	{
 		ImGui::SeparatorText("Jitter");
-		UIModified |= ImGui::SliderInt("Max Frames", &maxFrames, 1, MAX_FRAME);
+		//UIModified |= ImGui::SliderInt("Max Frames", &maxFrames, 1, MAX_FRAME);
+		PE::begin();
+		UIModified |= PE::DragInt("Max Frames", &maxFrames);
+		PE::end();
 		ImGui::TextDisabled("Frame: %d", pushConstant.frameIndex);
 	
 		ImGui::SeparatorText("Bounces");
@@ -152,7 +159,8 @@ void FzbRenderer::SVOPathGuidingRenderer::resize(VkCommandBuffer cmd, const VkEx
 	lightInject->resize(cmd, size);
 	IF_DEBUG(octree->resize(cmd, size, gBuffers, eImgTonemapped), octree->resize(cmd, size));
 	IF_DEBUG(svo->resize(cmd, size, gBuffers, eImgTonemapped), svo->resize(cmd, size));
-	svoWeight->resize(cmd, size);
+	IF_DEBUG(svoWeight->resize(cmd, size, gBuffers, eImgTonemapped), svoWeight->resize(cmd, size));
+	
 };
 void FzbRenderer::SVOPathGuidingRenderer::preRender() {
 	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
@@ -165,6 +173,8 @@ void FzbRenderer::SVOPathGuidingRenderer::preRender() {
 	pushConstant.time = Application::sceneResource.time;
 	pushConstant.voxelLength = std::sqrt(shaderio::dot(shaderio::float3(rasterVoxelization->setting.pushConstant.voxelSize_Count), shaderio::float3(rasterVoxelization->setting.pushConstant.voxelSize_Count)));
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
+	pushConstant.maxOctreeLayer = octree->setting.OctreeLayerCount;
+	pushConstant.VGBVoxelSize = shaderio::float3(rasterVoxelization->setting.pushConstant.voxelSize_Count);
 	asManager.updateToplevelAS(cmd);
 
 	rasterVoxelization->preRender(cmd);
@@ -172,6 +182,8 @@ void FzbRenderer::SVOPathGuidingRenderer::preRender() {
 	octree->preRender();
 	svo->preRender();
 	svoWeight->preRender();
+
+	pushConstant.randomRotateMatrix = svoWeight->randomRotateMatrix;
 
 	Application::app->submitAndWaitTempCmdBuffer(cmd);
 }
@@ -205,11 +217,11 @@ void FzbRenderer::SVOPathGuidingRenderer::render(VkCommandBuffer cmd) {
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
 		VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
-	//rasterVoxelization->postProcess(cmd);
-	//lightInject->postProcess(cmd);
-	//octree->postProcess(cmd);
-	//svo->postProcess(cmd);
-	//svoWeight->postProcess(cmd);
+	rasterVoxelization->postProcess(cmd);
+	lightInject->postProcess(cmd);
+	octree->postProcess(cmd);
+	svo->postProcess(cmd);
+	svoWeight->postProcess(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
 };
 
@@ -322,7 +334,7 @@ void FzbRenderer::SVOPathGuidingRenderer::createShader() {
 	SCOPED_TIMER(__FUNCTION__);
 
 	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
-	std::filesystem::path shaderSource = shaderPath / "SVOPathGuiding.slang";
+	std::filesystem::path shaderSource = shaderPath / "SVOPathGuiding2.slang";
 	VkShaderModuleCreateInfo shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
 
 	const VkPushConstantRange pushConstantRange{

@@ -43,39 +43,58 @@ public:
 	VkPipeline rtPipeline{};
 	VkPipelineLayout rtPipelineLayout{};
 
+	shaderio::float3x3 randomRotateMatrix;
+
 	nvvk::Buffer GlobalInfoBuffer;
 	nvvk::Buffer indivisibleNodeInfosBuffer_G;
 	nvvk::Buffer indivisibleNodeInfosBuffer_E;
 	nvvk::Buffer weightBuffer;
+	nvvk::Buffer nearbyNodeInfosBuffer;
 
 	VkShaderEXT computeShader_getIndivisibleNode{};
 	VkShaderEXT computeShader_initWeights{};
 	VkShaderEXT computeShader_getWeights{};
 	VkShaderEXT computeShader_getProbability{};
+
+	VkShaderEXT computeShader_getNearbyNodes{};
+	VkShaderEXT computeShader_getNearbyNodes2{};
 private:
+
 	shaderio::SVOWeightPushConstant pushConstant;
 	VkPushConstantsInfo pushInfo;
 	VkShaderModuleCreateInfo shaderCode;
 
 	void getIndivisibleNode(VkCommandBuffer cmd);
 	void initWeights(VkCommandBuffer cmd);
+	void getNearbyNodeInfos(VkCommandBuffer cmd);
 	void getWeights(VkCommandBuffer cmd);
 	void getProbability(VkCommandBuffer cmd);
 
 #ifndef NDEBUG
+public:
+	void resize(VkCommandBuffer cmd, const VkExtent2D& size, nvvk::GBuffer& gBuffers_other, uint32_t baseMapIndex);
+private:
 	void debugPrepare();
+
 	void debug_visualization(VkCommandBuffer cmd);
+	void debug_nearby(VkCommandBuffer cmd);
 
 	//glm::vec3 samplePoint = glm::vec3(-1.5f, 1.0f, 0.5f);
-	glm::vec3 samplePoint = glm::vec3(1.0f, 1.7f, 0.5f);
-	//glm::vec3 samplePoint = glm::vec3(-2.2f, 1.0f, -4.5f);
+	//glm::vec3 samplePoint = glm::vec3(1.0f, 1.7f, 0.5f);
+	glm::vec3 samplePoint = glm::vec3(-2.2f, 1.0f, -4.5f);
 	glm::vec3 outgoing = glm::vec3(0.0f, 1.0f, -1.0f);
 
 	VkShaderEXT computeShader_getSampleNodeInfo{};
 	VkShaderEXT vertexShader_visualization{};
 	VkShaderEXT fragmentShader_visualization{};
 
-	bool show = false;
+	VkShaderEXT vertexShader_nearby{};
+	VkShaderEXT fragmentShader_nearby{};
+
+	bool showWeightMap = false;
+	bool showNearbyMap = false;
+
+	VkImageView depthImageView;
 #endif
 };
 }

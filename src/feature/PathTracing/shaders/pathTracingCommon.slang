@@ -226,7 +226,7 @@ void initNEE(inout CallablePayload payload, SceneInfo sceneInfo, int NEEShaderIn
     for (int lightIndex = 0; lightIndex < lightNum; ++lightIndex) {
         payload.radiance_nee[lightIndex] = float3(0.0f);
         Light light = sceneInfo.lights[lightIndex];
-        float3 flux = light.color * light.intensity;
+        float3 radiance = light.color * light.intensity;
         float3 sampleDir = float3(1.0f);
         if (light.type == uint(LightType::Point)) {
             sampleDir = light.pos - payload.hitPos;
@@ -234,7 +234,7 @@ void initNEE(inout CallablePayload payload, SceneInfo sceneInfo, int NEEShaderIn
 
             if (!hitTest(distance, sampleDir, payload.hitPos, payload.hitNormal, NEEShaderIndex, time)) continue; // 遮挡
 
-            payload.radiance_nee[lightIndex] = flux;    // / (4.0f * M_PI * distance * distance);
+            payload.radiance_nee[lightIndex] = radiance;    // / (4.0f * M_PI * distance * distance);
         }
         else if (light.type == uint(LightType::Spot)) {}
         else if (light.type == uint(LightType::Directional)) {}
@@ -259,7 +259,7 @@ void initNEE(inout CallablePayload payload, SceneInfo sceneInfo, int NEEShaderIn
                 if (!hitTest(distance, sampleDir, payload.hitPos, payload.hitNormal, NEEShaderIndex, time)) continue; // 遮挡
 
                 // L = dPhi / (dA * cosTheta * domega) * (bsdf * cosTheta2) / pdf
-                payload.radiance_nee[lightIndex] = flux / pdf;  //flux / (M_TWO_PI * length(light.edge1) * length(light.edge2) * pdf);
+                payload.radiance_nee[lightIndex] = radiance;    // / pdf;  //flux / (M_TWO_PI * length(light.edge1) * length(light.edge2) * pdf);
                 payload.radiancePdf_nee[lightIndex] = pdf;
             } else {
                 float3 samplePos = light.pos + light.edge1 * randomNumber1 + light.edge2 * randomNumber2;
@@ -274,7 +274,7 @@ void initNEE(inout CallablePayload payload, SceneInfo sceneInfo, int NEEShaderIn
                 // L = dPhi / (dA * cosTheta1 * domega) * (cosTheta1 / distance * distance) * (bsdf * cosTheta2) / pdf
                 // 分母有一个cos和面积，雅可比有一个cos，pdf有一个面积，抵消了
                 distance = max(distance, 0.001f);
-                payload.radiance_nee[lightIndex] = flux * dot(normalize(sampleDir), light.direction) / (distance * distance * length(light.edge1) * length(light.edge2)); //flux / (M_TWO_PI * distance * distance);
+                payload.radiance_nee[lightIndex] = radiance * dot(normalize(sampleDir), light.direction) / (distance * distance * length(light.edge1) * length(light.edge2)); //flux / (M_TWO_PI * distance * distance);
                 payload.radiancePdf_nee[lightIndex] = 1.0f / (sqrt(dot(light.edge1, light.edge1) * dot(light.edge2, light.edge2))); // 1 / area
             }
         }
@@ -847,4 +847,30 @@ float getPdf_RoughDielectric(float eta, float3 albedo, float roughness, float3 i
         float weight = cosineIH * eta + cosineOH;
         return (1.0f - F_oneChanel) * D_costhetaNH * cosineIH / (weight * weight + 1e-10f);
     } else return F_oneChanel * D_costhetaNH / (abs(4.0f * cosineOH) + 1e-10f);
+}
+float getPdf(BSDFMaterial material, float3 incidence, float3 normal, float3 outgoing, float3x3 TBN, bool isExt) {
+    float pdf = 1.0f;
+    if (material.type == MaterialType::Diffuse) pdf = getPdf_Diffuse(incidence, normal);
+    else if (material.type == MaterialType::Conductor) pdf = getPdf_Conductor(incidence, normal, outgoing);
+    else if (material.type == MaterialType::Dielectric) {
+        float eta = material.eta.x;
+        if (!isExt) eta = 1.0f / eta;
+        pdf = getPdf_Dielectric(eta, material.albedo, incidence, normal, outgoing);
+    }
+    else if (material.type == MaterialType::RoughConductor)
+        pdf = getPdf_RoughConductor(material.roughness, incidence, normal, outgoing, TBN);
+    else if (material.type == MaterialType::RoughDielectric) {
+        float eta = material.eta.x;
+        if (!isExt) eta = 1.0f / eta;
+        pdf = getPdf_RoughDielectric(eta, material.albedo, material.roughness, incidence, normal, outgoing, TBN);
+    }
+    return pdf;
+}
+//------------------------------------------BSDF Sample---------------------------------------------------
+void BSDF_SAMPLE(inout CallablePayload payload) {
+    if (payload.material.type == MaterialType::Diffuse) PopulateCallablePayload_DiffuseMaterial(payload);
+    else if (payload.material.type == MaterialType::Conductor) PopulateCallablePayload_ConductorMaterial(payload);
+    else if (payload.material.type == MaterialType::Dielectric) PopulateCallablePayload_DielectricMaterial(payload);
+    else if (payload.material.type == MaterialType::RoughConductor) PopulateCallablePayload_RoughConductorMaterial(payload);
+    else if (payload.material.type == MaterialType::RoughDielectric) PopulateCallablePayload_RoughDielectricMaterial(payload);
 }

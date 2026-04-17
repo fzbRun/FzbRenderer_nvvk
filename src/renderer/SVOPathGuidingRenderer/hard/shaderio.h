@@ -4,17 +4,25 @@
 
 #ifndef FZBRENDERER_PATHGUIDING_SHADER_IO_H
 #define FZBRENDERER_PATHGUIDING_SHADER_IO_H
+
+//#define CLUSTER_WITH_MATERIAL
+//#define WEIGHT_WITH_MATERIAL
+#define USE_SVO
+
 NAMESPACE_SHADERIO_BEGIN()
 
 #define SVO_PATHGUIDING_THREADGROUP_SIZE_X 16
 #define SVO_PATHGUIDING_THREADGROUP_SIZE_Y 16
 struct SVOPathGuidingPushConstant
 {
-	float4 VGBStartPos_Size;
-	int frameIndex = 0;
+	float3x3 randomRotateMatrix;
 	int maxDepth = 6;
 	float time;
 	float voxelLength;
+	float4 VGBStartPos_Size;
+	float3 VGBVoxelSize;
+	int maxOctreeLayer;
+	int frameIndex = 0;
 	SceneInfo* sceneInfoAddress;
 	uint2 sceneSize;
 	uint2 threadGroupCount;

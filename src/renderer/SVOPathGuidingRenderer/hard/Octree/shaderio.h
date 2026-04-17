@@ -1,6 +1,7 @@
 #pragma once
 
 #include <common/Shader/shaderStructType.h>
+#include "renderer/SVOPathGuidingRenderer/hard/shaderio.h"
 
 #ifndef FZBRENDERER_OCTREE_SVOPG_SHADERIO_H
 #define FZBRENDERER_OCTREE_SVOPG_SHADERIO_H
@@ -11,7 +12,11 @@ NAMESPACE_SHADERIO_BEGIN()
 
 enum class BindingPoints_Octree_SVOPG : uint32_t {
 	eVGB = 0,
+
+	#ifdef CLUSTER_WITH_MATERIAL
 	eVGBMaterialInfos,
+	#endif
+
 	eOctreeArray_G,
 	eOctreeArray_E,
 	eNodeData_E,
@@ -34,8 +39,9 @@ struct OctreePushConstant_SVOPG {
 	uint32_t currentLayerNodeCount;
 	uint32_t VGBVoxelTotalCount;
 	SceneInfo* sceneInfoAddress;
-#ifndef NDEBUG
 	float4 VGBStartPos_Size;
+	float4 VGBVoxelSize;
+#ifndef NDEBUG
 	float frameIndex;
 	uint32_t showOctreeNodeTotalCount;
 	int normalIndex;
@@ -50,12 +56,17 @@ static const uint OctreeLayerStartIndex_E[3] = { 0, 8, 56 };
 struct OctreeNodeData_G {
 	float4 meanNormal;
 	AABB aabb;
+	float fillRate;
 	uint32_t indivisible;
 	uint32_t label;
-	uint32_t materialIndex;
+
+	#ifdef CLUSTER_WITH_MATERIAL
+	uint materialCountSum;
+	uint materialCounts[MAX_MATERIAL_COUNT];
+	#endif
 };
 struct OctreeNodeData_E {
-	float3 irradiance;
+	float E;
 	float pdf;
 	float4 meanNormal;
 	AABB aabb;

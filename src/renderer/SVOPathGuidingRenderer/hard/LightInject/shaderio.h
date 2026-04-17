@@ -7,6 +7,8 @@
 #define FZBRENDERER_LIGHTINJECT_SVOPG_SHADER_IO_H
 NAMESPACE_SHADERIO_BEGIN()
 
+#define SAMPLE_OUTPUT_COUNT 8
+
 struct LightInjectPushConstant_SVOPG {
 	float4 VGBVoxelSize;
 	float4 VGBStartPos_Size;
