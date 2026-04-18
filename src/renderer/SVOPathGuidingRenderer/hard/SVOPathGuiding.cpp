@@ -17,8 +17,10 @@ SVOPathGuidingRenderer::SVOPathGuidingRenderer(pugi::xml_node& rendererNode) {
 		lightInject = std::make_shared<LightInject_SVOPG>(lightInjectNode);
 	if (pugi::xml_node octreeNode = rendererNode.child("Octree"))
 		octree = std::make_shared<Octree_SVOPG>(octreeNode);
+	#ifdef USE_SVO
 	if (pugi::xml_node svoNode = rendererNode.child("SVO"))
 		svo = std::make_shared<FzbRenderer::SVO_SVOPG>(svoNode);
+	#endif
 	if (pugi::xml_node svoWeightNode = rendererNode.child("SVOWeight"))
 		svoWeight = std::make_shared<FzbRenderer::SVOWeight>(svoWeightNode);
 }
@@ -57,13 +59,17 @@ void FzbRenderer::SVOPathGuidingRenderer::init() {
 	};
 	octree->init(octreeSetting);
 
+	#ifdef USE_SVO
 	SVOSetting_SVOPG svoSetting{
 		.octree = octree
 	};
 	svo->init(svoSetting);
+	#endif
 
 	SVOWeightSetting svoWeightSetting{
+		#ifdef USE_SVO
 		.svo = svo,
+		#endif
 		.octree = octree,
 		.asManager = &asManager
 	};
@@ -86,7 +92,9 @@ void FzbRenderer::SVOPathGuidingRenderer::clean() {
 	rasterVoxelization->clean();
 	lightInject->clean();
 	octree->clean();
+	#ifdef USE_SVO
 	svo->clean();
+	#endif
 	svoWeight->clean();
 	PathTracingRenderer::clean();
 
@@ -134,7 +142,9 @@ void FzbRenderer::SVOPathGuidingRenderer::uiRender() {
 	rasterVoxelization->uiRender();
 	lightInject->uiRender();
 	octree->uiRender();
+	#ifdef USE_SVO
 	svo->uiRender();
+	#endif
 	svoWeight->uiRender();
 	
 	if (UIModified) resetFrame();
@@ -158,7 +168,9 @@ void FzbRenderer::SVOPathGuidingRenderer::resize(VkCommandBuffer cmd, const VkEx
 	IF_DEBUG(rasterVoxelization->resize(cmd, size, gBuffers, eImgTonemapped), rasterVoxelization->resize(cmd, size));
 	lightInject->resize(cmd, size);
 	IF_DEBUG(octree->resize(cmd, size, gBuffers, eImgTonemapped), octree->resize(cmd, size));
+	#ifdef USE_SVO
 	IF_DEBUG(svo->resize(cmd, size, gBuffers, eImgTonemapped), svo->resize(cmd, size));
+	#endif
 	IF_DEBUG(svoWeight->resize(cmd, size, gBuffers, eImgTonemapped), svoWeight->resize(cmd, size));
 	
 };
@@ -180,7 +192,9 @@ void FzbRenderer::SVOPathGuidingRenderer::preRender() {
 	rasterVoxelization->preRender(cmd);
 	lightInject->preRender();
 	octree->preRender();
+	#ifdef USE_SVO
 	svo->preRender();
+	#endif
 	svoWeight->preRender();
 
 	pushConstant.randomRotateMatrix = svoWeight->randomRotateMatrix;
@@ -191,7 +205,7 @@ void FzbRenderer::SVOPathGuidingRenderer::render(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
 
 	updateDataPerFrame(cmd);
-	//if (pushConstant.frameIndex == maxFrames - 1) return;
+	if (pushConstant.frameIndex == maxFrames - 1) return;
 
 	rasterVoxelization->render(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR);
@@ -199,7 +213,9 @@ void FzbRenderer::SVOPathGuidingRenderer::render(VkCommandBuffer cmd) {
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_NV, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	octree->render(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	#ifdef USE_SVO
 	svo->render(cmd);
+	#endif
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	svoWeight->render(cmd);
 	
@@ -220,7 +236,9 @@ void FzbRenderer::SVOPathGuidingRenderer::render(VkCommandBuffer cmd) {
 	rasterVoxelization->postProcess(cmd);
 	lightInject->postProcess(cmd);
 	octree->postProcess(cmd);
+	#ifdef USE_SVO
 	svo->postProcess(cmd);
+	#endif
 	svoWeight->postProcess(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
 };
@@ -237,11 +255,19 @@ void FzbRenderer::SVOPathGuidingRenderer::createDescriptorSetLayout() {
 			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
 			.descriptorCount = 1,
 			.stageFlags = VK_SHADER_STAGE_ALL});
+	#ifdef USE_SVO
 	bindings.addBinding({
 		.binding = (uint32_t)shaderio::StaticBindingPoints_SVOPG::eSVO_G,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
+	#else
+	bindings.addBinding({
+	.binding = (uint32_t)shaderio::StaticBindingPoints_SVOPG::eOctreeArray_G,
+	.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+	.descriptorCount = (uint32_t)octree->OctreeArray_G.size(),
+	.stageFlags = VK_SHADER_STAGE_ALL });
+	#endif
 	bindings.addBinding({
 		.binding = (uint32_t)shaderio::StaticBindingPoints_SVOPG::eNodeData_E,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -293,13 +319,20 @@ void FzbRenderer::SVOPathGuidingRenderer::createDescriptorSet() {
 		write.append(allTextures, allImages);
 	}
 
+	#ifdef USE_SVO
 	VkWriteDescriptorSet SVOArrayWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOPG::eSVO_G, 0, 0, 1);
 	write.append(SVOArrayWrite, svo->SVO_G, 0, svo->SVO_G.bufferSize);
+	#else
+	VkWriteDescriptorSet SVOArrayWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOPG::eOctreeArray_G, 0, 0, octree->OctreeArray_G.size());
+	nvvk::Buffer* octreeArrayPtr_G = octree->OctreeArray_G.data();
+	write.append(SVOArrayWrite, octreeArrayPtr_G);
+	#endif
 	
-	SVOArrayWrite =
+	VkWriteDescriptorSet Octree_EWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOPG::eNodeData_E, 0, 0, 1);
-	write.append(SVOArrayWrite, octree->NodeData_E, 0, octree->NodeData_E.bufferSize);
+	write.append(Octree_EWrite, octree->NodeData_E, 0, octree->NodeData_E.bufferSize);
 	
 	VkWriteDescriptorSet globalInfoWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOPG::eGlobalInfo, 0, 0, 1);
@@ -334,7 +367,11 @@ void FzbRenderer::SVOPathGuidingRenderer::createShader() {
 	SCOPED_TIMER(__FUNCTION__);
 
 	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
+	#ifdef USE_SVO
 	std::filesystem::path shaderSource = shaderPath / "SVOPathGuiding2.slang";
+	#else
+	std::filesystem::path shaderSource = shaderPath / "SVOPathGuiding.slang";
+	#endif
 	VkShaderModuleCreateInfo shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
 
 	const VkPushConstantRange pushConstantRange{
@@ -519,7 +556,9 @@ void FzbRenderer::SVOPathGuidingRenderer::compileAndCreateShaders() {
 	rasterVoxelization->compileAndCreateShaders();
 	lightInject->compileAndCreateShaders();
 	octree->compileAndCreateShaders();
+	#ifdef USE_SVO
 	svo->compileAndCreateShaders();
+	#endif
 };
 void FzbRenderer::SVOPathGuidingRenderer::updateDataPerFrame(VkCommandBuffer cmd) {}
 

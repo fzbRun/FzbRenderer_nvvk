@@ -59,6 +59,10 @@ public:
 	std::vector<nvvk::Buffer> OctreeArray_G;	//layer0: 6  layer1： 48 ……
 	std::vector<nvvk::Buffer> OctreeArray_E;
 	nvvk::Buffer NodeData_E;
+
+	nvvk::Buffer GlobalInfoBuffer;
+	nvvk::Buffer indivisibleNodeInfosBuffer_G;
+	nvvk::Buffer indivisibleNodeInfosBuffer_E;
 private:
 	nvvk::Buffer blockInfoBuffer_G;
 	nvvk::Buffer blockInfoBuffer_E;
@@ -66,18 +70,18 @@ private:
 	nvvk::Buffer hasDataBlockIndexBuffer_E;
 	nvvk::Buffer hasDataBlockCountBuffer;
 
-	nvvk::Buffer GlobalInfoBuffer;
-
 #ifndef USE_SVO
 	void getOctreeLabel(VkCommandBuffer cmd);
+	void getIndivisibleNodeInfos(VkCommandBuffer cmd);
 
 	nvvk::Buffer divisibleNodeInfos_G;		//每层可细分节点的索引
 	nvvk::Buffer threadGroupInfos;
-	nvvk::Buffer indivisibleNodeInfos_G;
 
 	VkShaderEXT computeShader_getOctreeLabel1{};
 	VkShaderEXT computeShader_getOctreeLabel2{};
 	VkShaderEXT computeShader_getOctreeLabel3{};
+
+	VkShaderEXT computeShader_getIndivisibleNodeInfos{};
 #endif
 
 	VkShaderEXT computeShader_initOctreeArray{};
@@ -109,6 +113,15 @@ private:
 	bool showWireframeMap_E = false;
 	int selectedWireframeMapIndex_G = 0;
 	int selectedWireframeMapIndex_E = 0;
+
+#ifndef USE_SVO
+	void debug_wireframe2(VkCommandBuffer cmd);
+
+	VkShaderEXT vertexShader_Wireframe2{};
+	VkShaderEXT fragmentShader_Wireframe2{};
+
+	bool showWireframeMap2_G = false;
+#endif
 #endif
 };
 

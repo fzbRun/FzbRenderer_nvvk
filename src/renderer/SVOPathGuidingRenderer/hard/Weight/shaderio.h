@@ -37,14 +37,18 @@ struct SVOWeightPushConstant {
 };
 
 enum class StaticBindingPoints_SVOWeight {
+#ifdef USE_SVO
 	eSVO_G = 2,
+#else
+	eOctreeArray_G = 2,
+#endif
 	eNodeData_E,
 	eTreeGlobalInfo,
 	eGlobalInfo,
-	eSVO_IndivisibleNodeInfos_G,
-	eSVO_IndivisibleNodeInfos_E,
+	eIndivisibleNodeInfos_G,
+	eIndivisibleNodeInfos_E,
 	eSVOWeights,
-	eSVO_IndivisibleNodeNearbyNodeInfos,
+	eIndivisibleNodeNearbyNodeInfos,
 };
 
 struct SVOWeightGlobalInfo {
@@ -52,13 +56,13 @@ struct SVOWeightGlobalInfo {
 	DispatchIndirectCommand cmd2;
 	uint indivisibleNodeCount_G;
 	uint indivisibleNodeCount_E;
-	uint SVOMaxLayer_G;
 #ifndef NDEBUG
 	AABB sampelNodeAABB;
 	uint sampelNodeLabel;
 #endif
 
 #ifdef USE_SVO
+	uint SVOMaxLayer_G;
 	SVOLayerInfo layerInfos_G[MAX_SVO_LAYER];
 #else
 	OctreeLayerInfo layerInfos_G[MAX_OCTREE_LAYER];
@@ -69,8 +73,12 @@ struct SVOIndivisibleNodeInfo {
 	uint32_t nodeIndex;
 };
 
-struct SVOIndivisibleNodeNearbyNodeInfo {
+struct IndivisibleNodeNearbyNodeInfo {
+#ifdef USE_SVO
 	int nearbyNodeIndices[NEARBY_NODE_COUNT];
+#else
+	int2 nearbyNodeInfos[NEARBY_NODE_COUNT];
+#endif
 	float nearbyNodeDistances[NEARBY_NODE_COUNT];
 };
 

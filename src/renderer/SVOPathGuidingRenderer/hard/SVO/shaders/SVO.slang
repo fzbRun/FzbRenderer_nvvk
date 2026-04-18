@@ -89,7 +89,7 @@ void computeMain_initSVOArray(uint threadIndex: SV_DispatchThreadID, uint thread
         if (nodeCount_layer2 <= 32) {
             if (threadIndex < nodeCount_layer2) {
                 uint fatherNodeIndex = groupDivisibleNodeIndices_layer1[threadIndex / 8];
-                uint nodeIndex = fatherNodeIndex * 8;
+                uint nodeIndex = fatherNodeIndex * 8 + threadIndex & 7;
 
                 OctreeNodeData_G nodeData = OctreeArray_G[1][nodeIndex];
                 bool hasData = nodeData.meanNormal.w > 0.0f;
@@ -516,12 +516,10 @@ void computeMain_getIndivisibleInfos(uint threadIndex: SV_DispatchThreadID, uint
             if (indivisible) SVO_IndivisibleNodeInfos_E[nodeWarpLabel + nodeGroupLabel] = threadIndex;
 
             if (warpIndex == warpCount - 1 && warpLane == 0) {
-                SVOGlobalInfo_SVOPG globalInfo;
+                SVOGlobalInfo_SVOPG globalInfo = SVOGlobalInfo[0];
                 globalInfo.indivisibleNodeCount_G = indivisibleNodeCount_G;
                 globalInfo.indivisibleNodeCount_E = nodeGroupLabel + warpIndivisibleNodeCount;
                 globalInfo.SVOMaxLayer_G = groupSVOLayerMaxLayer_G;
-                for (int layerIndex = 0; layerIndex < MAX_SVO_LAYER; ++layerIndex)
-                    globalInfo.layerInfos_G[layerIndex] = groupSVOLayerInfos_G[layerIndex];
                 SVOGlobalInfo[0] = globalInfo;
 
                 #ifndef NDEBUG

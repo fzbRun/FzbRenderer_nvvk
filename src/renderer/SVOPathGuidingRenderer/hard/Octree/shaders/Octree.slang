@@ -22,6 +22,8 @@
 
 [[vk::binding(BindingPoints_Octree_SVOPG::eDivisibleNodeInfos_G)]] RWStructuredBuffer<uint2> DivisibleNodeInfos_G;
 [[vk::binding(BindingPoints_Octree_SVOPG::eThreadGroupInfos)]] RWStructuredBuffer<OctreeThreadGroupInfo> OctreeThreadGroupInfos;
+[[vk::binding(BindingPoints_Octree_SVOPG::eIndivisibleNodeInfos_G)]] RWStructuredBuffer<uint2> IndivisibleNodeInfos_G;
+[[vk::binding(BindingPoints_Octree_SVOPG::eIndivisibleNodeInfos_E)]] RWStructuredBuffer<uint> IndivisibleNodeInfos_E;
 
 groupshared uint groupWarpHasDataCount_G[32];
 groupshared uint groupWarpHasDataCount_E[32];
@@ -427,13 +429,6 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
             }
             mergeE = WaveReadLaneAt(mergeE, blockFirstWarpLane);
 
-            //if (pushConst.frameIndex == 0 && mergeE > 1000000.0f) {
-            //    printf("layerIndex: %d\nnodeIndex: %d, mergeE: %f E: %f\n",
-            //        pushConst.currentLayer,
-            //        nodeIndex, mergeE, nodeData_E.E
-            //    );
-            //}
-
             if (pushConst.currentLayer > 10) {
                 AABB mergeAABB = nodeData_E.aabb;
                 atomicMergeAABB(mergeAABB);
@@ -458,6 +453,53 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
             } else {
                 float probability = nodeData_E.E / mergeE;
 
+                #ifdef MERGE_SIMILIAR_E
+                float maxProbability = probability;
+                for (int offset = 4; offset > 0; offset /= 2) {
+                    uint targetLane = warpLane + offset;
+                    float other_maxProbability = WaveReadLaneAt(maxProbability, targetLane);
+                    maxProbability = max(maxProbability, other_maxProbability);
+                }
+                maxProbability = WaveReadLaneAt(maxProbability, blockFirstWarpLane);
+
+                AABB mergeAABB; {
+                    mergeAABB.minimum.x = 3.402823466e+38F;
+                    mergeAABB.minimum.y = 3.402823466e+38F;
+                    mergeAABB.minimum.z = 3.402823466e+38F;
+                    mergeAABB.maximum.x = -3.402823466e+38F;
+                    mergeAABB.maximum.y = -3.402823466e+38F;
+                    mergeAABB.maximum.z = -3.402823466e+38F;}
+                float3 mergeNormal = float3(0.0f);
+
+                bool sampleAble = false; float probabilitySum = 0.0f;
+                if (probability / maxProbability >= 0.5f) {
+                    sampleAble = true;
+                    probabilitySum = probability;
+                    mergeAABB = nodeData_E.aabb;
+                    mergeNormal = nodeData_E.meanNormal.xyz;
+                }
+                for (int offset = 4; offset > 0; offset /= 2) {
+                    uint targetLane = warpLane + offset;
+                    probabilitySum += WaveReadLaneAt(probabilitySum, targetLane);
+                }
+
+                atomicMergeAABB(mergeAABB);
+                for (int offset = 4; offset > 0; offset /= 2) {
+                    uint targetLane = warpLane + offset;
+                    mergeNormal.x += WaveReadLaneAt(mergeNormal.x, targetLane);
+                    mergeNormal.y += WaveReadLaneAt(mergeNormal.y, targetLane);
+                    mergeNormal.z += WaveReadLaneAt(mergeNormal.z, targetLane);
+                }
+
+                if (warpLane == blockFirstWarpLane) {
+                    nodeData_E.E = mergeE;
+                    nodeData_E.pdf *= probabilitySum;
+                    nodeData_E.aabb = mergeAABB;
+                    nodeData_E.meanNormal = float4(mergeNormal, 1.0f);
+                    nodeData_E.indivisible = 1;
+                    OctreeArray_E[pushConst.currentLayer - 1][fatherNodeIndex] = nodeData_E;
+                }
+                #else
                 uint32_t sampleWarpLane = blockFirstWarpLane;
                 float sampleProbability = 1.0f;
                 if (warpLane == blockFirstWarpLane) {
@@ -479,6 +521,7 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
                     nodeData_E.indivisible = 1;
                     OctreeArray_E[pushConst.currentLayer - 1][fatherNodeIndex] = nodeData_E;
                 }
+                #endif
             }
         }
 
@@ -520,26 +563,30 @@ void computeMain_createOctreeArray2(uint threadIndex: SV_DispatchThreadID, uint 
     if (pushConst.currentLayer == OCTREE_CLUSTER_LAYER)
         NodeData_E[threadIndex] = OctreeArray_E[pushConst.currentLayer][threadIndex];
 }
+
+#ifndef USE_SVO
 //------------------------------------------------getLabel---------------------------------------------------------
-groupshared uint groupDivisibleNodeIndices_layer1[6];
-groupshared uint groupDivisibleNodeCount_layer1;
-groupshared uint groupWarpIndivisibleNodeCount_layer2[2];
-groupshared uint groupWarpDivisibleNodeCount_layer2[2];
+groupshared uint groupDivisibleNodeIndices_layer0[6];
+groupshared uint groupDivisibleNodeCount_layer0;
+groupshared uint groupIndivisibleNodeCount_layer0;
+groupshared uint groupWarpIndivisibleNodeCount_layer1[2];
+groupshared uint groupWarpDivisibleNodeCount_layer1[2];
 
 groupshared uint groupFatherLayerDivisibleNodeCount_G;
+groupshared uint groupIndivisibleNodeCountSum_G;
 groupshared uint groupWarpDivisibleNodeCountSums_G[GETOCTREELABEL_CS_THREADGROUP_SIZE / 32];
 groupshared uint groupWarpIndivisibleNodeCountSums_G[GETOCTREELABEL_CS_THREADGROUP_SIZE / 32];
 
-groupshared uint groupDivisibleNodeCountSum_G;
-groupshared uint groupIndivisibleNodeCountSum_G;
+groupshared uint groupThreadGroupDivisibleNodeCountSum_G;
+groupshared uint groupThreadGroupIndivisibleNodeCountSum_G;
 
 [numthreads(GETOCTREELABEL_CS_THREADGROUP_SIZE, 1, 1)]
 [shader("compute")]
 void computeMain_getOctreeLabel1(uint threadIndex: SV_DispatchThreadID, uint threadGroupIndex: SV_GroupID, uint groupThreadIndex: SV_GroupThreadID) {
+    uint indivisibleNodeCount_layer0 = 0;
+    uint divisibleNodeCount_layer0 = 0;
     uint indivisibleNodeCount_layer1 = 0;
     uint divisibleNodeCount_layer1 = 0;
-    uint indivisibleNodeCount_layer2 = 0;
-    uint divisibleNodeCount_layer2 = 0;
 
     if (threadIndex < 6) {
         OctreeNodeData_G nodeData = OctreeArray_G[0][threadIndex];
@@ -547,41 +594,50 @@ void computeMain_getOctreeLabel1(uint threadIndex: SV_DispatchThreadID, uint thr
         bool indivisible = hasData && nodeData.indivisible == 1;
         bool divisible = hasData && nodeData.indivisible == 0;
 
-        indivisibleNodeCount_layer1 = WaveActiveCountBits(indivisible);
-        divisibleNodeCount_layer1 = WaveActiveCountBits(divisible);
+        indivisibleNodeCount_layer0 = WaveActiveCountBits(indivisible);
+        divisibleNodeCount_layer0 = WaveActiveCountBits(divisible);
 
         uint indivisibleLabel = WavePrefixCountBits(indivisible);
         uint divisibleLabel = WavePrefixCountBits(divisible);
 
-        if (indivisible) nodeData.label = indivisibleLabel + 1;
+        if (indivisible) {
+            nodeData.label = indivisibleLabel + 1;
+            IndivisibleNodeInfos_G[indivisibleLabel] = uint2(0, threadIndex);
+        }
         if (divisible) {
             nodeData.label = divisibleLabel + 1;
-            groupDivisibleNodeIndices_layer1[divisibleLabel] = threadIndex;
+            groupDivisibleNodeIndices_layer0[divisibleLabel] = threadIndex;
         }
         OctreeArray_G[0][threadIndex].label = nodeData.label;
 
-        if (threadIndex == 0) groupDivisibleNodeCount_layer1 = divisibleNodeCount_layer1;
+        if (threadIndex == 0){
+            groupDivisibleNodeCount_layer0 = divisibleNodeCount_layer0;
+            groupIndivisibleNodeCount_layer0 = indivisibleNodeCount_layer0;
+        }
     }
     GroupMemoryBarrierWithGroupSync();
 
-    int nodeCount_layer2 = groupDivisibleNodeCount_layer1 * 8; // max 48
+    int nodeCount_layer2 = groupDivisibleNodeCount_layer0 * 8; // max 48
     if (nodeCount_layer2 <= 32) {
         if (threadIndex < nodeCount_layer2) {
-            uint fatherNodeIndex = groupDivisibleNodeIndices_layer1[threadIndex / 8];
-            uint nodeIndex = fatherNodeIndex * 8;
+            uint fatherNodeIndex = groupDivisibleNodeIndices_layer0[threadIndex / 8];
+            uint nodeIndex = fatherNodeIndex * 8 + threadIndex & 7;
 
             OctreeNodeData_G nodeData = OctreeArray_G[1][nodeIndex];
             bool hasData = nodeData.meanNormal.w > 0.0f;
             bool indivisible = hasData && nodeData.indivisible == 1;
             bool divisible = hasData && nodeData.indivisible == 0;
 
-            indivisibleNodeCount_layer2 = WaveActiveCountBits(indivisible);
-            divisibleNodeCount_layer2 = WaveActiveCountBits(divisible);
+            indivisibleNodeCount_layer1 = WaveActiveCountBits(indivisible);
+            divisibleNodeCount_layer1 = WaveActiveCountBits(divisible);
 
             uint indivisibleLabel = WavePrefixCountBits(indivisible);
             uint divisibleLabel = WavePrefixCountBits(divisible);
 
-            if (indivisible) nodeData.label = indivisibleLabel + 1;
+            if (indivisible) {
+                nodeData.label = indivisibleLabel + 1;
+                IndivisibleNodeInfos_G[groupIndivisibleNodeCount_layer0 + indivisibleLabel] = uint2(1, nodeIndex);
+            }
             if (divisible) {
                 nodeData.label = divisibleLabel + 1;
                 DivisibleNodeInfos_G[divisibleLabel] = nodeIndex;
@@ -597,7 +653,7 @@ void computeMain_getOctreeLabel1(uint threadIndex: SV_DispatchThreadID, uint thr
         uint indivisibleLabel; uint divisibleLabel;
         bool indivisible; bool divisible;
         if (threadIndex < nodeCount_layer2) {
-            uint fatherNodeIndex = groupDivisibleNodeIndices_layer1[threadIndex / 8];
+            uint fatherNodeIndex = groupDivisibleNodeIndices_layer0[threadIndex / 8];
             nodeIndex = fatherNodeIndex * 8 + blockLane;
 
             nodeData = OctreeArray_G[1][nodeIndex];
@@ -605,8 +661,8 @@ void computeMain_getOctreeLabel1(uint threadIndex: SV_DispatchThreadID, uint thr
             indivisible = hasData && nodeData.indivisible == 1;
             divisible = hasData && nodeData.indivisible == 0;
 
-            indivisibleNodeCount_layer2 = WaveActiveCountBits(indivisible);
-            divisibleNodeCount_layer2 = WaveActiveCountBits(divisible);
+            indivisibleNodeCount_layer1 = WaveActiveCountBits(indivisible);
+            divisibleNodeCount_layer1 = WaveActiveCountBits(divisible);
 
             indivisibleLabel = WavePrefixCountBits(indivisible);
             divisibleLabel = WavePrefixCountBits(divisible);
@@ -615,17 +671,18 @@ void computeMain_getOctreeLabel1(uint threadIndex: SV_DispatchThreadID, uint thr
             if (divisible) nodeData.label = divisibleLabel + 1;
 
             if (warpLane == 0) {
-                groupWarpIndivisibleNodeCount_layer2[warpIndex] = indivisibleNodeCount_layer2;
-                groupWarpDivisibleNodeCount_layer2[warpIndex] = divisibleNodeCount_layer2;
+                groupWarpIndivisibleNodeCount_layer1[warpIndex] = indivisibleNodeCount_layer1;
+                groupWarpDivisibleNodeCount_layer1[warpIndex] = divisibleNodeCount_layer1;
             }
         }
         GroupMemoryBarrierWithGroupSync();
         if (threadIndex < nodeCount_layer2) {
             if (warpIndex == 1) {
-                if (indivisible) nodeData.label += groupWarpIndivisibleNodeCount_layer2[0];
-                if (divisible) nodeData.label += groupWarpDivisibleNodeCount_layer2[0];
+                if (indivisible) nodeData.label += groupWarpIndivisibleNodeCount_layer1[0];
+                if (divisible) nodeData.label += groupWarpDivisibleNodeCount_layer1[0];
             }
             if (divisible) DivisibleNodeInfos_G[nodeData.label - 1] = nodeIndex;
+            else IndivisibleNodeInfos_G[groupIndivisibleNodeCount_layer0 + nodeData.label - 1] = uint2(1, nodeIndex);
             OctreeArray_G[1][threadIndex].label = nodeData.label;
         }
     }
@@ -633,15 +690,15 @@ void computeMain_getOctreeLabel1(uint threadIndex: SV_DispatchThreadID, uint thr
     if (threadIndex == 0) {
         OctreeGlobalInfo globalInfo;
 
-        globalInfo.layerInfos_G[0].divisibleNodeCount = divisibleNodeCount_layer1;
-        globalInfo.layerInfos_G[0].indivisibleNodeCount = 6 - divisibleNodeCount_layer1;
+        globalInfo.layerInfos_G[0].divisibleNodeCount = divisibleNodeCount_layer0;
+        globalInfo.layerInfos_G[0].indivisibleNodeCount = 6 - divisibleNodeCount_layer0;
 
         if (nodeCount_layer2 <= 32) {
-            globalInfo.layerInfos_G[1].divisibleNodeCount = divisibleNodeCount_layer2;
-            globalInfo.layerInfos_G[1].indivisibleNodeCount = indivisibleNodeCount_layer2;
+            globalInfo.layerInfos_G[1].divisibleNodeCount = divisibleNodeCount_layer1;
+            globalInfo.layerInfos_G[1].indivisibleNodeCount = indivisibleNodeCount_layer1;
         } else {
-            globalInfo.layerInfos_G[1].divisibleNodeCount = divisibleNodeCount_layer2 + groupWarpDivisibleNodeCount_layer2[1];
-            globalInfo.layerInfos_G[1].indivisibleNodeCount = indivisibleNodeCount_layer2 + groupWarpIndivisibleNodeCount_layer2[1];
+            globalInfo.layerInfos_G[1].divisibleNodeCount = divisibleNodeCount_layer1 + groupWarpDivisibleNodeCount_layer1[1];
+            globalInfo.layerInfos_G[1].indivisibleNodeCount = indivisibleNodeCount_layer1 + groupWarpIndivisibleNodeCount_layer1[1];
         }
 
         for (int i = 2; i < MAX_OCTREE_LAYER; ++i) {
@@ -664,6 +721,11 @@ void computeMain_getOctreeLabel2(uint threadIndex: SV_DispatchThreadID, uint thr
     if (groupThreadIndex == 0) {
         OctreeGlobalInfo globalInfo = GlobalInfoBuffer[0];
         groupFatherLayerDivisibleNodeCount_G = globalInfo.layerInfos_G[pushConst.currentLayer - 1].divisibleNodeCount;
+
+        uint indivisibleNodeCountSum_G = 0;
+        for (int layerIndex = 0; layerIndex < pushConst.currentLayer; ++layerIndex)
+            indivisibleNodeCountSum_G += globalInfo.layerInfos_G[layerIndex].indivisibleNodeCount;
+        groupIndivisibleNodeCountSum_G = indivisibleNodeCountSum_G;
     }
     GroupMemoryBarrierWithGroupSync();
 
@@ -680,7 +742,7 @@ void computeMain_getOctreeLabel2(uint threadIndex: SV_DispatchThreadID, uint thr
             if (oddLayer) fatherNodeIndex = DivisibleNodeInfos_G[fatherNodeLabel].x;
             else fatherNodeIndex = DivisibleNodeInfos_G[fatherNodeLabel].y;
             nodeIndex = fatherNodeIndex * 8 + blockLane;
-            nodeData = OctreeArray_G[pushConst.currentLayer - 1][nodeIndex];
+            nodeData = OctreeArray_G[pushConst.currentLayer][nodeIndex];
             hasData = nodeData.meanNormal.w > 0.0f;
         }
 
@@ -732,7 +794,9 @@ void computeMain_getOctreeLabel2(uint threadIndex: SV_DispatchThreadID, uint thr
             if (oddLayer) DivisibleNodeInfos_G[nodeData.label - 1].y = nodeIndex;
             else DivisibleNodeInfos_G[nodeData.label - 1].x = nodeIndex;
         }
-        if (hasData) OctreeArray_G[pushConst.currentLayer - 1][nodeIndex].label = nodeData.label;
+        if (indivisible && layerNodeCount_G <= GETOCTREELABEL_CS_THREADGROUP_SIZE)
+            IndivisibleNodeInfos_G[groupIndivisibleNodeCountSum_G + nodeData.label - 1] = uint2(pushConst.currentLayer, nodeIndex);
+        if (hasData) OctreeArray_G[pushConst.currentLayer][nodeIndex].label = nodeData.label;
 
         if (warpIndex == warpCount - 1 && warpLane == 0) {
             if (layerNodeCount_G <= WARP_SIZE) {
@@ -765,10 +829,13 @@ void computeMain_getOctreeLabel3(uint threadIndex: SV_DispatchThreadID, uint thr
     uint warpIndex = groupThreadIndex / WARP_SIZE;
 
     if (warpIndex == 0) { // this assume groupThreadCount < 32
-        if (groupThreadIndex == 0) {
-            OctreeGlobalInfo globalInfo = GlobalInfoBuffer[0];
+        OctreeGlobalInfo globalInfo = GlobalInfoBuffer[0];
+        if (groupThreadIndex == 0)
             groupFatherLayerDivisibleNodeCount_G = globalInfo.layerInfos_G[pushConst.currentLayer - 1].divisibleNodeCount;
-        }
+
+        uint indivisibleNodeCountSum_G = 0;
+        if (groupThreadIndex < pushConst.currentLayer) indivisibleNodeCountSum_G = globalInfo.layerInfos_G[groupThreadIndex].indivisibleNodeCount;
+        groupIndivisibleNodeCountSum_G = WaveActiveSum(indivisibleNodeCountSum_G);
 
         uint threadGroupDivisibleNodeCount = 0;
         uint threadGroupIndivisibleNodeCount = 0;
@@ -780,8 +847,8 @@ void computeMain_getOctreeLabel3(uint threadIndex: SV_DispatchThreadID, uint thr
         threadGroupDivisibleNodeCount = WaveActiveSum(threadGroupDivisibleNodeCount);
         threadGroupIndivisibleNodeCount = WaveActiveSum(threadGroupIndivisibleNodeCount);
         if (warpLane == 0) {
-            groupDivisibleNodeCountSum_G = threadGroupDivisibleNodeCount;
-            groupIndivisibleNodeCountSum_G = threadGroupIndivisibleNodeCount;
+            groupThreadGroupDivisibleNodeCountSum_G = threadGroupDivisibleNodeCount;
+            groupThreadGroupIndivisibleNodeCountSum_G = threadGroupIndivisibleNodeCount;
         }
     }
     GroupMemoryBarrierWithGroupSync();
@@ -795,14 +862,14 @@ void computeMain_getOctreeLabel3(uint threadIndex: SV_DispatchThreadID, uint thr
         if (oddLayer) fatherNodeIndex = DivisibleNodeInfos_G[fatherNodeLabel].x;
         else fatherNodeIndex = DivisibleNodeInfos_G[fatherNodeLabel].y;
         uint nodeIndex = fatherNodeIndex * 8 + blockLane;
-        OctreeNodeData_G nodeData = OctreeArray_G[pushConst.currentLayer - 1][nodeIndex];
+        OctreeNodeData_G nodeData = OctreeArray_G[pushConst.currentLayer][nodeIndex];
 
         bool hasData = nodeData.meanNormal.w > 0.0f;
         bool divisible = hasData && nodeData.indivisible == 0;
         bool indivisible = hasData && nodeData.indivisible == 1;
         if (divisible) {
-            uint label = nodeData.label + groupDivisibleNodeCountSum_G;
-            OctreeArray_G[pushConst.currentLayer - 1][nodeIndex].label = label;
+            uint label = nodeData.label + groupThreadGroupDivisibleNodeCountSum_G;
+            OctreeArray_G[pushConst.currentLayer][nodeIndex].label = label;
 
             uint fatherNodeLabel = threadIndex / 8;
 
@@ -815,7 +882,11 @@ void computeMain_getOctreeLabel3(uint threadIndex: SV_DispatchThreadID, uint thr
                 DivisibleNodeInfos_G[label - 1].x = fatherNodeIndex * 8 + blockLane;
             }
         }
-        else if (indivisible) OctreeArray_G[pushConst.currentLayer - 1][nodeIndex].label += groupIndivisibleNodeCountSum_G;
+        else if (indivisible) {
+            uint label = nodeData.label + groupThreadGroupIndivisibleNodeCountSum_G;
+            OctreeArray_G[pushConst.currentLayer][nodeIndex].label = label;
+            IndivisibleNodeInfos_G[groupIndivisibleNodeCountSum_G + label - 1] = uint2(pushConst.currentLayer, nodeIndex);
+        }
     }
 
     if (threadIndex == 0) {
@@ -823,17 +894,88 @@ void computeMain_getOctreeLabel3(uint threadIndex: SV_DispatchThreadID, uint thr
         uint nextLayerNodeCount = globalInfo.layerInfos_G[pushConst.currentLayer].divisibleNodeCount * 8;
         uint cmdX = (nextLayerNodeCount + GETOCTREELABEL_CS_THREADGROUP_SIZE - 1) / GETOCTREELABEL_CS_THREADGROUP_SIZE;
         globalInfo.cmd.x = cmdX;
-
-        #ifndef NDEBUG
-        if (pushConst.frameIndex == 0) {
-            uint divisibleNodeCount = GlobalInfoBuffer[0].layerInfos_G[pushConst.currentLayer].divisibleNodeCount;
-            printf("layer: %d, layerNodeCount: %d, divisibleNodeCount: %d\n", pushConst.currentLayer, layerNodeCount_G, divisibleNodeCount);
-        }
-        #endif
-
         GlobalInfoBuffer[0] = globalInfo;
     }
 }
+//------------------------------------------------getIndivisibleInfos---------------------------------------------------------
+groupshared uint groupIndivisibleNodeCount_G;
+groupshared uint groupWarpIndivisibleNodeCount_E[(OCTREE_NODECOUNT_E + 31) / 32];
+
+[numthreads(GETINDIVISIBLENODEINFOS_CS_THREADGROUP_SIZE, 1, 1)]
+[shader("compute")]
+void computeMain_getIndivisibleInfos(uint threadIndex: SV_DispatchThreadID, uint threadGroupIndex: SV_GroupID, uint groupThreadIndex: SV_GroupThreadID) {
+    if (groupThreadIndex < WARP_SIZE) {
+        OctreeGlobalInfo octreeGlobalInfo = GlobalInfoBuffer[0];
+
+        uint indivisibleNodeCount_G = 0;
+        if (groupThreadIndex < MAX_OCTREE_LAYER) indivisibleNodeCount_G = octreeGlobalInfo.layerInfos_G[groupThreadIndex].indivisibleNodeCount;
+        indivisibleNodeCount_G = WaveActiveSum(indivisibleNodeCount_G);
+
+        if (groupThreadIndex == 0) groupIndivisibleNodeCount_G = indivisibleNodeCount_G;
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    uint indivisibleNodeCount_G = groupIndivisibleNodeCount_G;
+    if (indivisibleNodeCount_G > IndivisibleNodeCount_G) {
+        if (threadIndex == 0) {
+            printf("Error: G indivisibleNodeCount_G exceeds the maximum node count. maxNodeCount: %u,       currentNodeCount: %u\n",
+                   IndivisibleNodeCount_G, groupIndivisibleNodeCount_G);
+            GlobalInfoBuffer[0].indivisibleNodeCount_G = 0;
+            GlobalInfoBuffer[0].indivisibleNodeCount_E = 0;
+        }
+        return;
+    }
+
+    if (threadGroupIndex == 0) {
+        uint warpIndex = threadIndex / 32;
+        uint warpLane = threadIndex & 31;
+
+        uint warpCount = 12; //(384 + 31) / 32;
+        bool indivisible = false;
+        uint warpIndivisibleNodeCount;
+        if (threadIndex < warpCount * 32) {
+            if (threadIndex < 384) {
+                OctreeNodeData_E nodeData = NodeData_E[threadIndex];
+                bool hasData = nodeData.E > 0.0f;
+                indivisible = hasData && nodeData.indivisible == 1;
+            }
+            warpIndivisibleNodeCount = WaveActiveCountBits(indivisible);
+            if (warpLane == 0) groupWarpIndivisibleNodeCount_E[warpIndex] = warpIndivisibleNodeCount;
+        }
+        GroupMemoryBarrierWithGroupSync();
+        if (threadIndex < warpCount * 32) {
+            uint nodeWarpLabel = WavePrefixCountBits(indivisible);
+
+            uint nodeGroupLabel = 0;
+            if (warpLane < warpIndex) nodeGroupLabel = groupWarpIndivisibleNodeCount_E[warpLane];
+            nodeGroupLabel = WaveActiveSum(nodeGroupLabel);
+
+            if (indivisible) IndivisibleNodeInfos_E[nodeWarpLabel + nodeGroupLabel] = threadIndex;
+
+            if (warpIndex == warpCount - 1 && warpLane == 0) {
+                OctreeGlobalInfo globalInfo = GlobalInfoBuffer[0];
+                globalInfo.indivisibleNodeCount_G = indivisibleNodeCount_G;
+                globalInfo.indivisibleNodeCount_E = nodeGroupLabel + warpIndivisibleNodeCount;
+                GlobalInfoBuffer[0] = globalInfo;
+
+                #ifndef NDEBUG
+                if (pushConst.frameIndex == 0) {
+                    printf("indivisibleNodeCount: G: %d  E: %d\n",
+                        indivisibleNodeCount_G, globalInfo.indivisibleNodeCount_E
+                    );
+                    for (int i = 0; i <= pushConst.octreeMaxLayer; ++i) {
+                        printf("G layer%d: divisibleNodeCount: %d   indivisibleNodeCount: %d\n", i,
+                               globalInfo.layerInfos_G[i].divisibleNodeCount, globalInfo.layerInfos_G[i].indivisibleNodeCount
+                        );
+                    }
+                }
+                #endif
+            }
+        }
+    }
+}
+#endif
+
 #ifndef NDEBUG
 //------------------------------------------------debug---------------------------------------------------------
 struct VSout_Wireframe {
@@ -1021,4 +1163,65 @@ void computeMain_MergeResult(uint3 dispatchId: SV_DispatchThreadID) {
     }
     */
 }
+
+#ifndef USE_SVO
+static const float4 Colors[8] = {
+    float4(0.0f, 0.0f, 0.0f, 1.0f),
+    float4(1.0f, 1.0f, 1.0f, 1.0f),
+    float4(1.0f, 0.0f, 0.0f, 1.0f),
+    float4(0.0f, 1.0f, 0.0f, 1.0f),
+    float4(0.0f, 0.0f, 1.0f, 1.0f),
+    float4(1.0f, 1.0f, 0.0f, 1.0f),
+    float4(1.0f, 0.0f, 1.0f, 1.0f),
+    float4(0.0f, 1.0f, 1.0f, 1.0f),
+};
+
+struct VSout_Wireframe2 {
+    float4 sv_position : SV_Position;
+    float4 color;
+};
+struct PSout_Wireframe2
+{
+    float4 color0 : SV_Target0;
+};
+[shader("vertex")]
+VSout_Wireframe2 vertexMain_Wireframe2(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID) {
+    VSout_Wireframe2 output;
+    output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
+
+    OctreeGlobalInfo globalInfo = GlobalInfoBuffer[0];
+
+    if (instanceIndex >= globalInfo.indivisibleNodeCount_G) return output;
+
+    uint2 nodeInfo = IndivisibleNodeInfos_G[instanceIndex];
+    uint layerIndex = nodeInfo.x;
+    uint nodeIndex = nodeInfo.y;
+    output.color = Colors[layerIndex];
+
+    OctreeNodeData_G nodeData = OctreeArray_G[layerIndex][nodeIndex];
+    bool hasData = nodeData.meanNormal.w > 0.0f;
+    bool show = hasData && nodeData.indivisible == 1;
+    AABB nodeAABB = nodeData.aabb;
+
+    // if (layerIndex == 6) show = false;
+    if (show) {
+        float3 aabbSize = nodeAABB.maximum - nodeAABB.minimum;
+
+        output.sv_position.x = ((vertexIndex & 3) * 2) % 6 == 0 ? 0.0f : aabbSize.x;
+        output.sv_position.y = (vertexIndex & 3) <= 1 ? 0.0f : aabbSize.y;
+        output.sv_position.z = vertexIndex / 4 == 0 ? 0.0f : aabbSize.z;
+        output.sv_position.xyz += nodeAABB.minimum;
+
+        output.sv_position = mul(float4(output.sv_position.xyz, 1.0f), pushConst.sceneInfoAddress[0].viewProjMatrix);
+    }
+
+    return output;
+}
+[shader("pixel")]
+PSout_Wireframe2 fragmentMain_Wireframe2(VSout_Wireframe2 input) {
+    PSout_Wireframe2 output;
+    output.color0 = input.color;
+    return output;
+}
+#endif
 #endif

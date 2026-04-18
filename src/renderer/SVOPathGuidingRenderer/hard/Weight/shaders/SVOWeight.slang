@@ -9,10 +9,10 @@
 [[vk::binding(StaticBindingPoints_SVOWeight::eNodeData_E)]] StructuredBuffer<OctreeNodeData_E, ScalarDataLayout> NodeData_E;
 [[vk::binding(StaticBindingPoints_SVOWeight::eTreeGlobalInfo)]] StructuredBuffer<SVOGlobalInfo_SVOPG> SVOGlobalInfoBuffer;
 [[vk::binding(StaticBindingPoints_SVOWeight::eGlobalInfo)]] RWStructuredBuffer<SVOWeightGlobalInfo> GlobalInfoBuffer;
-[[vk::binding(StaticBindingPoints_SVOWeight::eSVO_IndivisibleNodeInfos_G)]] RWStructuredBuffer<uint> SVO_IndivisibleNodeInfos_G;
-[[vk::binding(StaticBindingPoints_SVOWeight::eSVO_IndivisibleNodeInfos_E)]] RWStructuredBuffer<uint> SVO_IndivisibleNodeInfos_E;
+[[vk::binding(StaticBindingPoints_SVOWeight::eIndivisibleNodeInfos_G)]] RWStructuredBuffer<uint> SVO_IndivisibleNodeInfos_G;
+[[vk::binding(StaticBindingPoints_SVOWeight::eIndivisibleNodeInfos_E)]] RWStructuredBuffer<uint> SVO_IndivisibleNodeInfos_E;
 [[vk::binding(StaticBindingPoints_SVOWeight::eSVOWeights)]] RWStructuredBuffer<float> SVOWeights;
-[[vk::binding(StaticBindingPoints_SVOWeight::eSVO_IndivisibleNodeNearbyNodeInfos)]] RWStructuredBuffer<SVOIndivisibleNodeNearbyNodeInfo> SVO_IndivisibleNodeNearbyNodeInfos;
+[[vk::binding(StaticBindingPoints_SVOWeight::eIndivisibleNodeNearbyNodeInfos)]] RWStructuredBuffer<IndivisibleNodeNearbyNodeInfo> SVO_IndivisibleNodeNearbyNodeInfos;
 
 struct IndivisibleNodeData_E {
     float3 normal;
@@ -265,7 +265,7 @@ void computeMain_initWeights(uint threadIndex: SV_DispatchThreadID, uint groupTh
         globalInfo.SVOMaxLayer_G = svoGlobalInfo.SVOMaxLayer_G;
         globalInfo.layerInfos_G = svoGlobalInfo.layerInfos_G;
 
-        globalInfo.cmd.x = (svoGlobalInfo.indivisibleNodeCount_E * svoGlobalInfo.indivisibleNodeCount_E * OUTGOING_COUNT + GETWEIGHT_CS_THREADGROUP_SIZE - 1) / GETWEIGHT_CS_THREADGROUP_SIZE;
+        globalInfo.cmd.x = (svoGlobalInfo.indivisibleNodeCount_E * svoGlobalInfo.indivisibleNodeCount_G * OUTGOING_COUNT + GETWEIGHT_CS_THREADGROUP_SIZE - 1) / GETWEIGHT_CS_THREADGROUP_SIZE;
         globalInfo.cmd.y = 1; globalInfo.cmd.z = 1;
 
         GlobalInfoBuffer[0] = globalInfo;

@@ -43,7 +43,9 @@ public:
 	std::shared_ptr<RasterVoxelization_SVOPG> rasterVoxelization;
 	std::shared_ptr<LightInject_SVOPG> lightInject;
 	std::shared_ptr<Octree_SVOPG> octree;
+	#ifdef USE_SVO
 	std::shared_ptr<SVO_SVOPG> svo;
+	#endif
 	std::shared_ptr<SVOWeight> svoWeight;
 
 private:

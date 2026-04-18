@@ -194,7 +194,7 @@ void SVOWeight::createWeightArray() {
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(weightBuffer.buffer);
 
-	bufferSize = IndivisibleNodeCount_G * (IndivisibleNodeCount_G / GETNEARBYNODES_CS_THREADGROUP_SIZE) * sizeof(shaderio::SVOIndivisibleNodeNearbyNodeInfo);
+	bufferSize = IndivisibleNodeCount_G * (IndivisibleNodeCount_G / GETNEARBYNODES_CS_THREADGROUP_SIZE) * sizeof(shaderio::IndivisibleNodeNearbyNodeInfo);
 	allocator->createBuffer(nearbyNodeInfosBuffer, bufferSize,
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(nearbyNodeInfosBuffer.buffer);
@@ -204,9 +204,15 @@ void SVOWeight::createDescriptorSetLayout() {
 	nvvk::DescriptorBindings bindings;
 
 	bindings.addBinding({
+		#ifdef USE_SVO
 		.binding = (uint32_t)shaderio::StaticBindingPoints_SVOWeight::eSVO_G,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
+		#else
+		.binding = (uint32_t)shaderio::StaticBindingPoints_SVOWeight::eOctreeArray_G,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = (uint32_t)setting.octree->OctreeArray_G.size(),
+		#endif
 		.stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
 		.binding = (uint32_t)shaderio::StaticBindingPoints_SVOWeight::eNodeData_E,
@@ -224,12 +230,12 @@ void SVOWeight::createDescriptorSetLayout() {
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
-		.binding = (uint32_t)shaderio::StaticBindingPoints_SVOWeight::eSVO_IndivisibleNodeInfos_G,
+		.binding = (uint32_t)shaderio::StaticBindingPoints_SVOWeight::eIndivisibleNodeInfos_G,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
-		.binding = (uint32_t)shaderio::StaticBindingPoints_SVOWeight::eSVO_IndivisibleNodeInfos_E,
+		.binding = (uint32_t)shaderio::StaticBindingPoints_SVOWeight::eIndivisibleNodeInfos_E,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
@@ -239,17 +245,17 @@ void SVOWeight::createDescriptorSetLayout() {
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
-		.binding = (uint32_t)shaderio::StaticBindingPoints_SVOWeight::eSVO_IndivisibleNodeNearbyNodeInfos,
+		.binding = (uint32_t)shaderio::StaticBindingPoints_SVOWeight::eIndivisibleNodeNearbyNodeInfos,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
 
-#ifndef NDEBUG
+	#ifndef NDEBUG
 	bindings.addBinding({ .binding = shaderio::StaticSetBindingPoints_PT::eTextures_PT,
 				 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 				 .descriptorCount = 10,
 				 .stageFlags = VK_SHADER_STAGE_ALL });
-#endif
+	#endif
 
 	staticDescPack.init(bindings, Application::app->getDevice(), 1, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
 		VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT);
@@ -271,36 +277,57 @@ void SVOWeight::createDescriptorSetLayout() {
 }
 void SVOWeight::createDescriptorSet() {
 	nvvk::WriteSetContainer write{};
+
+	#ifdef USE_SVO
 	VkWriteDescriptorSet SVOArrayWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOWeight::eSVO_G, 0, 0, 1);
 	write.append(SVOArrayWrite, setting.svo->SVO_G, 0, setting.svo->SVO_G.bufferSize);
-
-	SVOArrayWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOWeight::eNodeData_E, 0, 0, 1);
-	write.append(SVOArrayWrite, setting.octree->NodeData_E, 0, setting.octree->NodeData_E.bufferSize);
 
 	VkWriteDescriptorSet SVOLayerInfosWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOWeight::eTreeGlobalInfo, 0, 0, 1);
 	write.append(SVOLayerInfosWrite, setting.svo->SVOGlobalInfo, 0, setting.svo->SVOGlobalInfo.bufferSize);
 
+	VkWriteDescriptorSet IndivisibleNodeInfosWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOWeight::eIndivisibleNodeInfos_G, 0, 0, 1);
+	write.append(IndivisibleNodeInfosWrite, setting.svo->indivisibleNodeInfosBuffer_G, 0, setting.svo->indivisibleNodeInfosBuffer_G.bufferSize);
+
+	IndivisibleNodeInfosWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOWeight::eIndivisibleNodeInfos_E, 0, 0, 1);
+	write.append(IndivisibleNodeInfosWrite, setting.svo->indivisibleNodeInfosBuffer_E, 0, setting.svo->indivisibleNodeInfosBuffer_E.bufferSize);
+	#else
+	VkWriteDescriptorSet OctreeArray_GWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOWeight::eOctreeArray_G, 0, 0, setting.octree->OctreeArray_G.size());
+	nvvk::Buffer* OctreeArrayPtr = setting.octree->OctreeArray_G.data();
+	write.append(OctreeArray_GWrite, OctreeArrayPtr);
+
+	VkWriteDescriptorSet SVOLayerInfosWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOWeight::eTreeGlobalInfo, 0, 0, 1);
+	write.append(SVOLayerInfosWrite, setting.octree->GlobalInfoBuffer, 0, setting.octree->GlobalInfoBuffer.bufferSize);
+
+	VkWriteDescriptorSet IndivisibleNodeInfosWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOWeight::eIndivisibleNodeInfos_G, 0, 0, 1);
+	write.append(IndivisibleNodeInfosWrite, setting.octree->indivisibleNodeInfosBuffer_G, 0, setting.octree->indivisibleNodeInfosBuffer_G.bufferSize);
+
+	IndivisibleNodeInfosWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOWeight::eIndivisibleNodeInfos_E, 0, 0, 1);
+	write.append(IndivisibleNodeInfosWrite, setting.octree->indivisibleNodeInfosBuffer_E, 0, setting.octree->indivisibleNodeInfosBuffer_E.bufferSize);
+	#endif
+
+	VkWriteDescriptorSet Octree_EWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOWeight::eNodeData_E, 0, 0, 1);
+	write.append(Octree_EWrite, setting.octree->NodeData_E, 0, setting.octree->NodeData_E.bufferSize);
+
 	VkWriteDescriptorSet globalInfoWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOWeight::eGlobalInfo, 0, 0, 1);
 	write.append(globalInfoWrite, GlobalInfoBuffer, 0, GlobalInfoBuffer.bufferSize);
 
-	VkWriteDescriptorSet IndivisibleNodeInfosWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOWeight::eSVO_IndivisibleNodeInfos_G, 0, 0, 1);
-	write.append(IndivisibleNodeInfosWrite, setting.svo->indivisibleNodeInfosBuffer_G, 0, setting.svo->indivisibleNodeInfosBuffer_G.bufferSize);
-
-	IndivisibleNodeInfosWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOWeight::eSVO_IndivisibleNodeInfos_E, 0, 0, 1);
-	write.append(IndivisibleNodeInfosWrite, setting.svo->indivisibleNodeInfosBuffer_E, 0, setting.svo->indivisibleNodeInfosBuffer_E.bufferSize);
 
 	VkWriteDescriptorSet weightsWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOWeight::eSVOWeights, 0, 0, 1);
 	write.append(weightsWrite, weightBuffer, 0, weightBuffer.bufferSize);
 
 	VkWriteDescriptorSet nearbyNodeInfosWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOWeight::eSVO_IndivisibleNodeNearbyNodeInfos, 0, 0, 1);
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOWeight::eIndivisibleNodeNearbyNodeInfos, 0, 0, 1);
 	write.append(nearbyNodeInfosWrite, nearbyNodeInfosBuffer, 0, nearbyNodeInfosBuffer.bufferSize);
 
 #ifndef NDEBUG
@@ -336,7 +363,11 @@ void SVOWeight::compileAndCreateShaders() {
 	SCOPED_TIMER(__FUNCTION__);
 
 	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
+	#ifdef USE_SVO
 	std::filesystem::path shaderSource = shaderPath / "SVOWeight.slang";
+	#else
+	std::filesystem::path shaderSource = shaderPath / "OctreeWeight.slang";
+	#endif
 	VkShaderModuleCreateInfo shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
 
 	const VkPushConstantRange pushConstantRange{
@@ -494,7 +525,6 @@ void SVOWeight::getNearbyNodeInfos(VkCommandBuffer cmd) {
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getNearbyNodes2);
 	vkCmdDispatchIndirect(cmd, GlobalInfoBuffer.buffer, offsetof(shaderio::SVOWeightGlobalInfo, cmd2));
 }
-
 void SVOWeight::getWeights(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
 
@@ -530,7 +560,7 @@ void SVOWeight::debugPrepare() {
 
 	scene.createSceneInfoBuffer();
 
-	pushConstant.sampleNodeLabel = 193;	// 39;354; 81;9
+	pushConstant.sampleNodeLabel = 53;	// 39;354; 81;9
 }
 void SVOWeight::resize(
 	VkCommandBuffer cmd, const VkExtent2D& size,
@@ -660,7 +690,11 @@ void SVOWeight::debug_nearby(VkCommandBuffer cmd) {
 	const nvvk::Buffer& v = scene.bDatas[bufferIndex];
 
 	vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(mesh.indexType));
+	#ifdef USE_SVO
 	vkCmdDrawIndexed(cmd, triMesh.indices.count, SVOSize_G, 0, 0, 0);
+	#else
+	vkCmdDrawIndexed(cmd, triMesh.indices.count, IndivisibleNodeCount_G, 0, 0, 0);
+	#endif
 
 	vkCmdEndRendering(cmd);
 

@@ -30,6 +30,9 @@ enum class BindingPoints_Octree_SVOPG : uint32_t {
 #ifndef USE_SVO
 	eDivisibleNodeInfos_G,
 	eThreadGroupInfos,
+
+	eIndivisibleNodeInfos_G,
+	eIndivisibleNodeInfos_E,
 #endif
 };
 
@@ -67,6 +70,10 @@ struct OctreeNodeData_G {
 	uint materialCountSum;
 	uint materialCounts[MAX_MATERIAL_COUNT];
 	#endif
+
+	#ifndef USE_SVO
+	int2 nearbyNodeInfos[NEARBY_NODE_COUNT];
+	#endif
 };
 struct OctreeNodeData_E {
 	float E;
@@ -89,6 +96,8 @@ struct OctreeLayerInfo {
 struct OctreeGlobalInfo {
 	DispatchIndirectCommand cmd;
 #ifndef USE_SVO
+	uint indivisibleNodeCount_G;
+	uint indivisibleNodeCount_E;
 	OctreeLayerInfo layerInfos_G[MAX_OCTREE_LAYER];
 #endif
 };
@@ -102,6 +111,7 @@ struct OctreeThreadGroupInfo {
 #define CREATEOCTREE_CS_THREADGROUP_SIZE 256
 
 #define GETOCTREELABEL_CS_THREADGROUP_SIZE 1024
+#define GETINDIVISIBLENODEINFOS_CS_THREADGROUP_SIZE 512
 
 NAMESPACE_SHADERIO_END()
 
