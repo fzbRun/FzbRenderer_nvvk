@@ -36,6 +36,7 @@ public:
 
 	void initSVOArray(VkCommandBuffer cmd);
 	void createSVOArray(VkCommandBuffer cmd);
+	void getSVOIndivisibleInfos(VkCommandBuffer cmd);
 
 	SVOSetting_SVOPG setting;
 	shaderio::SVOPushConstant_SVOPG pushConstant{};
@@ -43,10 +44,13 @@ public:
 
 	nvvk::Buffer SVO_G;		//buffer per normal
 	nvvk::Buffer SVOGlobalInfo;
+	nvvk::Buffer indivisibleNodeInfosBuffer_G;
+	nvvk::Buffer indivisibleNodeInfosBuffer_E;
 
 	VkShaderEXT computeShader_initSVOArray{};
 	VkShaderEXT computeShader_createSVOArray{};
 	VkShaderEXT computeShader_offsetLabelMultiBlock{};	//多个线程组需要跨线程组进行通信
+	VkShaderEXT computeShader_getIndivisibleInfos{};
 private:
 	nvvk::Buffer SVODivisibleNodeInfos_G;		//每层可细分节点的索引
 	nvvk::Buffer SVOThreadGroupInfos;

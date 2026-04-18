@@ -1,16 +1,15 @@
 #pragma once
 
 #include <common/Shader/shaderStructType.h>
-#include "renderer/SVOPathGuidingRenderer/hard/Octree/shaderio.h"
-#include "renderer/SVOPathGuidingRenderer/hard/SVO/shaderio.h"
 #include "renderer/SVOPathGuidingRenderer/hard/shaderio.h"
+#include "renderer/SVOPathGuidingRenderer/hard/Octree/shaderio.h"
+#ifdef USE_SVO
+#include "renderer/SVOPathGuidingRenderer/hard/SVO/shaderio.h"
+#endif
 
 #ifndef FZBRENDERER_SVOWeight_SHADER_IO_H
 #define FZBRENDERER_SVOWeight_SHADER_IO_H
 NAMESPACE_SHADERIO_BEGIN()
-
-#define SVOIndivisibleNodeCount_G 1024
-#define SVOIndivisibleNodeCount_E OCTREE_NODECOUNT_E
 
 #define HITTEST_COUNT 8
 #define OUTGOING_COUNT 64
@@ -38,14 +37,18 @@ struct SVOWeightPushConstant {
 };
 
 enum class StaticBindingPoints_SVOWeight {
+#ifdef USE_SVO
 	eSVO_G = 2,
+#else
+	eOctreeArray_G = 2,
+#endif
 	eNodeData_E,
-	eSVOGlobalInfo,
+	eTreeGlobalInfo,
 	eGlobalInfo,
-	eSVO_IndivisibleNodeInfos_G,
-	eSVO_IndivisibleNodeInfos_E,
+	eIndivisibleNodeInfos_G,
+	eIndivisibleNodeInfos_E,
 	eSVOWeights,
-	eSVO_IndivisibleNodeNearbyNodeInfos,
+	eIndivisibleNodeNearbyNodeInfos,
 };
 
 struct SVOWeightGlobalInfo {
@@ -53,24 +56,32 @@ struct SVOWeightGlobalInfo {
 	DispatchIndirectCommand cmd2;
 	uint indivisibleNodeCount_G;
 	uint indivisibleNodeCount_E;
-	uint SVOMaxLayer_G;
 #ifndef NDEBUG
 	AABB sampelNodeAABB;
 	uint sampelNodeLabel;
 #endif
+
+#ifdef USE_SVO
+	uint SVOMaxLayer_G;
 	SVOLayerInfo layerInfos_G[MAX_SVO_LAYER];
+#else
+	OctreeLayerInfo layerInfos_G[MAX_OCTREE_LAYER];
+#endif
 };
 struct SVOIndivisibleNodeInfo {
 	uint32_t layerIndex;
 	uint32_t nodeIndex;
 };
 
-struct SVOIndivisibleNodeNearbyNodeInfo {
+struct IndivisibleNodeNearbyNodeInfo {
+#ifdef USE_SVO
 	int nearbyNodeIndices[NEARBY_NODE_COUNT];
+#else
+	int2 nearbyNodeInfos[NEARBY_NODE_COUNT];
+#endif
 	float nearbyNodeDistances[NEARBY_NODE_COUNT];
 };
 
-#define GETINDIVISIBLENODEINFO_CS_THREADGROUP_SIZE 512
 #define INITWEIGHT_CS_THREADGROUP_SIZE 512
 #define GETWEIGHT_CS_THREADGROUP_SIZE 512
 #define GETPROBABILITY_CS_THREADGROUP_SIZE 512

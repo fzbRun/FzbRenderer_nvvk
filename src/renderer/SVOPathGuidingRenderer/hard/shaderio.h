@@ -7,7 +7,10 @@
 
 //#define CLUSTER_WITH_MATERIAL
 //#define WEIGHT_WITH_MATERIAL
-#define USE_SVO
+//#define USE_SVO
+#define MERGE_SIMILIAR_E
+
+#define NEARBY_NODE_COUNT 4	//must 2 exponent
 
 NAMESPACE_SHADERIO_BEGIN()
 
@@ -32,7 +35,11 @@ enum class StaticBindingPoints_SVOPG
 {
 	//eTextures = 0,
 	//eOutImage = 1,	//First save the result of lightInject, and finally MIS
+#ifdef USE_SVO
 	eSVO_G = 2,
+#else
+	eOctreeArray_G = 2,
+#endif
 	eNodeData_E,
 	eGlobalInfo,
 	eWeights,

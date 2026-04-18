@@ -529,7 +529,7 @@ PSout_Wireframe fragmentMain_Wireframe(VSout_Wireframe input) {
     output.color7 = colors[7]; 
     #endif
     #if WireframeMapCount > 8
-    output.color8 = colors[81];
+    output.color8 = colors[8];
     #endif
     #if WireframeMapCount > 9
     output.color9 = colors[9];

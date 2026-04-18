@@ -176,11 +176,11 @@ bool getNodeAABB_E_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload, inout 
 
     SVONodeData_G nodeData_G;
     NodeInfo_G nodeInfo_G = groupNodeInfos_G[normalIndex];
-    nodeLabel_G = (nodeInfo_G.label_indivisible >> 1);
+    nodeLabel_G = (nodeInfo_G.label_indivisible >> 1) - 1;
     bool indivisible = (nodeInfo_G.label_indivisible & 1u) == 1;
     bool hitIndivisible = false, hitNode = false;
     if (!indivisible) {
-        uint nodeLayerLabel = nodeLabel_G - 1;
+        uint nodeLayerLabel = nodeLabel_G;
         nodeLabel_G = groupSVOLayerInfos_G[1].indivisibleNodeCount;
         uint nodeIndexSum_G = 8;
         uint nodeIndex_G = nodeLayerLabel * 8 + nodeIndexSum_G;

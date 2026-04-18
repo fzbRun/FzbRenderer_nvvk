@@ -122,7 +122,7 @@ void rayClosestHitMain(inout LightInjectHitPayload payload, in BuiltInTriangleIn
 
     payload.randomSeed = callablePayload.randomSeed;
     payload.radiance = payload.radiance * callablePayload.bsdf * hitState.cosineON + callablePayload.radianceSum_nee + material.emissive;
-    payload.radiance = min(payload.radiance, sceneInfo.lights[0].color * sceneInfo.lights[0].intensity * 2.0f);
+    payload.radiance = min(payload.radiance, sceneInfo.lights[0].color * sceneInfo.lights[0].intensity * 1.5f);
 
     payload.rayDirection = callablePayload.incidence;
     payload.rayOrigin = hitState.pos + 0.001f * payload.rayDirection;

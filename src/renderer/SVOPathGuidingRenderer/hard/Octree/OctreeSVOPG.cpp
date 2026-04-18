@@ -44,6 +44,26 @@ void Octree_SVOPG::clean() {
 	Application::allocator.destroyBuffer(GlobalInfoBuffer);
 
 	VkDevice device = Application::app->getDevice();
+
+	#ifndef USE_SVO
+	Application::allocator.destroyBuffer(divisibleNodeInfos_G);
+	Application::allocator.destroyBuffer(threadGroupInfos);
+
+	Application::allocator.destroyBuffer(indivisibleNodeInfosBuffer_G);
+	Application::allocator.destroyBuffer(indivisibleNodeInfosBuffer_E);
+
+	vkDestroyShaderEXT(device, computeShader_getOctreeLabel1, nullptr);
+	vkDestroyShaderEXT(device, computeShader_getOctreeLabel2, nullptr);
+	vkDestroyShaderEXT(device, computeShader_getOctreeLabel3, nullptr);
+
+	vkDestroyShaderEXT(device, computeShader_getIndivisibleNodeInfos, nullptr);
+
+	#ifndef NDEBUG
+	vkDestroyShaderEXT(device, vertexShader_Wireframe2, nullptr);
+	vkDestroyShaderEXT(device, fragmentShader_Wireframe2, nullptr);
+	#endif
+	#endif
+
 	vkDestroyShaderEXT(device, computeShader_initOctreeArray, nullptr);
 	vkDestroyShaderEXT(device, computeShader_initHasDataBlockInfo, nullptr);
 	vkDestroyShaderEXT(device, computeShader_getGlobalInfo, nullptr);
@@ -59,8 +79,9 @@ void Octree_SVOPG::uiRender() {
 #ifndef NDEBUG
 	bool& UIModified = Application::UIModified;
 
-	std::vector<std::string> wireframeMapNames(showLayerCount);
-	for (int i = 0; i < showLayerCount; ++i) wireframeMapNames[i] = "octreeLayer" + std::to_string(i + OCTREE_CLUSTER_LAYER);
+	uint32_t octreeShowLayerCount = showLayerCount / 2;
+	std::vector<std::string> wireframeMapNames(octreeShowLayerCount);
+	for (int i = 0; i < octreeShowLayerCount; ++i) wireframeMapNames[i] = "octreeLayer" + std::to_string(i + OCTREE_CLUSTER_LAYER);
 
 	std::vector<const char*> wireframeMapNames_pointers;
 	for (const auto& wireframeMapName : wireframeMapNames)
@@ -88,6 +109,9 @@ void Octree_SVOPG::uiRender() {
 			{
 				showWireframeMap_G = !showWireframeMap_G;
 				showWireframeMap_E = false;
+				#ifndef USE_SVO
+				showWireframeMap2_G = false;
+				#endif
 			}
 		}
 		PE::end();
@@ -102,7 +126,7 @@ void Octree_SVOPG::uiRender() {
 				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, hoveredColor);
 				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(5, 5));
 
-				bool result = ImGui::ImageButton("##but", (ImTextureID)gBuffers.getDescriptorSet(selectedWireframeMapIndex_E + showLayerCount),
+				bool result = ImGui::ImageButton("##but", (ImTextureID)gBuffers.getDescriptorSet(selectedWireframeMapIndex_E + octreeShowLayerCount),
 					ImVec2(100 * gBuffers.getAspectRatio(), 100));
 
 				ImGui::PopStyleColor(2);
@@ -112,14 +136,46 @@ void Octree_SVOPG::uiRender() {
 			{
 				showWireframeMap_E = !showWireframeMap_E;
 				showWireframeMap_G = false;
+				#ifndef USE_SVO
+				showWireframeMap2_G = false;
+				#endif
 			}
 		}
 		PE::end();
+
+		#ifndef USE_SVO
+		if (PE::begin()) {
+			if (PE::entry("SVO Weight Debug Map", [&] {
+				static const ImVec4 highlightColor = ImVec4(118.f / 255.f, 185.f / 255.f, 0.f, 1.f);
+				ImVec4 selectedColor = showWireframeMap2_G ? highlightColor : ImGui::GetStyleColorVec4(ImGuiCol_Button);
+				ImVec4 hoveredColor = ImVec4(selectedColor.x * 1.2f, selectedColor.y * 1.2f, selectedColor.z * 1.2f, 1.f);
+				ImGui::PushStyleColor(ImGuiCol_Button, selectedColor);
+				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, hoveredColor);
+				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(5, 5));
+
+				bool result = ImGui::ImageButton("##but", (ImTextureID)gBuffers.getDescriptorSet(showLayerCount - 1),
+					ImVec2(100 * gBuffers.getAspectRatio(), 100));
+
+				ImGui::PopStyleColor(2);
+				ImGui::PopStyleVar();
+				return result;
+				}))
+			{
+				showWireframeMap2_G = !showWireframeMap2_G;
+				showWireframeMap_G = false;
+				showWireframeMap_E = false;
+			}
+		}
+		PE::end();
+		#endif
 	}
 	ImGui::End();
 
 	if (showWireframeMap_G) Application::viewportImage = gBuffers.getDescriptorSet(selectedWireframeMapIndex_G);
-	if (showWireframeMap_E) Application::viewportImage = gBuffers.getDescriptorSet(selectedWireframeMapIndex_E + showLayerCount);
+	if (showWireframeMap_E) Application::viewportImage = gBuffers.getDescriptorSet(selectedWireframeMapIndex_E + octreeShowLayerCount);
+	#ifndef USE_SVO
+	if (showWireframeMap2_G) Application::viewportImage = gBuffers.getDescriptorSet(showLayerCount - 1);
+	#endif
 #endif
 };
 void Octree_SVOPG::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
@@ -157,12 +213,21 @@ void Octree_SVOPG::render(VkCommandBuffer cmd) {
 	initOctreeArray(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT);
 	createOctreeArray(cmd);
+#ifndef USE_SVO
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	getOctreeLabel(cmd);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	getIndivisibleNodeInfos(cmd);
+#endif
 }
 void Octree_SVOPG::postProcess(VkCommandBuffer cmd) {
 #ifndef NDEBUG
 	debug_wirefame(cmd);
 	//nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	////debug_mergeResult(cmd);
+	#ifndef USE_SVO
+	debug_wireframe2(cmd);
+	#endif
 #endif
 };
 
@@ -223,6 +288,29 @@ void Octree_SVOPG::createOctreeArray() {
 	allocator->createBuffer(GlobalInfoBuffer, bufferSize,
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_2_INDIRECT_BUFFER_BIT);
 	NVVK_DBG_NAME(GlobalInfoBuffer.buffer);
+
+	#ifndef USE_SVO
+	bufferSize = sizeof(shaderio::uint2) * (1 << (3 * (setting.OctreeLayerCount - 1)));
+	allocator->createBuffer(divisibleNodeInfos_G, bufferSize,
+		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+	NVVK_DBG_NAME(divisibleNodeInfos_G.buffer);
+
+	uint32_t maxLayerNodeCount = (1 << (3 * setting.OctreeLayerCount));
+	bufferSize = sizeof(shaderio::OctreeThreadGroupInfo) * (maxLayerNodeCount / GETOCTREELABEL_CS_THREADGROUP_SIZE);
+	allocator->createBuffer(threadGroupInfos, bufferSize,
+		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+	NVVK_DBG_NAME(threadGroupInfos.buffer);
+
+	bufferSize = IndivisibleNodeCount_G * sizeof(shaderio::uint2);
+	allocator->createBuffer(indivisibleNodeInfosBuffer_G, bufferSize,
+		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+	NVVK_DBG_NAME(indivisibleNodeInfosBuffer_G.buffer);
+
+	bufferSize = NODECOUNT_E * sizeof(uint32_t);
+	allocator->createBuffer(indivisibleNodeInfosBuffer_E, bufferSize,
+		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+	NVVK_DBG_NAME(indivisibleNodeInfosBuffer_E.buffer);
+	#endif
 
 	pushConstant.octreeMaxLayer = setting.OctreeLayerCount;
 	pushConstant.octreeNodeTotalCount = int(pow(8, setting.OctreeLayerCount + 1) - 1) / 7 * 6;
@@ -290,18 +378,28 @@ void Octree_SVOPG::createDescriptorSetLayout() {
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
-#ifndef NDEBUG
+	#ifndef USE_SVO
 	bindings.addBinding({
-		.binding = (uint32_t)shaderio::BindingPoints_Octree_SVOPG::eWireframeMap,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-		.descriptorCount = showLayerCount * 2,
-		.stageFlags = VK_SHADER_STAGE_ALL });
-	bindings.addBinding({
-		.binding = (uint32_t)shaderio::BindingPoints_Octree_SVOPG::eBaseMap,
-		.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+		.binding = (uint32_t)shaderio::BindingPoints_Octree_SVOPG::eDivisibleNodeInfos_G,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
-#endif
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::BindingPoints_Octree_SVOPG::eThreadGroupInfos,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::BindingPoints_Octree_SVOPG::eIndivisibleNodeInfos_G,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::BindingPoints_Octree_SVOPG::eIndivisibleNodeInfos_E,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+	#endif
 
 	staticDescPack.init(bindings, Application::app->getDevice(), 1, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
 		VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT);
@@ -362,6 +460,24 @@ void Octree_SVOPG::createDescriptorSet() {
 		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_SVOPG::eGlobalInfo, 0, 0, 1);
 	write.append(GlobalInfoWrite, GlobalInfoBuffer, 0, GlobalInfoBuffer.bufferSize);
 
+	#ifndef USE_SVO
+	VkWriteDescriptorSet    LabelInfoWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_SVOPG::eDivisibleNodeInfos_G, 0, 0, 1);
+	write.append(LabelInfoWrite, divisibleNodeInfos_G, 0, divisibleNodeInfos_G.bufferSize);
+
+	LabelInfoWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_SVOPG::eThreadGroupInfos, 0, 0, 1);
+	write.append(LabelInfoWrite, threadGroupInfos, 0, threadGroupInfos.bufferSize);
+
+	VkWriteDescriptorSet    IndivisibleInfoWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_SVOPG::eIndivisibleNodeInfos_G, 0, 0, 1);
+	write.append(IndivisibleInfoWrite, indivisibleNodeInfosBuffer_G, 0, indivisibleNodeInfosBuffer_G.bufferSize);
+
+	IndivisibleInfoWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_SVOPG::eIndivisibleNodeInfos_E, 0, 0, 1);
+	write.append(IndivisibleInfoWrite, indivisibleNodeInfosBuffer_E, 0, indivisibleNodeInfosBuffer_E.bufferSize);
+	#endif
+
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }
 void Octree_SVOPG::compileAndCreateShaders() {
@@ -369,7 +485,7 @@ void Octree_SVOPG::compileAndCreateShaders() {
 
 	#ifndef NDEBUG
 	std::string wireframeMapCountName = "WireframeMapCount";
-	std::string wireframeMapCount = std::to_string(showLayerCount * 2);
+	std::string wireframeMapCount = std::to_string(showLayerCount - 1);
 	Application::slangCompiler.addMacro({
 		.name = wireframeMapCountName.c_str(),
 		.value = wireframeMapCount.c_str()
@@ -377,7 +493,11 @@ void Octree_SVOPG::compileAndCreateShaders() {
 	#endif
 
 	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
+	#ifdef USE_SVO
 	std::filesystem::path shaderSource = shaderPath / "Octree2.slang";
+	#else
+	std::filesystem::path shaderSource = shaderPath / "Octree.slang";
+	#endif
 	VkShaderModuleCreateInfo shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
 
 	#ifndef NDEBUG
@@ -450,6 +570,71 @@ void Octree_SVOPG::compileAndCreateShaders() {
 	shaderInfo.pCode = shaderCode.pCode;
 	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_createOctreeArray2);
 	NVVK_DBG_NAME(computeShader_createOctreeArray2);
+#ifndef USE_SVO
+	//--------------------------------------------------------------------------------------
+	vkDestroyShaderEXT(device, computeShader_getOctreeLabel1, nullptr);
+
+	shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	shaderInfo.nextStage = 0;
+	shaderInfo.pName = "computeMain_getOctreeLabel1";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_getOctreeLabel1);
+	NVVK_DBG_NAME(computeShader_getOctreeLabel1);
+	//--------------------------------------------------------------------------------------
+	vkDestroyShaderEXT(device, computeShader_getOctreeLabel2, nullptr);
+
+	shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	shaderInfo.nextStage = 0;
+	shaderInfo.pName = "computeMain_getOctreeLabel2";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_getOctreeLabel2);
+	NVVK_DBG_NAME(computeShader_getOctreeLabel2);
+	//--------------------------------------------------------------------------------------
+	vkDestroyShaderEXT(device, computeShader_getOctreeLabel3, nullptr);
+
+	shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	shaderInfo.nextStage = 0;
+	shaderInfo.pName = "computeMain_getOctreeLabel3";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_getOctreeLabel3);
+	NVVK_DBG_NAME(computeShader_getOctreeLabel3);
+	//--------------------------------------------------------------------------------------
+	vkDestroyShaderEXT(device, computeShader_getIndivisibleNodeInfos, nullptr);
+
+	shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	shaderInfo.nextStage = 0;
+	shaderInfo.pName = "computeMain_getIndivisibleInfos";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_getIndivisibleNodeInfos);
+	NVVK_DBG_NAME(computeShader_getIndivisibleNodeInfos);
+
+	#ifndef NDEBUG
+	//--------------------------------------------------------------------------------------
+	vkDestroyShaderEXT(device, vertexShader_Wireframe2, nullptr);
+	vkDestroyShaderEXT(device, fragmentShader_Wireframe2, nullptr);
+
+	shaderInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+	shaderInfo.nextStage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	shaderInfo.pName = "vertexMain_Wireframe2";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &vertexShader_Wireframe2);
+	NVVK_DBG_NAME(vertexShader_Wireframe2);
+
+	shaderInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	shaderInfo.nextStage = 0;
+	shaderInfo.pName = "fragmentMain_Wireframe2";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &fragmentShader_Wireframe2);
+	NVVK_DBG_NAME(fragmentShader_Wireframe2);
+	#endif
+#endif
+
 #ifndef NDEBUG
 	//--------------------------------------------------------------------------------------
 	vkDestroyShaderEXT(device, vertexShader_Wireframe, nullptr);
@@ -534,11 +719,49 @@ void Octree_SVOPG::createOctreeArray(VkCommandBuffer cmd) {
 		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	}
 }
+#ifndef USE_SVO
+void Octree_SVOPG::getOctreeLabel(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
+
+	vkCmdPushConstants2(cmd, &pushInfo);
+
+	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getOctreeLabel1);
+	vkCmdDispatch(cmd, 1, 1, 1);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+
+	for (int layerIndex = 2; layerIndex <= pushConstant.octreeMaxLayer; ++layerIndex) {
+		pushConstant.currentLayer = layerIndex;
+		vkCmdPushConstants2(cmd, &pushInfo);
+
+		vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getOctreeLabel2);
+		vkCmdDispatchIndirect(cmd, GlobalInfoBuffer.buffer, 0);
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+
+		vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getOctreeLabel3);
+		vkCmdDispatchIndirect(cmd, GlobalInfoBuffer.buffer, 0);
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+	}
+}
+
+void Octree_SVOPG::getIndivisibleNodeInfos(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
+	vkCmdPushConstants2(cmd, &pushInfo);
+
+	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getIndivisibleNodeInfos);
+	vkCmdDispatch(cmd, 1, 1, 1);
+}
+#endif
 
 #ifndef NDEBUG
 void Octree_SVOPG::debugPrepare() {
 	showLayerCount = setting.OctreeLayerCount - OCTREE_CLUSTER_LAYER;
-	Feature::createGBuffer(true, false, showLayerCount * 2);
+	showLayerCount *= 2;
+	#ifndef USE_SVO
+	++showLayerCount;
+	#endif
+	Feature::createGBuffer(true, false, showLayerCount);
 
 	for (int i = OCTREE_CLUSTER_LAYER; i < this->setting.OctreeLayerCount; ++i)
 		pushConstant.showOctreeNodeTotalCount += pow(8, i);
@@ -559,20 +782,20 @@ void Octree_SVOPG::resize(
 
 	depthImageView = gBuffers_other.getDepthImageView();
 
-	for (int i = 0; i < showLayerCount * 2; ++i) {
-		VkWriteDescriptorSet wireframeMapWrite = staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_SVOPG::eWireframeMap, 0, i, 1);
-		write.append(wireframeMapWrite, gBuffers.getColorImageView(i), VK_IMAGE_LAYOUT_GENERAL);
-	}
-
-	VkWriteDescriptorSet baseMapWrite = staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_SVOPG::eBaseMap, 0, 0, 1);
-	write.append(baseMapWrite, gBuffers_other.getColorImageView(baseMapIndex), VK_IMAGE_LAYOUT_GENERAL);
+	//for (int i = 0; i < showLayerCount * 2; ++i) {
+	//	VkWriteDescriptorSet wireframeMapWrite = staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_SVOPG::eWireframeMap, 0, i, 1);
+	//	write.append(wireframeMapWrite, gBuffers.getColorImageView(i), VK_IMAGE_LAYOUT_GENERAL);
+	//}
+	//
+	//VkWriteDescriptorSet baseMapWrite = staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_SVOPG::eBaseMap, 0, 0, 1);
+	//write.append(baseMapWrite, gBuffers_other.getColorImageView(baseMapIndex), VK_IMAGE_LAYOUT_GENERAL);
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }
 void Octree_SVOPG::debug_wirefame(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
 
-	uint32_t wireframeMapCount = showLayerCount * 2;
+	uint32_t wireframeMapCount = showLayerCount - 1;
 	std::vector<VkRenderingAttachmentInfo> colorAttachments(wireframeMapCount);
 	for (int i = 0; i < wireframeMapCount; ++i) {
 		nvvk::cmdImageMemoryBarrier(cmd,
@@ -585,9 +808,9 @@ void Octree_SVOPG::debug_wirefame(VkCommandBuffer cmd) {
 		colorAttachments[i].clearValue = { .color = {0.0f, 0.0f, 0.0f, 0.0f} };
 	}
 	VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
-	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;		//使用PathGuiding的深度纹理
-	//depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
-	depthAttachment.imageView = depthImageView;	// gBuffers.getDepthImageView();	//depthImageView;
+	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;		//使用PathGuiding的深度纹理
+	depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
+	depthAttachment.imageView = gBuffers.getDepthImageView();	// gBuffers.getDepthImageView();	//depthImageView;
 
 	VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
 	renderingInfo.renderArea = { {0, 0}, gBuffers.getSize() };
@@ -606,7 +829,7 @@ void Octree_SVOPG::debug_wirefame(VkCommandBuffer cmd) {
 	graphicsDynamicPipeline.rasterizationState.lineWidth = setting.lineWidth;
 	graphicsDynamicPipeline.rasterizationState.polygonMode = VK_POLYGON_MODE_LINE;
 	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_TRUE;
-	graphicsDynamicPipeline.depthStencilState.depthWriteEnable = VK_FALSE;
+	graphicsDynamicPipeline.depthStencilState.depthWriteEnable = VK_TRUE;
 
 	graphicsDynamicPipeline.colorWriteMasks.resize(wireframeMapCount);
 	graphicsDynamicPipeline.colorBlendEquations.resize(wireframeMapCount);
@@ -655,4 +878,67 @@ void Octree_SVOPG::debug_wirefame(VkCommandBuffer cmd) {
 			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
 	}
 }
+
+#ifndef USE_SVO
+void Octree_SVOPG::debug_wireframe2(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
+
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(showLayerCount - 1), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
+
+	VkRenderingAttachmentInfo colorAttachment = DEFAULT_VkRenderingAttachmentInfo;
+	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	colorAttachment.imageView = gBuffers.getColorImageView(showLayerCount - 1);
+	colorAttachment.clearValue = { .color = {0.0f, 0.0f, 0.0f, 0.0f} };
+
+	VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
+	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;		//使用PathGuiding的深度纹理
+	depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
+	depthAttachment.imageView = gBuffers.getDepthImageView();	// gBuffers.getDepthImageView();	//depthImageView;
+
+	VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
+	renderingInfo.renderArea = { {0, 0}, gBuffers.getSize() };
+	renderingInfo.colorAttachmentCount = 1;
+	renderingInfo.pColorAttachments = &colorAttachment;
+	renderingInfo.pDepthAttachment = &depthAttachment;
+
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1,
+		staticDescPack.getSetPtr(), 0, nullptr);
+
+	vkCmdBeginRendering(cmd, &renderingInfo);
+
+	graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
+	graphicsDynamicPipeline.inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;		//如果想使用虚线可以设置rasterizationLineState
+	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;
+	graphicsDynamicPipeline.rasterizationState.lineWidth = setting.lineWidth;
+	graphicsDynamicPipeline.rasterizationState.polygonMode = VK_POLYGON_MODE_LINE;
+	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_TRUE;
+	graphicsDynamicPipeline.depthStencilState.depthWriteEnable = VK_TRUE;
+
+	graphicsDynamicPipeline.cmdApplyAllStates(cmd);
+	graphicsDynamicPipeline.cmdSetViewportAndScissor(cmd, gBuffers.getSize());
+	graphicsDynamicPipeline.cmdBindShaders(cmd, { .vertex = vertexShader_Wireframe2, .fragment = fragmentShader_Wireframe2 });
+
+	VkVertexInputBindingDescription2EXT bindingDescription{};
+	VkVertexInputAttributeDescription2EXT attributeDescription = {};
+	vkCmdSetVertexInputEXT(cmd, 0, nullptr, 0, nullptr);
+
+	uint32_t wireframeMeshIndex = 0;
+	const shaderio::Mesh& mesh = scene.meshes[wireframeMeshIndex];
+	const shaderio::TriangleMesh& triMesh = mesh.triMesh;
+
+	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
+	vkCmdPushConstants2(cmd, &pushInfo);
+
+	uint32_t bufferIndex = scene.getMeshBufferIndex(wireframeMeshIndex);
+	const nvvk::Buffer& v = scene.bDatas[bufferIndex];
+
+	vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(mesh.indexType));
+
+	vkCmdDrawIndexed(cmd, triMesh.indices.count, IndivisibleNodeCount_G, 0, 0, 0);
+
+	vkCmdEndRendering(cmd);
+
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(showLayerCount - 1), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
+}
+#endif
 #endif
