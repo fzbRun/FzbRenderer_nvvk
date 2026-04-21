@@ -14,56 +14,59 @@ void raygenMain()
 
     SceneInfo* sceneInfo = pushConst.sceneInfoAddress;
 
-    uint seed = xxhash32(uint3(uint2(launchID.xy), pushConst.frameIndex));
-    float r1 = rand(seed);
-    float r2 = rand(seed);
-    float2 subpixel_jitter = pushConst.frameIndex == 0 ? float2(0.5f, 0.5f) : float2(r1, r2);
+    HitPayload payload;
+    payload.randomSeed = xxhash32(uint3(uint2(launchID.xy), pushConst.frameIndex));
 
-    const uint rayFlags = 0;    //RAY_FLAG_CULL_BACK_FACING_TRIANGLES;
-    const float2 pixelCenter = launchID + subpixel_jitter;
-    const float2 clipCoords = pixelCenter / launchSize * 2.0 - 1.0;
-    float4 viewCoords = mul(float4(clipCoords, 1.0, 1.0), sceneInfo.projInvMatrix);
-    viewCoords /= viewCoords.w;
-
+    const uint rayFlags = 0; // RAY_FLAG_CULL_BACK_FACING_TRIANGLES;
     RayDesc ray;
-    ray.Origin = sceneInfo.cameraPosition; // mul(float4(0.0, 0.0, 0.0, 1.0), sceneInfo.viewInvMatrix).xyz;
-    ray.Direction =  normalize(mul(float4(normalize(viewCoords.xyz), 0.0), sceneInfo.viewInvMatrix).xyz);
     ray.TMin = 0.001;
     ray.TMax = INFINITE;
-
-    // Initial state
-    HitPayload payload;
-    payload.randomSeed = seed;
-    payload.radiance  = float3(0, 0, 0);
-    payload.bsdf_cosine = float3(1.0f);
-    payload.pdf = 1.0f;
-    payload.bounceDepth = 0;
-    payload.rayOrigin = ray.Origin;
-    payload.rayDirection = ray.Direction;
-    payload.isExt = true;
 
     float3 accumulatedRadiance = float3(0, 0, 0);
     float RR = 0.8f;
 
-    // Iterative reflection loop
-    while (payload.bounceDepth < pushConst.maxDepth && (payload.bsdf_cosine.x + payload.bsdf_cosine.y + payload.bsdf_cosine.z > 0.0001f))
-    {
-    #ifdef PathTracingMotionBlur
-        TraceMotionRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, pushConst.time, payload);
-    #else
-        TraceRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, payload);
-    #endif
-        accumulatedRadiance += payload.radiance;
+    for (int sampleIndex = 0; sampleIndex < pushConst.spp; ++sampleIndex) {
+        float r1 = rand(payload.randomSeed);
+        float r2 = rand(payload.randomSeed);
+        float2 subpixel_jitter = pushConst.frameIndex == 0 && sampleIndex == 0? float2(0.5f, 0.5f) : float2(r1, r2);
 
-        float randomNumber = rand(payload.randomSeed);
-        if (randomNumber >= RR) break;
-        payload.pdf *= RR;
+        const float2 pixelCenter = launchID + subpixel_jitter;
+        const float2 clipCoords = pixelCenter / launchSize * 2.0 - 1.0;
+        float4 viewCoords = mul(float4(clipCoords, 1.0, 1.0), sceneInfo.projInvMatrix);
+        viewCoords /= viewCoords.w;
 
-        ray.Origin = payload.rayOrigin;
-        ray.Direction = payload.rayDirection;
+        ray.Origin = sceneInfo.cameraPosition; // mul(float4(0.0, 0.0, 0.0, 1.0), sceneInfo.viewInvMatrix).xyz;
+        ray.Direction = normalize(mul(float4(normalize(viewCoords.xyz), 0.0), sceneInfo.viewInvMatrix).xyz);
+
+        payload.radiance = float3(0, 0, 0);
+        payload.bsdf_cosine = float3(1.0f);
+        payload.pdf = 1.0f;
+        payload.bounceDepth = 0;
+        payload.rayOrigin = ray.Origin;
+        payload.rayDirection = ray.Direction;
+        payload.isExt = true;
+
+        // Iterative reflection loop
+        while (payload.bounceDepth < pushConst.maxDepth && (payload.bsdf_cosine.x + payload.bsdf_cosine.y + payload.bsdf_cosine.z > 0.0001f))
+        {
+            #ifdef PathTracingMotionBlur
+            TraceMotionRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, pushConst.time, payload);
+            #else
+            TraceRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, payload);
+            #endif
+            accumulatedRadiance += payload.radiance;
+
+            float randomNumber = rand(payload.randomSeed);
+            if (randomNumber >= RR) break;
+            payload.pdf *= RR;
+
+            ray.Origin = payload.rayOrigin;
+            ray.Direction = payload.rayDirection;
+        }
     }
-
     if (any(isnan(accumulatedRadiance)) || any(isinf(accumulatedRadiance))) return;
+    accumulatedRadiance /= pushConst.spp;
+
     // When the maximum frame rate is reached, the original image will decay by ((maxframe-1)/maxframe)^k < 1, and the final image will turn black
     if (pushConst.frameIndex > 0)
     {

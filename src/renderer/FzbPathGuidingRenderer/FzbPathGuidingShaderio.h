@@ -1,23 +1,20 @@
 #pragma once
-
+/*
 #include <common/Shader/shaderStructType.h>
 
-#ifndef FZBRENDERER_PATHGUIDING_SHADER_IO_H
-#define FZBRENDERER_PATHGUIDING_SHADER_IO_H
+#ifndef FZBRENDERER_FZB_PATHGUIDING_SHADER_IO_H
+#define FZBRENDERER_FZB_PATHGUIDING_SHADER_IO_H
+NAMESPACE_SHADERIO_BEGIN()
 
-//#define CLUSTER_WITH_MATERIAL
-#define WEIGHT_WITH_MATERIAL
-//#define USE_SVO
 #define MERGE_SIMILIAR_E
 
 #define NEARBYNODE_JITTER
-#define NEARBY_NODE_COUNT 4	//must 2 exponent
+#define NEARBY_NODE_COUNT 4
 
-NAMESPACE_SHADERIO_BEGIN()
+#define FZB_PATHGUIDING_THREADGROUP_SIZE_X 16
+#define FZB_PATHGUIDING_THREADGROUP_SIZE_Y 16
 
-#define SVO_PATHGUIDING_THREADGROUP_SIZE_X 16
-#define SVO_PATHGUIDING_THREADGROUP_SIZE_Y 16
-struct SVOPathGuidingPushConstant
+struct FzbPathGuidingPushConstant
 {
 	float3x3 randomRotateMatrix;
 	float3 VGBVoxelSize;
@@ -33,17 +30,13 @@ struct SVOPathGuidingPushConstant
 	uint2 threadGroupCount;
 };
 
-enum class StaticBindingPoints_SVOPG
+enum class StaticBindingPoints_FzbPG
 {
 	//eTextures = 0,
-	//eOutImage = 1,	//First save the result of lightInject, and finally MIS
-#ifdef USE_SVO
-	eSVO_G = 2,
-#else
+	//eOutImage = 1,
 	eOctreeArray_G = 2,
-	#ifdef NEARBYNODE_JITTER
+#ifdef NEARBYNODE_JITTER
 	eOctreeNearbyNodeInfos,
-	#endif
 #endif
 	eNodeData_E,
 	eGlobalInfo,
@@ -52,12 +45,11 @@ enum class StaticBindingPoints_SVOPG
 	eDepthImage,
 #endif
 };
-enum DynamicBindingPoints_SVOPG {
+enum class DynamicBindingPoints_FzbPG {
 	//eTlas_SVOPG = 0,
 	eSVOTlas_SVOPG = 1,
 };
-
-struct GlobalInfo_SOVPG {
+struct GlobalInfo_FzbPG {
 	uint SVOMaxLayer_G;
 	uint indivisibleNodeCount_G;
 	uint totalNodeCount_E;
@@ -65,3 +57,4 @@ struct GlobalInfo_SOVPG {
 
 NAMESPACE_SHADERIO_END()
 #endif
+*/

@@ -488,9 +488,11 @@ void computeMain_SVOPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
     float3 accumulatedRadiance = float3(0.0f);
     float RR = 0.8f;
 
-    uint bounceDepth = 0;
+    uint bounceDepth = 0; bool useBsdfSample = false;
     while (bounceDepth < pushConst.maxDepth) {
-        bool hit = traceRay(ray, payload);
+        bool hit = true;
+        if (!useBsdfSample) hit = traceRay(ray, payload);
+        useBsdfSample = false;
 
         #ifndef NDEBUG
         if (bounceDepth == 0) {
@@ -535,6 +537,7 @@ void computeMain_SVOPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
             float bsdfSample_bsdfPdf = 1.0f;
             float bsdfSample_weight = 0.0f;
             float3 bsdfSample_bsdf = 0.0f;
+            HitPayload_SVOPG payload_bsdfSample;
             {
                 BSDF_SAMPLE(payload);
                 bsdfSample = payload.incidence;
@@ -546,7 +549,6 @@ void computeMain_SVOPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
                 ray_bsdfSample.TMin = 0.001;
                 ray_bsdfSample.TMax = INFINITE;
 
-                HitPayload_SVOPG payload_bsdfSample;
                 bool hit = traceRay(ray_bsdfSample, payload_bsdfSample);
                 if (hit) {
                     bsdfSample_pgPdf = getPgPdf(nodeLabel_G, outgoingIndex, payload_bsdfSample.hitPos, payload_bsdfSample.hitNormal, ray_bsdfSample.Origin);
@@ -564,6 +566,7 @@ void computeMain_SVOPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
                     payload.incidence = pgSample;
                     bsdf_cosine_pdf *= pgSample_weight / pgSample_pgPdf * pgSample_bsdf;
                 } else {
+                    useBsdfSample = true;
                     payload.incidence = bsdfSample;
                     bsdf_cosine_pdf *= bsdfSample_weight / bsdfSample_bsdfPdf * bsdfSample_bsdf;
                 }
@@ -572,7 +575,6 @@ void computeMain_SVOPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
             float cosine = dot(payload.hitNormal, payload.incidence);
             if (payload.material.type == MaterialType::Dielectric || payload.material.type == MaterialType::RoughDielectric) cosine = abs(cosine);
             bsdf_cosine_pdf *= cosine;
-            payload.outgoing = -payload.incidence;
 
             bool end = any(bsdf_cosine_pdf < 0.0f) || all(bsdf_cosine_pdf <= 0.0f) || any(isnan(bsdf_cosine_pdf)) || any(isinf(bsdf_cosine_pdf));
             if (end) break;
@@ -581,8 +583,15 @@ void computeMain_SVOPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
             if (randomNumber >= RR) break;
             bsdf_cosine_pdf /= RR;
 
-            ray.Direction = payload.incidence;
-            ray.Origin = offsetRay(payload.hitPos, payload.hitNormal);
+            if (useBsdfSample) {
+                payload_bsdfSample.randomSeed = payload.randomSeed;
+                payload_bsdfSample.outgoing = -payload.incidence;
+                payload = payload_bsdfSample;
+            } else {
+                payload.outgoing = -payload.incidence;
+                ray.Direction = payload.incidence;
+                ray.Origin = offsetRay(payload.hitPos, payload.hitNormal);
+            }
 
             ++bounceDepth;
         }

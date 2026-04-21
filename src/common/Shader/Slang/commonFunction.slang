@@ -66,7 +66,8 @@ inline bool checkPointInAABB(float3 pos, AABB aabb) {
 }
 inline float getDistanceToAABB(float3 pos, AABB aabb) {
     float3 center = (aabb.maximum + aabb.minimum) * 0.5f;
-    return length(center - pos);
+    float3 centerToPos = abs(center - pos) + 1e-16f;
+    return length(centerToPos);
 }
 inline float3 getAABBPoint(float3 sampleDir, float3 aabbCenter, float3 aabbHalfSize) {
     float3 invDir = 1.0f / max(abs(sampleDir), 1e-6f);
@@ -84,6 +85,14 @@ float PointToAABBDistance(float3 pos, AABB aabb)
     float dy = max(aabb.minimum.y - pos.y, max(0.0f, pos.y - aabb.maximum.y));
     float dz = max(aabb.minimum.z - pos.z, max(0.0f, pos.z - aabb.maximum.z));
     return sqrt(max(dx * dx + dy * dy + dz * dz, 1e-6f));
+}
+float AABBDistance(AABB aabb1, AABB aabb2)
+{
+    float3 d1 = aabb2.minimum - aabb1.maximum;
+    float3 d2 = aabb1.minimum - aabb2.maximum;
+    float3 gap = max(d1, d2);
+    gap = max(gap, 0.0);
+    return length(gap);
 }
 //------------------------------------------------SphericalFibonacci---------------------------------------------
 #define M_PHI 1.618033988749895

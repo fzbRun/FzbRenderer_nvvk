@@ -30,7 +30,8 @@ void SVOWeight::clean() {
 
 	Application::allocator.destroyBuffer(GlobalInfoBuffer);
 	Application::allocator.destroyBuffer(weightBuffer);
-	Application::allocator.destroyBuffer(nearbyNodeInfosBuffer);
+	Application::allocator.destroyBuffer(nearbyNodeTempInfosBuffer);
+	Application::allocator.destroyBuffer(octreeNearbyNodeInfosBuffer);
 
 	vkDestroyShaderEXT(device, computeShader_initWeights, nullptr);
 	vkDestroyShaderEXT(device, computeShader_getWeights, nullptr);
@@ -121,14 +122,13 @@ void SVOWeight::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 void SVOWeight::preRender() {
 	if (Application::sceneResource.cameraChange) Application::frameIndex = 0;
 
-	float angle = FzbRenderer::rand(Application::frameIndex) * glm::four_over_pi<float>();
+	float angle = FzbRenderer::rand(Application::frameIndex) * glm::two_pi<float>();
 	randomRotateMatrix = glm::mat3(glm::rotate(glm::mat4(1.0f), angle, glm::vec3(0, 0, 1)));
 	pushConstant.randomRotateMatrix = randomRotateMatrix;
-
+	pushConstant.frameIndex = Application::frameIndex;
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 
 #ifndef NDEBUG
-	pushConstant.frameIndex = Application::frameIndex;
 	pushConstant.samplePos = samplePoint;
 	pushConstant.outgoing = outgoing;
 #endif
@@ -164,8 +164,10 @@ void SVOWeight::render(VkCommandBuffer cmd) {
 	vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 1, write.size(), write.data());
 
 	initWeights(cmd);
-	//getNearbyNodeInfos(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+	#ifdef NEARBYNODE_JITTER
+	getNearbyNodeInfos(cmd);
+	#endif
 	getWeights(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 	getProbability(cmd);
@@ -173,7 +175,9 @@ void SVOWeight::render(VkCommandBuffer cmd) {
 void SVOWeight::postProcess(VkCommandBuffer cmd) {
 #ifndef NDEBUG
 	debug_visualization(cmd);
-	//debug_nearby(cmd);
+	#ifdef NEARBYNODE_JITTER
+	debug_nearby(cmd);
+	#endif
 #endif
 };
 
@@ -194,10 +198,17 @@ void SVOWeight::createWeightArray() {
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(weightBuffer.buffer);
 
-	bufferSize = IndivisibleNodeCount_G * (IndivisibleNodeCount_G / GETNEARBYNODES_CS_THREADGROUP_SIZE) * sizeof(shaderio::IndivisibleNodeNearbyNodeInfo);
-	allocator->createBuffer(nearbyNodeInfosBuffer, bufferSize,
+	bufferSize = IndivisibleNodeCount_G * (IndivisibleNodeCount_G / GETNEARBYNODES_CS_THREADGROUP_SIZE) * sizeof(shaderio::IndivisibleNodeNearbyNodeTempInfo);
+	allocator->createBuffer(nearbyNodeTempInfosBuffer, bufferSize,
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-	NVVK_DBG_NAME(nearbyNodeInfosBuffer.buffer);
+	NVVK_DBG_NAME(nearbyNodeTempInfosBuffer.buffer);
+
+	#if !defined(USE_SVO) && defined(NEARBYNODE_JITTER)
+	bufferSize = IndivisibleNodeCount_G * sizeof(shaderio::OctreeNearbyNodeInfo);
+	allocator->createBuffer(octreeNearbyNodeInfosBuffer, bufferSize,
+		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+	NVVK_DBG_NAME(octreeNearbyNodeInfosBuffer.buffer);
+	#endif
 }
 void SVOWeight::createDescriptorSetLayout() {
 	SCOPED_TIMER(__FUNCTION__);
@@ -245,10 +256,17 @@ void SVOWeight::createDescriptorSetLayout() {
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
-		.binding = (uint32_t)shaderio::StaticBindingPoints_SVOWeight::eIndivisibleNodeNearbyNodeInfos,
+		.binding = (uint32_t)shaderio::StaticBindingPoints_SVOWeight::eIndivisibleNodeNearbyNodeTempInfos,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
+	#ifndef USE_SVO
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_SVOWeight::eOctreeNearbyNodeInofs,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+	#endif
 
 	#ifndef NDEBUG
 	bindings.addBinding({ .binding = shaderio::StaticSetBindingPoints_PT::eTextures_PT,
@@ -327,8 +345,14 @@ void SVOWeight::createDescriptorSet() {
 	write.append(weightsWrite, weightBuffer, 0, weightBuffer.bufferSize);
 
 	VkWriteDescriptorSet nearbyNodeInfosWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOWeight::eIndivisibleNodeNearbyNodeInfos, 0, 0, 1);
-	write.append(nearbyNodeInfosWrite, nearbyNodeInfosBuffer, 0, nearbyNodeInfosBuffer.bufferSize);
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOWeight::eIndivisibleNodeNearbyNodeTempInfos, 0, 0, 1);
+	write.append(nearbyNodeInfosWrite, nearbyNodeTempInfosBuffer, 0, nearbyNodeTempInfosBuffer.bufferSize);
+
+	#if !defined(USE_SVO) && defined(NEARBYNODE_JITTER)
+	nearbyNodeInfosWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOWeight::eOctreeNearbyNodeInofs, 0, 0, 1);
+	write.append(nearbyNodeInfosWrite, octreeNearbyNodeInfosBuffer, 0, octreeNearbyNodeInfosBuffer.bufferSize);
+	#endif
 
 #ifndef NDEBUG
 	if (!Application::sceneResource.textures.empty()) {
@@ -560,7 +584,7 @@ void SVOWeight::debugPrepare() {
 
 	scene.createSceneInfoBuffer();
 
-	pushConstant.sampleNodeLabel = 53;	// 39;354; 81;9
+	pushConstant.sampleNodeLabel = 184;	// 47;
 }
 void SVOWeight::resize(
 	VkCommandBuffer cmd, const VkExtent2D& size,

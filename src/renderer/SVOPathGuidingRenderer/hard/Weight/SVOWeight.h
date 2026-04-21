@@ -53,7 +53,7 @@ public:
 
 	nvvk::Buffer GlobalInfoBuffer;
 	nvvk::Buffer weightBuffer;
-	nvvk::Buffer nearbyNodeInfosBuffer;
+	nvvk::Buffer octreeNearbyNodeInfosBuffer;
 
 	VkShaderEXT computeShader_initWeights{};
 	VkShaderEXT computeShader_getWeights{};
@@ -62,6 +62,7 @@ public:
 	VkShaderEXT computeShader_getNearbyNodes{};
 	VkShaderEXT computeShader_getNearbyNodes2{};
 private:
+	nvvk::Buffer nearbyNodeTempInfosBuffer;
 
 	shaderio::SVOWeightPushConstant pushConstant;
 	VkPushConstantsInfo pushInfo;

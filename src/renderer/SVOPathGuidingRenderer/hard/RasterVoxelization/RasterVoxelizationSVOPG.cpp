@@ -32,7 +32,7 @@ RasterVoxelization_SVOPG::RasterVoxelization_SVOPG(pugi::xml_node& featureNode) 
 
 	if (pugi::xml_node voxelCountNode = featureNode.child("voxelCount"))
 		setting.pushConstant.voxelSize_Count.w = std::stoi(voxelCountNode.attribute("value").value());
-	else setting.pushConstant.voxelSize_Count.w = 64;
+	else setting.pushConstant.voxelSize_Count.w = 16;
 
 #ifndef NDEBUG
 	//-------------------------------------DebugSetting-------------------------------------------------
@@ -280,6 +280,7 @@ void RasterVoxelization_SVOPG::createVGBs() {
 			aabb.maximum.y = std::max(meshAABB.maximum.y, aabb.maximum.y);
 			aabb.maximum.z = std::max(meshAABB.maximum.z, aabb.maximum.z);
 		}
+
 		setting.sceneSize = aabb.maximum - aabb.minimum;
 		setting.sceneStartPos = aabb.minimum;
 

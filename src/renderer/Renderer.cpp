@@ -4,6 +4,7 @@
 #include "PathTracingRenderer/hard/PathTracingRenderer.h"
 #include "SVOPathGuidingRenderer/hard/SVOPathGuiding.h"
 #include <nvvk/formats.hpp>
+#include "FzbPathGuidingRenderer/FzbPathGuiding.h"
 
 enum FzbRendererType {
 	FZB_RENDERER_FORWARD,
@@ -15,6 +16,7 @@ enum FzbRendererType {
 	FZB_FEATURE_COMPONENT_BVH_DEBUG,
 	FZB_FEATURE_COMPONENT_SVO_DEBUG,
 	FZB_FEATURE_COMPONENT_SVO_PG_DEBUG,
+	FZB_RENDERER_FZB_PATH_GUIDING,
 };
 std::map<std::string, FzbRendererType> RendererTypeMap{
 	{ "Forward", FZB_RENDERER_FORWARD },
@@ -26,6 +28,7 @@ std::map<std::string, FzbRendererType> RendererTypeMap{
 	{ "BVH_Debug", FZB_FEATURE_COMPONENT_BVH_DEBUG },
 	{ "SVO_Debug", FZB_FEATURE_COMPONENT_SVO_DEBUG },
 	{ "SVO_PG_Debug", FZB_FEATURE_COMPONENT_SVO_PG_DEBUG },
+	{ "FzbPathGuiding", FZB_RENDERER_FZB_PATH_GUIDING },
 };
 
 std::shared_ptr<FzbRenderer::Renderer> FzbRenderer::createRenderer(RendererCreateInfo& createInfo) {
@@ -36,6 +39,7 @@ std::shared_ptr<FzbRenderer::Renderer> FzbRenderer::createRenderer(RendererCreat
 			case FZB_RENDERER_DEFERRED: return std::make_shared<DeferredRenderer>(createInfo.rendererNode);
 			case FZB_RENDERER_PATH_TRACING: return std::make_shared<PathTracingRenderer>(createInfo.rendererNode);
 			case FZB_RENDERER_SVO_PATH_GUIDING: return std::make_shared<SVOPathGuidingRenderer>(createInfo.rendererNode);
+			//case FZB_RENDERER_FZB_PATH_GUIDING: return std::make_shared<FzbPathGuidingRenderer>(createInfo.rendererNode);
 		}
 		return nullptr;
 	}

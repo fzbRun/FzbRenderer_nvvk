@@ -12,7 +12,7 @@
 [[vk::binding(StaticBindingPoints_SVOWeight::eIndivisibleNodeInfos_G)]] RWStructuredBuffer<uint> SVO_IndivisibleNodeInfos_G;
 [[vk::binding(StaticBindingPoints_SVOWeight::eIndivisibleNodeInfos_E)]] RWStructuredBuffer<uint> SVO_IndivisibleNodeInfos_E;
 [[vk::binding(StaticBindingPoints_SVOWeight::eSVOWeights)]] RWStructuredBuffer<float> SVOWeights;
-[[vk::binding(StaticBindingPoints_SVOWeight::eIndivisibleNodeNearbyNodeInfos)]] RWStructuredBuffer<IndivisibleNodeNearbyNodeInfo> SVO_IndivisibleNodeNearbyNodeInfos;
+[[vk::binding(StaticBindingPoints_SVOWeight::eIndivisibleNodeNearbyNodeTempInfos)]] RWStructuredBuffer<IndivisibleNodeNearbyNodeTempInfo> SVO_IndivisibleNodeNearbyNodeTempInfos;
 
 struct IndivisibleNodeData_E {
     float3 normal;
@@ -42,6 +42,7 @@ struct IndivisibleNodeData2_G {
     float3 normal;
     uint materialIndex;
     AABB aabb;
+    uint nodeIndex;
 }
 //---------------------------------------------groupsharedMemory-----------------------------------------
 groupshared uint groupIndivisibleNodeCount_G;
@@ -117,7 +118,8 @@ void traceRay(RayDesc ray, inout HitPayload_SVOWeight payload, AABB nodeAABB_G)
         const float3 edge1 = triPos[1] - triPos[0];
         const float3 edge2 = triPos[2] - triPos[0];
         const float3 geoNormal = normalize(cross(edge1, edge2));
-        payload.normal = normalize(mul(worldToObject, geoNormal).xyz);
+        //payload.normal = normalize(mul(worldToObject, geoNormal).xyz);
+        payload.normal = normalize(mul(geoNormal, transpose(worldToObject)).xyz);
     }
     else payload.hit = 0.0f;
 }
@@ -268,6 +270,9 @@ void computeMain_initWeights(uint threadIndex: SV_DispatchThreadID, uint groupTh
         globalInfo.cmd.x = (svoGlobalInfo.indivisibleNodeCount_E * svoGlobalInfo.indivisibleNodeCount_G * OUTGOING_COUNT + GETWEIGHT_CS_THREADGROUP_SIZE - 1) / GETWEIGHT_CS_THREADGROUP_SIZE;
         globalInfo.cmd.y = 1; globalInfo.cmd.z = 1;
 
+        globalInfo.cmd2.x = svoGlobalInfo.indivisibleNodeCount_G * ((svoGlobalInfo.indivisibleNodeCount_G + GETNEARBYNODES_CS_THREADGROUP_SIZE - 1) / GETNEARBYNODES_CS_THREADGROUP_SIZE);
+        globalInfo.cmd2.y = 1; globalInfo.cmd2.z = 1;
+
         GlobalInfoBuffer[0] = globalInfo;
     }
 }
@@ -362,7 +367,7 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
             ray.TMax = INFINITE;
 
             traceRay(ray, hitPayload, nodeData_G.aabb);
-            hitPayload.weight = 0.000001f;
+            //hitPayload.weight = 0.000001f;
         }
 
         //if (pushConst.frameIndex == 0) {
@@ -563,6 +568,7 @@ void computeMain_getNearbyNodes(uint threadIndex: SV_DispatchThreadID, uint thre
         IndivisibleNodeData2_G nodeInfo;
         nodeInfo.normal = normalize(nodeData.meanNormal.xyz);
         nodeInfo.aabb = nodeData.aabb;
+        nodeInfo.nodeIndex = nodeIndex;
         #ifdef CLUSTER_WITH_MATERIAL
         nodeInfo.materialIndex = nodeData.materialIndex;
         #endif
@@ -622,33 +628,31 @@ void computeMain_getNearbyNodes(uint threadIndex: SV_DispatchThreadID, uint thre
     GroupMemoryBarrierWithGroupSync();
 
     if (groupThreadIndex == 0) {
-        uint infoIndex = indivisibleNodeLabel1 * threadGroupCount_perIndivisibleNode + threadGroupOffset;
-        SVO_IndivisibleNodeNearbyNodeInfos[infoIndex].nearbyNodeIndices = groupNearbyNodeIndics;
-        for (int i = 0; i < NEARBY_NODE_COUNT; ++i)
-            SVO_IndivisibleNodeNearbyNodeInfos[infoIndex].nearbyNodeDistances[i] = OrderedIntToFloat(groupNearbyNodeDistanceIs[i]);
-
-        //if (pushConst.frameIndex == 0 && indivisibleNodeLabel1 == 20) {
-        //    for (int i = 0; i < NEARBY_NODE_COUNT; ++i) {
-        //        printf("nodeIndex2: %d, distance: %f\n",
-        //                groupNearbyNodeIndics[i], OrderedIntToFloat(groupNearbyNodeDistanceIs[i]),
-        //            );
-        //    }
-        //}
-    }
-
-    if (threadIndex == 0) {
-        DispatchIndirectCommand cmd2;
-        cmd2.x = (indivisibleNodeCount * 32 + GETNEARBYNODES2_CS_THREADGROUP_SIZE - 1) / GETNEARBYNODES2_CS_THREADGROUP_SIZE;
-        cmd2.y = 1; cmd2.z = 1;
-
-        if (threadGroupCount_perIndivisibleNode * NEARBY_NODE_COUNT > 32) {
-            printf("Error: Too many threads per indivisible node for getNearbyNodes. currentThreadCount: %u,    maxThreadCount: %u\n",
-                   threadGroupCount_perIndivisibleNode * NEARBY_NODE_COUNT, 32);
-            cmd2.x = 0; cmd2.y = 0; cmd2.z = 0;
+        if (threadGroupCount_perIndivisibleNode == 1) {
+            SVO_G[nodeData1.nodeIndex].nearbyNodeIndices = groupNearbyNodeIndics;
+        } else {
+            uint infoIndex = indivisibleNodeLabel1 * threadGroupCount_perIndivisibleNode + threadGroupOffset;
+            SVO_IndivisibleNodeNearbyNodeTempInfos[infoIndex].nearbyNodeIndices = groupNearbyNodeIndics;
+            for (int i = 0; i < NEARBY_NODE_COUNT; ++i)
+                SVO_IndivisibleNodeNearbyNodeTempInfos[infoIndex].nearbyNodeDistances[i] = OrderedIntToFloat(groupNearbyNodeDistanceIs[i]);
         }
+        if (threadIndex == 0) {
+            DispatchIndirectCommand cmd2;
+            if (threadGroupCount_perIndivisibleNode == 1) cmd2.x = 0;
+            else cmd2.x = (indivisibleNodeCount * 32 + GETNEARBYNODES2_CS_THREADGROUP_SIZE - 1) / GETNEARBYNODES2_CS_THREADGROUP_SIZE;
+            cmd2.y = 1; cmd2.z = 1;
 
-        GlobalInfoBuffer[0].cmd2 = cmd2;
+            if (threadGroupCount_perIndivisibleNode * NEARBY_NODE_COUNT > 32) {
+                printf("Error: Too many threads per indivisible node for getNearbyNodes. currentThreadCount: %u,     maxThreadCount: %u\n",
+                       threadGroupCount_perIndivisibleNode * NEARBY_NODE_COUNT, 32);
+                cmd2.x = 0; cmd2.y = 0; cmd2.z = 0;
+            }
+
+            GlobalInfoBuffer[0].cmd2 = cmd2;
+        }
     }
+
+
 }
 [numthreads(GETNEARBYNODES2_CS_THREADGROUP_SIZE, 1, 1)]
 [shader("compute")]
@@ -676,8 +680,8 @@ void computeMain_getNearbyNodes2(uint threadIndex: SV_DispatchThreadID, uint thr
     float distance = 1e30f; int nearbyNodeIndex = -1;
     if (warpLane < threadGroupCount_perIndivisibleNode * NEARBY_NODE_COUNT) {
         uint infoIndex = indivisibleNodeLabel * threadGroupCount_perIndivisibleNode + warpLane / NEARBY_NODE_COUNT;
-        distance = SVO_IndivisibleNodeNearbyNodeInfos[infoIndex].nearbyNodeDistances[warpLane % NEARBY_NODE_COUNT];
-        nearbyNodeIndex = SVO_IndivisibleNodeNearbyNodeInfos[infoIndex].nearbyNodeIndices[warpLane % NEARBY_NODE_COUNT];
+        distance = SVO_IndivisibleNodeNearbyNodeTempInfos[infoIndex].nearbyNodeDistances[warpLane % NEARBY_NODE_COUNT];
+        nearbyNodeIndex = SVO_IndivisibleNodeNearbyNodeTempInfos[infoIndex].nearbyNodeIndices[warpLane % NEARBY_NODE_COUNT];
     }
     uint nodeIndex = groupIndivisibleNodeIndics[warpIndex];
     for (int i = 0; i < NEARBY_NODE_COUNT; ++i) {

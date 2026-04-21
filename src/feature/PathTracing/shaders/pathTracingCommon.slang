@@ -110,7 +110,8 @@ HitState getHitStateWithPositionFetch(const float3 barycentrics, float3 rayDirec
     const float3 edge2 = pos2 - pos0;
     const float3 geoNormal = normalize(cross(edge1, edge2));
 
-    hitState.normal = normalize(mul(WorldToObject4x3(), geoNormal).xyz);
+    //hitState.normal = normalize(mul(WorldToObject4x3(), geoNormal).xyz);
+    hitState.normal = normalize(mul(geoNormal, transpose(WorldToObject4x3())).xyz);
     hitState.cosineON = dot(hitState.normal, -rayDirection);
     if (hitState.cosineON < 0) hitState.normal = -hitState.normal;
 

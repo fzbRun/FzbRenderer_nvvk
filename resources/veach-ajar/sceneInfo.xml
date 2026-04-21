@@ -72,13 +72,13 @@
 			<ext_Ior value="1.0" />
 		</bsdf>
 		<bsdf type="roughConductor" id="Pot3BSDF">
-			<roughness value="0.1" />
+			<roughness value="0.05" />
 			<eta value="1.91, 1.31, 0.82" />
 			<k value="8.05, 6.93, 5.99" />
 		</bsdf>
 		<bsdf type="diffuse" id="LightBSDF">
 			<albedo value="0.8, 0.8, 0.8, 1.0" />
-			<emissive value="10, 10, 10" />
+			<emissive value="1000, 1000, 1000" />
 		</bsdf>
 	</bsdfs>
 	<meshes>
@@ -341,8 +341,9 @@
 		-->
 		<instance id="Light">
 			<transform name="to_world">
-				<!--matrix value="0.730445 0 0 -4.4391 0 -1.32136 -1.42138e-007 1.50656 0 1.42138e-007 -1.93037 -4.44377 0 0 0 1" /-->
-				<matrix value="-0.730445 0 0 -1.4391 0 -1.32136 -1.42138e-007 1.50656 0 0 1.93037 -7.44377 0 0 0 1" />
+				<matrix value="0.730445 0 0 -4.4391 0 -1.32136 -1.42138e-007 1.50656 0 1.42138e-007 -1.93037 -4.44377 0 0 0 1" />
+				<!--matrix value="0.730445 0 0 -5.7391 0 -1.32136 -1.42138e-007 1.50656 0 1.42138e-007 -1.93037 -4.44377 0 0 0 1" /-->
+				<!--matrix value="-0.600445 0 0 -1.0 0 -2.75 -1.42138e-007 2.75 0 0 1.93037 -7.59 0 0 0 1" /-->
 			</transform>
 			<meshRef id="custom" type="plane" />
 			<materialRef id="LightBSDF"/>
@@ -355,7 +356,7 @@
 		<backgroundColor value = "0.0, 0.0, 0.0" />
 		<light type="area" id="Light">
 			<emissive value = "1.0, 1.0, 1.0" />
-			<intensity value = "10.0" />
+			<intensity value = "1000.0" />
 			<SphericalRectangleSample value="true" />
 			<instanceRef id="Light"/>
 		</light>
