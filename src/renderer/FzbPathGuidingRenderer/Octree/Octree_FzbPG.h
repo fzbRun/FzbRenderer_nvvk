@@ -1,5 +1,5 @@
 #pragma once
-/*
+
 #include "feature/Feature.h"
 #include "./OctreeShaderio_FzbPG.h"
 
@@ -11,7 +11,7 @@ struct OctreeCreateInfo_FzbPG{
 
 	shaderio::float3 VGBStartPos;
 	shaderio::float3 VGBVoxelSize;
-	uint32_t VGBSize;
+	float VGBSize;
 };
 
 class Octree_FzbPG : public Feature {
@@ -38,7 +38,7 @@ public:
 	void initOctreeArray(VkCommandBuffer cmd);
 	void createOctreeArray(VkCommandBuffer cmd);
 	void getOctreeLabel(VkCommandBuffer cmd);
-	void getIndivisibleNodeInfos(VkCommandBuffer cmd);
+	void getOctreeNodePairData(VkCommandBuffer cmd);
 
 	shaderio::OctreePushConstant_FzbPG pushConstant{};
 
@@ -53,6 +53,9 @@ public:
 	nvvk::Buffer globalInfoBuffer;
 	nvvk::Buffer indivisibleNodeInfosBuffer_G;
 	nvvk::Buffer indivisibleNodeInfosBuffer_E;
+
+	nvvk::Buffer octreeNodePairVisibleDataBuffer;
+	nvvk::Buffer octreeNodePairWeightBuffer;
 private:
 	OctreeCreateInfo_FzbPG setting;
 
@@ -74,12 +77,33 @@ private:
 	VkShaderEXT computeShader_getOctreeLabel1{};
 	VkShaderEXT computeShader_getOctreeLabel2{};
 	VkShaderEXT computeShader_getOctreeLabel3{};
-
-	VkShaderEXT computeShader_getIndivisibleNodeInfos{};
+	VkShaderEXT computeShader_getOctreeLabel4{};
 
 	VkBindDescriptorSetsInfo bindDescriptorSetsInfo;
 	VkPushConstantsInfo pushInfo;
+
+#ifndef NDEBUG
+public:
+	void resize(VkCommandBuffer cmd, const VkExtent2D& size, nvvk::GBuffer& gBuffers_other, uint32_t baseMapIndex);
+private:
+	void debug_Prepare();
+	void debug_OctreeLayer_Visualization(VkCommandBuffer cmd);
+	void debug_OctreeIndivisibleNodes_Visualization(VkCommandBuffer cmd);
+
+	VkShaderEXT vertexShader_OctreeLayer{};
+	VkShaderEXT fragmentShader_OctreeLayer{};
+	VkShaderEXT vertexShader_OctreeIndivisibleNodes{};
+	VkShaderEXT fragmentShader_OctreeIndivisibleNodes{};
+
+	VkImageView depthImageView;
+
+	uint32_t showLayerCount = 1;
+	bool showOctreeLayerMap_G = false;
+	bool showOctreeLayerMap_E = false;
+	bool showOctreeIndivisibleNodeMap_G = false;
+	int selectedOctreeLayerMapIndex_G = 0;
+	int selectedOctreeLayerMapIndex_E = 0;
+#endif
 };
 }
 #endif
-*/

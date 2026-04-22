@@ -80,7 +80,7 @@ void RasterVoxelization_SVOPG::clean() {
 	vkDestroyShaderEXT(device, vertexShader, nullptr);
 	vkDestroyShaderEXT(device, geometryShader, nullptr);
 	vkDestroyShaderEXT(device, fragmentShader, nullptr);
-#ifndef NDBUG
+#ifndef NDEBUG
 	Application::allocator.destroyBuffer(fragmentCountBuffer);
 	Application::allocator.destroyBuffer(fragmentCountStageBuffer);
 

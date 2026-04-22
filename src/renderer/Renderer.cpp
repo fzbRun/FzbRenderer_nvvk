@@ -39,7 +39,7 @@ std::shared_ptr<FzbRenderer::Renderer> FzbRenderer::createRenderer(RendererCreat
 			case FZB_RENDERER_DEFERRED: return std::make_shared<DeferredRenderer>(createInfo.rendererNode);
 			case FZB_RENDERER_PATH_TRACING: return std::make_shared<PathTracingRenderer>(createInfo.rendererNode);
 			case FZB_RENDERER_SVO_PATH_GUIDING: return std::make_shared<SVOPathGuidingRenderer>(createInfo.rendererNode);
-			//case FZB_RENDERER_FZB_PATH_GUIDING: return std::make_shared<FzbPathGuidingRenderer>(createInfo.rendererNode);
+			case FZB_RENDERER_FZB_PATH_GUIDING: return std::make_shared<FzbPathGuidingRenderer>(createInfo.rendererNode);
 		}
 		return nullptr;
 	}

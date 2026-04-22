@@ -1,4 +1,3 @@
-/*
 #include "./FzbPathGuiding.h"
 #include <common/Application/Application.h>
 #include <nvgui/sky.hpp>
@@ -18,8 +17,8 @@ FzbPathGuidingRenderer::FzbPathGuidingRenderer(pugi::xml_node& rendererNode) {
 		rasterVoxelization = std::make_shared<RasterVoxelization_SVOPG>(rasterVoxelizationNode);
 	if (pugi::xml_node lightInjectNode = rendererNode.child("LightInject"))
 		lightInject = std::make_shared<LightInject_SVOPG>(lightInjectNode);
-	//if (pugi::xml_node octreeNode = rendererNode.child("Octree"))
-	//	octree = std::make_shared<Octree_FzbPG>(octreeNode);
+	if (pugi::xml_node octreeNode = rendererNode.child("Octree"))
+		octree = std::make_shared<Octree_FzbPG>(octreeNode);
 	//if (pugi::xml_node weightNode = rendererNode.child("Weight"))
 	//	weight = std::make_shared<FzbRenderer::Weight_FzbPG>(weightNode);
 }
@@ -29,7 +28,7 @@ void FzbPathGuidingRenderer::FzbPathGuidingRenderer::init() {
 	sbtGenerator.init(Application::app->getDevice(), ptContext.rtProperties);
 
 	rasterVoxelization->init();
-
+	
 	LightInjectSetting_SVOPG lightInjectSetting{
 		.VGBs = rasterVoxelization->VGBs,
 		.VGBStartPos = rasterVoxelization->setting.pushConstant.voxelGroupStartPos,
@@ -41,6 +40,14 @@ void FzbPathGuidingRenderer::FzbPathGuidingRenderer::init() {
 		.asManager = &asManager
 	};
 	lightInject->init(lightInjectSetting);
+	
+	OctreeCreateInfo_FzbPG octreeCreateInfo{
+		.VGBs = rasterVoxelization->VGBs,
+		.VGBStartPos = rasterVoxelization->setting.pushConstant.voxelGroupStartPos,
+		.VGBVoxelSize = glm::vec3(rasterVoxelization->setting.pushConstant.voxelSize_Count),
+		.VGBSize = rasterVoxelization->setting.pushConstant.voxelSize_Count.w,
+	};
+	octree->init(octreeCreateInfo);
 
 	IF_DEBUG(Feature::createGBuffer(true, true, 1), Feature::createGBuffer(false, true, 1));
 	createDescriptorSetLayout();
@@ -53,10 +60,12 @@ void FzbPathGuidingRenderer::FzbPathGuidingRenderer::init() {
 void FzbPathGuidingRenderer::clean() {
 	rasterVoxelization->clean();
 	lightInject->clean();
-	PathTracingRenderer::clean();
+	octree->clean();
 
 	VkDevice device = Application::app->getDevice();
 	vkDestroyShaderEXT(device, computeShader_FzbPathGuiding, nullptr);
+
+	PathTracingRenderer::clean();
 };
 void FzbPathGuidingRenderer::uiRender() {
 	bool& UIModified = Application::UIModified;
@@ -98,6 +107,7 @@ void FzbPathGuidingRenderer::uiRender() {
 
 	rasterVoxelization->uiRender();
 	lightInject->uiRender();
+	octree->uiRender();
 
 	if (UIModified) resetFrame();
 };
@@ -119,6 +129,7 @@ void FzbPathGuidingRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size)
 
 	IF_DEBUG(rasterVoxelization->resize(cmd, size, gBuffers, eImgTonemapped), rasterVoxelization->resize(cmd, size));
 	lightInject->resize(cmd, size);
+	IF_DEBUG(octree->resize(cmd, size, gBuffers, eImgTonemapped), octree->resize(cmd, size));
 };
 void FzbPathGuidingRenderer::preRender() {
 	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
@@ -137,6 +148,7 @@ void FzbPathGuidingRenderer::preRender() {
 
 	rasterVoxelization->preRender(cmd);
 	lightInject->preRender();
+	octree->preRender();
 
 	//pushConstant.randomRotateMatrix = svoWeight->randomRotateMatrix;
 
@@ -152,6 +164,8 @@ void FzbPathGuidingRenderer::render(VkCommandBuffer cmd) {
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR);
 	lightInject->render(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_NV, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	octree->render(cmd);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_NV, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	pathGuiding(cmd);
@@ -163,6 +177,7 @@ void FzbPathGuidingRenderer::render(VkCommandBuffer cmd) {
 
 	rasterVoxelization->postProcess(cmd);
 	lightInject->postProcess(cmd);
+	octree->postProcess(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
 };
 
@@ -237,12 +252,8 @@ void FzbPathGuidingRenderer::createPipelineLayout() {
 void FzbPathGuidingRenderer::compileAndCreateShaders() {
 	SCOPED_TIMER(__FUNCTION__);
 
-	rasterVoxelization->compileAndCreateShaders();
-	lightInject->compileAndCreateShaders();
-
 	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
 	std::filesystem::path shaderSource = shaderPath / "FzbPathGuiding.slang";
-
 	VkShaderModuleCreateInfo shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
 
 	const VkPushConstantRange pushConstantRange{
@@ -312,4 +323,3 @@ void FzbPathGuidingRenderer::pathGuiding(VkCommandBuffer cmd) {
 
 	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
 }
-*/

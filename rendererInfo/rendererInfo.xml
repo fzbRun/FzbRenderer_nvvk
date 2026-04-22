@@ -3,7 +3,7 @@
 	<resolution width = "1280" height = "720" />
 	<sceneXML path = "./veach-ajar" />	<!--开头不能加/，但可以是./或不加--><!--simpleTest bearBox veach-ajar-->
 
-	<renderer type = "SVOPathGuiding">  <!--FzbPathGuiding SVOPathGuiding PathTracing  Deferred-->
+	<renderer type = "FzbPathGuiding">  <!--FzbPathGuiding SVOPathGuiding PathTracing  Deferred-->
 		<maxDepth value = "10" />
 		<useNEE value = "false" />
 		<spp value = "1" />

@@ -1,5 +1,5 @@
 #pragma once
-/*
+
 #include "renderer/PathTracingRenderer/hard/PathTracingRenderer.h"
 #include "./FzbPathGuidingShaderio.h"
 #include <renderer/SVOPathGuidingRenderer/hard/RasterVoxelization/RasterVoxelizationSVOPG.h>
@@ -36,7 +36,7 @@ private:
 	std::shared_ptr<RasterVoxelization_SVOPG> rasterVoxelization;
 	std::shared_ptr<LightInject_SVOPG> lightInject;
 	std::shared_ptr<Octree_FzbPG> octree;
-	std::shared_ptr<Weight_FzbPG> weight;
+	//std::shared_ptr<Weight_FzbPG> weight;
 
 	shaderio::FzbPathGuidingPushConstant pushConstant{};
 	VkShaderEXT computeShader_FzbPathGuiding{};
@@ -44,4 +44,3 @@ private:
 }
 
 #endif
-*/
