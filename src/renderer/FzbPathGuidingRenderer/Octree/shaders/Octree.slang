@@ -105,7 +105,7 @@ void computeMain_initOctreeArray(uint threadIndex: SV_DispatchThreadID, uint gro
             nodeIndex -= layerNodeCount;
             layerNodeCount *= 8;
         }
-        OctreeArray_G[layerIndex][nodeIndex] = nodeData_G;
-        OctreeArray_E[layerIndex][nodeIndex] = nodeData_E;
+        OctreeClusterDataBuffer_G[layerIndex][nodeIndex] = nodeClusterData_G;
+        if (layerIndex >= OCTREE_CLUSTER_LAYER) OctreeClusterDataBuffer_E[layerIndex][nodeIndex] = nodeClusterData_E;
     }
 }

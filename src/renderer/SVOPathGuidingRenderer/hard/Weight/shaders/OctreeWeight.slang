@@ -368,7 +368,7 @@ void computeMain_getNearbyNodes(uint threadIndex: SV_DispatchThreadID, uint thre
     fillGroupshared(groupThreadIndex);
     if (groupThreadIndex < NEARBY_NODE_COUNT) {
         groupNearbyNodeDistanceIs[groupThreadIndex] = 2147483647;
-        groupNearbyNodeInfos[groupThreadIndex] = uint2(0);
+        groupNearbyNodeInfos[groupThreadIndex] = int2(-1);
     }
     GroupMemoryBarrierWithGroupSync();
     int indivisibleNodeCount = groupIndivisibleNodeCount_G;
@@ -475,22 +475,14 @@ void computeMain_getNearbyNodes2(uint threadIndex: SV_DispatchThreadID, uint thr
 
     for (int i = 0; i < NEARBY_NODE_COUNT; ++i) {
         float minDistance = WaveActiveMin(distance);
-        //if (minDistance > 1.0f) {
-        //    if (warpLane == 0) {
-        //        for (int j = i; j < NEARBY_NODE_COUNT; ++j) SVO_G[nodeIndex].nearbyNodeIndices[j] = -1;
-        //    }
+        // if (minDistance > 1.0f) {
+        //    OctreeNearbyNodeInfos[nodeLabel].nearbyNodeInfos[i] = int2(-1);
         //    break;
         //}
         uint minDistanceLabel = WavePrefixCountBits(distance == minDistance);
         if (distance == minDistance && minDistanceLabel == 0) {
             OctreeNearbyNodeInfos[nodeLabel].nearbyNodeInfos[i] = nearbyNodeIndex;
             distance = 1e30f;
-
-            //if (pushConst.frameIndex == 0 && indivisibleNodeLabel == pushConst.sampleNodeLabel) {
-            //    printf("nodeIndex1: %d, nodeIndex2: %d, distance: %f\n",
-            //        nodeIndex, nearbyNodeIndex, minDistance,
-            //    );
-            //}
         }
     }
 }

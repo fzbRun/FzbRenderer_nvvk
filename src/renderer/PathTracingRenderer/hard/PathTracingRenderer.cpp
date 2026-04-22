@@ -423,8 +423,8 @@ void FzbRenderer::PathTracingRenderer::preRender() {
 	if (scene.cameraChange) resetFrame();	//如果相机参数变化，则从新累计帧
 
 	if (scene.periodInstanceCount + scene.randomInstanceCount > 0 || scene.hasDynamicLight) maxFrames = 1;
-	pushValues.frameIndex = std::min(Application::frameIndex, maxFrames - 1);
-
+	pushValues.frameIndex = Application::frameIndex;
+	pushValues.maxFrameCount = maxFrames;
 	pushValues.time = Application::sceneResource.time;
 
 	pushValues.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
@@ -435,7 +435,7 @@ void FzbRenderer::PathTracingRenderer::render(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
 
 	//maxFrames等于1表示只要一帧，我们就每帧都替换
-	if (pushValues.frameIndex == maxFrames - 1 && maxFrames > 1) return;
+	if (pushValues.frameIndex >= maxFrames && maxFrames > 1) return;
 
 	updateDataPerFrame(cmd);
 	rayTraceScene(cmd);

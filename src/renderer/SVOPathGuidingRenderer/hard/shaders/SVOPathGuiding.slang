@@ -178,7 +178,7 @@ bool getNodeAABB_E_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload, inout 
         float3 nodeSize = pushConst.VGBVoxelSize * (1 << (pushConst.maxOctreeLayer - 1));
         float3 nodeStartPos = pushConst.VGBStartPos_Size.xyz;
 
-        int nodeSum = 6; int layerNodeCunt = 6;
+        int nodeSum = 6; int layerNodeCount = 6;
         for (layerIndex = 1; layerIndex <= pushConst.maxOctreeLayer; ++layerIndex) {
             int3 nodeIndex3 = min(int3((hitPos - nodeStartPos) / nodeSize), 1);
             int subNodeIndex = nodeIndex3.z * 4 + nodeIndex3.y * 2 + nodeIndex3.x;
@@ -192,8 +192,8 @@ bool getNodeAABB_E_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload, inout 
                 hasData = (nodeInfo_G.label_indivisible_hasData & 1u) == 1;
                 indivisible = (nodeInfo_G.label_indivisible_hasData & 2u) == 2;
                 nodeLayerLabel = (nodeInfo_G.label_indivisible_hasData >> 2) - 1;
-                layerNodeCunt *= 8;
-                nodeSum += layerNodeCunt;
+                layerNodeCount *= 8;
+                nodeSum += layerNodeCount;
             } else {
                 nodeData_G = OctreeArray_G[layerIndex][nodeIndex];
                 hasData = nodeData_G.meanNormal.w > 0.0f;
@@ -221,18 +221,23 @@ bool getNodeAABB_E_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload, inout 
     weights[0] = 1.0f / getDistanceToAABB(hitPos, nodeData_G.aabb);
     float weightSum = weights[0];
     int2 nearbyNodeInfos[NEARBY_NODE_COUNT] = OctreeNearbyNodeInfos[nodeLabel_G].nearbyNodeInfos;
-    for (int nearbyNodeIndex = 0; nearbyNodeIndex < NEARBY_NODE_COUNT; ++nearbyNodeIndex) {
-        int2 nearbyNodeInfo = nearbyNodeInfos[nearbyNodeIndex];
+    int nearbyNodeCount = 0;
+    for (; nearbyNodeCount < NEARBY_NODE_COUNT; ++nearbyNodeCount) {
+        int2 nearbyNodeInfo = nearbyNodeInfos[nearbyNodeCount];
+        if (nearbyNodeInfo.x == -1) break;
         OctreeNodeData_G nearbyNodeData = OctreeArray_G[nearbyNodeInfo.x][nearbyNodeInfo.y];
-        weights[nearbyNodeIndex + 1] = max(dot(payload.hitNormal, normalize(nearbyNodeData.meanNormal.xyz)), 0.0f) / getDistanceToAABB(hitPos, nearbyNodeData.aabb);
-        weightSum += weights[nearbyNodeIndex + 1];
+        weights[nearbyNodeCount + 1] = max(dot(payload.hitNormal, normalize(nearbyNodeData.meanNormal.xyz)), 0.0f) / getDistanceToAABB(hitPos, nearbyNodeData.aabb);
+        weightSum += weights[nearbyNodeCount + 1];
     }
     float nearbyNodeSampleProbability = rand(payload.randomSeed);
-    for (int nearbyNodeIndex = 0; nearbyNodeIndex < NEARBY_NODE_COUNT + 1; ++nearbyNodeIndex) {
+    for (int nearbyNodeIndex = 0; nearbyNodeIndex < nearbyNodeCount + 1; ++nearbyNodeIndex) {
         float selectProbability = weights[nearbyNodeIndex] / weightSum;
         if (nearbyNodeSampleProbability <= selectProbability) {
-            int2 nearbyNodeInfo = nearbyNodeIndex == 0 ? int2(layerIndex, nodeIndex) : nearbyNodeInfos[nearbyNodeIndex - 1];
-            nodeLabel_G = OctreeArray_G[nearbyNodeInfo.x][nearbyNodeInfo.y].label - 1;
+            if (nearbyNodeIndex > 0) {
+                int2 nearbyNodeInfo = nearbyNodeInfos[nearbyNodeIndex - 1];
+                nodeLabel_G = OctreeArray_G[nearbyNodeInfo.x][nearbyNodeInfo.y].label - 1;
+                for (int l = 0; l < nearbyNodeInfo.x; ++l) nodeLabel_G += groupOctreeLayerInfos_G[l].indivisibleNodeCount;
+            }
             jitterPdf *= selectProbability;       //this pdf shoud add to bsdfSample
             break;
         }

@@ -18,6 +18,7 @@ struct PathTracingPushConstant
 {
 	int NEEShaderIndex = -1;
 	int frameIndex = 0;
+	int maxFrameCount = 1;
 	int maxDepth = 3;
 	int spp = 1;
 	float time = 0.0f;
