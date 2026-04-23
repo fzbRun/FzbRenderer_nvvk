@@ -94,6 +94,23 @@ float AABBDistance(AABB aabb1, AABB aabb2)
     gap = max(gap, 0.0);
     return length(gap);
 }
+float AABBContainmentRatio(inout AABB x, AABB y)
+{   float3 origLen = x.maximum - x.minimum;
+
+    x.minimum = max(x.minimum, y.minimum);
+    x.maximum = min(x.maximum, y.maximum);
+
+    float3 clippedLen = x.maximum - x.minimum;
+
+    if (clippedLen.x < 0.0 || clippedLen.y < 0.0 || clippedLen.z < 0.0)
+        return 0.0;
+
+    float ratio = 1.0;
+    ratio *= (origLen.x > 0.0) ? (clippedLen.x / origLen.x) : 1.0;
+    ratio *= (origLen.y > 0.0) ? (clippedLen.y / origLen.y) : 1.0;
+    ratio *= (origLen.z > 0.0) ? (clippedLen.z / origLen.z) : 1.0;
+    return ratio;
+}
 //------------------------------------------------SphericalFibonacci---------------------------------------------
 #define M_PHI 1.618033988749895
 //y axis is up, get worldPos

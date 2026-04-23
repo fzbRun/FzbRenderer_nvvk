@@ -68,6 +68,8 @@ private:
 	nvvk::Buffer divisibleNodeInfoBuffer_G;		//每层可细分节点的索引
 	nvvk::Buffer threadGroupInfoBuffer;
 
+	nvvk::Buffer octreeNodePairEBuffer;
+
 	VkShaderEXT computeShader_initOctreeArray{};
 	VkShaderEXT computeShader_initHasDataBlockInfo{};
 	VkShaderEXT computeShader_getGlobalInfo{};
@@ -78,6 +80,11 @@ private:
 	VkShaderEXT computeShader_getOctreeLabel2{};
 	VkShaderEXT computeShader_getOctreeLabel3{};
 	VkShaderEXT computeShader_getOctreeLabel4{};
+
+	VkShaderEXT computeShader_initWeights{};
+	VkShaderEXT computeShader_octreeNodeHitTest{};
+	VkShaderEXT computeShader_visibleAABBCluster{};
+	VkShaderEXT computeShader_getProbability{};
 
 	VkBindDescriptorSetsInfo bindDescriptorSetsInfo;
 	VkPushConstantsInfo pushInfo;

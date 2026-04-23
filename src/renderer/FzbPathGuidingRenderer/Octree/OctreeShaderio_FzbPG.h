@@ -6,7 +6,7 @@
 #ifndef FZBRENDERER_OCTREE_FZBPG_SHADERIO_H
 #define FZBRENDERER_OCTREE_FZBPG_SHADERIO_H
 
-#define MAX_OCTREE_LAYER_FZBPG 7
+#define MAX_OCTREE_LAYER_FZBPG 5
 #define IndivisibleNodeCount_G_FZBPG 1024
 
 NAMESPACE_SHADERIO_BEGIN()
@@ -47,13 +47,14 @@ enum class BindingPoints_Octree_FzbPG : uint32_t {
 	eIndivisibleNodeInfos_G,
 	eIndivisibleNodeInfos_E,
 	eOctreeNodePairVisibleData,
+	eOctreeNodePairE,
 	eOctreeNodePairWeight,
 };
 //------------------------------------------------------------------------------------------
 #define OCTREE_CLUSTER_LAYER_FZBPG 2
 #define OCTREE_NODECOUNT_E_FZBPG 440		//8 + 48 + 384
 #define CLUSTER_LAYER_NODECOUNT_E_FZBPG 384
-static const uint OctreeLayerNodeCount_FzbPG[MAX_OCTREE_LAYER_FZBPG] = { 8, 48, 384, 3072, 24576, 196608, 1572864 };
+static const uint OctreeLayerNodeCount_FzbPG[MAX_OCTREE_LAYER_FZBPG] = { 8, 48, 384, 3072, 24576 };
 static const uint OctreeLayerStartIndex_FzbPG[3] = { 0, 8, 56 };
 
 struct OctreeNodeClusterData_G_FzbPG {
@@ -123,6 +124,8 @@ struct OctreeThreadGroupInfo_FzbPG {
 #define inverseOutgoing inverseSH
 #endif
 
+#define VISIBLEAABB_CLUSTER_LAYER 4
+
 /*
 nodePair consisting of indivisibleNode_G and indivisibleNode_E
 aabb is the indivisibleNode_E's visible area for a indivisibleNode_G
@@ -138,8 +141,10 @@ struct OctreeNodePairVisibleData_FzbPG {
 #define GETOCTREELABEL_CS_THREADGROUP_SIZE 1024
 #define GETOCTREELABEL4_CS_THREADGROUP_SIZE 512
 
-#define INITWEIGHT_CS_THREADGROUP_SIZE 512
+#define INITWEIGHT_CS_THREADGROUP_SIZE 256
 #define HITTEST_CS_THREADGROUP_SIZE 512
+#define VISIBLEAABB_CLUSTER_CS_THREADGROUP_SIZE 256
+#define GETPROBABILITY_CS_THREADGROUP_SIZE 1024
 
 NAMESPACE_SHADERIO_END()
 #endif
