@@ -96,7 +96,7 @@ void computeMain_initOctreeArray(uint threadIndex: SV_DispatchThreadID, uint gro
             uint warpHasDataMask_E = WaveActiveBallot(hasData_E).x;
             uint blockHasDataNodeCount_E = countbits(warpHasDataMask_E & blockNodeMask);
             bool blockHasData_E = blockHasDataNodeCount_E > 0;
-            if (blockHasData_E) OctreeClusterDataBuffer_E[layerIndex][threadIndex] = nodeClusterData_E;
+            if (blockHasData_E) OctreeClusterDataBuffer_E[layerIndex][threadIndex] = nodeClusterData_E;     //cmdFillData 0 for maxLayerNode, before use aabb, check E > 0
             if (blockLane == 0) BlockInfoBuffer_E[blockIndex] = (uint)blockHasData_E;
         }
     }
@@ -817,11 +817,11 @@ void computeMain_initWeights(uint threadIndex: SV_DispatchThreadID, uint groupTh
 
 struct IndivisibleNodeData_E {
     AABB aabb;
-    float3 normal;
     uint nodeIndex;
 };
 struct IndivisibleNodeData_G {
     AABB aabb;
+    float3 normal;
 };
 struct HitPayload_SVOWeight {
     BSDFMaterial material;
@@ -840,7 +840,7 @@ groupshared HitPayload_SVOWeight groupHitPayloads[MAX_INDIVISIBLE_NODE_G_COUNT *
 
 #define VISIBLEAABB_CLUSTER_NODECOUNT_E (1 << (3 * (VISIBLEAABB_CLUSTER_LAYER - OCTREE_CLUSTER_LAYER_FZBPG)))
 
-void traceRay(RayDesc ray, inout HitPayload_SVOWeight payload, AABB nodeAABB_G)
+void traceRay(RayDesc ray, inout HitPayload_SVOWeight payload)
 {
     // Initialize inline ray query with no special flags
     RayQuery<RAY_FLAG_NONE> q;
@@ -877,12 +877,6 @@ void traceRay(RayDesc ray, inout HitPayload_SVOWeight payload, AABB nodeAABB_G)
         triPos = q.CommittedGetIntersectionTriangleVertexPositions();
         const float3 localPosition = triPos[0] * barycentrics.x + triPos[1] * barycentrics.y + triPos[2] * barycentrics.z;
         payload.hitPos = float3(mul(float4(localPosition, 1.0), objectToWorld));
-
-        if (!checkPointInAABB(payload.hitPos, nodeAABB_G)) {
-            payload.hit = -1.0f;
-            return;
-        }
-
         payload.hit = 1.0f;
 
         const float3 edge1 = triPos[1] - triPos[0];
@@ -969,7 +963,6 @@ void computeMain_octreeNodeHitTest(uint threadIndex: SV_DispatchThreadID, uint t
 
         IndivisibleNodeData_E groupNodeData_E;
         groupNodeData_E.nodeIndex = nodeIndex;
-        groupNodeData_E.normal = normalize(nodeData.meanNormal.xyz);
         groupNodeData_E.aabb = nodeData.aabb;
 
         groupNodeDatas_E[groupThreadIndex] = groupNodeData_E;
@@ -985,6 +978,7 @@ void computeMain_octreeNodeHitTest(uint threadIndex: SV_DispatchThreadID, uint t
 
         IndivisibleNodeData_G groupNodeData_G;
         groupNodeData_G.aabb = nodeData.aabb;
+        groupNodeData_G.normal = normalize(nodeData.meanNormal.xyz);
 
         groupNodeDatas_G[groupThreadIndex] = groupNodeData_G;
     }
@@ -1004,12 +998,13 @@ void computeMain_octreeNodeHitTest(uint threadIndex: SV_DispatchThreadID, uint t
         uint seed = xxhash32(uint3(threadIndex, hitTestIndex, (uint)pushConst.frameIndex));
 
         float3 randXYZ = float3(rand(seed), rand(seed), rand(seed));
-        float3 samplePoint_E = randXYZ * (nodeData_E.aabb.maximum - nodeData_E.aabb.minimum) + nodeData_E.aabb.minimum;
-
-        randXYZ = float3(rand(seed), rand(seed), rand(seed));
         float3 samplePoint_G = randXYZ * (nodeData_G.aabb.maximum - nodeData_G.aabb.minimum) + nodeData_G.aabb.minimum;
 
+        randXYZ = float3(rand(seed), rand(seed), rand(seed));
+        float3 samplePoint_E = randXYZ * (nodeData_E.aabb.maximum - nodeData_E.aabb.minimum) + nodeData_E.aabb.minimum;
+
         float3 sampleDir = normalize(samplePoint_G - samplePoint_E);
+        samplePoint_E = getAABBPoint(nodeData_E.aabb, samplePoint_E, sampleDir);
 
         HitPayload_SVOWeight hitPayload;
         hitPayload.hit = -1.0f;
@@ -1020,16 +1015,33 @@ void computeMain_octreeNodeHitTest(uint threadIndex: SV_DispatchThreadID, uint t
         ray.Origin = samplePoint_E + sampleDir * 0.00001f;
         ray.TMin = 0.001;
         ray.TMax = INFINITE;
-        traceRay(ray, hitPayload, nodeData_G.aabb);
+        traceRay(ray, hitPayload);
 
-        if (dot(hitPayload.normal, nodeData_E.normal) <= 0.7f) hitPayload.hit = -1.0f;
-        AABB visibleAabb = atomicMergeAABB(hitPayload.hitPos, hitPayload.hit > 0.0f);
+        if (hitPayload.hit > 0.0f) {
+            if (!checkPointInAABB(hitPayload.hitPos, nodeData_G.aabb)) hitPayload.hit = -1.0f;
+            if (dot(hitPayload.normal, -sampleDir) <= 0.0f) hitPayload.hit = -1.0f;
+            if (dot(nodeData_G.normal, -sampleDir) <= 0.0f) hitPayload.hit = -1.0f;
+        }
+        groupHitPayloads[hitTestIndex] = hitPayload;
+
+        //bool printfAble = pushConst.frameIndex == 0;
+        //printfAble &= nodeLabel_G % indivisibleNodeCount_G == 44;
+        //printfAble &= nodeLabel_E == 23; // abs(nodeData_E.aabb.minimum.x - (-3.067444f)) < 0.0001f; //abs(nodeData_E.aabb.maximum.x - nodeData_E.aabb.minimum.x) < 0.0001f;
+        //// printfAble &= i % HITTEST_COUNT_FZBPG == 0;
+        //if (printfAble) {
+        //    printf("nodeLabel_E: %d hit: %f, hitPos: %f %f %f\naabb: %f %f %f %f %f %f\n\n",
+        //        nodeLabel_E, hitPayload.hit, hitPayload.hitPos.x, hitPayload.hitPos.y, hitPayload.hitPos.z,
+        //           nodeData_E.aabb.minimum.x, nodeData_E.aabb.minimum.y, nodeData_E.aabb.minimum.z,
+        //           nodeData_E.aabb.maximum.x, nodeData_E.aabb.maximum.y, nodeData_E.aabb.maximum.z,
+        //    );
+        //}
+
+        AABB visibleAabb = atomicMergeAABB(samplePoint_E, hitPayload.hit > 0.0f);
         if (i % HITTEST_COUNT_FZBPG == 0) {
-            uint nodePairDataIndex = nodeLabel_G * CLUSTER_LAYER_NODECOUNT_E_FZBPG + nodeLabel_E;
+            nodeLabel_G = nodeLabel_G % indivisibleNodeCount_G;
+            uint nodePairDataIndex = nodeLabel_G * indivisibleNodeCount_E + nodeLabel_E;
             OctreeNodePairVisibleDataBuffer[nodePairDataIndex].aabb = visibleAabb;
         }
-
-        groupHitPayloads[hitTestIndex] = hitPayload;
     }
     GroupMemoryBarrierWithGroupSync();
     if (threadIndex >= indivisibleNodeCount_E * indivisibleNodeCount_G * OUTGOING_COUNT_FZBPG) return;
@@ -1089,15 +1101,16 @@ groupshared VisibleAABBClusterNodeInfo groupImportanceSampleNode_E[(VISIBLEAABB_
 void computeMain_visibleAABBCluster(uint threadIndex: SV_DispatchThreadID, uint threadGroupIndex: SV_GroupID, uint groupThreadIndex: SV_GroupThreadID) {
     if (groupThreadIndex < THREADGROUP_NODECOUNT_E) {
         OctreeGlobalInfo_FzbPG globalInfo = GlobalInfoBuffer[0];
-        groupIndivisibleNodeCount_G = globalInfo.indivisibleNodeCount_G;
-        groupIndivisibleNodeCount_E = globalInfo.indivisibleNodeCount_E;
+        if (groupThreadIndex == 0) {
+            groupIndivisibleNodeCount_G = globalInfo.indivisibleNodeCount_G;
+            groupIndivisibleNodeCount_E = globalInfo.indivisibleNodeCount_E;
+        }
 
         uint nodeLabel_E = (threadGroupIndex * THREADGROUP_NODECOUNT_E + groupThreadIndex) % globalInfo.indivisibleNodeCount_E;
         uint nodeLabel_G = (threadGroupIndex * THREADGROUP_NODECOUNT_E + groupThreadIndex) / globalInfo.indivisibleNodeCount_E;
         if (nodeLabel_E < globalInfo.indivisibleNodeCount_E) {
-            uint nodePairDataIndex = nodeLabel_G * CLUSTER_LAYER_NODECOUNT_E_FZBPG + nodeLabel_E;
+            uint nodePairDataIndex = nodeLabel_G * globalInfo.indivisibleNodeCount_E + nodeLabel_E;
             groupVisibleAABB[groupThreadIndex] = OctreeNodePairVisibleDataBuffer[nodePairDataIndex].aabb;
-
             groupNodeIndex_E[groupThreadIndex] = IndivisibleNodeInfoBuffer_E[nodeLabel_E];
         }
     }
@@ -1120,7 +1133,7 @@ void computeMain_visibleAABBCluster(uint threadIndex: SV_DispatchThreadID, uint 
     if (visibleAabb_E.minimum.x > 1e30f) {
         uint nodeClusterLabel_G = threadIndex / threadCount_perNodeG;
         uint nodeClusterLabel_E = threadIndex % threadCount_perNodeG;
-        uint nodePairIndex = nodeClusterLabel_G * CLUSTER_LAYER_NODECOUNT_E_FZBPG + nodeClusterLabel_E;
+        uint nodePairIndex = nodeClusterLabel_G * indivisibleNodeCount_E + nodeClusterLabel_E;
         OctreeNodePairEBuffer[nodePairIndex] = 0.0f;
         return;
     }
@@ -1130,46 +1143,61 @@ void computeMain_visibleAABBCluster(uint threadIndex: SV_DispatchThreadID, uint 
     float containmentRatio = AABBContainmentRatio(nodeData_E.aabb, visibleAabb_E);
     float E = nodeData_E.E * containmentRatio;
 
+    uint nodeClusterLabel_G = threadIndex / threadCount_perNodeG;
+    uint nodeClusterLabel_E = (threadIndex / VISIBLEAABB_CLUSTER_NODECOUNT_E) % indivisibleNodeCount_E;
+    uint nodePairIndex = nodeClusterLabel_G * indivisibleNodeCount_E + nodeClusterLabel_E;
+
+    bool printfAble = pushConst.frameIndex == 0;
+    printfAble &= nodeClusterLabel_G == 44;
+    printfAble &= nodeClusterLabel_E == 23;
+    if (printfAble) {
+        printf("containmentRatio: %f, E: %f\n\n",
+            containmentRatio, E
+        );
+    }
+
     // importance sample
     uint warpLane = groupThreadIndex & 31;
     uint blockLane = groupThreadIndex % VISIBLEAABB_CLUSTER_NODECOUNT_E;
     #if VISIBLEAABB_CLUSTER_NODECOUNT_E == 8
-    uint blockFirstWarpLane = (warpLane / 8) * 8;
-    uint32_t sampleWarpLane = blockFirstWarpLane;
-    float sampleProbability = 1.0f;
-    if (warpLane == blockFirstWarpLane) {
-        uint randomSeed = xxhash32(uint3(threadIndex, groupThreadIndex, (uint)pushConst.frameIndex));
-        sampleProbability = rand(randomSeed);
-    }
-    sampleProbability = WaveReadLaneAt(sampleProbability, blockFirstWarpLane);
-
-    float mergeE = E;
-    for (int offset = 4; offset > 0; offset /= 2) {
-        uint targetLane = warpLane + offset;
-        mergeE += WaveReadLaneAt(mergeE, targetLane);
-    }
-    mergeE = WaveReadLaneAt(mergeE, blockFirstWarpLane);
-    float probability = E / mergeE;
-
-    for (int offset = 0; offset < 8; ++offset) {
-        sampleProbability -= WaveReadLaneAt(probability, blockFirstWarpLane + offset);
-        if (sampleProbability <= 0.0f) {
-            sampleWarpLane += offset;
-            break;
+    {
+        uint blockFirstWarpLane = (warpLane / 8) * 8;
+        uint32_t sampleWarpLane = blockFirstWarpLane;
+        float sampleProbability = 1.0f;
+        if (warpLane == blockFirstWarpLane) {
+            uint randomSeed = xxhash32(uint3(threadIndex, groupThreadIndex, (uint)pushConst.frameIndex));
+            sampleProbability = rand(randomSeed);
         }
-    }
+        sampleProbability = WaveReadLaneAt(sampleProbability, blockFirstWarpLane);
 
-    if (warpLane == sampleWarpLane) {
-        OctreeNodePairVisibleData_FzbPG nodePairData;
-        nodePairData.pdf = probability;
-        nodePairData.aabb = nodeData_E.aabb;
+        float mergeE = E;
+        for (int offset = 4; offset > 0; offset /= 2) {
+            uint targetLane = warpLane + offset;
+            mergeE += WaveReadLaneAt(mergeE, targetLane);
+        }
+        mergeE = WaveReadLaneAt(mergeE, blockFirstWarpLane);
+        float probability = E / mergeE;
 
-        uint nodeClusterLabel_G = threadIndex / threadCount_perNodeG;
-        uint nodeClusterLabel_E = threadIndex % threadCount_perNodeG;
-        uint nodePairIndex = nodeClusterLabel_G * CLUSTER_LAYER_NODECOUNT_E_FZBPG + nodeClusterLabel_E;
-        OctreeNodePairVisibleDataBuffer[nodePairIndex] = nodePairData;
+        for (int offset = 0; offset < 8; ++offset) {
+            sampleProbability -= WaveReadLaneAt(probability, blockFirstWarpLane + offset);
+            if (sampleProbability <= 0.0f) {
+                sampleWarpLane += offset;
+                break;
+            }
+        }
 
-        OctreeNodePairEBuffer[nodePairIndex] = E;
+        if (warpLane == sampleWarpLane) {
+            OctreeNodePairVisibleData_FzbPG nodePairData;
+            nodePairData.pdf = probability;
+            nodePairData.aabb = nodeData_E.aabb;
+
+            uint nodeClusterLabel_G = threadIndex / threadCount_perNodeG;
+            uint nodeClusterLabel_E = threadIndex % threadCount_perNodeG;
+            uint nodePairIndex = nodeClusterLabel_G * indivisibleNodeCount_E + nodeClusterLabel_E;
+            OctreeNodePairVisibleDataBuffer[nodePairIndex] = nodePairData;
+
+            OctreeNodePairEBuffer[nodePairIndex] = E;
+        }
     }
     #else
     float sampleProbability = 1.0f; uint randomSeed;
@@ -1203,7 +1231,7 @@ void computeMain_visibleAABBCluster(uint threadIndex: SV_DispatchThreadID, uint 
     }
     GroupMemoryBarrierWithGroupSync();
 
-    if (warpLane < warpInfoCount_perClusterNode) {
+    if (blockLane < warpInfoCount_perClusterNode) {
         uint sampleIndex = nodeClusterLabel_E_group * warpInfoCount_perClusterNode + blockLane;
         VisibleAABBClusterNodeInfo clusterNodeInfo = groupImportanceSampleNode_E[sampleIndex];
         mergeE = clusterNodeInfo.mergeE;
@@ -1230,14 +1258,31 @@ void computeMain_visibleAABBCluster(uint threadIndex: SV_DispatchThreadID, uint 
             nodePairData.aabb = clusterNodeInfo.aabb;
 
             uint nodeClusterLabel_G = threadIndex / threadCount_perNodeG;
-            uint nodeClusterLabel_E = threadIndex % threadCount_perNodeG;
-            uint nodePairIndex = nodeClusterLabel_G * CLUSTER_LAYER_NODECOUNT_E_FZBPG + nodeClusterLabel_E;
+            uint nodeClusterLabel_E = (threadIndex / VISIBLEAABB_CLUSTER_NODECOUNT_E) % indivisibleNodeCount_E;
+            uint nodePairIndex = nodeClusterLabel_G * indivisibleNodeCount_E + nodeClusterLabel_E;
             OctreeNodePairVisibleDataBuffer[nodePairIndex] = nodePairData;
-
             OctreeNodePairEBuffer[nodePairIndex] = clusterNodeInfo.E;
         }
     }
     #endif
+
+    //GroupMemoryBarrierWithGroupSync();
+    //uint nodeClusterLabel_G = threadIndex / threadCount_perNodeG;
+    //uint nodeClusterLabel_E = (threadIndex / VISIBLEAABB_CLUSTER_NODECOUNT_E) % indivisibleNodeCount_E;
+    //uint nodePairIndex = nodeClusterLabel_G * indivisibleNodeCount_E + nodeClusterLabel_E;
+    //
+    //bool printfAble = pushConst.frameIndex == 0;
+    //printfAble &= nodeClusterLabel_G == 44;
+    //printfAble &= nodeClusterLabel_E == 23;
+    //if (printfAble) {
+    //    OctreeNodePairVisibleData_FzbPG nodePairData = OctreeNodePairVisibleDataBuffer[nodePairIndex];
+    //    float E = OctreeNodePairEBuffer[nodePairIndex];
+    //    printf("sampleAabb: %f %f %f %f %f %f\npdf: %f, E: %f\n\n",
+    //        nodePairData.aabb.minimum.x, nodePairData.aabb.minimum.y, nodePairData.aabb.minimum.z,
+    //        nodePairData.aabb.maximum.x, nodePairData.aabb.maximum.y, nodePairData.aabb.maximum.z,
+    //        nodePairData.pdf, E
+    //    );
+    //}
 }
 
 [numthreads(GETPROBABILITY_CS_THREADGROUP_SIZE, 1, 1)]
@@ -1263,9 +1308,11 @@ void computeMain_getProbability(uint threadIndex: SV_DispatchThreadID, uint thre
     uint weightIndex = weightStartIndex + OctreeLayerStartIndex_FzbPG[layerIndex] + nodeIndex_currentLayer_E;
     float weight = OctreeNodePairWeightBuffer[weightIndex];
 
-    uint nodeLabel_E = ClusterlayerDataBuffer_E[nodeIndex_currentLayer_E].label - 1;
-    float E = OctreeNodePairEBuffer[nodeLable_G * CLUSTER_LAYER_NODECOUNT_E_FZBPG + nodeLabel_E];
-    weight *= E;
+    if (pushConst.currentLayer == OCTREE_CLUSTER_LAYER_FZBPG) {
+        uint nodeLabel_E = ClusterlayerDataBuffer_E[nodeIndex_currentLayer_E].label - 1;
+        float E = OctreeNodePairEBuffer[nodeLable_G * groupIndivisibleNodeCount_E + nodeLabel_E];
+        weight *= E;
+    }
 
     uint warplane = groupThreadIndex & (WARP_SIZE - 1);
     uint blockFirstWarplane = warplane / 8 * 8;
@@ -1344,6 +1391,7 @@ VSout_OctreeLayer vertexMain_OctreeLayer(uint vertexIndex: SV_VertexID, int inst
 {
     VSout_OctreeLayer output;
     output.renderTargetIndex = 0;
+    output.debug_color = false;
 
     bool isG = true;
     uint nodeIndex = instanceIndex;
@@ -1374,6 +1422,12 @@ VSout_OctreeLayer vertexMain_OctreeLayer(uint vertexIndex: SV_VertexID, int inst
         OctreeNodeClusterData_E_FzbPG octreeData_E = OctreeClusterDataBuffer_E[layerIndex][nodeIndex];
         nodeAABB = octreeData_E.aabb;
         invisible = octreeData_E.E > 0.0f;
+
+        //uint nodeIndex_23 = IndivisibleNodeInfoBuffer_E[23];
+        //if (layerIndex == 0 && nodeIndex == nodeIndex_23) {
+        //    output.debug_color = true;
+        //    output.color = float4(0.0f, 1.0f, 0.0f, 1.0f);
+        //}
     }
 
     if (normalIndex != pushConst.normalIndex) invisible = 0;
@@ -1503,4 +1557,63 @@ PSout_OctreeIndivisibleNodes fragmentMain_OctreeIndivisibleNodes(VSout_OctreeInd
     output.color0 = input.color;
     return output;
 }
+
+struct VSout_OctreeNodePairHitTestResult {
+    float4 sv_position : SV_Position;
+    float4 color;
+};
+struct PSout_OctreeNodePairHitTestResult
+{
+    float4 color0 : SV_Target0;
+};
+[shader("vertex")]
+VSout_OctreeNodePairHitTestResult vertexMain_OctreeNodePairHitTestResult(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID) {
+    VSout_OctreeNodePairHitTestResult output;
+    output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
+
+    uint indivisibleNodeCount_E = GlobalInfoBuffer[0].indivisibleNodeCount_E;
+    if (instanceIndex >= indivisibleNodeCount_E + 1 ||
+        pushConst.sampleNodeLabel_G <= 0 ||
+        pushConst.sampleNodeLabel_G >= GlobalInfoBuffer[0].indivisibleNodeCount_G + 1) return output;
+
+    uint nodeLabel_G = pushConst.sampleNodeLabel_G - 1;
+    AABB nodeAABB;
+    if (instanceIndex == indivisibleNodeCount_E) {
+        uint2 nodeInfo_G = IndivisibleNodeInfoBuffer_G[nodeLabel_G];
+        OctreeNodeClusterData_G_FzbPG nodeData_G = OctreeClusterDataBuffer_G[nodeInfo_G.x - OCTREE_CLUSTER_LAYER_FZBPG][nodeInfo_G.y];
+        nodeAABB = nodeData_G.aabb;
+        output.color = float4(1.0f, 0.0f, 0.0f, 1.0f);
+    } else {
+        uint visibleNodePairDataIndex = nodeLabel_G * indivisibleNodeCount_E + instanceIndex;
+        OctreeNodePairVisibleData_FzbPG nodePairData = OctreeNodePairVisibleDataBuffer[visibleNodePairDataIndex];
+        nodeAABB = nodePairData.aabb;
+        output.color = float4(0.0f, 1.0f, 0.0f, 1.0f);
+    }
+    if (nodeAABB.minimum.x > 1e10f) return output;
+
+    float3 aabbSize = nodeAABB.maximum - nodeAABB.minimum;
+
+    output.sv_position.x = ((vertexIndex & 3) * 2) % 6 == 0 ? 0.0f : aabbSize.x;
+    output.sv_position.y = (vertexIndex & 3) <= 1 ? 0.0f : aabbSize.y;
+    output.sv_position.z = vertexIndex / 4 == 0 ? 0.0f : aabbSize.z;
+    output.sv_position.xyz += nodeAABB.minimum;
+
+    output.sv_position = mul(float4(output.sv_position.xyz, 1.0f), pushConst.sceneInfoAddress[0].viewProjMatrix);
+
+    return output;
+}
+[shader("pixel")]
+PSout_OctreeNodePairHitTestResult fragmentMain_OctreeNodePairHitTestResult(VSout_OctreeNodePairHitTestResult input) {
+    return { input.color };
+}
+
+//typedef VSout_OctreeNodePairHitTestResult VSout_OctreeNodePairCluster 
+//typedef PSout_OctreeNodePairHitTestResult PSout_OctreeNodePairCluster 
+//[shader("vertex")]
+//VSout_OctreeNodePairCluster vertexMain_OctreeNodePairCluster( uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID) {
+//    VSout_OctreeNodePairHitTestResult output;
+//    output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
+//
+//
+//}
 #endif

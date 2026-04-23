@@ -1,3 +1,6 @@
+#ifndef FZBRENDERER_PATHTRACING_COMMON_SLANG
+#define FZBRENDERER_PATHTRACING_COMMON_SLANG
+
 #include "common/Shader/nvvk/Slang/pbr.h.slang"
 #include "common/Shader/Slang/commonFunction.slang"
 #include "nvshaders/constants.h.slang"
@@ -875,3 +878,5 @@ void BSDF_SAMPLE(inout CallablePayload payload) {
     else if (payload.material.type == MaterialType::RoughConductor) PopulateCallablePayload_RoughConductorMaterial(payload);
     else if (payload.material.type == MaterialType::RoughDielectric) PopulateCallablePayload_RoughDielectricMaterial(payload);
 }
+
+#endif

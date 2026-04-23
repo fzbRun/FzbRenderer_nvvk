@@ -27,11 +27,12 @@ struct OctreePushConstant_FzbPG {
 #ifndef NDEBUG
 	int showOctreeNodeTotalCount;
 	int normalIndex;
+	int sampleNodeLabel_G = 1;
 #endif
 };
 
 enum class BindingPoints_Octree_FzbPG : uint32_t {
-	eVGB = 0,
+	eVGB = 2,
 	eOctreeClusterData_G,
 	eOctreeData_G,
 	eOctreeClusterData_E,

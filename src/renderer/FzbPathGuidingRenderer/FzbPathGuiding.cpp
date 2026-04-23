@@ -46,6 +46,7 @@ void FzbPathGuidingRenderer::FzbPathGuidingRenderer::init() {
 		.VGBStartPos = rasterVoxelization->setting.pushConstant.voxelGroupStartPos,
 		.VGBVoxelSize = glm::vec3(rasterVoxelization->setting.pushConstant.voxelSize_Count),
 		.VGBSize = rasterVoxelization->setting.pushConstant.voxelSize_Count.w,
+		.asManager = &asManager,
 	};
 	octree->init(octreeCreateInfo);
 

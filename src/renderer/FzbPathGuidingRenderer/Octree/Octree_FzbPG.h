@@ -2,6 +2,7 @@
 
 #include "feature/Feature.h"
 #include "./OctreeShaderio_FzbPG.h"
+#include <renderer/PathTracingRenderer/hard/AccelerationStructure.h>
 
 #ifndef FZBRENDERER_OCTREE_FZBPG_H
 #define FZBRENDERER_OCTREE_FZBPG_H
@@ -12,6 +13,8 @@ struct OctreeCreateInfo_FzbPG{
 	shaderio::float3 VGBStartPos;
 	shaderio::float3 VGBVoxelSize;
 	float VGBSize;
+
+	AccelerationStructureManager* asManager;
 };
 
 class Octree_FzbPG : public Feature {
@@ -32,6 +35,7 @@ public:
 	void createOctreeArray();
 	void createDescriptorSetLayout() override;
 	void createDescriptorSet();
+	void createPipeline();
 	void compileAndCreateShaders();
 	void updateDataPerFrame(VkCommandBuffer cmd) override;
 
@@ -96,20 +100,32 @@ private:
 	void debug_Prepare();
 	void debug_OctreeLayer_Visualization(VkCommandBuffer cmd);
 	void debug_OctreeIndivisibleNodes_Visualization(VkCommandBuffer cmd);
+	void debug_OctreeNodePairHitTestResult_Visualization(VkCommandBuffer cmd);
 
 	VkShaderEXT vertexShader_OctreeLayer{};
 	VkShaderEXT fragmentShader_OctreeLayer{};
+
 	VkShaderEXT vertexShader_OctreeIndivisibleNodes{};
 	VkShaderEXT fragmentShader_OctreeIndivisibleNodes{};
 
+	VkShaderEXT vertexShader_OctreeNodePairHitTestResult{};
+	VkShaderEXT fragmentShader_OctreeNodePairHitTestResult{};
+
 	VkImageView depthImageView;
 
-	uint32_t showLayerCount = 1;
+	uint32_t showMapCount = 3;
+
+	uint32_t showOctreeLayerMapCount = 1;
 	bool showOctreeLayerMap_G = false;
 	bool showOctreeLayerMap_E = false;
-	bool showOctreeIndivisibleNodeMap_G = false;
 	int selectedOctreeLayerMapIndex_G = 0;
 	int selectedOctreeLayerMapIndex_E = 0;
+
+	uint32_t showOctreeIndivisibleNodeMapIndex = 2;
+	bool showOctreeIndivisibleNodeMap_G = false;
+
+	uint32_t showOctreeNodePairHitTestResultMapIndex = 3;
+	bool showOctreeNodePairHitTestResultMap = false;
 #endif
 };
 }

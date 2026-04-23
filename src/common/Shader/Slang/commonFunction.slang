@@ -1,3 +1,6 @@
+#ifndef FZBRENDERER_COMMON_FUNCTION_SLANG
+#define FZBRENDERER_COMMON_FUNCTION_SLANG
+
 #include "common/Shader/shaderStructType.h"
 #include "nvshaders/constants.h.slang"
 #include "nvshaders/random.h.slang"
@@ -79,6 +82,34 @@ inline float3 getAABBPoint(float3 sampleDir, float3 aabbCenter, float3 aabbHalfS
     float t = min(min(tCandidate.x, tCandidate.y), tCandidate.z);
     return aabbCenter + sampleDir * t * signHalfSize;
 }
+float3 getAABBPoint(AABB aabb, float3 x, float3 sampleDir) {
+    float tEnter = -1e30;
+    float tExit = 1e30;
+
+    for (int i = 0; i < 3; ++i)
+    {
+        float d = sampleDir[i];
+        float o = x[i];
+
+        if (abs(d) < 1e-12)
+        {
+            if (o < aabb.minimum[i] || o > aabb.maximum[i]) return x;
+            continue;
+        }
+
+        float t0 = (aabb.minimum[i] - o) / d;
+        float t1 = (aabb.maximum[i] - o) / d;
+        float tMin = min(t0, t1);
+        float tMax = max(t0, t1);
+
+        tEnter = max(tEnter, tMin);
+        tExit = min(tExit, tMax);
+
+        if (tEnter > tExit) return x;
+    }
+
+    return x + sampleDir * tExit;
+}
 float PointToAABBDistance(float3 pos, AABB aabb)
 {
     float dx = max(aabb.minimum.x - pos.x, max(0.0f, pos.x - aabb.maximum.x));
@@ -94,16 +125,16 @@ float AABBDistance(AABB aabb1, AABB aabb2)
     gap = max(gap, 0.0);
     return length(gap);
 }
-float AABBContainmentRatio(inout AABB x, AABB y)
-{   float3 origLen = x.maximum - x.minimum;
+float AABBContainmentRatio(inout AABB x, AABB y){   
+    float3 origLen = x.maximum - x.minimum;
 
     x.minimum = max(x.minimum, y.minimum);
     x.maximum = min(x.maximum, y.maximum);
 
     float3 clippedLen = x.maximum - x.minimum;
 
-    if (clippedLen.x < 0.0 || clippedLen.y < 0.0 || clippedLen.z < 0.0)
-        return 0.0;
+    if (clippedLen.x < -0.01f || clippedLen.y < -0.01f || clippedLen.z < -0.01f) return 0.0;
+    clippedLen = abs(clippedLen);
 
     float ratio = 1.0;
     ratio *= (origLen.x > 0.0) ? (clippedLen.x / origLen.x) : 1.0;
@@ -557,3 +588,4 @@ float3 sphericalRectangleSample(Quadrilateral_initialization quadrangle, float u
 
     return xu * quadrangle.x + yv * quadrangle.y + quadrangle.z0 * quadrangle.z; // Œ¥πÈ“ªªØ
 }
+#endif
