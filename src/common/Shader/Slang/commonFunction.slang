@@ -125,22 +125,73 @@ float AABBDistance(AABB aabb1, AABB aabb2)
     gap = max(gap, 0.0);
     return length(gap);
 }
-float AABBContainmentRatio(inout AABB x, AABB y){   
+float AABBContainmentRatio(inout AABB x, AABB y) {
     float3 origLen = x.maximum - x.minimum;
+    float3 yLen = y.maximum - y.minimum;
 
     x.minimum = max(x.minimum, y.minimum);
     x.maximum = min(x.maximum, y.maximum);
 
-    float3 clippedLen = x.maximum - x.minimum;
+    float3 intersectLen = x.maximum - x.minimum;
+    if (intersectLen.x < -0.001f || intersectLen.y < -0.001f || intersectLen.z < -0.001f) return 0.0f;
 
-    if (clippedLen.x < -0.01f || clippedLen.y < -0.01f || clippedLen.z < -0.01f) return 0.0;
-    clippedLen = abs(clippedLen);
+    intersectLen = abs(intersectLen);
 
-    float ratio = 1.0;
-    ratio *= (origLen.x > 0.0) ? (clippedLen.x / origLen.x) : 1.0;
-    ratio *= (origLen.y > 0.0) ? (clippedLen.y / origLen.y) : 1.0;
-    ratio *= (origLen.z > 0.0) ? (clippedLen.z / origLen.z) : 1.0;
+    float ratio = 1.0f;
+    for (int i = 0; i < 3; ++i) {
+        if (abs(yLen[i]) < 0.0001f) continue;
+
+        if (origLen[i] > 0.0f) ratio *= intersectLen[i] / origLen[i];
+        else ratio *= 1.0f;
+    }
     return ratio;
+}
+float3 RandomPointOnAABBSurface(inout uint seed, AABB aabb)
+{
+    float3 extent = aabb.maximum - aabb.minimum;
+
+    float3 axisArea;
+    axisArea.x = 2.0f * extent.y * extent.z;
+    axisArea.y = 2.0f * extent.x * extent.z;
+    axisArea.z = 2.0f * extent.x * extent.y;
+    float totalArea = axisArea.x + axisArea.y + axisArea.z;
+
+    if (totalArea <= 0.0f) return aabb.minimum;
+
+    float r = rand(seed) * totalArea;
+    int axis;
+    if (r < axisArea.x) axis = 0;
+    else if (r < axisArea.x + axisArea.y) axis = 1;
+    else axis = 2;
+
+    bool useMax = rand(seed) >= 0.5f;
+
+    float u = rand(seed);
+    float v = rand(seed);
+    float3 pt;
+
+    if (axis == 0)
+    {
+        float y = aabb.minimum.y + u * extent.y;
+        float z = aabb.minimum.z + v * extent.z;
+        pt = useMax ? float3(aabb.maximum.x, y, z)
+                    : float3(aabb.minimum.x, y, z);
+    }
+    else if (axis == 1)
+    {
+        float x = aabb.minimum.x + u * extent.x;
+        float z = aabb.minimum.z + v * extent.z;
+        pt = useMax ? float3(x, aabb.maximum.y, z)
+                    : float3(x, aabb.minimum.y, z);
+    }
+    else
+    {
+        float x = aabb.minimum.x + u * extent.x;
+        float y = aabb.minimum.y + v * extent.y;
+        pt = useMax ? float3(x, y, aabb.maximum.z)
+                    : float3(x, y, aabb.minimum.z);
+    }
+    return pt;
 }
 //------------------------------------------------SphericalFibonacci---------------------------------------------
 #define M_PHI 1.618033988749895

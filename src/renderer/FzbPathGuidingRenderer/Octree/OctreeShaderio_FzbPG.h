@@ -114,7 +114,7 @@ struct OctreeThreadGroupInfo_FzbPG {
 };
 //------------------------------------------------------------------------------------------
 #define OUTGOING_COUNT_FZBPG 64
-#define HITTEST_COUNT_FZBPG 32		//don't greater than 32 or less than 2
+#define HITTEST_COUNT_FZBPG 32		//not bigger than 32 or smaller than 8
 
 #define OUTGOING_TYPE_FZBPG 0
 #if OUTGOING_TYPE_FZBPG == 0

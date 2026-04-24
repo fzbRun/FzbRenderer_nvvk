@@ -218,6 +218,9 @@ void Octree_FzbPG::preRender() {
 	pushConstant.VGBStartPos_Size = glm::vec4(setting.VGBStartPos, setting.VGBSize);
 	pushConstant.VGBVoxelSize = glm::vec4(setting.VGBVoxelSize, 1.0f);
 	pushConstant.frameIndex = Application::frameIndex;
+
+	float angle = FzbRenderer::rand(Application::frameIndex) * glm::two_pi<float>();
+	pushConstant.randomRotateMatrix = glm::mat3(glm::rotate(glm::mat4(1.0f), angle, glm::vec3(0, 0, 1)));
 }
 void Octree_FzbPG::render(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd, "Octree_render");
@@ -903,15 +906,15 @@ void Octree_FzbPG::getOctreeNodePairData(VkCommandBuffer cmd) {
 	
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_visibleAABBCluster);
 	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
-	//nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
-	//
-	//vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getProbability);
-	//for (int layerIndex = OCTREE_CLUSTER_LAYER_FZBPG; layerIndex >= 0; --layerIndex) {
-	//	pushConstant.currentLayer = layerIndex;
-	//	vkCmdPushConstants2(cmd, &pushInfo);
-	//
-	//	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
-	//}
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+	
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getProbability);
+	for (int layerIndex = OCTREE_CLUSTER_LAYER_FZBPG; layerIndex >= 0; --layerIndex) {
+		pushConstant.currentLayer = layerIndex;
+		vkCmdPushConstants2(cmd, &pushInfo);
+	
+		vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
+	}
 }
 
 #ifndef NDEBUG
@@ -924,7 +927,7 @@ void Octree_FzbPG::debug_Prepare() {
 
 	showMapCount = showOctreeLayerMapCount + 1 + 1;
 
-	pushConstant.sampleNodeLabel_G = 45;
+	pushConstant.sampleNodeLabel_G = 204;	// 45 - 23;   1 - 130
 
 	Feature::createGBuffer(true, false, showMapCount);
 
