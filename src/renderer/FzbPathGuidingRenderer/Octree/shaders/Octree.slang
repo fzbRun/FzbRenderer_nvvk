@@ -782,7 +782,7 @@ void computeMain_getOctreeLabel4(uint threadIndex: SV_DispatchThreadID, uint thr
                 GlobalInfoBuffer[0] = globalInfo;
 
                 #ifndef NDEBUG
-                if (pushConst.frameIndex == 0) {
+                if (pushConst.frameIndex == 1) {
                     printf("indivisibleNodeCount: G: %d  E: %d\n",
                         indivisibleNodeCount_G, globalInfo.indivisibleNodeCount_E
                     );
@@ -1076,13 +1076,21 @@ void computeMain_octreeNodeHitTest(uint threadIndex: SV_DispatchThreadID, uint t
         ++hitCount;
 
         //{
-        //    uint nodeLabel_G = (threadIndex / OUTGOING_COUNT_FZBPG) % indivisibleNodeCount_G;
-        //    uint nodeIndex_E = groupNodeDatas_E[nodeLabel_E_group].nodeIndex;
-        //    if (outgoingIndex == 36 && nodeLabel_G == 203 && nodeIndex_E == 344 && pushConst.frameIndex == 1) {
-        //        printf("outgoing: %f %f %f\nnormal: %f %f %f\nincidence: %f %f %f\n\n", 
-        //            outgoing.x, outgoing.y, outgoing.z,
-        //            hitPayload.normal.x, hitPayload.normal.y, hitPayload.normal.z,
+        //    bool printfAble = pushConst.frameIndex == 1;
+        //    printfAble &= (threadIndex / OUTGOING_COUNT_FZBPG) % indivisibleNodeCount_G == pushConst.sampleNodeLabel_G - 1;
+        //    printfAble &= outgoingIndex == 4;
+        //    uint nodeLabel_E = threadIndex / (indivisibleNodeCount_G * OUTGOING_COUNT_FZBPG);
+        //    // uint nodeIndex = IndivisibleNodeInfoBuffer_E[nodeLabel_E];
+        //    // OctreeNodeClusterData_E_FzbPG nodeData = OctreeClusterDataBuffer_E[0][nodeIndex];
+        //    // printfAble &= abs(normalize(nodeData.meanNormal.xyz).x - 1.0f) < 0.1f;
+        //    printfAble &= nodeLabel_E == 35;
+        //    printfAble &= cosine > 0.0f;
+        //    if (printfAble) {
+        //        printf("nodeLabel_E: %d\nweight: %f, bsdf: %f %f %f, cosine: %f\nincidence: %f %f %f, outgoing: %f %f %f\n\n", 
+        //            nodeLabel_E, 
+        //            weight, bsdf.x, bsdf.y, bsdf.z, cosine,
         //            -hitPayload.sampleDir.x, -hitPayload.sampleDir.y, -hitPayload.sampleDir.z,
+        //            outgoing.x, outgoing.y, outgoing.z,
         //        );
         //    }
         //}
@@ -1097,7 +1105,6 @@ void computeMain_octreeNodeHitTest(uint threadIndex: SV_DispatchThreadID, uint t
                            nodeLabel_G * OCTREE_NODECOUNT_E_FZBPG + (nodeIndex_E + 56);
         OctreeNodePairWeightBuffer[weightIndex] = weight;
     }
-
 
     if (threadIndex == 0) {
         uint threadTotalCount = indivisibleNodeCount_G * indivisibleNodeCount_E * VISIBLEAABB_CLUSTER_NODECOUNT_E;
@@ -1492,7 +1499,7 @@ VSout_OctreeLayer vertexMain_OctreeLayer(uint vertexIndex: SV_VertexID, int inst
         nodeAABB = octreeData_E.aabb;
         invisible = octreeData_E.E > 0.0f;
 
-        uint nodeIndex_sample = IndivisibleNodeInfoBuffer_E[133];
+        uint nodeIndex_sample = IndivisibleNodeInfoBuffer_E[pushConst.sampleNodeLabel_E];
         if (layerIndex == 0 && nodeIndex == nodeIndex_sample) {
             output.debug_color = true;
             output.color = float4(0.0f, 1.0f, 0.0f, 1.0f);
@@ -1651,16 +1658,23 @@ VSout_OctreeNodePairHitTestResult vertexMain_OctreeNodePairHitTestResult(uint ve
     OctreeNodeClusterData_G_FzbPG nodeData_G = OctreeClusterDataBuffer_G[nodeInfo_G.x - OCTREE_CLUSTER_LAYER_FZBPG][nodeInfo_G.y];
 
     float3 nodeCenter = (nodeData_G.aabb.minimum + nodeData_G.aabb.maximum) * 0.5f;
-    float3 outgoing = mul(pushConst.randomRotateMatrix, normalize(pushConst.sceneInfoAddress[0].cameraPosition - nodeCenter));
+    float3 viewDir = normalize(pushConst.sceneInfoAddress[0].cameraPosition - nodeCenter);
+    float3 outgoing = mul(pushConst.randomRotateMatrix, viewDir);
     uint outgoingIndex = inverseOutgoing_FzbPG(outgoing, OUTGOING_COUNT_FZBPG);
     uint weightStartIndex = outgoingIndex * indivisibleNodeCount_G * OCTREE_NODECOUNT_E_FZBPG + nodeLabel_G * OCTREE_NODECOUNT_E_FZBPG;
 
     AABB nodeAABB;
     if (instanceIndex == indivisibleNodeCount_E) {
-
-        if (pushConst.frameIndex == 1) {
-            printf("outgoingIndex: %d\n\n", outgoingIndex);
-        }
+        //if (pushConst.frameIndex == 1 && vertexIndex == 0) {
+        //    printf("outgoingIndex: %d\nviewDir: %f %f %f, outgoing: %f %f %f\n\n",
+        //        outgoingIndex,
+        //        viewDir.x, viewDir.y, viewDir.z,
+        //        outgoing.x, outgoing.y, outgoing.z,
+        //    );
+        //
+        //    //viewDir = mul(getOutgoing_FzbPG(outgoingIndex, OUTGOING_COUNT_FZBPG), pushConst.randomRotateMatrix);
+        //    //printf("inverse viewDir: %f %f %f\n\n", viewDir.x, viewDir.y, viewDir.z);
+        //}
 
         nodeAABB = nodeData_G.aabb;
         output.color = float4(1.0f, 0.0f, 0.0f, 1.0f);

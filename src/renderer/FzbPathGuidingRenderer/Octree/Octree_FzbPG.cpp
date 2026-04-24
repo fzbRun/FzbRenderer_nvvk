@@ -197,7 +197,8 @@ void Octree_FzbPG::uiRender() {
 				showOctreeIndivisibleNodeMap_G = false;
 			}
 
-			UIModified |= PE::DragInt("sampleNodeLabel", &pushConstant.sampleNodeLabel_G);
+			UIModified |= PE::DragInt("sampleNodeLabel_G", &pushConstant.sampleNodeLabel_G);
+			UIModified |= PE::DragInt("sampleNodeLabel_e", &pushConstant.sampleNodeLabel_E);
 		}
 		PE::end();
 	}
@@ -927,7 +928,8 @@ void Octree_FzbPG::debug_Prepare() {
 
 	showMapCount = showOctreeLayerMapCount + 1 + 1;
 
-	pushConstant.sampleNodeLabel_G = 204;	// 45 - 23;   1 - 130
+	pushConstant.sampleNodeLabel_G = 206;	// 45 - 23;   1 - 130  204 236
+	pushConstant.sampleNodeLabel_E = 35;
 
 	Feature::createGBuffer(true, false, showMapCount);
 

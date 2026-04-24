@@ -28,6 +28,7 @@ struct OctreePushConstant_FzbPG {
 	int showOctreeNodeTotalCount;
 	int normalIndex;
 	int sampleNodeLabel_G = 1;
+	int sampleNodeLabel_E = 1;
 #endif
 };
 

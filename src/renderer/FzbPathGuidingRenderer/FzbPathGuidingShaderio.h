@@ -33,13 +33,11 @@ enum class StaticBindingPoints_FzbPG
 {
 	//eTextures = 0,
 	//eOutImage = 1,
-	eOctreeArray_G = 2,
-#ifdef NEARBYNODE_JITTER
-	eOctreeNearbyNodeInfos,
-#endif
-	eNodeData_E,
+	eOctreeData_G = 2,
+	eClusterLayerData_E,
+	eOctreeNodePairVisibleData,
+	eOctreeNodePairWeight,
 	eGlobalInfo,
-	eWeights,
 #ifndef NDEBUG
 	eDepthImage,
 #endif

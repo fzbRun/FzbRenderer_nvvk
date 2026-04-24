@@ -143,7 +143,7 @@ void FzbPathGuidingRenderer::preRender() {
 	pushConstant.maxFrameCount = maxFrames;
 	pushConstant.time = Application::sceneResource.time;
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
-	//pushConstant.maxOctreeLayer = octree->setting.OctreeLayerCount;
+	pushConstant.maxOctreeLayer = octree->octreeMaxLayer;
 	pushConstant.VGBVoxelSize = shaderio::float3(rasterVoxelization->setting.pushConstant.voxelSize_Count);
 	asManager.updateToplevelAS(cmd);
 
@@ -151,7 +151,7 @@ void FzbPathGuidingRenderer::preRender() {
 	lightInject->preRender();
 	octree->preRender();
 
-	//pushConstant.randomRotateMatrix = svoWeight->randomRotateMatrix;
+	pushConstant.randomRotateMatrix = octree->pushConstant.randomRotateMatrix;
 
 	Application::app->submitAndWaitTempCmdBuffer(cmd);
 }
@@ -166,9 +166,8 @@ void FzbPathGuidingRenderer::render(VkCommandBuffer cmd) {
 	lightInject->render(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_NV, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	octree->render(cmd);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_NV, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+
 	pathGuiding(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
@@ -194,6 +193,31 @@ void FzbPathGuidingRenderer::createDescriptorSetLayout() {
 			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
 			.descriptorCount = 1,
 			.stageFlags = VK_SHADER_STAGE_ALL });
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeData_G,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = (uint32_t)octree->octreeDataBuffer_G.size(),
+		.stageFlags = VK_SHADER_STAGE_ALL });
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eClusterLayerData_E,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodePairVisibleData,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodePairWeight,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eGlobalInfo,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
 #ifndef NDEBUG
 	bindings.addBinding({
 		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eDepthImage,
@@ -229,6 +253,27 @@ void FzbPathGuidingRenderer::createDescriptorSet() {
 		nvvk::Image* allImages = Application::sceneResource.textures.data();
 		write.append(allTextures, allImages);
 	}
+
+	VkWriteDescriptorSet	OctreeArrayWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeData_G, 0, 0, octree->octreeDataBuffer_G.size());
+	nvvk::Buffer* octreeArraysPtr = octree->octreeDataBuffer_G.data();
+	write.append(OctreeArrayWrite, octreeArraysPtr);
+
+	OctreeArrayWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eClusterLayerData_E, 0, 0, 1);
+	write.append(OctreeArrayWrite, octree->clusterLayerDataBuffer_E, 0, octree->clusterLayerDataBuffer_E.bufferSize);
+
+	VkWriteDescriptorSet    NodePairInfoWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodePairVisibleData, 0, 0, 1);
+	write.append(NodePairInfoWrite, octree->octreeNodePairVisibleDataBuffer, 0, octree->octreeNodePairVisibleDataBuffer.bufferSize);
+
+	NodePairInfoWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodePairWeight, 0, 0, 1);
+	write.append(NodePairInfoWrite, octree->octreeNodePairWeightBuffer, 0, octree->octreeNodePairWeightBuffer.bufferSize);
+
+	VkWriteDescriptorSet    GlobalInfoWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eGlobalInfo, 0, 0, 1);
+	write.append(GlobalInfoWrite, octree->globalInfoBuffer, 0, octree->globalInfoBuffer.bufferSize);
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }

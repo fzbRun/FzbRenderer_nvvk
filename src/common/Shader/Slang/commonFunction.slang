@@ -322,6 +322,102 @@ uint inverseSF(float3 p, float n, inout float probability) {
     probability = 1.0f;
     return 0;
 }
+
+uint inverseSF(float3 p, float n, inout float probability, float3 normal) {
+    float phi = min(atan2(p.z, p.x), M_PI), cosTheta = p.y;
+    float k = max(2, floor(
+        log(n * M_PI * sqrt(5) * (1 - cosTheta * cosTheta))
+        / log(M_PHI * M_PHI)));
+    float Fk = pow(M_PHI, k) / sqrt(5);
+    float F0 = round(Fk), F1 = round(Fk * M_PHI);
+    float2x2 B = float2x2(
+                2 * M_PI * madfrac(F0 + 1, M_PHI - 1) - 2 * M_PI * (M_PHI - 1),
+                          2 * M_PI * madfrac(F1 + 1, M_PHI - 1) - 2 * M_PI * (M_PHI - 1),
+                -2 * F0 / n,
+                -2 * F1 / n);
+    float2x2 invB = Inverse2x2(B);
+
+    if (k <= 4.0f) {
+        float2 c = floor(mul(invB, float2(phi, cosTheta - (1 - 1 / n))));
+        float d = INFINITE, j = 0;
+        for (uint s = 0; s < 4; ++s) {
+            float cosTheta = dot(B[1], float2(s % 2, s / 2) + c) + (1 - 1 / n);
+            cosTheta = clamp(cosTheta, -1, +1) * 2 - cosTheta;
+            float i = floor(n * 0.5 - cosTheta * n * 0.5);
+            float3 q = fibSpherePoint(i, n);
+
+            if (dot(q, normal) <= 0.0) continue;
+
+            float squaredDistance = dot(q - p, q - p);
+            if (squaredDistance < d) {
+                d = squaredDistance;
+                j = i;
+            }
+        }
+
+        probability = 1.0f;
+        return (uint)j;
+    } else {
+        float2 c = mul(invB, float2(phi, cosTheta - (1.0 - 1.0 / n)));
+        int2 center = int2((int)round(c.x), (int)round(c.y));
+
+        float h = sqrt(4.0 * M_PI / n);
+        float totalWeight = 0.0;
+        float weights[9]; uint idxs[9];
+        uint idx_result = 0;
+        for (int di = -1; di <= 1; ++di) {
+            for (int dj = -1; dj <= 1; ++dj) {
+                int idx_index = (di + 1) * 3 + (dj + 1);
+                int2 gridCoord = center + int2(di, dj);
+
+                float cosCorner = B[1][0] * gridCoord.x + B[1][1] * gridCoord.y + (1.0 - 1.0 / n);
+                if (cosCorner > 1.0) cosCorner = 2.0 - cosCorner;
+                else if (cosCorner < -1.0) cosCorner = -2.0 - cosCorner;
+
+                float iEst = floor(n * 0.5 - cosCorner * n * 0.5);
+                int idx = (int)iEst;
+                idx = clamp(idx, 0, (int)n - 1);
+                idxs[idx_index] = idx;
+
+                float3 q = fibSpherePoint(idx, n);
+
+                float w = 0.0;
+                if (dot(q, normal) > 0.0) {
+                    float delta = distance(q, p);
+                    float t = max(0.0, 1.0 - delta / h);
+                    w = 3.0 * t * t - 2.0 * t * t * t;
+                }
+
+                if (w > 0.0) {
+                    totalWeight += w;
+                    weights[idx_index] = w;
+                } else {
+                    weights[idx_index] = 0.0;
+                }
+            }
+        }
+        if (totalWeight == 0) {
+            probability = 1.0f;
+            return 0; // fallback
+        }
+        for (int i = 0; i < 9; ++i) {
+            float probability_i = weights[i] / totalWeight;
+            if (probability <= probability_i) {
+                idx_result = idxs[i];
+                break;
+            }
+            probability -= probability_i;
+        }
+        probability = 0.0f;
+        for (int i = 0; i < 9; ++i) {
+            if (idxs[i] == idx_result) probability += weights[i] / totalWeight;
+        }
+        return idx_result;
+    }
+
+    probability = 1.0f;
+    return 0;
+}
 //------------------------------------------------Low difference sequence---------------------------------------------
 float RadicalInverse_VdC(uint bits)
 {
