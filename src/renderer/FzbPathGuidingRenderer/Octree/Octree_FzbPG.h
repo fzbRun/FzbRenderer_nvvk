@@ -43,6 +43,7 @@ public:
 	void createOctreeArray(VkCommandBuffer cmd);
 	void getOctreeLabel(VkCommandBuffer cmd);
 	void getOctreeNodePairData(VkCommandBuffer cmd);
+	void getNearbyNodeInfo(VkCommandBuffer cmd);
 
 	shaderio::OctreePushConstant_FzbPG pushConstant{};
 
@@ -60,6 +61,8 @@ public:
 
 	nvvk::Buffer octreeNodePairVisibleDataBuffer;
 	nvvk::Buffer octreeNodePairWeightBuffer;
+
+	nvvk::Buffer nearbyNodeInfoBuffer;
 private:
 	OctreeCreateInfo_FzbPG setting;
 
@@ -73,6 +76,8 @@ private:
 	nvvk::Buffer threadGroupInfoBuffer;
 
 	nvvk::Buffer octreeNodePairEBuffer;
+
+	nvvk::Buffer nearbyNodeTempInfoBuffer;
 
 	VkShaderEXT computeShader_initOctreeArray{};
 	VkShaderEXT computeShader_initHasDataBlockInfo{};
@@ -90,6 +95,9 @@ private:
 	VkShaderEXT computeShader_visibleAABBCluster{};
 	VkShaderEXT computeShader_getProbability{};
 
+	VkShaderEXT computeShader_getNearbyNodes1{};
+	VkShaderEXT computeShader_getNearbyNodes2{};
+
 	VkBindDescriptorSetsInfo bindDescriptorSetsInfo;
 	VkPushConstantsInfo pushInfo;
 
@@ -101,6 +109,7 @@ private:
 	void debug_OctreeLayer_Visualization(VkCommandBuffer cmd);
 	void debug_OctreeIndivisibleNodes_Visualization(VkCommandBuffer cmd);
 	void debug_OctreeNodePairHitTestResult_Visualization(VkCommandBuffer cmd);
+	void debug_NearbyNodeInfoResult_Visualization(VkCommandBuffer cmd);
 
 	VkShaderEXT vertexShader_OctreeLayer{};
 	VkShaderEXT fragmentShader_OctreeLayer{};
@@ -110,6 +119,9 @@ private:
 
 	VkShaderEXT vertexShader_OctreeNodePairHitTestResult{};
 	VkShaderEXT fragmentShader_OctreeNodePairHitTestResult{};
+
+	VkShaderEXT vertexShader_NearbyNodeInfoResult{};
+	VkShaderEXT fragmentShader_NearbyNodeInfoResult{};
 
 	VkImageView depthImageView;
 
@@ -126,6 +138,9 @@ private:
 
 	uint32_t showOctreeNodePairHitTestResultMapIndex = 3;
 	bool showOctreeNodePairHitTestResultMap = false;
+
+	uint32_t showNearbyNodeInfoResultMapIndex = 4;
+	bool showNearbyNodeInfoResultMap = false;
 #endif
 };
 }

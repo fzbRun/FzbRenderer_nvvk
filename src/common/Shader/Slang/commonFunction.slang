@@ -712,7 +712,7 @@ Quadrilateral_initialization initQuadrilateral(float3 hitPos, float3 quadRangleS
     quadrangle.b1 = n2.z;
     quadrangle.b0sq = quadrangle.b0 * quadrangle.b0;
     quadrangle.k = 2 * M_PI - g2 - g3;
-    quadrangle.S = g0 + g1 - quadrangle.k;
+    quadrangle.S = max(g0 + g1 - quadrangle.k, 0.0f);
 
     return quadrangle;
 }

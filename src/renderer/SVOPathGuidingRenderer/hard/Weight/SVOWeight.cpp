@@ -722,6 +722,6 @@ void SVOWeight::debug_nearby(VkCommandBuffer cmd) {
 
 	vkCmdEndRendering(cmd);
 
-	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(RasterVoxelizationGBuffer_SVOPG::CubeMap_SVOPG), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(1), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
 }
 #endif

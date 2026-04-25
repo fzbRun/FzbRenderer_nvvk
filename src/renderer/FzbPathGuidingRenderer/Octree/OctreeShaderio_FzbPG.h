@@ -51,6 +51,10 @@ enum class BindingPoints_Octree_FzbPG : uint32_t {
 	eOctreeNodePairVisibleData,
 	eOctreeNodePairE,
 	eOctreeNodePairWeight,
+#ifdef NEARBYNODE_JITTER_FZBPG
+	eNearbyNodeTempInfos,
+	eNearbyNodeInfos,
+#endif
 };
 //------------------------------------------------------------------------------------------
 #define OCTREE_CLUSTER_LAYER_FZBPG 2
@@ -72,9 +76,6 @@ the 1 - 31 bite is label, 0 mean no data, other mean the node's index of this la
 */
 struct OctreeNodeData_G_FzbPG {
 	uint32_t label_indivisible;
-};
-struct OctreeNearbyNodeInfo_FzbPG {
-	int nearbyNodeInfos[NEARBY_NODE_COUNT_FZBPG];		//0-3 is layer, 4 - 31 is nodeIndex
 };
 
 /*
@@ -105,6 +106,9 @@ struct OctreeLayerInfo_FzbPG {
 };
 struct OctreeGlobalInfo_FzbPG {
 	DispatchIndirectCommand cmd;
+#ifdef NEARBYNODE_JITTER_FZBPG
+	DispatchIndirectCommand cmd2;
+#endif
 	uint indivisibleNodeCount_G;
 	uint indivisibleNodeCount_E;
 	OctreeLayerInfo_FzbPG layerInfos_G[MAX_OCTREE_LAYER_FZBPG];
@@ -137,6 +141,16 @@ struct OctreeNodePairVisibleData_FzbPG {
 	float pdf;
 	AABB aabb;		//node_E's visible aabb for a node_G
 };
+//------------------------------------------------------------------------------------------
+struct IndivisibleNodeNearbyNodeTempInfo_FzbPG {
+	uint nodeLabel;
+	int2 nearbyNodeInfos[NEARBY_NODE_COUNT_FZBPG];
+	float nearbyNodeDistances[NEARBY_NODE_COUNT_FZBPG];
+};
+
+struct OctreeNearbyNodeInfo_FzbPG {
+	int2 nearbyNodeInfos[NEARBY_NODE_COUNT_FZBPG];		//0-3 is layer, 4 - 31 is nodeIndex
+};
 
 #define CREATEOCTREE_CS_THREADGROUP_SIZE 256
 
@@ -147,6 +161,9 @@ struct OctreeNodePairVisibleData_FzbPG {
 #define HITTEST_CS_THREADGROUP_SIZE 512
 #define VISIBLEAABB_CLUSTER_CS_THREADGROUP_SIZE 256
 #define GETPROBABILITY_CS_THREADGROUP_SIZE 1024
+
+#define GETNEARBYNODES_CS_THREADGROUP_SIZE 512
+#define GETNEARBYNODES2_CS_THREADGROUP_SIZE 1024
 
 NAMESPACE_SHADERIO_END()
 #endif

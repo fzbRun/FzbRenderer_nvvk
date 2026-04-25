@@ -57,6 +57,9 @@ void Octree_FzbPG::clean() {
 
 	Application::allocator.destroyBuffer(octreeNodePairEBuffer);
 
+	Application::allocator.destroyBuffer(nearbyNodeTempInfoBuffer);
+	Application::allocator.destroyBuffer(nearbyNodeInfoBuffer);
+
 	VkDevice device = Application::app->getDevice();
 	vkDestroyShaderEXT(device, computeShader_initOctreeArray, nullptr);
 	vkDestroyShaderEXT(device, computeShader_initHasDataBlockInfo, nullptr);
@@ -73,6 +76,9 @@ void Octree_FzbPG::clean() {
 	vkDestroyShaderEXT(device, computeShader_octreeNodeHitTest, nullptr);
 	vkDestroyShaderEXT(device, computeShader_visibleAABBCluster, nullptr);
 	vkDestroyShaderEXT(device, computeShader_getProbability, nullptr);
+
+	vkDestroyShaderEXT(device, computeShader_getNearbyNodes1, nullptr);
+	vkDestroyShaderEXT(device, computeShader_getNearbyNodes2, nullptr);
 #ifndef NDEBUG
 	vkDestroyShaderEXT(device, vertexShader_OctreeLayer, nullptr);
 	vkDestroyShaderEXT(device, fragmentShader_OctreeLayer, nullptr);
@@ -82,6 +88,9 @@ void Octree_FzbPG::clean() {
 
 	vkDestroyShaderEXT(device, vertexShader_OctreeNodePairHitTestResult, nullptr);
 	vkDestroyShaderEXT(device, fragmentShader_OctreeNodePairHitTestResult, nullptr);
+
+	vkDestroyShaderEXT(device, vertexShader_NearbyNodeInfoResult, nullptr);
+	vkDestroyShaderEXT(device, fragmentShader_NearbyNodeInfoResult, nullptr);
 #endif
 }
 void Octree_FzbPG::uiRender() {
@@ -145,6 +154,7 @@ void Octree_FzbPG::uiRender() {
 				showOctreeLayerMap_G = false;
 				showOctreeIndivisibleNodeMap_G = false;
 				showOctreeNodePairHitTestResultMap = false;
+				showNearbyNodeInfoResultMap = false;
 			}
 		}
 		PE::end();
@@ -170,6 +180,7 @@ void Octree_FzbPG::uiRender() {
 				showOctreeLayerMap_G = false;
 				showOctreeLayerMap_E = false;
 				showOctreeNodePairHitTestResultMap = false;
+				showNearbyNodeInfoResultMap = false;
 			}
 		}
 		PE::end();
@@ -195,10 +206,37 @@ void Octree_FzbPG::uiRender() {
 				showOctreeLayerMap_G = false;
 				showOctreeLayerMap_E = false;
 				showOctreeIndivisibleNodeMap_G = false;
+				showNearbyNodeInfoResultMap = false;
 			}
 
 			UIModified |= PE::DragInt("sampleNodeLabel_G", &pushConstant.sampleNodeLabel_G);
 			UIModified |= PE::DragInt("sampleNodeLabel_e", &pushConstant.sampleNodeLabel_E);
+		}
+		PE::end();
+
+		if (PE::begin()) {
+			if (PE::entry("Indivisible Nearby Node Map", [&] {
+				static const ImVec4 highlightColor = ImVec4(118.f / 255.f, 185.f / 255.f, 0.f, 1.f);
+				ImVec4 selectedColor = showNearbyNodeInfoResultMap ? highlightColor : ImGui::GetStyleColorVec4(ImGuiCol_Button);
+				ImVec4 hoveredColor = ImVec4(selectedColor.x * 1.2f, selectedColor.y * 1.2f, selectedColor.z * 1.2f, 1.f);
+				ImGui::PushStyleColor(ImGuiCol_Button, selectedColor);
+				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, hoveredColor);
+				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(5, 5));
+
+				bool result = ImGui::ImageButton("##but", (ImTextureID)gBuffers.getDescriptorSet(showNearbyNodeInfoResultMapIndex),
+					ImVec2(100 * gBuffers.getAspectRatio(), 100));
+
+				ImGui::PopStyleColor(2);
+				ImGui::PopStyleVar();
+				return result;
+				}))
+			{
+				showNearbyNodeInfoResultMap = !showNearbyNodeInfoResultMap;
+				showOctreeLayerMap_G = false;
+				showOctreeLayerMap_E = false;
+				showOctreeIndivisibleNodeMap_G = false;
+				showOctreeNodePairHitTestResultMap = false;
+			}
 		}
 		PE::end();
 	}
@@ -208,6 +246,7 @@ void Octree_FzbPG::uiRender() {
 	if (showOctreeLayerMap_E) Application::viewportImage = gBuffers.getDescriptorSet(selectedOctreeLayerMapIndex_E + octreeShowLayerCount);
 	if (showOctreeIndivisibleNodeMap_G) Application::viewportImage = gBuffers.getDescriptorSet(showOctreeIndivisibleNodeMapIndex);
 	if (showOctreeNodePairHitTestResultMap) Application::viewportImage = gBuffers.getDescriptorSet(showOctreeNodePairHitTestResultMapIndex);
+	if (showNearbyNodeInfoResultMap) Application::viewportImage = gBuffers.getDescriptorSet(showNearbyNodeInfoResultMapIndex);
 #endif
 }
 void Octree_FzbPG::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
@@ -253,12 +292,14 @@ void Octree_FzbPG::render(VkCommandBuffer cmd) {
 	getOctreeLabel(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	getOctreeNodePairData(cmd);
+	getNearbyNodeInfo(cmd);
 }
 void Octree_FzbPG::postProcess(VkCommandBuffer cmd) {
 #ifndef NDEBUG
 	debug_OctreeLayer_Visualization(cmd);
 	debug_OctreeIndivisibleNodes_Visualization(cmd);
 	debug_OctreeNodePairHitTestResult_Visualization(cmd);
+	debug_NearbyNodeInfoResult_Visualization(cmd);
 #endif
 };
 
@@ -370,6 +411,18 @@ void Octree_FzbPG::createOctreeArray() {
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(octreeNodePairWeightBuffer.buffer);
 
+	#ifdef NEARBYNODE_JITTER_FZBPG
+	bufferSize = IndivisibleNodeCount_G_FZBPG * (IndivisibleNodeCount_G_FZBPG / GETNEARBYNODES_CS_THREADGROUP_SIZE) * sizeof(shaderio::IndivisibleNodeNearbyNodeTempInfo_FzbPG);
+	allocator->createBuffer(nearbyNodeTempInfoBuffer, bufferSize,
+		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+	NVVK_DBG_NAME(nearbyNodeTempInfoBuffer.buffer);
+
+	bufferSize = IndivisibleNodeCount_G_FZBPG * sizeof(shaderio::OctreeNearbyNodeInfo_FzbPG);
+	allocator->createBuffer(nearbyNodeInfoBuffer, bufferSize,
+		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+	NVVK_DBG_NAME(nearbyNodeInfoBuffer.buffer);
+	#endif
+
 	pushConstant.octreeMaxLayer = octreeMaxLayer;
 	pushConstant.octreeNodeTotalCount = int(pow(8, octreeMaxLayer + 1) - 1) / 7 * 6;
 	pushConstant.VGBVoxelTotalCount = VGBSize * VGBSize * VGBSize;
@@ -467,6 +520,18 @@ void Octree_FzbPG::createDescriptorSetLayout() {
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
+#ifdef NEARBYNODE_JITTER_FZBPG
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eNearbyNodeTempInfos,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eNearbyNodeInfos,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+#endif
 
 	staticDescPack.init(bindings, Application::app->getDevice(), 1, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
 		VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT);
@@ -561,6 +626,16 @@ void Octree_FzbPG::createDescriptorSet() {
 	NodePairInfoWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eOctreeNodePairWeight, 0, 0, 1);
 	write.append(NodePairInfoWrite, octreeNodePairWeightBuffer, 0, octreeNodePairWeightBuffer.bufferSize);
+
+#ifdef NEARBYNODE_JITTER_FZBPG
+	VkWriteDescriptorSet    NearbyNodeInfoWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eNearbyNodeTempInfos, 0, 0, 1);
+	write.append(NearbyNodeInfoWrite, nearbyNodeTempInfoBuffer, 0, nearbyNodeTempInfoBuffer.bufferSize);
+
+	NearbyNodeInfoWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eNearbyNodeInfos, 0, 0, 1);
+	write.append(NearbyNodeInfoWrite, nearbyNodeInfoBuffer, 0, nearbyNodeInfoBuffer.bufferSize);
+#endif
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }
@@ -750,6 +825,29 @@ void Octree_FzbPG::compileAndCreateShaders() {
 	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_getProbability);
 	NVVK_DBG_NAME(computeShader_getProbability);
 
+#ifdef NEARBYNODE_JITTER_FZBPG
+	//--------------------------------------------------------------------------------------
+	vkDestroyShaderEXT(device, computeShader_getNearbyNodes1, nullptr);
+
+	shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	shaderInfo.nextStage = 0;
+	shaderInfo.pName = "computeMain_getNearbyNodes1";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_getNearbyNodes1);
+	NVVK_DBG_NAME(computeShader_getNearbyNodes1);
+	//--------------------------------------------------------------------------------------
+	vkDestroyShaderEXT(device, computeShader_getNearbyNodes2, nullptr);
+
+	shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	shaderInfo.nextStage = 0;
+	shaderInfo.pName = "computeMain_getNearbyNodes2";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_getNearbyNodes2);
+	NVVK_DBG_NAME(computeShader_getNearbyNodes2);
+#endif
+
 #ifndef NDEBUG
 	//--------------------------------------------------------------------------------------
 	vkDestroyShaderEXT(device, vertexShader_OctreeLayer, nullptr);
@@ -808,6 +906,25 @@ void Octree_FzbPG::compileAndCreateShaders() {
 	shaderInfo.pCode = shaderCode.pCode;
 	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &fragmentShader_OctreeNodePairHitTestResult);
 	NVVK_DBG_NAME(fragmentShader_OctreeNodePairHitTestResult);
+	//--------------------------------------------------------------------------------------
+	vkDestroyShaderEXT(device, vertexShader_NearbyNodeInfoResult, nullptr);
+	vkDestroyShaderEXT(device, fragmentShader_NearbyNodeInfoResult, nullptr);
+
+	shaderInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+	shaderInfo.nextStage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	shaderInfo.pName = "vertexMain_nearby";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &vertexShader_NearbyNodeInfoResult);
+	NVVK_DBG_NAME(vertexShader_NearbyNodeInfoResult);
+
+	shaderInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	shaderInfo.nextStage = 0;
+	shaderInfo.pName = "fragmentMain_nearby";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &fragmentShader_NearbyNodeInfoResult);
+	NVVK_DBG_NAME(fragmentShader_NearbyNodeInfoResult);
 #endif
 }
 void Octree_FzbPG::updateDataPerFrame(VkCommandBuffer cmd) {}
@@ -907,15 +1024,28 @@ void Octree_FzbPG::getOctreeNodePairData(VkCommandBuffer cmd) {
 	
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_visibleAABBCluster);
 	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 	
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getProbability);
 	for (int layerIndex = OCTREE_CLUSTER_LAYER_FZBPG; layerIndex >= 0; --layerIndex) {
 		pushConstant.currentLayer = layerIndex;
 		vkCmdPushConstants2(cmd, &pushInfo);
 	
+		//明明是伪随机，但是却出现了真随机，只能是异步调度出现了问题导致的，那么到底是哪里呢？
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 		vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
 	}
+}
+void Octree_FzbPG::getNearbyNodeInfo(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
+
+	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
+
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getNearbyNodes1);
+	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, offsetof(shaderio::OctreeGlobalInfo_FzbPG, cmd2));
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getNearbyNodes2);
+	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, offsetof(shaderio::OctreeGlobalInfo_FzbPG, cmd2));
 }
 
 #ifndef NDEBUG
@@ -925,10 +1055,11 @@ void Octree_FzbPG::debug_Prepare() {
 
 	showOctreeIndivisibleNodeMapIndex = showOctreeLayerMapCount;
 	showOctreeNodePairHitTestResultMapIndex = showOctreeIndivisibleNodeMapIndex + 1;
+	showNearbyNodeInfoResultMapIndex = showOctreeIndivisibleNodeMapIndex + 2;
 
-	showMapCount = showOctreeLayerMapCount + 1 + 1;
+	showMapCount = showOctreeLayerMapCount + 1 + 1 + 1;
 
-	pushConstant.sampleNodeLabel_G = 206;	// 45 - 23;   1 - 130  204 236
+	pushConstant.sampleNodeLabel_G = 240;	// 45 - 23;   1 - 130  204 236
 	pushConstant.sampleNodeLabel_E = 35;
 
 	Feature::createGBuffer(true, false, showMapCount);
@@ -968,9 +1099,9 @@ void Octree_FzbPG::debug_OctreeLayer_Visualization(VkCommandBuffer cmd) {
 		colorAttachments[i].clearValue = { .color = {0.0f, 0.0f, 0.0f, 0.0f} };
 	}
 	VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
-	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;		//使用PathGuiding的深度纹理
-	depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
-	depthAttachment.imageView = gBuffers.getDepthImageView();	// gBuffers.getDepthImageView();	//depthImageView;
+	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;		//使用PathGuiding的深度纹理
+	//depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
+	depthAttachment.imageView = depthImageView;	// gBuffers.getDepthImageView();	//depthImageView;
 
 	VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
 	renderingInfo.renderArea = { {0, 0}, gBuffers.getSize() };
@@ -989,7 +1120,7 @@ void Octree_FzbPG::debug_OctreeLayer_Visualization(VkCommandBuffer cmd) {
 	graphicsDynamicPipeline.rasterizationState.lineWidth = 2.0f;
 	graphicsDynamicPipeline.rasterizationState.polygonMode = VK_POLYGON_MODE_LINE;
 	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_TRUE;
-	graphicsDynamicPipeline.depthStencilState.depthWriteEnable = VK_TRUE;
+	graphicsDynamicPipeline.depthStencilState.depthWriteEnable = VK_FALSE;
 
 	graphicsDynamicPipeline.colorWriteMasks.resize(wireframeMapCount);
 	graphicsDynamicPipeline.colorBlendEquations.resize(wireframeMapCount);
@@ -1112,15 +1243,15 @@ void Octree_FzbPG::debug_OctreeNodePairHitTestResult_Visualization(VkCommandBuff
 											Application::sceneResource.sceneInfo.backgroundColor.z, 1.0f} };
 
 	VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
-	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;		//使用PathGuiding的深度纹理
-	depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
-	depthAttachment.imageView = gBuffers.getDepthImageView();	// gBuffers.getDepthImageView();	//depthImageView;
+	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;		//使用PathGuiding的深度纹理
+	//depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
+	depthAttachment.imageView = depthImageView;	// gBuffers.getDepthImageView();	//depthImageView;
 
 	VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
 	renderingInfo.renderArea = { {0, 0}, gBuffers.getSize() };
 	renderingInfo.colorAttachmentCount = 1;
 	renderingInfo.pColorAttachments = &colorAttachment;
-	renderingInfo.pDepthAttachment = nullptr;
+	renderingInfo.pDepthAttachment = &depthAttachment;
 
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1,
 		staticDescPack.getSetPtr(), 0, nullptr);
@@ -1129,7 +1260,7 @@ void Octree_FzbPG::debug_OctreeNodePairHitTestResult_Visualization(VkCommandBuff
 
 	graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
 	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
-	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_FALSE;
+	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_TRUE;
 	graphicsDynamicPipeline.depthStencilState.depthWriteEnable = VK_FALSE;
 	graphicsDynamicPipeline.cmdApplyAllStates(cmd);
 	graphicsDynamicPipeline.cmdSetViewportAndScissor(cmd, gBuffers.getSize());
@@ -1154,5 +1285,60 @@ void Octree_FzbPG::debug_OctreeNodePairHitTestResult_Visualization(VkCommandBuff
 	vkCmdEndRendering(cmd);
 
 	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(showOctreeNodePairHitTestResultMapIndex), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
+}
+void Octree_FzbPG::debug_NearbyNodeInfoResult_Visualization(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
+
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(showNearbyNodeInfoResultMapIndex), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
+
+	VkRenderingAttachmentInfo colorAttachment = DEFAULT_VkRenderingAttachmentInfo;
+	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	colorAttachment.imageView = gBuffers.getColorImageView(showNearbyNodeInfoResultMapIndex);
+	colorAttachment.clearValue = { .color = {Application::sceneResource.sceneInfo.backgroundColor.x,
+											Application::sceneResource.sceneInfo.backgroundColor.y,
+											Application::sceneResource.sceneInfo.backgroundColor.z, 1.0f} };
+
+	VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
+	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+	depthAttachment.imageView = depthImageView;	// gBuffers.getDepthImageView();
+	//depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
+
+	VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
+	renderingInfo.renderArea = { {0, 0}, gBuffers.getSize() };
+	renderingInfo.colorAttachmentCount = 1;
+	renderingInfo.pColorAttachments = &colorAttachment;
+	renderingInfo.pDepthAttachment = &depthAttachment;
+
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1,
+		staticDescPack.getSetPtr(), 0, nullptr);
+
+	vkCmdBeginRendering(cmd, &renderingInfo);
+
+	graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
+	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
+	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_TRUE;
+	graphicsDynamicPipeline.depthStencilState.depthWriteEnable = VK_FALSE;
+	graphicsDynamicPipeline.cmdApplyAllStates(cmd);
+	graphicsDynamicPipeline.cmdSetViewportAndScissor(cmd, gBuffers.getSize());
+	graphicsDynamicPipeline.cmdBindShaders(cmd, { .vertex = vertexShader_NearbyNodeInfoResult, .fragment = fragmentShader_NearbyNodeInfoResult });
+
+	VkVertexInputBindingDescription2EXT bindingDescription{};
+	VkVertexInputAttributeDescription2EXT attributeDescription = {};
+	vkCmdSetVertexInputEXT(cmd, 0, nullptr, 0, nullptr);
+
+	const shaderio::Mesh& mesh = scene.meshes[1];
+	const shaderio::TriangleMesh& triMesh = mesh.triMesh;
+
+	vkCmdPushConstants2(cmd, &pushInfo);
+
+	uint32_t bufferIndex = scene.getMeshBufferIndex(1);
+	const nvvk::Buffer& v = scene.bDatas[bufferIndex];
+
+	vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(mesh.indexType));
+	vkCmdDrawIndexed(cmd, triMesh.indices.count, IndivisibleNodeCount_G_FZBPG, 0, 0, 0);
+
+	vkCmdEndRendering(cmd);
+
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(showNearbyNodeInfoResultMapIndex), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
 }
 #endif

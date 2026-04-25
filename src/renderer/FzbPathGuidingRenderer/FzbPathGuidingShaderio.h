@@ -7,6 +7,7 @@
 NAMESPACE_SHADERIO_BEGIN()
 
 #define MERGE_SIMILIAR_E_FZBPG
+
 #define NEARBYNODE_JITTER_FZBPG
 #define NEARBY_NODE_COUNT_FZBPG 4
 
@@ -38,6 +39,10 @@ enum class StaticBindingPoints_FzbPG
 	eOctreeNodePairVisibleData,
 	eOctreeNodePairWeight,
 	eGlobalInfo,
+#ifdef NEARBYNODE_JITTER_FZBPG
+	eOctreeClusterData_G,
+	eNearbyNodeInfos,
+#endif
 #ifndef NDEBUG
 	eDepthImage,
 #endif
