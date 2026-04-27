@@ -357,7 +357,7 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
                 #endif
                 indivisible &= length(mergeNormal) > 0.707f &&
                               (nodeData_G.fillRate >= 0.75 ||
-                              (mergeAABBVolume - aabbVolumeSum) < pushConst.voxelVolume * (pushConst.octreeMaxLayer - OCTREE_CLUSTER_LAYER) * 2);
+                              (mergeAABBVolume - aabbVolumeSum) < pushConst.voxelVolume * (pushConst.octreeMaxLayer - OCTREE_CLUSTER_LAYER) * 1.5f);
 
                 nodeData_G.indivisible = indivisible;
                 nodeData_G.label = 0;

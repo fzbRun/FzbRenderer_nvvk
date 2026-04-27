@@ -64,14 +64,24 @@ bool traceRay(RayDesc ray, inout HitPayload_SVOPG payload)
             float3(1.0 - barycentricCoords.x - barycentricCoords.y, barycentricCoords.x, barycentricCoords.y);
 
         // Process intersection data into world-space shading information
-        // HitState hitState = getHitStateWithPositionFetch(barycentrics);
+        //HitState hitState = getHitStateWithPositionFetch(barycentrics);
         float3 triPos[3];
         triPos = q.CommittedGetIntersectionTriangleVertexPositions();
         const float3 localPosition = triPos[0] * barycentrics.x + triPos[1] * barycentrics.y + triPos[2] * barycentrics.z;
         payload.hitPos = float3(mul(float4(localPosition, 1.0), objectToWorld));
-
         const float3 edge1 = triPos[1] - triPos[0];
         const float3 edge2 = triPos[2] - triPos[0];
+
+        //int triID = q.CommittedPrimitiveIndex();
+        //int3 indices = getTriangleIndices(mesh.dataBuffer, mesh.triMesh, triID);
+        //float3 pos0 = getAttribute<float3>(mesh.dataBuffer, mesh.triMesh.positions, indices.x);
+        //float3 pos1 = getAttribute<float3>(mesh.dataBuffer, mesh.triMesh.positions, indices.y);
+        //float3 pos2 = getAttribute<float3>(mesh.dataBuffer, mesh.triMesh.positions, indices.z);
+        //float3 posObj = pos0 * barycentrics.x + pos1 * barycentrics.y + pos2 * barycentrics.z;
+        //payload.hitPos = float3(mul(float4(posObj, 1.0), objectToWorld));
+        //
+        //const float3 edge1 = pos1 - pos0;
+        //const float3 edge2 = pos2 - pos0;
         const float3 geoNormal = normalize(cross(edge1, edge2));
 
         //payload.hitNormal = normalize(mul(worldToObject, geoNormal).xyz);
@@ -100,57 +110,6 @@ float3 RayMiss(float3 rayDirection) {
     SceneInfo *sceneInfo = pushConst.sceneInfoAddress;
     if (sceneInfo.useSky == 1) return evalSimpleSky(sceneInfo.skySimpleParam, rayDirection);
     else return sceneInfo.backgroundColor;
-}
-bool SphericalRectangleSample(AABB aabb, float3 hitPos, inout uint randomSeed, inout float3 sampleDir, inout float pdf) {
-    float3 distance = aabb.maximum - aabb.minimum;
-    float3 nodeDirection = (aabb.maximum + aabb.minimum) * 0.5f - hitPos;
-
-    float3 edge0 = float3(distance.x, 0.0f, 0.0f);
-    float3 edge1 = float3(0.0f, distance.y, 0.0f);
-    float3 edge2 = float3(0.0f, 0.0f, distance.z);
-
-    float3 face0StartPos = aabb.minimum;
-    face0StartPos.x += nodeDirection.x < 0 ? distance.x : 0.0f; // in left
-    float3 face1StartPos = aabb.minimum;
-    face1StartPos.y += nodeDirection.y < 0 ? distance.y : 0.0f; // in bottom
-    float3 face2StartPos = aabb.minimum;
-    face2StartPos.z += nodeDirection.z < 0 ? distance.z : 0.0f; // in back
-
-    Quadrilateral_initialization quad0 = initQuadrilateral(hitPos, face0StartPos, edge2, edge1);
-    quad0.S = isnan(quad0.S) ? 0.0f : quad0.S;
-    Quadrilateral_initialization quad1 = initQuadrilateral(hitPos, face1StartPos, edge0, edge2);
-    quad1.S = isnan(quad1.S) ? 0.0f : quad1.S;
-    Quadrilateral_initialization quad2 = initQuadrilateral(hitPos, face2StartPos, edge0, edge1);
-    quad2.S = isnan(quad2.S) ? 0.0f : quad2.S;
-
-    float sphericalRectangleSampleProbability = 1.0f;
-    float selectFaceProbability = rand(randomSeed);
-    float randomU = rand(randomSeed); float randomV = rand(randomSeed);
-
-    // The occurrence of this all-0 situation indicates that hitPos is located on the sampling plane, and we degenerate to BSDF sampling
-    if (quad0.S + quad1.S + quad2.S == 0.0f) return false;
-    else {
-        float3 sphereQuadrilateralSolidAngle = float3(quad0.S, quad1.S, quad2.S);
-        sphereQuadrilateralSolidAngle /= quad0.S + quad1.S + quad2.S;
-        Quadrilateral_initialization sampleQuad;
-        if (selectFaceProbability <= sphereQuadrilateralSolidAngle.x) {
-            sampleQuad = quad0;
-            sphericalRectangleSampleProbability *= sphereQuadrilateralSolidAngle.x;
-        }
-        else if (selectFaceProbability <= 1.0f - sphereQuadrilateralSolidAngle.z) {
-            sampleQuad = quad1;
-            sphericalRectangleSampleProbability *= sphereQuadrilateralSolidAngle.y;
-        }
-        else {
-            sampleQuad = quad2;
-            sphericalRectangleSampleProbability *= sphereQuadrilateralSolidAngle.z;
-        }
-
-        pdf *= sphericalRectangleSampleProbability;
-        sampleDir = sphericalRectangleSample(sampleQuad, randomU, randomV, pdf);    // p *= 1 / quad.s
-    }
-
-    return true;
 }
 
 bool getNodeAABB_E_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload, inout float nodeEPdf, inout float jitterPdf,
@@ -215,6 +174,7 @@ bool getNodeAABB_E_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload, inout 
     }
     if (!hitIndivisible) return false;
 
+    jitterPdf = 1.0f;
     #ifdef NEARBYNODE_JITTER
     if (layerIndex < 4) nodeData_G = OctreeArray_G[layerIndex][nodeIndex];
     float weights[NEARBY_NODE_COUNT + 1];
@@ -254,6 +214,7 @@ bool getNodeAABB_E_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload, inout 
     uint weightStartIndex = outgoingIndex * groupGlobalInfo.indivisibleNodeCount_G * OCTREE_NODECOUNT_E +
                             nodeLabel_G * OCTREE_NODECOUNT_E;
 
+    nodeEPdf = 1.0f;
     uint nodeIndex_E = 0, nodeOffset; bool getNode = false;
     for (uint layerIndex_E = 0; layerIndex_E <= OCTREE_CLUSTER_LAYER; ++layerIndex_E) {
         getNode = false;
@@ -282,11 +243,65 @@ bool getNodeAABB_E_SVOPG(inout AABB aabb, inout HitPayload_SVOPG payload, inout 
     return true;
 }
 
+bool SphericalRectangleSample(AABB aabb, float3 hitPos, inout uint randomSeed, inout float3 sampleDir, inout float pdf) {
+    float3 distance = aabb.maximum - aabb.minimum;
+    float3 nodeDirection = (aabb.maximum + aabb.minimum) * 0.5f - hitPos;
+
+    float3 edge0 = float3(distance.x, 0.0f, 0.0f);
+    float3 edge1 = float3(0.0f, distance.y, 0.0f);
+    float3 edge2 = float3(0.0f, 0.0f, distance.z);
+
+    float3 face0StartPos = aabb.minimum;
+    face0StartPos.x += nodeDirection.x < 0 ? distance.x : 0.0f; // in left
+    float3 face1StartPos = aabb.minimum;
+    face1StartPos.y += nodeDirection.y < 0 ? distance.y : 0.0f; // in bottom
+    float3 face2StartPos = aabb.minimum;
+    face2StartPos.z += nodeDirection.z < 0 ? distance.z : 0.0f; // in back
+
+    Quadrilateral_initialization quad0 = initQuadrilateral(hitPos, face0StartPos, edge2, edge1);
+    quad0.S = isnan(quad0.S) ? 0.0f : quad0.S;
+    Quadrilateral_initialization quad1 = initQuadrilateral(hitPos, face1StartPos, edge0, edge2);
+    quad1.S = isnan(quad1.S) ? 0.0f : quad1.S;
+    Quadrilateral_initialization quad2 = initQuadrilateral(hitPos, face2StartPos, edge0, edge1);
+    quad2.S = isnan(quad2.S) ? 0.0f : quad2.S;
+
+    float sphericalRectangleSampleProbability = 1.0f;
+    float selectFaceProbability = rand(randomSeed);
+    float randomU = rand(randomSeed); float randomV = rand(randomSeed);
+
+    // The occurrence of this all-0 situation indicates that hitPos is located on the sampling plane, and we degenerate to BSDF sampling
+    if (quad0.S + quad1.S + quad2.S == 0.0f) return false;
+    else {
+        float3 sphereQuadrilateralSolidAngle = float3(quad0.S, quad1.S, quad2.S);
+        sphereQuadrilateralSolidAngle /= quad0.S + quad1.S + quad2.S;
+        Quadrilateral_initialization sampleQuad;
+        if (selectFaceProbability <= sphereQuadrilateralSolidAngle.x) {
+            sampleQuad = quad0;
+            sphericalRectangleSampleProbability *= sphereQuadrilateralSolidAngle.x;
+        }
+        else if (selectFaceProbability <= 1.0f - sphereQuadrilateralSolidAngle.z) {
+            sampleQuad = quad1;
+            sphericalRectangleSampleProbability *= sphereQuadrilateralSolidAngle.y;
+        }
+        else {
+            sampleQuad = quad2;
+            sphericalRectangleSampleProbability *= sphereQuadrilateralSolidAngle.z;
+        }
+
+        pdf *= sphericalRectangleSampleProbability;
+        sampleDir = sphericalRectangleSample(sampleQuad, randomU, randomV, pdf);    // p *= 1 / quad.s
+    }
+
+    return true;
+}
 int getNodeIndex_E(float3 hitPos, float3 hitNormal) {
     float3 voxelSize = pushConst.VGBVoxelSize * (1 << (pushConst.maxOctreeLayer - OCTREE_CLUSTER_LAYER));
     int3 voxelIndex = int3((hitPos - pushConst.VGBStartPos_Size.xyz) / voxelSize);
     int voxelCount = 1 << OCTREE_CLUSTER_LAYER;
     int voxelTotalCount = voxelCount * voxelCount * voxelCount;
+
+    uint normalIndex = getNormalIndex(hitNormal);
+    int nodeIndex_E = voxelTotalCount * normalIndex;
 
     int voxelIndexU = 0;
     while (voxelTotalCount > 1) {
@@ -304,8 +319,8 @@ int getNodeIndex_E(float3 hitPos, float3 hitNormal) {
         voxelIndexU += offset.x * voxelTotalCount;
         voxelIndex.x -= offset.x * voxelCount;
     }
-    uint normalIndex = getNormalIndex(hitNormal);
-    return voxelTotalCount * normalIndex + voxelIndexU;
+
+    return nodeIndex_E + voxelIndexU;
 }
 float getPgPdf(uint nodeLabel_G, uint outgoingIndex, float3 hitPos, float3 hitNormal, float3 viewPos) {
     uint weightStartIndex = outgoingIndex * groupGlobalInfo.indivisibleNodeCount_G * OCTREE_NODECOUNT_E + nodeLabel_G * OCTREE_NODECOUNT_E;
@@ -445,9 +460,8 @@ void computeMain_SVOPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
         uint nodeLabel_G = 0;
         uint outgoingIndex = 0;
 
-        uint bounceDepth = 0; bool useBsdfSample = false;
+        uint bounceDepth = 0; bool useBsdfSample = false, hit = true;
         while (bounceDepth < pushConst.maxDepth) {
-            bool hit = true;
             if (!useBsdfSample) hit = traceRay(ray, payload);
             useBsdfSample = false;
 
@@ -469,91 +483,79 @@ void computeMain_SVOPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
                 float jitterPdf = 1.0f;
 
                 float3 pgSample;
-                float pgSample_pgPdf = 1.0f;
-                float pgSample_bsdfPdf = 1.0f;
-                float pgSample_weight = 0.0f;
-                float3 pgSample_bsdf = 0.0f;
-                {
-                    AABB nodeAABB_E;
-                    bool useSVOPG = getNodeAABB_E_SVOPG(nodeAABB_E, payload, pgSample_pgPdf, jitterPdf, nodeLabel_G, outgoingIndex);
-                    if (useSVOPG) useSVOPG = SphericalRectangleSample(nodeAABB_E, payload.hitPos, payload.randomSeed, pgSample, pgSample_pgPdf);
-                    if (useSVOPG) {
+                float pgSample_pgPdf = 0.0f;
+                float pgSample_bsdfPdf = 0.0f;
+                float3 pgSample_bsdf = float3(0.0f);
+                AABB nodeAABB_E;
+                bool useFzbPG = getNodeAABB_E_SVOPG(nodeAABB_E, payload, pgSample_pgPdf, jitterPdf, nodeLabel_G, outgoingIndex);
+                if (useFzbPG) {
+                    useFzbPG = SphericalRectangleSample(nodeAABB_E, payload.hitPos, payload.randomSeed, pgSample, pgSample_pgPdf);
+                    if (useFzbPG) {
                         pgSample_bsdf = getBSDF(payload.material, pgSample, payload.hitNormal, payload.outgoing, payload.TBN, payload.isExt);
-                        // if (dot(payload.incidence, payload.hitNormal) * dot(payload.outgoing, payload.hitNormal) < 0.0f) payload.isExt = !payload.isExt;
-
                         pgSample_bsdfPdf = getPdf(payload.material, pgSample, payload.hitNormal, payload.outgoing, payload.TBN, payload.isExt);
                     }
-                    pgSample_weight = pgSample_pgPdf / max(pgSample_pgPdf + pgSample_bsdfPdf, 1e-16f);
-
-                    // bool useSVOPG = getNodeAABB_E_SVOPG(nodeAABB_E, payload, pgSample_pgPdf, nodeLabel_G, outgoingIndex);
-                    //if (useSVOPG == false) accumulatedRadiance = float3(10.0f, 0.0f, 0.0f);
-                    //else if (useSVOPG == true) accumulatedRadiance = float3(0.0f, 10.0f, 0.0f);
-                    //break;
                 }
-
-                float3 bsdfSample;
-                float bsdfSample_pgPdf = 1.0f;
-                float bsdfSample_bsdfPdf = 1.0f;
-                float bsdfSample_weight = 0.0f;
-                float3 bsdfSample_bsdf = 0.0f;
-                HitPayload_SVOPG payload_bsdfSample;
-                {
-                    BSDF_SAMPLE(payload);
-                    bsdfSample = payload.incidence;
-                    bsdfSample_bsdf = payload.bsdf;
-
-                    RayDesc ray_bsdfSample;
-                    ray_bsdfSample.Origin = offsetRay(payload.hitPos, payload.hitNormal);
-                    ray_bsdfSample.Direction = bsdfSample;
-                    ray_bsdfSample.TMin = 0.001;
-                    ray_bsdfSample.TMax = INFINITE;
-
-                    bool hit = traceRay(ray_bsdfSample, payload_bsdfSample);
-                    if (hit) {
-                        bsdfSample_pgPdf = getPgPdf(nodeLabel_G, outgoingIndex, payload_bsdfSample.hitPos, payload_bsdfSample.hitNormal, ray_bsdfSample.Origin);
-                        bsdfSample_pgPdf *= jitterPdf;
-
-                        bsdfSample_bsdfPdf = payload.pdf;
-                        bsdfSample_weight = bsdfSample_bsdfPdf / max(bsdfSample_pgPdf + bsdfSample_bsdfPdf, 1e-16f);
-                    }
+                if (!useFzbPG) {
+                    pgSample_pgPdf = 0.0f;
+                    pgSample_bsdfPdf = 0.0f;
+                    jitterPdf = 1.0f;
                 }
+                //pgSample_pgPdf *= jitterPdf;
+                float pgSample_weight = pgSample_pgPdf / max(pgSample_pgPdf + pgSample_bsdfPdf, 1e-16f);
+
+                //if (pushConst.frameIndex == 1) { // && all(threadIndex == uint2(449, 90))
+                //    printf("threadInex: %d %d useFzbPG: %d\npgSample_pgPdf: %f, jitterPdf: %f\n",
+                //       threadIndex.x, threadIndex.y, useFzbPG,
+                //       pgSample_pgPdf, jitterPdf
+                //   );
+                //}
+                //break;
+
+                BSDF_SAMPLE(payload);
+                float3 bsdfSample = payload.incidence;
+                float3 bsdfSample_bsdf = payload.bsdf;
+                float bsdfSample_bsdfPdf = payload.pdf;
+
+                float3 hitNormal = payload.hitNormal;
+                float3 hitPos = payload.hitPos;
+                ray.Origin = offsetRay(hitPos, hitNormal);
+                ray.Direction = bsdfSample;
+                hit = traceRay(ray, payload); // after here, payload is changed to next hitPos's payload!!!!!!
+
+                float bsdfSample_pgPdf = 0.0f;
+                if (useFzbPG && hit) {
+                    bsdfSample_pgPdf = getPgPdf(nodeLabel_G, outgoingIndex, payload.hitPos, payload.hitNormal, hitPos);
+                    //bsdfSample_pgPdf *= jitterPdf;
+                }
+                float bsdfSample_weight = bsdfSample_bsdfPdf / max(bsdfSample_pgPdf + bsdfSample_bsdfPdf, 1e-16f);
 
                 // MIS
-                {
-                    float probabilitySum = max(pgSample_weight + bsdfSample_weight, 1e-16f);
-                    float pgSample_selectProbability = pgSample_weight / probabilitySum;
-                    float randomNumber = rand(payload.randomSeed);
-                    if (randomNumber <= pgSample_selectProbability) {
-                        payload.incidence = pgSample;
-                        // bsdf_cosine_pdf *= pgSample_weight / pgSample_pgPdf * pgSample_bsdf / pgSample_selectProbability;
-                        bsdf_cosine_pdf *= probabilitySum / pgSample_pgPdf * pgSample_bsdf;
-                    } else {
-                        useBsdfSample = true;
-                        payload.incidence = bsdfSample;
-                        // bsdf_cosine_pdf *= bsdfSample_weight / bsdfSample_bsdfPdf * bsdfSample_bsdf / (1.0f - pgSample_selectProbability);
-                        bsdf_cosine_pdf *= probabilitySum / bsdfSample_bsdfPdf * bsdfSample_bsdf;
-                    }
+                float probabilitySum = max(pgSample_weight + bsdfSample_weight, 1e-16f);
+                float pgSample_selectProbability = pgSample_weight / probabilitySum;
+                float randomNumber = rand(payload.randomSeed);
+                if (randomNumber <= pgSample_selectProbability) {
+                    payload.incidence = pgSample;
+                    bsdf_cosine_pdf *= probabilitySum / max(pgSample_pgPdf, 1e-16f) * pgSample_bsdf;
+                } else {
+                    useBsdfSample = true;
+                    payload.incidence = bsdfSample;
+                    bsdf_cosine_pdf *= probabilitySum / max(bsdfSample_bsdfPdf, 1e-16f) * bsdfSample_bsdf;
                 }
 
-                float cosine = dot(payload.hitNormal, payload.incidence);
-                if (payload.material.type == MaterialType::Dielectric || payload.material.type == MaterialType::RoughDielectric) cosine = abs(cosine);
+                float cosine = dot(hitNormal, payload.incidence);
                 bsdf_cosine_pdf *= cosine;
 
                 bool end = any(bsdf_cosine_pdf <= 0.0f) || all(bsdf_cosine_pdf <= 0.0f) || any(isnan(bsdf_cosine_pdf)) || any(isinf(bsdf_cosine_pdf));
                 if (end) break;
 
-                float randomNumber = rand(payload.randomSeed);
+                randomNumber = rand(payload.randomSeed);
                 if (randomNumber >= RR) break;
                 bsdf_cosine_pdf /= RR;
 
-                if (useBsdfSample) {
-                    payload_bsdfSample.randomSeed = payload.randomSeed;
-                    payload_bsdfSample.outgoing = -payload.incidence;
-                    payload = payload_bsdfSample;
-                } else {
-                    payload.outgoing = -payload.incidence;
+                payload.outgoing = -payload.incidence;
+                if (!useBsdfSample) {
                     ray.Direction = payload.incidence;
-                    ray.Origin = offsetRay(payload.hitPos, payload.hitNormal);
+                    ray.Origin = offsetRay(hitPos, hitNormal);
                 }
 
                 ++bounceDepth;

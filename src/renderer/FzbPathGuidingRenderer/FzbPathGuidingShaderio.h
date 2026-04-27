@@ -6,6 +6,8 @@
 #define FZBRENDERER_FZB_PATHGUIDING_SHADER_IO_H
 NAMESPACE_SHADERIO_BEGIN()
 
+//#define USE_VISIBLE_AABB_FZBPG
+
 #define MERGE_SIMILIAR_E_FZBPG
 
 #define NEARBYNODE_JITTER_FZBPG
@@ -36,7 +38,9 @@ enum class StaticBindingPoints_FzbPG
 	//eOutImage = 1,
 	eOctreeData_G = 2,
 	eClusterLayerData_E,
+#ifdef USE_VISIBLE_AABB_FZBPG
 	eOctreeNodePairVisibleData,
+#endif
 	eOctreeNodePairWeight,
 	eGlobalInfo,
 #ifdef NEARBYNODE_JITTER_FZBPG

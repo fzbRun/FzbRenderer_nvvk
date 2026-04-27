@@ -110,6 +110,7 @@ private:
 	void debug_OctreeIndivisibleNodes_Visualization(VkCommandBuffer cmd);
 	void debug_OctreeNodePairHitTestResult_Visualization(VkCommandBuffer cmd);
 	void debug_NearbyNodeInfoResult_Visualization(VkCommandBuffer cmd);
+	void debug_NodePairVisibleAABB_Visualization(VkCommandBuffer cmd);
 
 	VkShaderEXT vertexShader_OctreeLayer{};
 	VkShaderEXT fragmentShader_OctreeLayer{};
@@ -141,6 +142,9 @@ private:
 
 	uint32_t showNearbyNodeInfoResultMapIndex = 4;
 	bool showNearbyNodeInfoResultMap = false;
+
+	uint32_t showOctreeNodePairVisibleAabbMapIndex = 5;
+	bool showOctreeNodePairVisibleAabbMap = false;
 #endif
 };
 }

@@ -29,6 +29,7 @@ struct OctreePushConstant_FzbPG {
 	int normalIndex;
 	int sampleNodeLabel_G = 1;
 	int sampleNodeLabel_E = 1;
+	int showVisibleAABB = 1;
 #endif
 };
 
@@ -48,8 +49,10 @@ enum class BindingPoints_Octree_FzbPG : uint32_t {
 	eThreadGroupInfos,
 	eIndivisibleNodeInfos_G,
 	eIndivisibleNodeInfos_E,
+#ifdef USE_VISIBLE_AABB_FZBPG
 	eOctreeNodePairVisibleData,
 	eOctreeNodePairE,
+#endif
 	eOctreeNodePairWeight,
 #ifdef NEARBYNODE_JITTER_FZBPG
 	eNearbyNodeTempInfos,
@@ -74,6 +77,7 @@ label_indivisible is made of two data
 the first bite is indivisible, 0 mean divisible, 1 mean indivisible
 the 1 - 31 bite is label, 0 mean no data, other mean the node's index of this layer indivisible or divisible node
 */
+
 struct OctreeNodeData_G_FzbPG {
 	uint32_t label_indivisible;
 };
@@ -83,6 +87,10 @@ Octree_E is OCTREE_CLUSTER_LAYER - octreeMaxLayer
 every node is indivisible, has all childNode's aabb, E and normal
 */
 struct OctreeNodeClusterData_E_FzbPG {
+#ifdef USE_VISIBLE_AABB_FZBPG
+#else
+	float pdf;
+#endif
 	float E;
 	float4 meanNormal;
 	AABB aabb;
@@ -93,8 +101,14 @@ the OCTREE_CLUSTER_LAYER layer node must is indivisible, and 0-OCTREE_CLUSTER_LA
 so we only record the OCTREE_CLUSTER_LAYER layer node's label
 */
 struct OctreeNodeData_E_FzbPG {
+#ifdef USE_VISIBLE_AABB_FZBPG
+#else
+	AABB aabb;
+	float pdf;
+#endif
 	uint32_t label;
 };
+
 //------------------------------------------------------------------------------------------
 struct HasDataOctreeBlockCount_FzbPG {
 	uint32_t count_G;
@@ -119,7 +133,7 @@ struct OctreeThreadGroupInfo_FzbPG {
 };
 //------------------------------------------------------------------------------------------
 #define OUTGOING_COUNT_FZBPG 64
-#define HITTEST_COUNT_FZBPG 32		//not bigger than 32 or smaller than 8
+#define HITTEST_COUNT_FZBPG 16		//not bigger than 32 or smaller than 8
 
 #define OUTGOING_TYPE_FZBPG 0
 #if OUTGOING_TYPE_FZBPG == 0
@@ -159,7 +173,7 @@ struct OctreeNearbyNodeInfo_FzbPG {
 
 #define INITWEIGHT_CS_THREADGROUP_SIZE 256
 #define HITTEST_CS_THREADGROUP_SIZE 512
-#define VISIBLEAABB_CLUSTER_CS_THREADGROUP_SIZE 256
+#define VISIBLEAABB_CLUSTER_CS_THREADGROUP_SIZE 512
 #define GETPROBABILITY_CS_THREADGROUP_SIZE 1024
 
 #define GETNEARBYNODES_CS_THREADGROUP_SIZE 512

@@ -67,6 +67,9 @@ float2x2 Inverse2x2(float2x2 m) {
 inline bool checkPointInAABB(float3 pos, AABB aabb) {
     return all((pos - aabb.minimum >= 0.0f) && (aabb.maximum - pos >= 0.0f));
 }
+inline bool checkPointInAABB2(float3 pos, AABB aabb) {
+    return all((pos - aabb.minimum >= -0.001f) && (aabb.maximum - pos >= -0.001f));
+}
 inline float getDistanceToAABB(float3 pos, AABB aabb) {
     float3 center = (aabb.maximum + aabb.minimum) * 0.5f;
     float3 centerToPos = abs(center - pos) + 1e-16f;

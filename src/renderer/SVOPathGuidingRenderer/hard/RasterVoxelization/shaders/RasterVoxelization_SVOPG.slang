@@ -177,7 +177,39 @@ void fragmentMain(GSout input) {
     int voxelIndexU = getVoxelIndex(input.worldPos, pushConst.voxelGroupStartPos, pushConst.voxelSize_Count.xyz, (int)pushConst.voxelSize_Count.w);
     int VGBIndex = getNormalIndex(input.worldNormal);
 
-    atomicAABB(input.worldPos, voxelIndexU, VGBIndex);
+    float3 halfPixelSizeX = abs(ddx(input.worldPos)) * 0.5f;
+    float3 halfPixelSizeY = abs(ddy(input.worldPos)) * 0.5f;
+    float3 maximum = input.worldPos + halfPixelSizeX + halfPixelSizeY;
+    float3 minimum = input.worldPos - halfPixelSizeX - halfPixelSizeY;
+
+    int3 voxelIndex = int3((input.worldPos - pushConst.voxelGroupStartPos) / pushConst.voxelSize_Count.xyz);
+    AABB voxelRange;
+    voxelRange.minimum = voxelIndex * pushConst.voxelSize_Count.xyz + pushConst.voxelGroupStartPos;
+    voxelRange.maximum = voxelRange.minimum + pushConst.voxelSize_Count.xyz;
+
+    bool pixelXInVoxel = checkPointInAABB2(maximum, voxelRange);
+    if (pixelXInVoxel) atomicAABB(maximum, voxelIndexU, VGBIndex);
+    bool pixelYInVoxel = checkPointInAABB2(minimum, voxelRange);
+    if (pixelYInVoxel) atomicAABB(minimum, voxelIndexU, VGBIndex);
+    if (!pixelXInVoxel || !pixelYInVoxel) atomicAABB(input.worldPos, voxelIndexU, VGBIndex);
+    /*
+    AABBI voxelAabbI = VGBs[VGBIndex][voxelIndexU].aabbI;
+    AABB voxelAabb;
+    voxelAabb.minimum.x = OrderedIntToFloat(voxelAabbI.minimum.x);
+    voxelAabb.minimum.y = OrderedIntToFloat(voxelAabbI.minimum.y);
+    voxelAabb.minimum.z = OrderedIntToFloat(voxelAabbI.minimum.z);
+    voxelAabb.maximum.x = OrderedIntToFloat(voxelAabbI.maximum.x);
+    voxelAabb.maximum.y = OrderedIntToFloat(voxelAabbI.maximum.y);
+    voxelAabb.maximum.z = OrderedIntToFloat(voxelAabbI.maximum.z);
+
+    bool pixelXInVoxel = checkPointInAABB(maximum, voxelRange);
+    if (pixelXInVoxel && !checkPointInAABB2(maximum, voxelAabb)) atomicAABB(maximum, voxelIndexU, VGBIndex);
+
+    bool pixelYInVoxel = checkPointInAABB(minimum, voxelRange);
+    if (pixelYInVoxel && !checkPointInAABB2(minimum, voxelAabb)) atomicAABB(minimum, voxelIndexU, VGBIndex);
+
+    if ((!pixelXInVoxel || !pixelYInVoxel) && !checkPointInAABB2(input.worldPos, voxelAabb)) atomicAABB(input.worldPos, voxelIndexU, VGBIndex);
+    */
     atomicNormalG(input.worldNormal, voxelIndexU, VGBIndex);
 
     #ifdef CLUSTER_WITH_MATERIAL
@@ -237,7 +269,41 @@ PSout_ThreeView fragmentMain_ThreeView(GSout_ThreeView input) {
     int voxelIndexU = getVoxelIndex(input.worldPos, pushConst.voxelGroupStartPos, pushConst.voxelSize_Count.xyz, (int)pushConst.voxelSize_Count.w);
     int VGBIndex = getNormalIndex(input.worldNormal);
 
-    atomicAABB(input.worldPos, voxelIndexU, VGBIndex);
+    float3 halfPixelSizeX = abs(ddx(input.worldPos)) * 0.5f;
+    float3 halfPixelSizeY = abs(ddy(input.worldPos)) * 0.5f;
+    float3 maximum = input.worldPos + halfPixelSizeX + halfPixelSizeY;
+    float3 minimum = input.worldPos - halfPixelSizeX - halfPixelSizeY;
+
+    int3 voxelIndex = int3((input.worldPos - pushConst.voxelGroupStartPos) / pushConst.voxelSize_Count.xyz);
+    AABB voxelRange;
+    voxelRange.minimum = voxelIndex * pushConst.voxelSize_Count.xyz + pushConst.voxelGroupStartPos;
+    voxelRange.maximum = voxelRange.minimum + pushConst.voxelSize_Count.xyz;
+
+    bool pixelXInVoxel = checkPointInAABB2(maximum, voxelRange);
+    if (pixelXInVoxel) atomicAABB(maximum, voxelIndexU, VGBIndex);
+    bool pixelYInVoxel = checkPointInAABB2(minimum, voxelRange);
+    if (pixelYInVoxel) atomicAABB(minimum, voxelIndexU, VGBIndex);
+    if (!pixelXInVoxel || !pixelYInVoxel) atomicAABB(input.worldPos, voxelIndexU, VGBIndex);
+
+    /*
+    AABBI voxelAabbI = VGBs[VGBIndex][voxelIndexU].aabbI;
+    AABB voxelAabb;
+    voxelAabb.minimum.x = OrderedIntToFloat(voxelAabbI.minimum.x);
+    voxelAabb.minimum.y = OrderedIntToFloat(voxelAabbI.minimum.y);
+    voxelAabb.minimum.z = OrderedIntToFloat(voxelAabbI.minimum.z);
+    voxelAabb.maximum.x = OrderedIntToFloat(voxelAabbI.maximum.x);
+    voxelAabb.maximum.y = OrderedIntToFloat(voxelAabbI.maximum.y);
+    voxelAabb.maximum.z = OrderedIntToFloat(voxelAabbI.maximum.z);
+
+    bool pixelXInVoxel = checkPointInAABB(maximum, voxelRange);
+    if (pixelXInVoxel && !checkPointInAABB2(maximum, voxelAabb)) atomicAABB(maximum, voxelIndexU, VGBIndex);
+
+    bool pixelYInVoxel = checkPointInAABB(minimum, voxelRange);
+    if (pixelYInVoxel && !checkPointInAABB2(minimum, voxelAabb)) atomicAABB(minimum, voxelIndexU, VGBIndex);
+
+    if ((!pixelXInVoxel || !pixelYInVoxel) && !checkPointInAABB2(input.worldPos, voxelAabb)) atomicAABB(input.worldPos, voxelIndexU, VGBIndex);
+    */
+
     atomicNormalG(input.worldNormal, voxelIndexU, VGBIndex);
 
     #ifdef CLUSTER_WITH_MATERIAL

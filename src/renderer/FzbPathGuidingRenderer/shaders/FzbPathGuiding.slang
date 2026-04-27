@@ -6,7 +6,9 @@
 [[vk::push_constant]] ConstantBuffer<FzbPathGuidingPushConstant, ScalarDataLayout> pushConst;
 [[vk::binding(StaticBindingPoints_FzbPG::eOctreeData_G)]] RWStructuredBuffer<OctreeNodeData_G_FzbPG, ScalarDataLayout> OctreeDataBuffer_G[];
 [[vk::binding(StaticBindingPoints_FzbPG::eClusterLayerData_E)]] RWStructuredBuffer<OctreeNodeData_E_FzbPG, ScalarDataLayout> ClusterlayerDataBuffer_E;
+#ifdef USE_VISIBLE_AABB_FZBPG
 [[vk::binding(StaticBindingPoints_FzbPG::eOctreeNodePairVisibleData)]] RWStructuredBuffer<OctreeNodePairVisibleData_FzbPG, ScalarDataLayout> OctreeNodePairVisibleDataBuffer;
+#endif
 [[vk::binding(StaticBindingPoints_FzbPG::eOctreeNodePairWeight)]] RWStructuredBuffer<float> OctreeNodePairWeightBuffer;
 [[vk::binding(StaticBindingPoints_FzbPG::eGlobalInfo)]] RWStructuredBuffer<OctreeGlobalInfo_FzbPG, ScalarDataLayout> GlobalInfoBuffer;
 #ifdef NEARBYNODE_JITTER_FZBPG
@@ -228,18 +230,23 @@ bool getNodeAABB_E_FzbPG(inout AABB aabb, inout HitPayload_FzbPG payload, inout 
     nodeIndex_E = nodeIndex_E + nodeOffset - OctreeLayerStartIndex_FzbPG[OCTREE_CLUSTER_LAYER_FZBPG];
 
     OctreeNodeData_E_FzbPG nodeInfo_E = groupClusterLayerNodeData_E[nodeIndex_E];
+    #ifdef USE_VISIBLE_AABB_FZBPG
     uint nodePairIndex = nodeLabel_G * groupGlobalInfo.indivisibleNodeCount_E + nodeInfo_E.label - 1;
     OctreeNodePairVisibleData_FzbPG nodePairData = OctreeNodePairVisibleDataBuffer[nodePairIndex];
     aabb = nodePairData.aabb;
+    nodeEPdf *= nodePairData.pdf;
+    #else
+    aabb = nodeInfo_E.aabb;
+    nodeEPdf *= nodeInfo_E.pdf;
+    #endif
 
-    //if (pushConst.frameIndex == 1 && all(threadIndex == uint2(740, 62))) {
-    //    printf("nodeLabel_G: %d, nodeLabel_E: %d\, nodeIndex_E: %d\npgSample_pgPdf: %f, nodePairData.pdf: %f,  jitterPdf: %f\n\n",
+    //if (pushConst.frameIndex == 1 && all(threadIndex == uint2(735, 2))) {
+    //    printf("nodeLabel_G: %d, nodeLabel_E: %d\, nodeIndex_E: %d\npgSample_pgPdf: %f, nodePairData.pdf: %f,   jitterPdf: %f\n\n",
     //           nodeLabel_G, nodeInfo_E.label - 1, nodeIndex_E,
-    //           nodeEPdf, nodePairData.pdf, jitterPdf
+    //           nodeEPdf, nodeInfo_E.pdf, jitterPdf
     //        );
     //}
 
-    nodeEPdf *= nodePairData.pdf;
     return true;
 }
 bool SphericalRectangleSample(AABB aabb, float3 hitPos, inout uint randomSeed, inout float3 sampleDir, inout float pdf, uint2 threadIndex) {
@@ -310,27 +317,26 @@ int getNodeIndex_E(float3 hitPos, float3 hitNormal) {
     uint normalIndex = getNormalIndex(hitNormal);
     int nodeIndex_E = voxelTotalCount * normalIndex;
 
-    int voxelIndexU = 0;
     while (voxelTotalCount > 1) {
         voxelCount = voxelCount / 2;
         voxelTotalCount = voxelTotalCount / 8;
 
         uint3 offset = voxelIndex / voxelCount;
 
-        voxelIndexU += offset.z * 4 * voxelTotalCount;
+        nodeIndex_E += offset.z * 4 * voxelTotalCount;
         voxelIndex.z -= offset.z * voxelCount;
 
-        voxelIndexU += offset.y * 2 * voxelTotalCount;
+        nodeIndex_E += offset.y * 2 * voxelTotalCount;
         voxelIndex.y -= offset.y * voxelCount;
 
-        voxelIndexU += offset.x * voxelTotalCount;
+        nodeIndex_E += offset.x * voxelTotalCount;
         voxelIndex.x -= offset.x * voxelCount;
     }
 
-    return nodeIndex_E + voxelIndexU;
+    return nodeIndex_E;
 }
-float getPgPdf(uint nodeLabel_G, uint outgoingIndex, float3 hitPos, float3 hitNormal, float3 viewPos) {
-    uint weightStartIndex = outgoingIndex * groupGlobalInfo.indivisibleNodeCount_G * OCTREE_CLUSTER_LAYER_FZBPG + nodeLabel_G * OCTREE_CLUSTER_LAYER_FZBPG;
+float getPgPdf(uint nodeLabel_G, uint outgoingIndex, float3 hitPos, float3 hitNormal, float3 viewPos, uint2 threadIndex) {
+    uint weightStartIndex = outgoingIndex * groupGlobalInfo.indivisibleNodeCount_G * OCTREE_NODECOUNT_E_FZBPG + nodeLabel_G * OCTREE_NODECOUNT_E_FZBPG;
 
     float pg_Pdf = 1.0f;
     uint nodeIndex_E = getNodeIndex_E(hitPos, hitNormal);
@@ -342,27 +348,42 @@ float getPgPdf(uint nodeLabel_G, uint outgoingIndex, float3 hitPos, float3 hitNo
     }
 
     OctreeNodeData_E_FzbPG nodeInfo_E = groupClusterLayerNodeData_E[nodeIndex_E];
+    #ifdef USE_VISIBLE_AABB_FZBPG
     uint nodePairIndex = nodeLabel_G * groupGlobalInfo.indivisibleNodeCount_E + nodeInfo_E.label - 1;
     OctreeNodePairVisibleData_FzbPG nodePairData = OctreeNodePairVisibleDataBuffer[nodePairIndex];
     pg_Pdf *= nodePairData.pdf;
+    #define NodeAABB_E_GetPgPdf nodePairData.aabb
+    #else
+    pg_Pdf *= nodeInfo_E.pdf;
+    #define NodeAABB_E_GetPgPdf nodeInfo_E.aabb
+    #endif
+
+    //if (pushConst.frameIndex == 1 && all(threadIndex == uint2(1059, 4))) { //
+    //    printf("threadInex: %d %d, nodeIndex_E: %d\noutgoingIndex: %d, nodeLabel_G: %d\nbsdfSample_pgPdf: %f, nodeInfo_E.pdf: %f\n",
+    //           threadIndex.x, threadIndex.y, nodeIndex_E,
+    //           outgoingIndex, nodeLabel_G,
+    //           pg_Pdf, nodeInfo_E.pdf
+    //    );
+    //}
+
     // if (checkPointInAABB(hitPos, nodeInfo_E.aabb)) pg_Pdf *= nodeInfo_E.pdf;
     // else pg_Pdf *= (1.0f - nodeInfo_E.pdf) / pow(8, pushConst.maxOctreeLayer - OCTREE_CLUSTER_LAYER);
     if (pg_Pdf == 0.0f) return pg_Pdf;
 
     // getPdf from Sphere sample
     {
-        float3 distance = nodePairData.aabb.maximum - nodePairData.aabb.minimum;
-        float3 nodeDirection = (nodePairData.aabb.maximum + nodePairData.aabb.minimum) * 0.5f - viewPos;
+        float3 distance = NodeAABB_E_GetPgPdf.maximum - NodeAABB_E_GetPgPdf.minimum;
+        float3 nodeDirection = (NodeAABB_E_GetPgPdf.maximum + NodeAABB_E_GetPgPdf.minimum) * 0.5f - viewPos;
 
         float3 edge0 = float3(distance.x, 0.0f, 0.0f);
         float3 edge1 = float3(0.0f, distance.y, 0.0f);
         float3 edge2 = float3(0.0f, 0.0f, distance.z);
 
-        float3 face0StartPos = nodePairData.aabb.minimum;
+        float3 face0StartPos = NodeAABB_E_GetPgPdf.minimum;
         face0StartPos.x += nodeDirection.x < 0 ? distance.x : 0.0f; // in left
-        float3 face1StartPos = nodePairData.aabb.minimum;
+        float3 face1StartPos = NodeAABB_E_GetPgPdf.minimum;
         face1StartPos.y += nodeDirection.y < 0 ? distance.y : 0.0f; // in bottom
-        float3 face2StartPos = nodePairData.aabb.minimum;
+        float3 face2StartPos = NodeAABB_E_GetPgPdf.minimum;
         face2StartPos.z += nodeDirection.z < 0 ? distance.z : 0.0f; // in back
 
         Quadrilateral_initialization quad0 = initQuadrilateral(viewPos, face0StartPos, edge2, edge1);
@@ -487,15 +508,7 @@ void computeMain_FzbPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
                     pgSample_bsdfPdf = 0.0f;
                 }
                 float pgSample_weight = pgSample_pgPdf / max(pgSample_pgPdf + pgSample_bsdfPdf, 1e-16f);
-
-                //if (pushConst.frameIndex == 1 && (pgSample_pgPdf < 0.0f || isnan(pgSample_pgPdf))) { // && all(threadIndex == uint2(740, 62))
-                //    printf("threadInex: %d %d, randomSeed: %d\npgSample_pgPdf: %f, jitterPdf: %f\n\n",
-                //        threadIndex.x, threadIndex.y, payload.randomSeed,
-                //        pgSample_pgPdf, jitterPdf
-                //    );
-                //    break;
-                //} 
-                //if (pushConst.frameIndex == 1) { // && all(threadIndex == uint2(449, 90))
+                //if (pushConst.frameIndex == 1) { //  && all(threadIndex == uint2(735, 2))
                 //    printf("threadInex: %d %d\npgSample_pgPdf: %f, jitterPdf: %f\n", 
                 //        threadIndex.x, threadIndex.y, 
                 //        pgSample_pgPdf, jitterPdf
@@ -522,18 +535,19 @@ void computeMain_FzbPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
 
                 float bsdfSample_pgPdf = 0.0f;
                 if (useFzbPG && hit) {
-                    bsdfSample_pgPdf = getPgPdf(nodeLabel_G, outgoingIndex, payload.hitPos, payload.hitNormal, hitPos);
-                    bsdfSample_pgPdf *= jitterPdf;
+                    bsdfSample_pgPdf = getPgPdf(nodeLabel_G, outgoingIndex, payload.hitPos, payload.hitNormal, hitPos, threadIndex);
+                    //bsdfSample_pgPdf *= jitterPdf;
                 }
                 float bsdfSample_weight = bsdfSample_bsdfPdf / max(bsdfSample_pgPdf + bsdfSample_bsdfPdf, 1e-16f);
 
-                //if (pushConst.frameIndex == 1) {
-                //    printf("pgSample_weight: %f, pgSample_pgPdf: %f, pgSample_bsdfPdf: %f\nbsdfSample_weight: %f\n\n",
-                //           pgSample_weight, pgSample_pgPdf, pgSample_bsdfPdf,
-                //           bsdfSample_weight
+                //if (pushConst.frameIndex == 1 && all(threadIndex == uint2(1059, 4))) { //  
+                //    printf("threadInex: %d %d\noutgoingIndex: %d, nodeLabel_G: %d\nbsdfSample_pgPdf: %f\n\n",
+                //        threadIndex.x, threadIndex.y,
+                //        outgoingIndex, nodeLabel_G,
+                //        bsdfSample_pgPdf
                 //    );
-                //    break;
                 //}
+                //break;
 
                 // MIS
                 float probabilitySum = max(pgSample_weight + bsdfSample_weight, 1e-16f);
