@@ -1105,6 +1105,7 @@ void Octree_FzbPG::getOctreeNodePairData(VkCommandBuffer cmd) {
 #endif
 	
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getProbability);
+#ifdef USE_VISIBLE_AABB_FZBPG
 	for (int layerIndex = OCTREE_CLUSTER_LAYER_FZBPG; layerIndex >= 0; --layerIndex) {
 		pushConstant.currentLayer = layerIndex;
 		vkCmdPushConstants2(cmd, &pushInfo);
@@ -1112,6 +1113,10 @@ void Octree_FzbPG::getOctreeNodePairData(VkCommandBuffer cmd) {
 		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 		vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
 	}
+#else
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
+#endif
 }
 void Octree_FzbPG::getNearbyNodeInfo(VkCommandBuffer cmd) {
 #ifdef NEARBYNODE_JITTER_FZBPG
@@ -1142,11 +1147,10 @@ void Octree_FzbPG::debug_Prepare() {
 	showOctreeNodePairVisibleAabbMapIndex = showOctreeIndivisibleNodeMapIndex + 3;
 	++showMapCount;
 #endif
+	Feature::createGBuffer(true, false, showMapCount);
 
 	pushConstant.sampleNodeLabel_G = 63;	// 45 - 23;   1 - 130  204 236
 	pushConstant.sampleNodeLabel_E = 88;
-
-	Feature::createGBuffer(true, false, showMapCount);
 
 	for (int i = OCTREE_CLUSTER_LAYER_FZBPG; i < octreeMaxLayer; ++i)
 		pushConstant.showOctreeNodeTotalCount += pow(8, i);

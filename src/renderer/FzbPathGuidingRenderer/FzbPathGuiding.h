@@ -5,7 +5,6 @@
 #include <renderer/SVOPathGuidingRenderer/hard/RasterVoxelization/RasterVoxelizationSVOPG.h>
 #include <renderer/SVOPathGuidingRenderer/hard/LightInject/LightInjectSVOPG.h>
 #include "Octree/Octree_FzbPG.h"
-#include "Weight/Weight_FzbPG.h"
 
 #ifndef FZBRENDERER_FZB_PATHGUIDING_H
 #define FZBRENDERER_FZB_PATHGUIDING_H
@@ -36,7 +35,6 @@ private:
 	std::shared_ptr<RasterVoxelization_SVOPG> rasterVoxelization;
 	std::shared_ptr<LightInject_SVOPG> lightInject;
 	std::shared_ptr<Octree_FzbPG> octree;
-	//std::shared_ptr<Weight_FzbPG> weight;
 
 	shaderio::FzbPathGuidingPushConstant pushConstant{};
 	VkShaderEXT computeShader_FzbPathGuiding{};

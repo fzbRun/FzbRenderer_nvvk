@@ -620,7 +620,7 @@ void computeMain_octreeNodeHitTest(uint threadIndex: SV_DispatchThreadID, uint t
         traceRay(ray, hitPayload);
 
         if (hitPayload.hit > 0.0f) {
-            bool notHit = !checkPointInAABB(hitPayload.hitPos, nodeData_G.aabb);
+            bool notHit = !checkPointInAABB2(hitPayload.hitPos, nodeData_G.aabb);
             notHit |= dot(hitPayload.normal, -sampleDir) <= 0.0f;
             notHit |= dot(nodeData_G.normal, -sampleDir) <= 0.0f;
             notHit |= dot(nodeData_E.normal, sampleDir) <= 0.0f;

@@ -15,6 +15,9 @@
 struct IndivisibleNodeData_G {
     AABB aabb;
     float3 normal;
+#ifdef GEOMETRY_CLUSTER_WITH_E
+    float E;
+#endif
 };
 
 groupshared uint groupIndivisibleNodeCount_G;
@@ -44,6 +47,9 @@ void computeMain_getNearbyNodes1(uint threadIndex: SV_DispatchThreadID, uint thr
         IndivisibleNodeData_G nodeInfo;
         nodeInfo.normal = normalize(nodeData.meanNormal.xyz);
         nodeInfo.aabb = nodeData.aabb;
+        #ifdef GEOMETRY_CLUSTER_WITH_E
+        nodeInfo.E = nodeData.E;
+        #endif
         groupIndivisibleNodeData = nodeInfo;
     }
     GroupMemoryBarrierWithGroupSync();
@@ -58,7 +64,11 @@ void computeMain_getNearbyNodes1(uint threadIndex: SV_DispatchThreadID, uint thr
     OctreeNodeClusterData_G_FzbPG nearbyNodeData = OctreeClusterDataBuffer_G[nearbyNodeInfo.x - OCTREE_CLUSTER_LAYER_FZBPG][nearbyNodeInfo.y];
 
     float distance = AABBDistance(indivisibleNodeData.aabb, nearbyNodeData.aabb);
-    distance *= 1.0f / max(dot(indivisibleNodeData.normal, normalize(nearbyNodeData.meanNormal.xyz)), 0.00001f);
+    float cosine = dot(indivisibleNodeData.normal, normalize(nearbyNodeData.meanNormal.xyz));
+    distance *= cosine < 0.707f ? 100000.0f : (1.1f - cosine);
+    #ifdef GEOMETRY_CLUSTER_WITH_E
+    distance *= (1.1f - (min(indivisibleNodeData.E, nearbyNodeData.E) / max(indivisibleNodeData.E, nearbyNodeData.E)));
+    #endif
 
     uint randomSeed = (uint)pushConst.frameIndex;
     distance += rand(randomSeed) * 0.0001f;
@@ -75,6 +85,8 @@ void computeMain_getNearbyNodes1(uint threadIndex: SV_DispatchThreadID, uint thr
         int groupMinDistanceI = groupNearbyNodeDistanceIs[i];
         uint minDistanceLabel = WavePrefixCountBits(distanceI == groupMinDistanceI);
         if (distanceI == groupMinDistanceI && minDistanceLabel == 0) {
+            //if (distance > 1.0f) break;
+
             groupNearbyNodeInfos[i] = nearbyNodeInfo;
             distanceI = 2147483647;
         }
@@ -136,8 +148,8 @@ void computeMain_getNearbyNodes2(uint threadIndex: SV_DispatchThreadID, uint thr
 
     for (int i = 0; i < NEARBY_NODE_COUNT_FZBPG; ++i) {
         float minDistance = WaveActiveMin(distance);
-        // if (minDistance > 1.0f) {
-        //    OctreeNearbyNodeInfos[nodeLabel].nearbyNodeInfos[i] = int2(-1);
+        //if (minDistance > 1.0f) {
+        //    NearbyNodeInfoBuffer[nodeLabel].nearbyNodeInfos[i] = int2(-1);
         //    break;
         //}
         uint minDistanceLabel = WavePrefixCountBits(distance == minDistance);

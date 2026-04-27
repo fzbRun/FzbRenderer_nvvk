@@ -60,7 +60,7 @@ enum class BindingPoints_Octree_FzbPG : uint32_t {
 #endif
 };
 //------------------------------------------------------------------------------------------
-#define OCTREE_CLUSTER_LAYER_FZBPG 2
+#define OCTREE_CLUSTER_LAYER_FZBPG 2		//don't change!!!!!
 #define OCTREE_NODECOUNT_E_FZBPG 440		//8 + 48 + 384
 #define CLUSTER_LAYER_NODECOUNT_E_FZBPG 384
 static const uint OctreeLayerNodeCount_FzbPG[MAX_OCTREE_LAYER_FZBPG] = { 8, 48, 384, 3072, 24576 };
@@ -71,6 +71,9 @@ struct OctreeNodeClusterData_G_FzbPG {
 	AABB aabb;
 	float fillRate;
 	uint indivisible;
+#ifdef GEOMETRY_CLUSTER_WITH_E
+	float E;
+#endif
 };
 /*
 label_indivisible is made of two data

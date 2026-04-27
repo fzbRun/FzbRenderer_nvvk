@@ -23,7 +23,7 @@ typedef CallablePayload HitPayload_FzbPG;
 //---------------------------------------------groupsharedMemory-----------------------------------------
 groupshared OctreeGlobalInfo_FzbPG groupGlobalInfo;
 
-groupshared OctreeNodeData_G_FzbPG groupOctreeNodeData_G[3510];                               // 13.7KB  6 + 48 + 384 + 3072 = 3510
+groupshared OctreeNodeData_G_FzbPG groupOctreeNodeData_G[3510];                                     // 13.7KB  6 + 48 + 384 + 3072 = 3510
 groupshared OctreeNodeData_E_FzbPG groupClusterLayerNodeData_E[CLUSTER_LAYER_NODECOUNT_E_FZBPG];   //1.71KB
 //-------------------------------------------------Function----------------------------------------------
 bool traceRay(RayDesc ray, inout HitPayload_FzbPG payload)
@@ -158,15 +158,29 @@ bool getNodeAABB_E_FzbPG(inout AABB aabb, inout HitPayload_FzbPG payload, inout 
     #ifdef NEARBYNODE_JITTER_FZBPG
     OctreeNodeClusterData_G_FzbPG nodeData_G = OctreeClusterDataBuffer_G[layerIndex_G - OCTREE_CLUSTER_LAYER_FZBPG][nodeIndex_G];
     float weights[NEARBY_NODE_COUNT_FZBPG + 1];
-    weights[0] = 1.0f / getDistanceToAABB(hitPos, nodeData_G.aabb);
+
+    float distance = getDistanceToAABB(hitPos, nodeData_G.aabb);
+    float cosine = dot(payload.hitNormal, normalize(nodeData_G.meanNormal.xyz));
+    distance *= cosine < 0.707f ? 100000.0f : (1.1f - cosine);
+    //distance *= 0.1f;
+    weights[0] = 1.0f / max(distance, 1e-16f);
     float weightSum = weights[0];
+
     int2 nearbyNodeInfos[NEARBY_NODE_COUNT_FZBPG] = NearbyNodeInfoBuffer[nodeLabel_G].nearbyNodeInfos;
     int nearbyNodeCount = 0;
     for (; nearbyNodeCount < NEARBY_NODE_COUNT_FZBPG; ++nearbyNodeCount) {
         int2 nearbyNodeInfo = nearbyNodeInfos[nearbyNodeCount];
         if (nearbyNodeInfo.x == -1) break;
         OctreeNodeClusterData_G_FzbPG nearbyNodeData = OctreeClusterDataBuffer_G[nearbyNodeInfo.x - OCTREE_CLUSTER_LAYER_FZBPG][nearbyNodeInfo.y];
-        weights[nearbyNodeCount + 1] = max(dot(payload.hitNormal, normalize(nearbyNodeData.meanNormal.xyz)), 0.0f) / getDistanceToAABB(hitPos, nearbyNodeData.aabb);
+
+        distance = getDistanceToAABB(hitPos, nearbyNodeData.aabb);
+        cosine = dot(payload.hitNormal, normalize(nearbyNodeData.meanNormal.xyz));
+        distance *= cosine < 0.707f ? 100000.0f : (1.1f - cosine);
+        //#ifdef GEOMETRY_CLUSTER_WITH_E
+        //distance *= 1.1f - (min(nodeData_G.E, nearbyNodeData.E) / max(nodeData_G.E, nearbyNodeData.E));
+        //#endif
+        weights[nearbyNodeCount + 1] = 1.0f / max(distance, 1e-16f);
+
         weightSum += weights[nearbyNodeCount + 1];
     }
     float nearbyNodeSampleProbability = rand(payload.randomSeed);
@@ -208,13 +222,6 @@ bool getNodeAABB_E_FzbPG(inout AABB aabb, inout HitPayload_FzbPG payload, inout 
         for (nodeOffset = 0; nodeOffset < 8; ++nodeOffset) {
             uint weightIndex = weightStartIndex + nodeIndex_E + nodeOffset;
             float probability = OctreeNodePairWeightBuffer[weightIndex];
-
-            //if (pushConst.frameIndex == 1 && all(threadIndex == uint2(683, 88))) {
-            //    printf("layerIndex: %d, pdf: %f\n",
-            //        layerIndex_E, probability
-            //    );
-            //}
-
             if (randomNumber <= probability) {
                 nodeEPdf *= probability;
                 if (layerIndex_E != OCTREE_CLUSTER_LAYER_FZBPG)
