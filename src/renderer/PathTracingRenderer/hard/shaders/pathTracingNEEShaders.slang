@@ -97,7 +97,7 @@ void raygenMain()
 
     if (any(isnan(accumulatedRadiance)) || any(isinf(accumulatedRadiance))) return;
     // When the maximum frame rate is reached, the original image will decay by ((maxframe-1)/maxframe)^k < 1, and the final image will turn black
-    if (pushConst.frameIndex > 0)
+    if (pushConst.maxFrameCount > 1 && pushConst.frameIndex > 0)
     {
         float a = 1.0f / float(pushConst.frameIndex + 1);
         float3 old_color = outImage[int2(launchID)].xyz;

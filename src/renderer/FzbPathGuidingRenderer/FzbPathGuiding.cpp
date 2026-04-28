@@ -16,7 +16,7 @@ FzbPathGuidingRenderer::FzbPathGuidingRenderer(pugi::xml_node& rendererNode) {
 	if (pugi::xml_node rasterVoxelizationNode = rendererNode.child("RasterVoxelization"))
 		rasterVoxelization = std::make_shared<RasterVoxelization_SVOPG>(rasterVoxelizationNode);
 	if (pugi::xml_node lightInjectNode = rendererNode.child("LightInject"))
-		lightInject = std::make_shared<LightInject_SVOPG>(lightInjectNode);
+		lightInject = std::make_shared<LightInject_FzbPG>(lightInjectNode);
 	if (pugi::xml_node octreeNode = rendererNode.child("Octree"))
 		octree = std::make_shared<Octree_FzbPG>(octreeNode);
 	//if (pugi::xml_node weightNode = rendererNode.child("Weight"))
@@ -29,17 +29,15 @@ void FzbPathGuidingRenderer::FzbPathGuidingRenderer::init() {
 
 	rasterVoxelization->init();
 	
-	LightInjectSetting_SVOPG lightInjectSetting{
+	LightInjectCreateInfo_FzbPG lightInjectCreateInfo{
 		.VGBs = rasterVoxelization->VGBs,
 		.VGBStartPos = rasterVoxelization->setting.pushConstant.voxelGroupStartPos,
 		.VGBVoxelSize = glm::vec3(rasterVoxelization->setting.pushConstant.voxelSize_Count),
 		.VGBSize = rasterVoxelization->setting.pushConstant.voxelSize_Count.w,
-		.sceneStartPos = rasterVoxelization->setting.sceneStartPos,
-		.sceneSize = rasterVoxelization->setting.sceneSize,
 		.ptContext = &ptContext,
 		.asManager = &asManager
 	};
-	lightInject->init(lightInjectSetting);
+	lightInject->init(lightInjectCreateInfo);
 	
 	OctreeCreateInfo_FzbPG octreeCreateInfo{
 		.VGBs = rasterVoxelization->VGBs,
@@ -162,9 +160,9 @@ void FzbPathGuidingRenderer::render(VkCommandBuffer cmd) {
 	if (pushConstant.frameIndex >= maxFrames && maxFrames > 1) return;
 
 	rasterVoxelization->render(cmd);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT);
 	lightInject->render(cmd);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_NV, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	octree->render(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 

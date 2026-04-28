@@ -1149,8 +1149,8 @@ void Octree_FzbPG::debug_Prepare() {
 #endif
 	Feature::createGBuffer(true, false, showMapCount);
 
-	pushConstant.sampleNodeLabel_G = 63;	// 45 - 23;   1 - 130  204 236
-	pushConstant.sampleNodeLabel_E = 88;
+	pushConstant.sampleNodeLabel_G = 88;	// 45 - 23;   1 - 130  204 236
+	pushConstant.sampleNodeLabel_E = 30;
 
 	for (int i = OCTREE_CLUSTER_LAYER_FZBPG; i < octreeMaxLayer; ++i)
 		pushConstant.showOctreeNodeTotalCount += pow(8, i);

@@ -99,9 +99,9 @@ void LightInject_FzbPG::preRender() {
 	if (Application::sceneResource.cameraChange) Application::frameIndex = 0;
 
 	pushConstant.VGBVoxelSize = glm::vec4(setting.VGBVoxelSize, 1.0f);
-	pushConstant.VGBStartPos_Size = glm::vec4(setting.VGBStartPos, setting.VGBSize);
+	pushConstant.VGBStartPos = glm::vec3(setting.VGBStartPos);
 	pushConstant.frameIndex = Application::frameIndex;
-	pushConstant.voxelCount = 1 << (3 * (uint32_t)setting.VGBSize);
+	pushConstant.voxelCount = (uint32_t)pow(setting.VGBSize, 3);
 	pushConstant.time = Application::sceneResource.time;
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 }
@@ -110,16 +110,16 @@ void LightInject_FzbPG::render(VkCommandBuffer cmd) {
 
 	updateDataPerFrame(cmd);
 
-	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipelineLayout, 0, 1,
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1,
 		staticDescPack.getSetPtr(), 0, nullptr);
 
 	nvvk::WriteSetContainer write{};
 	write.append(dynamicDescPack.makeWrite(shaderio::DynamicSetBindingPoints_PT::eTlas_PT), setting.asManager->asBuilder.tlas);
-	vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipelineLayout, 1, write.size(), write.data());
+	vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 1, write.size(), write.data());
 
 	const VkPushConstantsInfo pushInfo{
 		.sType = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
-		.layout = rtPipelineLayout,
+		.layout = pipelineLayout,
 		.stageFlags = VK_SHADER_STAGE_ALL,
 		.size = sizeof(shaderio::LightInjectPushConstant_FzbPG),
 		.pValues = &pushConstant
@@ -140,16 +140,15 @@ void LightInject_FzbPG::createBuffer() {
 	nvvk::StagingUploader& stagingUploader = Application::stagingUploader;
 	nvvk::ResourceAllocator* allocator = stagingUploader.getResourceAllocator();
 
-	uint32_t voxelTotalCount = (1 << (3 * (uint32_t)pushConstant.VGBStartPos_Size.w)) * 6;
+	uint32_t voxelTotalCount = (uint32_t)pow(setting.VGBSize, 3) * 6;
 	uint32_t bufferSize = voxelTotalCount * sizeof(shaderio::HasGeometryVoxelInfo);
 	allocator->createBuffer(hasGeometryVoxelInfoBuffer, bufferSize,
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(hasGeometryVoxelInfoBuffer.buffer);
 		
-		
 	bufferSize = sizeof(shaderio::LightInjectGlobalInfo);
 	allocator->createBuffer(globalInfoBuffer, bufferSize,
-		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_2_INDIRECT_BUFFER_BIT);
 	NVVK_DBG_NAME(globalInfoBuffer.buffer);
 }
 void LightInject_FzbPG::createDescriptorSetLayout() {
@@ -219,7 +218,7 @@ void LightInject_FzbPG::createDescriptorSet() {
 
 	VkWriteDescriptorSet    globalInfoWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_LightInject_FzbPG::eGlobalInfo, 0, 0, 1);
-	write.append(globalInfoWrite, hasGeometryVoxelInfoBuffer, 0, hasGeometryVoxelInfoBuffer.bufferSize);
+	write.append(globalInfoWrite, globalInfoBuffer, 0, globalInfoBuffer.bufferSize);
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }
@@ -322,13 +321,13 @@ void LightInject_FzbPG::updateDataPerFrame(VkCommandBuffer cmd) {}
 void LightInject_FzbPG::getHasGeometryVoxels(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
 
-	vkCmdFillBuffer(cmd, globalInfoBuffer.buffer, 0, sizeof(shaderio::HasGeometryVoxelInfo), 0);
+	vkCmdFillBuffer(cmd, globalInfoBuffer.buffer, 0, sizeof(shaderio::LightInjectGlobalInfo), 0);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
 	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
-	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_LightInject);
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getHasGeometryVoxels);
 
-	uint32_t voxelTotalCount = (1 << (3 * (uint32_t)pushConstant.VGBStartPos_Size.w)) * 6;
+	uint32_t voxelTotalCount = pushConstant.voxelCount * 6;
 	VkExtent2D groupSize = nvvk::getGroupCounts({ voxelTotalCount , 1 }, VkExtent2D{ 1024, 1 });
 	vkCmdDispatch(cmd, groupSize.width, 1, 1);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
@@ -343,3 +342,67 @@ void LightInject_FzbPG::lightInject(VkCommandBuffer cmd) {
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_LightInject);
 	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
 }
+
+#ifndef NDEBUG
+void LightInject_FzbPG::debug_Cube(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
+
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(0), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
+
+	VkRenderingAttachmentInfo colorAttachment = DEFAULT_VkRenderingAttachmentInfo;
+	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	colorAttachment.imageView = gBuffers.getColorImageView(0);
+	colorAttachment.clearValue = { .color = {Application::sceneResource.sceneInfo.backgroundColor.x,
+											Application::sceneResource.sceneInfo.backgroundColor.y,
+											Application::sceneResource.sceneInfo.backgroundColor.z, 1.0f} };
+	VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
+	depthAttachment.imageView = gBuffers.getDepthImageView();
+	depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
+
+	VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
+	renderingInfo.renderArea = { {0, 0}, gBuffers.getSize() };
+	renderingInfo.colorAttachmentCount = 1;
+	renderingInfo.pColorAttachments = &colorAttachment;
+	renderingInfo.pDepthAttachment = &depthAttachment;
+
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1,
+		staticDescPack.getSetPtr(), 0, nullptr);
+
+	vkCmdBeginRendering(cmd, &renderingInfo);
+
+	graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
+	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
+	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_TRUE;
+	graphicsDynamicPipeline.cmdApplyAllStates(cmd);
+	graphicsDynamicPipeline.cmdSetViewportAndScissor(cmd, Application::app->getViewportSize());
+	graphicsDynamicPipeline.cmdBindShaders(cmd, { .vertex = vertexShader_Cube, .fragment = fragmentShader_Cube });
+
+	VkPushConstantsInfo pushInfo = {
+		.sType = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
+		.layout = pipelineLayout,
+		.stageFlags = VK_SHADER_STAGE_ALL,
+		.offset = 0,
+		.size = sizeof(shaderio::LightInjectPushConstant_FzbPG),
+		.pValues = &pushConstant,
+	};
+	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
+	vkCmdPushConstants2(cmd, &pushInfo);
+
+	VkVertexInputBindingDescription2EXT bindingDescription{};
+	VkVertexInputAttributeDescription2EXT attributeDescription = {};
+	vkCmdSetVertexInputEXT(cmd, 0, nullptr, 0, nullptr);
+
+	const shaderio::Mesh& mesh = scene.meshes[0];
+	const shaderio::TriangleMesh& triMesh = mesh.triMesh;
+
+	uint32_t bufferIndex = scene.getMeshBufferIndex(0);
+	const nvvk::Buffer& v = scene.bDatas[bufferIndex];
+
+	vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(mesh.indexType));
+	vkCmdDrawIndexed(cmd, triMesh.indices.count, pushConstant.voxelCount * 6, 0, 0, 0);
+
+	vkCmdEndRendering(cmd);
+
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(0), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
+}
+#endif

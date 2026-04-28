@@ -11,12 +11,12 @@ NAMESPACE_SHADERIO_BEGIN()
 
 struct LightInjectPushConstant_FzbPG {
 	float4 VGBVoxelSize;
-	float4 VGBStartPos_Size;
+	float3 VGBStartPos;
 	int frameIndex = 0;
-	int voxelCount;
 	float3 sceneSize;
-	float time;
+	int voxelCount;
 	SceneInfo* sceneInfoAddress;
+	float time;
 };
 enum class StaticBindingPoints_LightInject_FzbPG {
 	eVGB = 2,

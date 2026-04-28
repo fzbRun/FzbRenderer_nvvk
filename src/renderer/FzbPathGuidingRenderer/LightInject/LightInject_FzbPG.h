@@ -44,8 +44,8 @@ public:
 	nvvk::Buffer hasGeometryVoxelInfoBuffer;
 	nvvk::Buffer globalInfoBuffer;
 
-	VkShaderEXT computeShader_getHasGeometryVoxels;
-	VkShaderEXT computeShader_setDispatchIndirectCommand;
+	VkShaderEXT computeShader_getHasGeometryVoxels{};
+	VkShaderEXT computeShader_setDispatchIndirectCommand{};
 	VkShaderEXT computeShader_LightInject{};
 
 #ifndef NDEBUG

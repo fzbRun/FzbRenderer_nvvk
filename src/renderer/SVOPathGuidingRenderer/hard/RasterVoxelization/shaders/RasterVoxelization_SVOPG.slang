@@ -284,7 +284,6 @@ PSout_ThreeView fragmentMain_ThreeView(GSout_ThreeView input) {
     bool pixelYInVoxel = checkPointInAABB2(minimum, voxelRange);
     if (pixelYInVoxel) atomicAABB(minimum, voxelIndexU, VGBIndex);
     if (!pixelXInVoxel || !pixelYInVoxel) atomicAABB(input.worldPos, voxelIndexU, VGBIndex);
-
     /*
     AABBI voxelAabbI = VGBs[VGBIndex][voxelIndexU].aabbI;
     AABB voxelAabb;
