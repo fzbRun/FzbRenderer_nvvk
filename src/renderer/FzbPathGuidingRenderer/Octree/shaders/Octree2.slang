@@ -391,17 +391,13 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
                 }
             }
 
-            #ifdef ADAPTIVE_IMPORTANCE_SAMPLING
-            AABB mergeAabb = nodeData_E.mergeAabb;
-            atomicMergeAABB(mergeAabb);
-            #endif
-
             if (warpLane == sampleWarpLane) {
                 #ifdef ADAPTIVE_IMPORTANCE_SAMPLING
                 nodeData_E.mergeAabb = mergeAabb;
                 #endif
                 nodeData_E.E = mergeE;
                 nodeData_E.pdf *= probability;
+                
                 OctreeClusterDataBuffer_E[layerIndex - 1][fatherNodeIndex] = nodeData_E;
             }
 

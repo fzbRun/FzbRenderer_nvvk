@@ -235,6 +235,35 @@ uint inverseSF(float3 p, float n) {
     }
     return (uint)j;
 }
+uint inverseSF(float3 p, float n, float3 normal) {
+    float phi = min(atan2(p.z, p.x), M_PI), cosTheta = p.y;
+    float k = max(2, floor(
+        log(n * M_PI * sqrt(5) * (1 - cosTheta * cosTheta))
+        / log(M_PHI * M_PHI)));
+    float Fk = pow(M_PHI, k) / sqrt(5);
+    float F0 = round(Fk), F1 = round(Fk * M_PHI);
+    float2x2 B = float2x2(
+                2 * M_PI * madfrac(F0 + 1, M_PHI - 1) - 2 * M_PI * (M_PHI - 1),
+                          2 * M_PI * madfrac(F1 + 1, M_PHI - 1) - 2 * M_PI * (M_PHI - 1),
+                -2 * F0 / n,
+                -2 * F1 / n);
+    float2x2 invB = Inverse2x2(B);
+    float2 c = floor(mul(invB, float2(phi, cosTheta - (1 - 1 / n))));
+    float d = INFINITE, j = 0;
+    for (uint s = 0; s < 4; ++s) {
+        float cosTheta = dot(B[1], float2(s % 2, s / 2) + c) + (1 - 1 / n);
+        cosTheta = clamp(cosTheta, -1, +1) * 2 - cosTheta;
+        float i = floor(n * 0.5 - cosTheta * n * 0.5);
+        float3 q = fibSpherePoint(i, n);
+
+        float squaredDistance = dot(q - p, q - p) + (1.0f - uint(dot(q, normal) > 0.0));
+        if (squaredDistance < d) {
+            d = squaredDistance;
+            j = i;
+        }
+    }
+    return (uint)j;
+}
 
 uint inverseSF(float3 p, float n, inout float probability) {
     float phi = min(atan2(p.z, p.x), M_PI), cosTheta = p.y;

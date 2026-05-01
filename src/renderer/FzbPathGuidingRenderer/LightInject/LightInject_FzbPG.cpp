@@ -5,6 +5,7 @@
 #include <nvvk/default_structs.hpp>
 #include <nvgui/property_editor.hpp>
 #include <nvvk/compute_pipeline.hpp>
+#include <renderer/SVOPathGuidingRenderer/hard/RasterVoxelization/RasterVoxelizationSVOPG.h>
 
 using namespace FzbRenderer;
 
@@ -104,6 +105,9 @@ void LightInject_FzbPG::preRender() {
 	pushConstant.voxelCount = (uint32_t)pow(setting.VGBSize, 3);
 	pushConstant.time = Application::sceneResource.time;
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
+
+	float angle = FzbRenderer::rand(Application::frameIndex) * glm::two_pi<float>();
+	pushConstant.randomRotateMatrix = glm::mat3(glm::rotate(glm::mat4(1.0f), angle, glm::vec3(0, 0, 1)));
 }
 void LightInject_FzbPG::render(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
@@ -386,6 +390,7 @@ void LightInject_FzbPG::debug_Cube(VkCommandBuffer cmd) {
 		.pValues = &pushConstant,
 	};
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
+	pushConstant.normalIndex = RasterVoxelization_SVOPG::normalIndex;
 	vkCmdPushConstants2(cmd, &pushInfo);
 
 	VkVertexInputBindingDescription2EXT bindingDescription{};

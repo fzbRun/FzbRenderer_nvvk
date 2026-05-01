@@ -7,7 +7,7 @@
 #define FZBRENDERER_LIGHTINJECT_FZBPG_SHADER_IO_H
 NAMESPACE_SHADERIO_BEGIN()
 
-#define LIGHTINJECT_SAMPLE_COUNT 8
+#define LIGHTINJECT_SAMPLE_COUNT 32
 
 struct LightInjectPushConstant_FzbPG {
 	float4 VGBVoxelSize;
@@ -16,7 +16,11 @@ struct LightInjectPushConstant_FzbPG {
 	float3 sceneSize;
 	int voxelCount;
 	SceneInfo* sceneInfoAddress;
+	float3x3 randomRotateMatrix;
 	float time;
+#ifndef NDEBUG
+	uint normalIndex;
+#endif
 };
 enum class StaticBindingPoints_LightInject_FzbPG {
 	eVGB = 2,

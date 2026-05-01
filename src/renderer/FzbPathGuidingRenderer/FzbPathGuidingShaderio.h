@@ -8,7 +8,7 @@ NAMESPACE_SHADERIO_BEGIN()
 
 //#define GEOMETRY_CLUSTER_WITH_E
 
-//#define MERGE_SIMILIAR_E_FZBPG
+#define MERGE_SIMILIAR_E_FZBPG
 
 //#define ADAPTIVE_IMPORTANCE_SAMPLING	//Adaptive importance sampling
 

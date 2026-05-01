@@ -26,6 +26,56 @@ groupshared OctreeGlobalInfo_FzbPG groupGlobalInfo;
 groupshared OctreeNodeData_G_FzbPG groupOctreeNodeData_G[3510];                                     // 13.7KB  6 + 48 + 384 + 3072 = 3510
 groupshared OctreeNodeData_E_FzbPG groupClusterLayerNodeData_E[CLUSTER_LAYER_NODECOUNT_E_FZBPG];   //1.71KB
 //-------------------------------------------------Function----------------------------------------------
+bool hitTestTraceRay(RayDesc ray, inout HitTestPayload payload) {
+    RayQuery<RAY_FLAG_NONE> q;
+    q.TraceRayInline(topLevelAS, RAY_FLAG_NONE, 0xFF, ray);
+
+    while (q.Proceed())
+    {
+        // For non-opaque triangles, force them to be opaque (simplified alpha handling)
+        if (q.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE)
+            q.CommitNonOpaqueTriangleHit(); // Accept all intersections as solid
+    }
+
+    if (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT) {
+        payload.distance = q.CommittedRayT();
+        return true;
+    }
+
+    return false;
+}
+void getDirectionLight(inout HitPayload_FzbPG payload, SceneInfo sceneInfo) {
+    payload.directionLightRadiance = 0.0f;
+
+    bool isDielectric = payload.material.type == uint(MaterialType::Dielectric) ||
+                        payload.material.type == uint(MaterialType::RoughDielectric);
+    uint lightNum = min(sceneInfo.numLights, NEE_MAX_SAMPLE_NUM);
+    for (int lightIndex = 0; lightIndex < lightNum; ++lightIndex) {
+        Light light = sceneInfo.lights[lightIndex];
+        if (light.type == uint(LightType::Direction)) {
+            float3 sampleDir = -light.direction;
+            float cosine = dot(sampleDir, payload.hitNormal);
+            if (!isDielectric && cosine <= 0.001f) continue;
+
+            const uint rayFlags = 0;
+            RayDesc tempRay;
+            tempRay.Direction = normalize(sampleDir);
+            tempRay.Origin = payload.hitPos + 0.00001f * tempRay.Direction;
+            tempRay.TMin = 0.001f;
+            tempRay.TMax = INFINITE;
+            HitTestPayload tempPayload;
+            tempPayload.distance = MISS_DISTANCE;
+
+            hitTestTraceRay(tempRay, tempPayload);
+
+            if (tempPayload.distance != MISS_DISTANCE) continue;
+            payload.directionLightDir = light.direction;
+            payload.directionLightRadiance = light.color * light.intensity * cosine;
+            break;
+        }
+    }
+}
+
 bool traceRay(RayDesc ray, inout HitPayload_FzbPG payload)
 {
     // Initialize inline ray query with no special flags
@@ -302,7 +352,7 @@ bool SphericalRectangleSample(AABB aabb, float3 hitPos, inout uint randomSeed, i
         }
 
         pdf *= sphericalRectangleSampleProbability;
-        sampleDir = sphericalRectangleSample(sampleQuad, randomU, randomV, pdf); // p *= 1 / quad.s
+        sampleDir = normalize(sphericalRectangleSample(sampleQuad, randomU, randomV, pdf)); // p *= 1 / quad.s
 
         //if (pushConst.frameIndex == 1 && all(threadIndex == uint2(740, 62))) {
         //    printf("pdf: %f, faceSelectPdf: %f, srPdf: %f\naabb: %f %f %f %f %f %f\n\n",
@@ -364,14 +414,6 @@ float getPgPdf(uint nodeLabel_G, uint outgoingIndex, float3 hitPos, float3 hitNo
     pg_Pdf *= nodeInfo_E.pdf;
     #define NodeAABB_E_GetPgPdf nodeInfo_E.aabb
     #endif
-
-    //if (pushConst.frameIndex == 1 && all(threadIndex == uint2(1059, 4))) { //
-    //    printf("threadInex: %d %d, nodeIndex_E: %d\noutgoingIndex: %d, nodeLabel_G: %d\nbsdfSample_pgPdf: %f, nodeInfo_E.pdf: %f\n",
-    //           threadIndex.x, threadIndex.y, nodeIndex_E,
-    //           outgoingIndex, nodeLabel_G,
-    //           pg_Pdf, nodeInfo_E.pdf
-    //    );
-    //}
 
     // if (checkPointInAABB(hitPos, nodeInfo_E.aabb)) pg_Pdf *= nodeInfo_E.pdf;
     // else pg_Pdf *= (1.0f - nodeInfo_E.pdf) / pow(8, pushConst.maxOctreeLayer - OCTREE_CLUSTER_LAYER);
@@ -439,7 +481,7 @@ void computeMain_FzbPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
     float2 launchSize = (float2)pushConst.sceneSize;
     if (threadIndex.x >= pushConst.sceneSize.x || threadIndex.y >= pushConst.sceneSize.y) return;
 
-    SceneInfo *sceneInfo = pushConst.sceneInfoAddress;
+    SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
 
     const uint rayFlags = 0; // RAY_FLAG_CULL_BACK_FACING_TRIANGLES;
     RayDesc ray;
@@ -493,8 +535,6 @@ void computeMain_FzbPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
                 accumulatedRadiance += RayMiss(ray.Direction) * bsdf_cosine_pdf;
                 bounceDepth = MISS_DEPTH;
             } else {
-                accumulatedRadiance += payload.material.emissive * bsdf_cosine_pdf;
-
                 float jitterPdf = 1.0f;
 
                 float3 pgSample;
@@ -515,21 +555,12 @@ void computeMain_FzbPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
                     pgSample_bsdfPdf = 0.0f;
                 }
                 float pgSample_weight = pgSample_pgPdf / max(pgSample_pgPdf + pgSample_bsdfPdf, 1e-16f);
-                //if (pushConst.frameIndex == 1) { //  && all(threadIndex == uint2(735, 2))
-                //    printf("threadInex: %d %d\npgSample_pgPdf: %f, jitterPdf: %f\n", 
-                //        threadIndex.x, threadIndex.y, 
-                //        pgSample_pgPdf, jitterPdf
-                //    );
-                //    break;
-                //}
-                //break;
 
-                // useFzbPG = getNodeAABB_E_SVOPG(nodeAABB_E, payload, pgSample_pgPdf, jitterPdf, nodeLabel_G, outgoingIndex);
-                // if (useFzbPG == false) accumulatedRadiance = float3(10.0f, 0.0f, 0.0f);
-                // else if (useFzbPG == true) accumulatedRadiance = float3(0.0f, 10.0f, 0.0f);
-                // break;
-
+                getDirectionLight(payload, sceneInfo);
                 BSDF_SAMPLE(payload);
+
+                accumulatedRadiance += (payload.material.emissive + payload.directionLightRadiance) * bsdf_cosine_pdf;
+
                 float3 bsdfSample = payload.incidence;
                 float3 bsdfSample_bsdf = payload.bsdf;
                 float bsdfSample_bsdfPdf = payload.pdf;
@@ -546,15 +577,6 @@ void computeMain_FzbPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
                     //bsdfSample_pgPdf *= jitterPdf;
                 }
                 float bsdfSample_weight = bsdfSample_bsdfPdf / max(bsdfSample_pgPdf + bsdfSample_bsdfPdf, 1e-16f);
-
-                //if (pushConst.frameIndex == 1 && all(threadIndex == uint2(1059, 4))) { //  
-                //    printf("threadInex: %d %d\noutgoingIndex: %d, nodeLabel_G: %d\nbsdfSample_pgPdf: %f\n\n",
-                //        threadIndex.x, threadIndex.y,
-                //        outgoingIndex, nodeLabel_G,
-                //        bsdfSample_pgPdf
-                //    );
-                //}
-                //break;
 
                 // MIS
                 float probabilitySum = max(pgSample_weight + bsdfSample_weight, 1e-16f);
@@ -590,6 +612,11 @@ void computeMain_FzbPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
         }
     }
     accumulatedRadiance /= pushConst.spp;
+
+    //if (pushConst.frameIndex == 1) printf("threadIndex: %d %d\naccumulatedRadiance: %f %f %f\n\n", 
+    //    threadIndex.x, threadIndex.y,
+    //    accumulatedRadiance.x, accumulatedRadiance.y, accumulatedRadiance.z
+    //);
 
     // When the maximum frame rate is reached, the original image will decay by ((maxframe-1)/maxframe)^k < 1, and the final image will turn black
     if (pushConst.maxFrameCount > 1 && pushConst.frameIndex > 0)

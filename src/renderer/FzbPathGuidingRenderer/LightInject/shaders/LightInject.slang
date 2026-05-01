@@ -229,6 +229,8 @@ void initNEE(inout LightInjectHitPayload payload) {
     } else if (light.type == uint(LightType::Direction)) {
         payload.lightSampleDir = -light.direction;
 
+        if (dot(payload.lightSampleDir, payload.hitNormal) <= 0.001f) return;
+
         RayDesc ray;
         ray.TMin = 0.001;
         ray.TMax = INFINITE;
@@ -239,7 +241,6 @@ void initNEE(inout LightInjectHitPayload payload) {
         if (!traceRay_NEE(ray, samplePayload))
             payload.lightRadiance = light.color * light.intensity;
     }
-
 }
 //----------------------------------------------LightInject--------------------------------------------
 [numthreads(LIGHTINJECT_CS_THREADGROUP_SIZE, 1, 1)]
@@ -287,7 +288,8 @@ void computeMain_LightInject(uint threadIndex: SV_DispatchThreadID, uint groupTh
     for (int sampleIndex = 0; sampleIndex < LIGHTINJECT_SAMPLE_COUNT; ++sampleIndex) {
         payload.randomSeed = xxhash32(uint3(voxelIndex_atAll, pushConst.frameIndex, sampleIndex));
 
-        float3 sampleDir = sample_hemisphere_mean(payload.randomSeed);
+        float3 sampleDir = fibSpherePoint(sampleIndex, LIGHTINJECT_SAMPLE_COUNT);
+        sampleDir = mul(sampleDir, pushConst.randomRotateMatrix);
         sampleDir = mul(sampleDir, voxelTBN);
         float3 samplePos = getAABBPoint(sampleDir, voxelAabbCenter, voxelAabbHalfSize) + 0.01f * sampleDir;
         sampleDir = -sampleDir;
@@ -305,53 +307,48 @@ void computeMain_LightInject(uint threadIndex: SV_DispatchThreadID, uint groupTh
                 bool reSample = payload.cosineON <= 0.0f;
                 reSample |= !checkPointInAABB(payload.hitPos, voxelAabb);
                 reSample |= dot(payload.hitNormal, VGBNormal) <= 0.0f;
-                if (reSample) {
-                    payload.hitNormal = voxelNormal;
-                    payload.incidence = mul(sample_hemisphere_mean(payload.randomSeed), voxelTBN);
-                    payload.hitPos = getAABBPoint(sampleDir, voxelAabbCenter, voxelAabbHalfSize) + 0.01f * payload.incidence;
-                    payload.incidence = -payload.incidence;
+                if (reSample) break;
+
+                float3 bsdf = M_1_PI * payload.albedo;
+                float3 radiance_nee = float3(0.0f);
+                if (isPosInDirectionLight(payload.hitPos, sceneInfo.lights[0])) {
+                    if (bounceDepth > 0) payload.emissive = float3(0.0f);
                 }
                 else {
-                    float3 bsdf = M_1_PI * payload.albedo;
-
-                    float3 radiance_nee = float3(0.0f);
-                    if (isPosInDirectionLight(payload.hitPos, sceneInfo.lights[0])) {
-                        if(bounceDepth > 0) payload.emissive = float3(0.0f);
+                    initNEE(payload);
+                    if (any(payload.lightRadiance > 0.0f)) {
+                        float cosineIN = dot(payload.lightSampleDir, payload.hitNormal);
+                        radiance_nee = payload.lightRadiance * bsdf; // * cosineIN;
                     }
-                    else {
-                        initNEE(payload);
-                        if (any(payload.lightRadiance > 0.0f)) {
-                            float cosineIN = dot(payload.lightSampleDir, payload.hitNormal);
-                            radiance_nee = payload.lightRadiance * bsdf; // * cosineIN;
-                        }
-                    }
-                    accumulatedRadiance += (payload.emissive + radiance_nee) * bsdf_cosine_pdf;
-                    if (bounceDepth == 0 && payload.emissive.x > 0.0f) accumulatedRadiance += payload.emissive * 2.0f;
-
-                    float3 incidence = sample_hemisphere_mean(payload.randomSeed);
-                    payload.incidence = mul(incidence, payload.TBN);
-                    bsdf_cosine_pdf *= payload.albedo * M_1_PI; // * dot(incidence, payload.hitNormal);
                 }
+                accumulatedRadiance += (payload.emissive + radiance_nee) * bsdf_cosine_pdf;
+                if(bounceDepth == 0 && any(payload.emissive > 0.0f)) accumulatedRadiance += payload.emissive * 10000.0f;
+
+                float3 incidence = sample_hemisphere_mean(payload.randomSeed);
+                payload.incidence = mul(incidence, payload.TBN);
+                bsdf_cosine_pdf *= payload.albedo * M_1_PI; // * dot(incidence, payload.hitNormal);
 
                 ray.Origin = offsetRay(payload.hitPos, payload.hitNormal);
                 ray.Direction = payload.incidence;
 
                 ++bounceDepth;
 
-                //bool printfAble = pushConst.frameIndex == 2;
-                //printfAble &= normalIndex == 1;
-                //printfAble &= voxelIndex == 1150;
-                //printfAble &= any(accumulatedRadiance > 0.0f);
-                //if (printfAble) {
-                //    printf("sampleIndex: %d\naabb: %f %f %f %f %f %f\nhitPos: %f %f %f, hitNormal: %f %f  %f\nreSample: %d\n\n",
-                //        sampleIndex,
-                //        voxelAabb.minimum.x, voxelAabb.minimum.y, voxelAabb.minimum.z,
-                //        voxelAabb.maximum.x, voxelAabb.maximum.y, voxelAabb.maximum.z,
-                //        payload.hitPos.x, payload.hitPos.y, payload.hitPos.z,
-                //        payload.hitNormal.x, payload.hitNormal.y, payload.hitNormal.z,
-                //        reSample
-                //    );
-                //}
+                {
+                    // bool printfAble = pushConst.frameIndex == 2;
+                    // printfAble &= normalIndex == 3;
+                    ////printfAble &= voxelIndex == 1150;
+                    // printfAble &= any(accumulatedRadiance > 0.0f);
+                    // if (printfAble) {
+                    //     printf("voxelIndex: %d, sampleIndex: %d\naabb: %f %f %f %f %f %f\nhitPos: %f %f %f, hitNormal: %f %f  %f\nreSample: %d\n\n",
+                    //         voxelIndex, sampleIndex,
+                    //         voxelAabb.minimum.x, voxelAabb.minimum.y, voxelAabb.minimum.z,
+                    //         voxelAabb.maximum.x, voxelAabb.maximum.y, voxelAabb.maximum.z,
+                    //         payload.hitPos.x, payload.hitPos.y, payload.hitPos.z,
+                    //         payload.hitNormal.x, payload.hitNormal.y, payload.hitNormal.z,
+                    //         reSample
+                    //     );
+                    // }
+                }
             } else {
                 accumulatedRadiance += RayMiss(ray.Direction) * bsdf_cosine_pdf;
                 bounceDepth = MISS_DEPTH;
@@ -387,7 +384,7 @@ VSout_Cube vertexMain_Cube(uint vertexIndex: SV_VertexID, int instanceIndex: SV_
 
     VGBVoxelData_SVOPG voxelData = VGBs[VGBIndex][voxelIndex];
     VSout_Cube output;
-    if (voxelData.irradiance.w == 0.0f) output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
+    if (voxelData.irradiance.w == 0.0f || VGBIndex != pushConst.normalIndex) output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
     else {
         output.worldPos.x = ((vertexIndex & 3) * 2) % 6 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.x) : OrderedIntToFloat(voxelData.aabbI.maximum.x);
         output.worldPos.y = (vertexIndex & 3) <= 1 ? OrderedIntToFloat(voxelData.aabbI.minimum.y) : OrderedIntToFloat(voxelData.aabbI.maximum.y);
@@ -397,15 +394,15 @@ VSout_Cube vertexMain_Cube(uint vertexIndex: SV_VertexID, int instanceIndex: SV_
         output.sv_position = mul(float4(output.worldPos.xyz, 1.0f), sceneInfo.viewProjMatrix);
         output.color = voxelData.irradiance.xyz / voxelData.irradiance.w;
     }
-    if (instanceIndex == 5246) {
-        output.worldPos.x = ((vertexIndex & 3) * 2) % 6 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.x) : OrderedIntToFloat(voxelData.aabbI.maximum.x);
-        output.worldPos.y = (vertexIndex & 3) <= 1 ? OrderedIntToFloat(voxelData.aabbI.minimum.y) : OrderedIntToFloat(voxelData.aabbI.maximum.y);
-        output.worldPos.z = vertexIndex / 4 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.z) : OrderedIntToFloat(voxelData.aabbI.maximum.z);
-    
-        SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
-        output.sv_position = mul(float4(output.worldPos.xyz, 1.0f), sceneInfo.viewProjMatrix);
-        output.color = float3(1.0f, 0.0f, 0.0f);
-    }
+    //if (instanceIndex == 5246) {
+    //    output.worldPos.x = ((vertexIndex & 3) * 2) % 6 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.x) : OrderedIntToFloat(voxelData.aabbI.maximum.x);
+    //    output.worldPos.y = (vertexIndex & 3) <= 1 ? OrderedIntToFloat(voxelData.aabbI.minimum.y) : OrderedIntToFloat(voxelData.aabbI.maximum.y);
+    //    output.worldPos.z = vertexIndex / 4 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.z) : OrderedIntToFloat(voxelData.aabbI.maximum.z);
+    //
+    //    SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+    //    output.sv_position = mul(float4(output.worldPos.xyz, 1.0f), sceneInfo.viewProjMatrix);
+    //    output.color = float3(1.0f, 0.0f, 0.0f);
+    //}
 
     return output;
 }
