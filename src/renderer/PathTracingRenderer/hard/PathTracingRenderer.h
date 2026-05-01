@@ -54,6 +54,8 @@ public:
 	nvvk::Buffer sbtBuffer;
 private:
 	shaderio::PathTracingPushConstant pushValues{};
+
+	bool useNEE = true;
 };
 
 }

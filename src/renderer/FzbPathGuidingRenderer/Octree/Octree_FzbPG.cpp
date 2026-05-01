@@ -244,7 +244,7 @@ void Octree_FzbPG::uiRender() {
 		}
 		PE::end();
 
-#ifdef USE_VISIBLE_AABB_FZBPG
+#ifdef ADAPTIVE_IMPORTANCE_SAMPLING
 		if (PE::begin()) {
 			if (PE::entry("Node Pair Visible AABB Map", [&] {
 				static const ImVec4 highlightColor = ImVec4(118.f / 255.f, 185.f / 255.f, 0.f, 1.f);
@@ -420,7 +420,7 @@ void Octree_FzbPG::createOctreeArray() {
 	NVVK_DBG_NAME(divisibleNodeInfoBuffer_G.buffer);
 
 	uint32_t maxLayerNodeCount = (1 << (3 * octreeMaxLayer));
-	bufferSize = sizeof(shaderio::OctreeThreadGroupInfo_FzbPG) * (maxLayerNodeCount / GETOCTREELABEL_CS_THREADGROUP_SIZE);
+	bufferSize = sizeof(shaderio::OctreeThreadGroupInfo_FzbPG) * ((maxLayerNodeCount + GETOCTREELABEL_CS_THREADGROUP_SIZE - 1) / GETOCTREELABEL_CS_THREADGROUP_SIZE);
 	allocator->createBuffer(threadGroupInfoBuffer, bufferSize,
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(threadGroupInfoBuffer.buffer);
@@ -435,7 +435,7 @@ void Octree_FzbPG::createOctreeArray() {
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(indivisibleNodeInfosBuffer_E.buffer);
 
-#ifdef USE_VISIBLE_AABB_FZBPG
+#ifdef ADAPTIVE_IMPORTANCE_SAMPLING
 	bufferSize = IndivisibleNodeCount_G_FZBPG * CLUSTER_LAYER_NODECOUNT_E_FZBPG * sizeof(shaderio::OctreeNodePairVisibleData_FzbPG);
 	allocator->createBuffer(octreeNodePairVisibleDataBuffer, bufferSize,
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
@@ -546,7 +546,7 @@ void Octree_FzbPG::createDescriptorSetLayout() {
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
-#ifdef USE_VISIBLE_AABB_FZBPG
+#ifdef ADAPTIVE_IMPORTANCE_SAMPLING
 	bindings.addBinding({
 		.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eOctreeNodePairVisibleData,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -662,7 +662,7 @@ void Octree_FzbPG::createDescriptorSet() {
 		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eOctreeNodePairWeight, 0, 0, 1);
 	write.append(NodePairInfoWrite, octreeNodePairWeightBuffer, 0, octreeNodePairWeightBuffer.bufferSize);
 
-#ifdef USE_VISIBLE_AABB_FZBPG
+#ifdef ADAPTIVE_IMPORTANCE_SAMPLING
 	NodePairInfoWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eOctreeNodePairVisibleData, 0, 0, 1);
 	write.append(NodePairInfoWrite, octreeNodePairVisibleDataBuffer, 0, octreeNodePairVisibleDataBuffer.bufferSize);
@@ -715,7 +715,7 @@ void Octree_FzbPG::compileAndCreateShaders() {
 	#endif
 
 	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
-	#ifdef USE_VISIBLE_AABB_FZBPG
+	#ifdef ADAPTIVE_IMPORTANCE_SAMPLING
 	std::filesystem::path shaderSource = shaderPath / "Octree.slang";
 	#else
 	std::filesystem::path shaderSource = shaderPath / "Octree2.slang";
@@ -813,7 +813,7 @@ void Octree_FzbPG::compileAndCreateShaders() {
 	shaderInfo.pCode = shaderCode.pCode;
 	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_octreeNodeHitTest);
 	NVVK_DBG_NAME(computeShader_octreeNodeHitTest);
-#ifdef USE_VISIBLE_AABB_FZBPG
+#ifdef ADAPTIVE_IMPORTANCE_SAMPLING
 	//--------------------------------------------------------------------------------------
 	vkDestroyShaderEXT(device, computeShader_visibleAABBCluster, nullptr);
 
@@ -1089,7 +1089,7 @@ void Octree_FzbPG::getOctreeNodePairData(VkCommandBuffer cmd) {
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_octreeNodeHitTest);
 	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
 	
-#if !defined(NDEBUG) && defined(USE_VISIBLE_AABB_FZBPG)
+#if !defined(NDEBUG) && defined(ADAPTIVE_IMPORTANCE_SAMPLING)
 	pushConstant.showVisibleAABB = 1;
 	vkCmdPushConstants2(cmd, &pushInfo);
 
@@ -1105,7 +1105,7 @@ void Octree_FzbPG::getOctreeNodePairData(VkCommandBuffer cmd) {
 #endif
 	
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getProbability);
-#ifdef USE_VISIBLE_AABB_FZBPG
+#ifdef ADAPTIVE_IMPORTANCE_SAMPLING
 	for (int layerIndex = OCTREE_CLUSTER_LAYER_FZBPG; layerIndex >= 0; --layerIndex) {
 		pushConstant.currentLayer = layerIndex;
 		vkCmdPushConstants2(cmd, &pushInfo);
@@ -1143,13 +1143,13 @@ void Octree_FzbPG::debug_Prepare() {
 	showNearbyNodeInfoResultMapIndex = showOctreeIndivisibleNodeMapIndex + 2;
 
 	showMapCount = showOctreeLayerMapCount + 1 + 1 + 1;
-#ifdef USE_VISIBLE_AABB_FZBPG
+#ifdef ADAPTIVE_IMPORTANCE_SAMPLING
 	showOctreeNodePairVisibleAabbMapIndex = showOctreeIndivisibleNodeMapIndex + 3;
 	++showMapCount;
 #endif
 	Feature::createGBuffer(true, false, showMapCount);
 
-	pushConstant.sampleNodeLabel_G = 88;	// 45 - 23;   1 - 130  204 236
+	pushConstant.sampleNodeLabel_G = 1;	// 45 - 23;   1 - 130  204 236
 	pushConstant.sampleNodeLabel_E = 30;
 
 	for (int i = OCTREE_CLUSTER_LAYER_FZBPG; i < octreeMaxLayer; ++i)
@@ -1430,7 +1430,7 @@ void Octree_FzbPG::debug_NearbyNodeInfoResult_Visualization(VkCommandBuffer cmd)
 	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(showNearbyNodeInfoResultMapIndex), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
 }
 void Octree_FzbPG::debug_NodePairVisibleAABB_Visualization(VkCommandBuffer cmd) {
-#ifdef USE_VISIBLE_AABB_FZBPG
+#ifdef ADAPTIVE_IMPORTANCE_SAMPLING
 	//NVVK_DBG_SCOPE(cmd);
 
 	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(showOctreeNodePairVisibleAabbMapIndex), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });

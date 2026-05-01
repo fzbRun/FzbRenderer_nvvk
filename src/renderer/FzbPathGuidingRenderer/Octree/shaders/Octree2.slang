@@ -21,10 +21,6 @@
 [[vk::binding(BindingPoints_Octree_FzbPG::eIndivisibleNodeInfos_G)]] RWStructuredBuffer<uint2> IndivisibleNodeInfoBuffer_G;
 [[vk::binding(BindingPoints_Octree_FzbPG::eIndivisibleNodeInfos_E)]] RWStructuredBuffer<uint> IndivisibleNodeInfoBuffer_E;
 [[vk::binding(BindingPoints_Octree_FzbPG::eOctreeNodePairWeight)]] RWStructuredBuffer<float> OctreeNodePairWeightBuffer;
-#ifdef NEARBYNODE_JITTER_FZBPG
-[[vk::binding(BindingPoints_Octree_FzbPG::eNearbyNodeTempInfos)]] RWStructuredBuffer<IndivisibleNodeNearbyNodeTempInfo_FzbPG, ScalarDataLayout> NearbyNodeTempInfoBuffer;
-[[vk::binding(BindingPoints_Octree_FzbPG::eNearbyNodeInfos)]] RWStructuredBuffer<OctreeNearbyNodeInfo_FzbPG, ScalarDataLayout> NearbyNodeInfoBuffer;
-#endif
 //----------------------------------------------clearOctreeArray--------------------------------------------
 [numthreads(1024, 1, 1)]
 [shader("compute")]
@@ -50,13 +46,14 @@ void computeMain_initOctreeArray(uint threadIndex: SV_DispatchThreadID, uint gro
         #endif
     }
     OctreeNodeClusterData_E_FzbPG nodeClusterData_E; {
-        #ifdef USE_VISIBLE_AABB_FZBPG
+        #ifdef ADAPTIVE_IMPORTANCE_SAMPLING
         #else
         nodeClusterData_E.pdf = 1.0f;
         #endif
         nodeClusterData_E.E = 0.0f;
         nodeClusterData_E.meanNormal = float4(0.0f);
-        nodeClusterData_E.aabb = aabb;}
+        nodeClusterData_E.aabb = aabb;
+    }
 
     if (threadIndex < pushConst.VGBVoxelTotalCount * 6) { // must be 1024 Integer multiple, so warp and threadGroup can synchronization
         uint VGBIndex = threadIndex / pushConst.VGBVoxelTotalCount;
@@ -316,24 +313,27 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
 
             bool indivisible = true;
             #ifdef GEOMETRY_CLUSTER_WITH_E
-            float mergeE = nodeData_G.E;
-            for (int offset = 4; offset > 0; offset /= 2) {
-                uint targetLane = warpLane + offset;
-                mergeE += WaveReadLaneAt(mergeE, targetLane);
+            {
+                float mergeE = nodeData_G.E;
+                for (int offset = 4; offset > 0; offset /= 2) {
+                    uint targetLane = warpLane + offset;
+                    mergeE += WaveReadLaneAt(mergeE, targetLane);
+                }
+                mergeE = WaveReadLaneAt(mergeE, blockFirstWarpLane);
+
+                bool indivisibleE = true;
+                if (mergeE > 0.0f) {
+                    float ratioE = hasData ? nodeData_G.E / mergeE : 1.0f;
+                    indivisibleE = ratioE >= (1.0f / blockHasDataNodeCount);
+                    for (int offset = 4; offset > 0; offset /= 2) {
+                        uint targetLane = warpLane + offset;
+                        indivisibleE &= WaveReadLaneAt(indivisibleE, targetLane);
+                    }
+                }
+                indivisible &= indivisibleE;
+
+                nodeData_G.E = mergeE;
             }
-            mergeE = WaveReadLaneAt(mergeE, blockFirstWarpLane);
-            //
-            //bool indivisibleE = true;
-            //if (mergeE > 0.0f) {
-            //    float ratioE = hasData ? nodeData_G.E / mergeE : 1.0f;
-            //    indivisibleE = ratioE >= (1.0f / blockHasDataNodeCount);
-            //    for (int offset = 4; offset > 0; offset /= 2) {
-            //        uint targetLane = warpLane + offset;
-            //        indivisibleE &= WaveReadLaneAt(indivisibleE, targetLane);
-            //    }
-            //}
-            //indivisible &= indivisibleE;
-            nodeData_G.E = mergeE;
             #endif
             
             if (warpLane == blockFirstWarpLane) {
@@ -376,7 +376,37 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
             mergeE = WaveReadLaneAt(mergeE, blockFirstWarpLane);
 
             float probability = nodeData_E.E / mergeE;
+            uint32_t sampleWarpLane = blockFirstWarpLane;
+            float sampleProbability = 1.0f;
+            if (warpLane == blockFirstWarpLane) {
+                uint randomSeed = xxhash32(uint3(threadIndex, groupThreadIndex, (uint)pushConst.frameIndex));
+                sampleProbability = rand(randomSeed);
+            }
+            sampleProbability = WaveReadLaneAt(sampleProbability, blockFirstWarpLane);
+            for (int offset = 0; offset < 8; ++offset) {
+                sampleProbability -= WaveReadLaneAt(probability, blockFirstWarpLane + offset);
+                if (sampleProbability <= 0.0f) {
+                    sampleWarpLane += offset;
+                    break;
+                }
+            }
 
+            #ifdef ADAPTIVE_IMPORTANCE_SAMPLING
+            AABB mergeAabb = nodeData_E.mergeAabb;
+            atomicMergeAABB(mergeAabb);
+            #endif
+
+            if (warpLane == sampleWarpLane) {
+                #ifdef ADAPTIVE_IMPORTANCE_SAMPLING
+                nodeData_E.mergeAabb = mergeAabb;
+                #endif
+                nodeData_E.E = mergeE;
+                nodeData_E.pdf *= probability;
+                OctreeClusterDataBuffer_E[layerIndex - 1][fatherNodeIndex] = nodeData_E;
+            }
+
+            /*
+            float probability = nodeData_E.E / mergeE;
             #ifdef MERGE_SIMILIAR_E_FZBPG
             {
                 float maxProbability = probability;
@@ -386,8 +416,6 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
                     maxProbability = max(maxProbability, other_maxProbability);
                 }
                 maxProbability = WaveReadLaneAt(maxProbability, blockFirstWarpLane);
-                
-                
 
                 AABB mergeAABB; {
                     mergeAABB.minimum.x = 3.402823466e+38F;
@@ -451,6 +479,7 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
                 }
             }
             #endif
+            */
         }
 
         if (blockLane == 0 && blockHasDataNodeCount > 0 && layerIndex > 1) {
@@ -481,6 +510,7 @@ void computeMain_createOctreeArray2(uint threadIndex: SV_DispatchThreadID, uint 
     //     OctreeDataBuffer_G[pushConst.currentLayer - 1][fatherNodeIndex].label_indivisible = 3;
     else OctreeDataBuffer_G[pushConst.currentLayer - 1][fatherNodeIndex].label_indivisible = 2;
 
+    #ifndef ADAPTIVE_IMPORTANCE_SAMPLING
     if (pushConst.currentLayer == OCTREE_CLUSTER_LAYER_FZBPG) {
         if (OctreeClusterDataBuffer_E[0][threadIndex].E > 0.0f) {
             OctreeNodeClusterData_E_FzbPG clusterNodeData_E = OctreeClusterDataBuffer_E[0][threadIndex];
@@ -491,6 +521,7 @@ void computeMain_createOctreeArray2(uint threadIndex: SV_DispatchThreadID, uint 
             ClusterlayerDataBuffer_E[threadIndex] = nodeData_E;
         }
     }
+    #endif
 }
 
 //----------------------------------------------getNodePairData-------------------------------------------------
@@ -878,11 +909,10 @@ void computeMain_getProbability(uint threadIndex: SV_DispatchThreadID, uint thre
     GroupMemoryBarrierWithGroupSync();
 
     //bool printfAble = pushConst.frameIndex == 1;
-    //printfAble &= outgoingIndex == 10;
-    //printfAble &= nodeLabel_G == 62;
-    //printfAble &= groupThreadIndex == 344;
+    //printfAble &= outgoingIndex == 57;
+    //printfAble &= nodeLabel_G == 0;
     //if (printfAble) {
-    //    printf("nodeIndex_E: %d\nweight:%f, probability: %f\n\n", groupThreadIndex, weight, probability);
+    //    printf("layerIndex: 2, nodeIndex_E: %d\nweight:%f, probability: %f\n\n", groupThreadIndex, weight, probability);
     //}
 
     for (int layerIndex = OCTREE_CLUSTER_LAYER_FZBPG - 1; layerIndex >= 0; --layerIndex) {
@@ -897,6 +927,10 @@ void computeMain_getProbability(uint threadIndex: SV_DispatchThreadID, uint thre
         }
         weightSum = WaveReadLaneAt(weightSum, blockFirstWarplane);
         probability = weight / max(weightSum, 1e-20f);
+
+        //if (printfAble) {
+        //    printf("layerIndex: %d, nodeIndex_E: %d\nweight:%f, probability: %f\n\n", layerIndex, groupThreadIndex, weight, probability);
+        //}
 
         if (probability > 0.0f) {
             weightIndex = weightStartIndex + OctreeLayerStartIndex_FzbPG[layerIndex] + groupThreadIndex;
@@ -1117,22 +1151,24 @@ VSout_OctreeNodePairHitTestResult vertexMain_OctreeNodePairHitTestResult(uint ve
         OctreeNodeData_E_FzbPG nodeData_E = ClusterlayerDataBuffer_E[nodeIndex_E];
         nodeAABB = nodeData_E.aabb;
 
-        float pdf = nodeData_E.pdf;
+        float layerPdf = 1.0f;
         for (int layerIndex = OCTREE_CLUSTER_LAYER_FZBPG; layerIndex >= 0; --layerIndex) {
             uint weightIndex = weightStartIndex + nodeIndex_E + OctreeLayerStartIndex_FzbPG[layerIndex];
-            pdf *= OctreeNodePairWeightBuffer[weightIndex];
+            layerPdf *= OctreeNodePairWeightBuffer[weightIndex];
             nodeIndex_E /= 8;
         }
-        output.color = float4(0.0f, pdf * 100.0f, 0.0f, 1.0f);
 
-        //bool printfAble = pushConst.frameIndex == 1;
-        //printfAble &= outgoingIndex == 10;
-        //printfAble &= nodeLabel_G == 62;
-        //printfAble &= nodeLabel_E == 52;
-        //printfAble &= vertexIndex == 0;
-        //if (printfAble) {
-        //    printf("pdf:%f, nodePdf: %f\n\n", pdf, nodeData_E.pdf);
+        //if (pushConst.frameIndex == pushConst.maxFrameCount - 1 && vertexIndex == 0 && layerPdf > 0.0f){
+        //    printf("nodeIndex_E: %d\naabb: %f %f %f %f %f %f\nnodePdf: %f, layerPdf: %f\n\n",
+        //           IndivisibleNodeInfoBuffer_E[instanceIndex],
+        //           nodeAABB.minimum.x, nodeAABB.minimum.y, nodeAABB.minimum.z,
+        //           nodeAABB.maximum.x, nodeAABB.maximum.y, nodeAABB.maximum.z,
+        //           nodeData_E.pdf, layerPdf
+        //    );
         //}
+
+        float pdf = layerPdf * nodeData_E.pdf;
+        output.color = float4(0.0f, pdf * 100.0f, 0.0f, 1.0f);
     }
     if (nodeAABB.minimum.x > 1e10f) return output;
 

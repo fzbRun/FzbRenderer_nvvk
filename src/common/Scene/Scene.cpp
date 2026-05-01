@@ -198,7 +198,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 					light.coneAngle = std::stof(coneAngleNode.attribute("value").value());
 			}
 			else if (lightType == "sun") {
-				light.type == shaderio::Directional;
+				light.type == shaderio::Direction;
 				sceneInfo.useSky = true;
 			}
 			else if (lightType == "area") {		//默认是矩形光源
@@ -231,6 +231,10 @@ void FzbRenderer::Scene::createSceneFromXML() {
 
 				if (pugi::xml_node SRSNode = lightNode.child("SphericalRectangleSample"))
 					light.SphericalRectangleSample = std::string(SRSNode.attribute("value").value()) == "true";
+			}
+			else if (lightType == "direction") {
+				light.type = shaderio::Direction;
+				light.direction = glm::normalize(FzbRenderer::getRGBFromString(lightNode.child("direction").attribute("value").value()));
 			}
 		}
 	}

@@ -30,6 +30,7 @@ struct OctreePushConstant_FzbPG {
 	int sampleNodeLabel_G = 1;
 	int sampleNodeLabel_E = 1;
 	int showVisibleAABB = 1;
+	int maxFrameCount;
 #endif
 };
 
@@ -49,9 +50,12 @@ enum class BindingPoints_Octree_FzbPG : uint32_t {
 	eThreadGroupInfos,
 	eIndivisibleNodeInfos_G,
 	eIndivisibleNodeInfos_E,
-#ifdef USE_VISIBLE_AABB_FZBPG
-	eOctreeNodePairVisibleData,
+#ifdef ADAPTIVE_IMPORTANCE_SAMPLING
+	eOctreeNodePairPartialHitNodeInfo1,
+	eOOctreeNodePairPartialHitNodeInfo2Count,
+	eOctreeNodePairPartialHitNodeInfo2,
 	eOctreeNodePairE,
+	eOctreeNodePairData,
 #endif
 	eOctreeNodePairWeight,
 #ifdef NEARBYNODE_JITTER_FZBPG
@@ -90,13 +94,13 @@ Octree_E is OCTREE_CLUSTER_LAYER - octreeMaxLayer
 every node is indivisible, has all childNode's aabb, E and normal
 */
 struct OctreeNodeClusterData_E_FzbPG {
-#ifdef USE_VISIBLE_AABB_FZBPG
-#else
 	float pdf;
-#endif
 	float E;
 	float4 meanNormal;
 	AABB aabb;
+#ifdef ADAPTIVE_IMPORTANCE_SAMPLING
+	int importantSampleNodeIndex;
+#endif
 };
 /*
 Octree_E is only 0 - OCTREE_CLUSTER_LAYER
@@ -104,8 +108,7 @@ the OCTREE_CLUSTER_LAYER layer node must is indivisible, and 0-OCTREE_CLUSTER_LA
 so we only record the OCTREE_CLUSTER_LAYER layer node's label
 */
 struct OctreeNodeData_E_FzbPG {
-#ifdef USE_VISIBLE_AABB_FZBPG
-#else
+#ifndef ADAPTIVE_IMPORTANCE_SAMPLING
 	AABB aabb;
 	float pdf;
 #endif
@@ -147,16 +150,19 @@ struct OctreeThreadGroupInfo_FzbPG {
 #define inverseOutgoing inverseSH
 #endif
 
-#define VISIBLEAABB_CLUSTER_LAYER 4
+#define HITTEST_COUNT_PERCHILDNODE_FZBPG 4  //dont change!!!
 
-/*
-nodePair consisting of indivisibleNode_G and indivisibleNode_E
-aabb is the indivisibleNode_E's visible area for a indivisibleNode_G
-pdf is (the visible area's E) / (OCTREE_CLUSTER_LAYER node's E that merge all child node' E)
-*/
-struct OctreeNodePairVisibleData_FzbPG {
+struct OctreeNodePairPartialHitNodeInfo1_FzbPG {
+	float childNodeMergeE[8];
+	uint nodeIndex;
+};
+struct OctreeNodePairPartialHitNodeInfo2_FzbPG {
+	uint nodeIndex;
+	uint fatherNodeIndex;	//fatherNodeIndex in last layer PartialHitNodeInfo1Buffer
+};
+struct OctreeNodePairData_FzbPG {
+	AABB aabb;
 	float pdf;
-	AABB aabb;		//node_E's visible aabb for a node_G
 };
 //------------------------------------------------------------------------------------------
 struct IndivisibleNodeNearbyNodeTempInfo_FzbPG {
@@ -181,6 +187,8 @@ struct OctreeNearbyNodeInfo_FzbPG {
 
 #define GETNEARBYNODES_CS_THREADGROUP_SIZE 512
 #define GETNEARBYNODES2_CS_THREADGROUP_SIZE 1024
+
+#define HITTEST_CS_THREADGROUP_SIZE2 256
 
 NAMESPACE_SHADERIO_END()
 #endif

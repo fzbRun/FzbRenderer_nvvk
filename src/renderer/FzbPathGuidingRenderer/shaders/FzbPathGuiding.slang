@@ -6,7 +6,7 @@
 [[vk::push_constant]] ConstantBuffer<FzbPathGuidingPushConstant, ScalarDataLayout> pushConst;
 [[vk::binding(StaticBindingPoints_FzbPG::eOctreeData_G)]] RWStructuredBuffer<OctreeNodeData_G_FzbPG, ScalarDataLayout> OctreeDataBuffer_G[];
 [[vk::binding(StaticBindingPoints_FzbPG::eClusterLayerData_E)]] RWStructuredBuffer<OctreeNodeData_E_FzbPG, ScalarDataLayout> ClusterlayerDataBuffer_E;
-#ifdef USE_VISIBLE_AABB_FZBPG
+#ifdef ADAPTIVE_IMPORTANCE_SAMPLING
 [[vk::binding(StaticBindingPoints_FzbPG::eOctreeNodePairVisibleData)]] RWStructuredBuffer<OctreeNodePairVisibleData_FzbPG, ScalarDataLayout> OctreeNodePairVisibleDataBuffer;
 #endif
 [[vk::binding(StaticBindingPoints_FzbPG::eOctreeNodePairWeight)]] RWStructuredBuffer<float> OctreeNodePairWeightBuffer;
@@ -237,7 +237,7 @@ bool getNodeAABB_E_FzbPG(inout AABB aabb, inout HitPayload_FzbPG payload, inout 
     nodeIndex_E = nodeIndex_E + nodeOffset - OctreeLayerStartIndex_FzbPG[OCTREE_CLUSTER_LAYER_FZBPG];
 
     OctreeNodeData_E_FzbPG nodeInfo_E = groupClusterLayerNodeData_E[nodeIndex_E];
-    #ifdef USE_VISIBLE_AABB_FZBPG
+    #ifdef ADAPTIVE_IMPORTANCE_SAMPLING
     uint nodePairIndex = nodeLabel_G * groupGlobalInfo.indivisibleNodeCount_E + nodeInfo_E.label - 1;
     OctreeNodePairVisibleData_FzbPG nodePairData = OctreeNodePairVisibleDataBuffer[nodePairIndex];
     aabb = nodePairData.aabb;
@@ -355,7 +355,7 @@ float getPgPdf(uint nodeLabel_G, uint outgoingIndex, float3 hitPos, float3 hitNo
     }
 
     OctreeNodeData_E_FzbPG nodeInfo_E = groupClusterLayerNodeData_E[nodeIndex_E];
-    #ifdef USE_VISIBLE_AABB_FZBPG
+    #ifdef ADAPTIVE_IMPORTANCE_SAMPLING
     uint nodePairIndex = nodeLabel_G * groupGlobalInfo.indivisibleNodeCount_E + nodeInfo_E.label - 1;
     OctreeNodePairVisibleData_FzbPG nodePairData = OctreeNodePairVisibleDataBuffer[nodePairIndex];
     pg_Pdf *= nodePairData.pdf;

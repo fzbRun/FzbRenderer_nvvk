@@ -16,7 +16,7 @@ enum DynamicSetBindingPoints_PT {
 
 struct PathTracingPushConstant
 {
-	int NEEShaderIndex = -1;
+	int HitTestShaderIndex = -1;
 	int frameIndex = 0;
 	int maxFrameCount = 1;
 	int maxDepth = 3;

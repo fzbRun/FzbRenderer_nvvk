@@ -176,7 +176,7 @@ float3 RayMiss(float3 rayDirection) {
     else return sceneInfo.backgroundColor;
 }
 
-bool traceRay_NEE(RayDesc ray, inout NEEPayload payload) {
+bool traceRay_NEE(RayDesc ray, inout HitTestPayload payload) {
     RayQuery<RAY_FLAG_NONE> q;
     q.TraceRayInline(topLevelAS, RAY_FLAG_NONE, 0xFF, ray);
 
@@ -200,31 +200,46 @@ void initNEE(inout LightInjectHitPayload payload) {
     payload.lightRadiance = float3(0.0f);
 
     Light light = sceneInfo.lights[0];
-    Quadrilateral quad;
-    quad.startPos = light.pos;
-    quad.normal = light.direction;
-    quad.edge1 = light.edge1;
-    quad.edge2 = light.edge2;
-    float pdf = 1.0f;
-    payload.lightSampleDir = sphereRectangleSample(quad, payload.hitPos, rand(payload.randomSeed), rand(payload.randomSeed), pdf);
-    float distance = length(payload.lightSampleDir);
-    payload.lightSampleDir = normalize(payload.lightSampleDir);
+    if (light.type == uint(LightType::Area)) {
+        Quadrilateral quad;
+        quad.startPos = light.pos;
+        quad.normal = light.direction;
+        quad.edge1 = light.edge1;
+        quad.edge2 = light.edge2;
+        float pdf = 1.0f;
+        payload.lightSampleDir = sphereRectangleSample(quad, payload.hitPos, rand(payload.randomSeed), rand(payload.randomSeed), pdf);
+        float distance = length(payload.lightSampleDir);
+        payload.lightSampleDir = normalize(payload.lightSampleDir);
 
-    if (isnan(pdf) || isinf(pdf)) return;
-    if (dot(-payload.lightSampleDir, light.direction) <= 0.001f) return;
-    if (dot(payload.lightSampleDir, payload.hitNormal) <= 0.001f) return;
+        if (isnan(pdf) || isinf(pdf)) return;
+        if (dot(-payload.lightSampleDir, light.direction) <= 0.001f) return;
+        if (dot(payload.lightSampleDir, payload.hitNormal) <= 0.001f) return;
 
-    RayDesc ray;
-    ray.TMin = 0.001;
-    ray.TMax = INFINITE;
-    ray.Origin = payload.hitPos + 0.0001f * payload.lightSampleDir;
-    ray.Direction = payload.lightSampleDir;
+        RayDesc ray;
+        ray.TMin = 0.001;
+        ray.TMax = INFINITE;
+        ray.Origin = payload.hitPos + 0.0001f * payload.lightSampleDir;
+        ray.Direction = payload.lightSampleDir;
 
-    NEEPayload samplePayload;
-    if (traceRay_NEE(ray, samplePayload)) {
-        if (samplePayload.distance + 0.002f < distance) return;
-        payload.lightRadiance = light.color * light.intensity;
+        HitTestPayload samplePayload;
+        if (traceRay_NEE(ray, samplePayload)) {
+            if (samplePayload.distance + 0.002f < distance) return;
+            payload.lightRadiance = light.color * light.intensity;
+        }
+    } else if (light.type == uint(LightType::Direction)) {
+        payload.lightSampleDir = -light.direction;
+
+        RayDesc ray;
+        ray.TMin = 0.001;
+        ray.TMax = INFINITE;
+        ray.Origin = payload.hitPos + 0.0001f * payload.lightSampleDir;
+        ray.Direction = payload.lightSampleDir;
+
+        HitTestPayload samplePayload;
+        if (!traceRay_NEE(ray, samplePayload))
+            payload.lightRadiance = light.color * light.intensity;
     }
+
 }
 //----------------------------------------------LightInject--------------------------------------------
 [numthreads(LIGHTINJECT_CS_THREADGROUP_SIZE, 1, 1)]
@@ -306,7 +321,7 @@ void computeMain_LightInject(uint threadIndex: SV_DispatchThreadID, uint groupTh
                     else {
                         initNEE(payload);
                         if (any(payload.lightRadiance > 0.0f)) {
-                            // float cosineIN = dot(payload.lightSampleDir, payload.hitNormal);
+                            float cosineIN = dot(payload.lightSampleDir, payload.hitNormal);
                             radiance_nee = payload.lightRadiance * bsdf; // * cosineIN;
                         }
                     }
@@ -315,7 +330,7 @@ void computeMain_LightInject(uint threadIndex: SV_DispatchThreadID, uint groupTh
 
                     float3 incidence = sample_hemisphere_mean(payload.randomSeed);
                     payload.incidence = mul(incidence, payload.TBN);
-                    bsdf_cosine_pdf *= payload.albedo * M_1_PI;// * dot(incidence, payload.hitNormal);
+                    bsdf_cosine_pdf *= payload.albedo * M_1_PI; // * dot(incidence, payload.hitNormal);
                 }
 
                 ray.Origin = offsetRay(payload.hitPos, payload.hitNormal);

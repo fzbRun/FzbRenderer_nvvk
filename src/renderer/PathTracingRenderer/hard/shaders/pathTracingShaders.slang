@@ -93,10 +93,12 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
     CallablePayload callablePayload;
     initCallableShader(callablePayload, payload, barycentrics, sceneInfo);
 
+    getDirectionalLight(callablePayload, sceneInfo, pushConst.HitTestShaderIndex);
+
     CallShader<CallablePayload>(uint(callablePayload.material.type), callablePayload);
 
     payload.randomSeed = callablePayload.randomSeed;
-    payload.radiance = callablePayload.material.emissive * payload.bsdf_cosine / payload.pdf;
+    payload.radiance = (callablePayload.material.emissive + callablePayload.directionLightRadiance) * payload.bsdf_cosine / payload.pdf;
     payload.rayDirection = callablePayload.incidence;
     payload.rayOrigin = callablePayload.hitPos + 0.001f * payload.rayDirection;
     payload.bsdf_cosine *= callablePayload.bsdf * abs(dot(callablePayload.hitNormal, payload.rayDirection));
@@ -105,8 +107,6 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
 
     payload.bounceDepth++;
 }
-[shader("closesthit")]
-void NEEClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionAttributes attr) {}
 
 [shader("miss")]
 void rayMissMain(inout HitPayload payload)

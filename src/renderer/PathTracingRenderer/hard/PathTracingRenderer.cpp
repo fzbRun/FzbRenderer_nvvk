@@ -15,7 +15,7 @@ FzbRenderer::PathTracingRenderer::PathTracingRenderer(pugi::xml_node& rendererNo
 	if (pugi::xml_node sppNode = rendererNode.child("spp"))
 		pushValues.spp = std::stoi(sppNode.attribute("value").value());
 	if (pugi::xml_node useNEENode = rendererNode.child("useNEE"))
-		pushValues.NEEShaderIndex = std::string(useNEENode.attribute("value").value()) == "true";
+		useNEE = std::string(useNEENode.attribute("value").value()) == "true";
 		
 }
 //-----------------------------------------创造光追管线----------------------------------------------------------
@@ -150,7 +150,7 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 		eClosestHit,
 		//eAnyHit,
 
-		eClosestHit_NEE,
+		eClosestHit_HitTest,
 
 		eCallable_DiffuseMaterial,
 		eCallable_ConductorMaterial,
@@ -165,7 +165,10 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 
 	addPathTracingSlangMacro();
 	std::string shaderSlangName;
-	if(pushValues.NEEShaderIndex == 1) shaderSlangName = "pathTracingNEEShaders.slang";
+	if (useNEE) {
+		shaderSlangName = "pathTracingNEEShaders.slang";
+		pushValues.HitTestShaderIndex = 1;
+	}
 	else shaderSlangName = "pathTracingShaders.slang";
 
 	//VkShaderModuleCreateInfo shaderCode = compileSlangShader("pathTracingShaders.slang", {});
@@ -188,9 +191,9 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 	//stages[eAnyHit].pName = "rayAnyHitMain";
 	//stages[eAnyHit].stage = VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
 
-	stages[eClosestHit_NEE].pNext = &shaderCode;
-	stages[eClosestHit_NEE].pName = "NEEClosestHitMain";
-	stages[eClosestHit_NEE].stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+	stages[eClosestHit_HitTest].pNext = &shaderCode;
+	stages[eClosestHit_HitTest].pName = "HitTestClosestHitMain";
+	stages[eClosestHit_HitTest].stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
 
 	stages[eCallable_DiffuseMaterial].pNext = &shaderCode;
 	stages[eCallable_DiffuseMaterial].pName = "diffuseMaterialMain";
@@ -236,12 +239,8 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 	//group.anyHitShader = eAnyHit;
 	shader_groups.push_back(group);
 
-	if (pushValues.NEEShaderIndex == 1) {		//使用NEE
-		group.closestHitShader = eClosestHit_NEE;
-		shader_groups.push_back(group);
-
-		pushValues.NEEShaderIndex = 1;
-	}
+	group.closestHitShader = eClosestHit_HitTest;
+	shader_groups.push_back(group);
 
 	group.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
 	group.closestHitShader = VK_SHADER_UNUSED_KHR;
@@ -382,7 +381,7 @@ void FzbRenderer::PathTracingRenderer::uiRender() {
 			PE::end();
 		}
 
-		bool NEEChange = ImGui::Checkbox("USE NEE", (bool*)&pushValues.NEEShaderIndex);
+		bool NEEChange = ImGui::Checkbox("USE NEE", (bool*)&useNEE);
 		if (NEEChange) {
 			vkQueueWaitIdle(Application::app->getQueue(0).queue);
 			createRayTracingPipeline();

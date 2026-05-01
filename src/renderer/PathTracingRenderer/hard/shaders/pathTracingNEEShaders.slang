@@ -63,14 +63,15 @@ void raygenMain()
     float RRPdf = 1.0f;
 
     float weight_bsdf = 1.0f;
+    float pdf_bsdfSample = 1.0f;
     uint lightNum = min(sceneInfo.numLights, NEE_MAX_SAMPLE_NUM);
     while (payload.bounceDepth < pushConst.maxDepth && (payload.bsdf_cosine.x + payload.bsdf_cosine.y + payload.bsdf_cosine.z > 0.0f))
     {
-    #ifdef PathTracingMotionBlur
+        #ifdef PathTracingMotionBlur
         TraceMotionRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, pushConst.time, payload);
-    #else
+        #else
         TraceRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, payload);
-    #endif
+        #endif
 
         ray.Origin = payload.rayOrigin;
         ray.Direction = payload.rayDirection;
@@ -84,9 +85,10 @@ void raygenMain()
                 pdf_directLightSample = getPdf_directionLightSample(ray.Origin, ray.Direction, light);
                 break; // bsdf sample only in one direct light, other light's pdf is 0
             }
-            weight_bsdf /= (payload.pdf_bsdfSample + pdf_directLightSample + 0.0001f);
+            weight_bsdf /= (pdf_bsdfSample + pdf_directLightSample + 0.0001f);
         }
 
+        pdf_bsdfSample = payload.pdf_bsdfSample;
         accumulatedRadiance += (payload.radiance_emissive + payload.radiance_directLightSample) * weight_bsdf / RRPdf;
 
         float randomNumber = rand(payload.randomSeed);
@@ -143,7 +145,7 @@ void rayClosestHitMain(inout NEEHitPayload payload, in BuiltInTriangleIntersecti
     }
 
     callablePayload.radianceSum_nee = float3(0.0f);
-    if (pushConst.NEEShaderIndex > 0) initNEE(callablePayload, pushConst.sceneInfoAddress[0], pushConst.NEEShaderIndex, pushConst.time);
+    if (pushConst.HitTestShaderIndex > 0) initNEE(callablePayload, pushConst.sceneInfoAddress[0], pushConst.HitTestShaderIndex, pushConst.time);
 
     CallShader<CallablePayload>(uint(material.type), callablePayload);
 
@@ -182,7 +184,7 @@ void rayMissMain(inout NEEHitPayload payload)
 void diffuseMaterialMain(inout CallablePayload payload) {
     PopulateCallablePayload_DiffuseMaterial(payload);
 
-    if (pushConst.NEEShaderIndex > 0) {
+    if (pushConst.HitTestShaderIndex > 0) {
         uint lightNum = min(pushConst.sceneInfoAddress[0].numLights, NEE_MAX_SAMPLE_NUM);
         for (int i = 0; i < lightNum; ++i) {
             float3 radiance_nee = payload.radiance_nee[i];
@@ -211,7 +213,7 @@ void conductorMaterialMain(inout CallablePayload payload) {
     payload.pdf = 1.0f;
     payload.incidence = reflect(-payload.outgoing, payload.hitNormal);
 
-    if (pushConst.NEEShaderIndex > 0) {
+    if (pushConst.HitTestShaderIndex > 0) {
         uint lightNum = min(pushConst.sceneInfoAddress[0].numLights, NEE_MAX_SAMPLE_NUM);
         for (int i = 0; i < lightNum; ++i) {
             float3 radiance_nee = payload.radiance_nee[i];
@@ -241,7 +243,7 @@ void dielectricMaterialMain(inout CallablePayload payload) {
 
     PopulateCallablePayload_DielectricMaterial(payload);
 
-    if (pushConst.NEEShaderIndex > 0) {
+    if (pushConst.HitTestShaderIndex > 0) {
         uint lightNum = min(pushConst.sceneInfoAddress[0].numLights, NEE_MAX_SAMPLE_NUM);
         for (int i = 0; i < lightNum; ++i) {
             float3 radiance_nee = payload.radiance_nee[i];
@@ -287,7 +289,7 @@ void roughConductorMaterialMain(inout CallablePayload payload) {
     float roughness = payload.material.roughness;
     float G1_outgoing, G1_incidence;
 
-    if (pushConst.NEEShaderIndex > 0) {
+    if (pushConst.HitTestShaderIndex > 0) {
         uint lightNum = min(pushConst.sceneInfoAddress[0].numLights, NEE_MAX_SAMPLE_NUM);
         for (int i = 0; i < lightNum; ++i) {
             float3 radiance_nee = payload.radiance_nee[i];
@@ -343,7 +345,7 @@ void roughDielectricMaterialMain(inout CallablePayload payload) {
     float roughness = payload.material.roughness;
     float G1_outgoing, G1_incidence;
 
-    if (pushConst.NEEShaderIndex > 0) {
+    if (pushConst.HitTestShaderIndex > 0) {
         uint lightNum = min(pushConst.sceneInfoAddress[0].numLights, NEE_MAX_SAMPLE_NUM);
         for (int i = 0; i < lightNum; ++i) {
             float3 radiance_nee = payload.radiance_nee[i];

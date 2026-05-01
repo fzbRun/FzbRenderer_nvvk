@@ -149,6 +149,8 @@ void FzbPathGuidingRenderer::preRender() {
 	lightInject->preRender();
 	octree->preRender();
 
+	octree->pushConstant.maxFrameCount = maxFrames;
+
 	pushConstant.randomRotateMatrix = octree->pushConstant.randomRotateMatrix;
 
 	Application::app->submitAndWaitTempCmdBuffer(cmd);
@@ -201,7 +203,7 @@ void FzbPathGuidingRenderer::createDescriptorSetLayout() {
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
-#ifdef USE_VISIBLE_AABB_FZBPG
+#ifdef ADAPTIVE_IMPORTANCE_SAMPLING
 	bindings.addBinding({
 		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodePairVisibleData,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -278,7 +280,7 @@ void FzbPathGuidingRenderer::createDescriptorSet() {
 	VkWriteDescriptorSet NodePairInfoWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodePairWeight, 0, 0, 1);
 	write.append(NodePairInfoWrite, octree->octreeNodePairWeightBuffer, 0, octree->octreeNodePairWeightBuffer.bufferSize);
-#ifdef USE_VISIBLE_AABB_FZBPG
+#ifdef ADAPTIVE_IMPORTANCE_SAMPLING
 	NodePairInfoWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodePairVisibleData, 0, 0, 1);
 	write.append(NodePairInfoWrite, octree->octreeNodePairVisibleDataBuffer, 0, octree->octreeNodePairVisibleDataBuffer.bufferSize);
