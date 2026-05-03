@@ -1,14 +1,15 @@
 <rendererInfo>
 	<name value = "FzbRenderer" />
 	<resolution width = "1280" height = "720" />
-	<sceneXML path = "./bearBox" />	<!--开头不能加/，但可以是./或不加--><!--simpleTest bearBox veach-ajar-->
+	<sceneXML path = "./veach-ajar-2" />	<!--开头不能加/，但可以是./或不加--><!--simpleTest bearBox veach-ajar  veach-ajar-2-->
 
-	<renderer type = "SVOPathGuiding">  <!--SVOPathGuiding PathTracing  Deferred-->
-		<maxDepth value = "6" />
+	<renderer type = "FzbPathGuiding">  <!--FzbPathGuiding SVOPathGuiding PathTracing  Deferred-->
+		<maxDepth value = "4" />
 		<useNEE value = "true" />
+		<spp value = "6" />
 		<RasterVoxelization>
-			<resolution value = "512, 512" />
-			<voxelCount value="16" />
+			<resolution value = "256, 256" />
+			<voxelCount value="8" />
 		</RasterVoxelization>
 		<LightInject>
 		</LightInject>

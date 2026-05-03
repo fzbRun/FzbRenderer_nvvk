@@ -14,58 +14,69 @@ void raygenMain()
 
     SceneInfo* sceneInfo = pushConst.sceneInfoAddress;
 
-    uint seed = xxhash32(uint3(uint2(launchID.xy), pushConst.frameIndex));
-    float r1 = rand(seed);
-    float r2 = rand(seed);
-    float2 subpixel_jitter = pushConst.frameIndex == 0 ? float2(0.5f, 0.5f) : float2(r1, r2);
+    HitPayload payload;
+    payload.randomSeed = xxhash32(uint3(uint2(launchID.xy), pushConst.frameIndex));
 
-    const uint rayFlags = 0;    //RAY_FLAG_CULL_BACK_FACING_TRIANGLES;
-    const float2 pixelCenter = launchID + subpixel_jitter;
-    const float2 clipCoords = pixelCenter / launchSize * 2.0 - 1.0;
-    float4 viewCoords = mul(float4(clipCoords, 1.0, 1.0), sceneInfo.projInvMatrix);
-    viewCoords /= viewCoords.w;
-
+    const uint rayFlags = 0; // RAY_FLAG_CULL_BACK_FACING_TRIANGLES;
     RayDesc ray;
-    ray.Origin = sceneInfo.cameraPosition; // mul(float4(0.0, 0.0, 0.0, 1.0), sceneInfo.viewInvMatrix).xyz;
-    ray.Direction =  normalize(mul(float4(normalize(viewCoords.xyz), 0.0), sceneInfo.viewInvMatrix).xyz);
     ray.TMin = 0.001;
     ray.TMax = INFINITE;
-
-    // Initial state
-    HitPayload payload;
-    payload.randomSeed = seed;
-    payload.radiance  = float3(0, 0, 0);
-    payload.bsdf_cosine = float3(1.0f);
-    payload.pdf = 1.0f;
-    payload.bounceDepth = 0;
-    payload.rayOrigin = ray.Origin;
-    payload.rayDirection = ray.Direction;
-    payload.isExt = true;
 
     float3 accumulatedRadiance = float3(0, 0, 0);
     float RR = 0.8f;
 
-    // Iterative reflection loop
-    while (payload.bounceDepth < pushConst.maxDepth && (payload.bsdf_cosine.x + payload.bsdf_cosine.y + payload.bsdf_cosine.z > 0.0001f))
-    {
-    #ifdef PathTracingMotionBlur
-        TraceMotionRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, pushConst.time, payload);
-    #else
-        TraceRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, payload);
-    #endif
-        accumulatedRadiance += payload.radiance;
+    for (int sampleIndex = 0; sampleIndex < pushConst.spp; ++sampleIndex) {
+        float r1 = rand(payload.randomSeed);
+        float r2 = rand(payload.randomSeed);
+        float2 subpixel_jitter = pushConst.frameIndex == 0 && sampleIndex == 0? float2(0.5f, 0.5f) : float2(r1, r2);
 
-        float randomNumber = rand(payload.randomSeed);
-        if (randomNumber >= RR) break;
-        payload.pdf *= RR;
+        const float2 pixelCenter = launchID + subpixel_jitter;
+        const float2 clipCoords = pixelCenter / launchSize * 2.0 - 1.0;
+        float4 viewCoords = mul(float4(clipCoords, 1.0, 1.0), sceneInfo.projInvMatrix);
+        viewCoords /= viewCoords.w;
 
-        ray.Origin = payload.rayOrigin;
-        ray.Direction = payload.rayDirection;
+        ray.Origin = sceneInfo.cameraPosition; // mul(float4(0.0, 0.0, 0.0, 1.0), sceneInfo.viewInvMatrix).xyz;
+        ray.Direction = normalize(mul(float4(normalize(viewCoords.xyz), 0.0), sceneInfo.viewInvMatrix).xyz);
+
+        payload.radiance = float3(0, 0, 0);
+        payload.bsdf_cosine = float3(1.0f);
+        payload.pdf = 1.0f;
+        payload.bounceDepth = 0;
+        payload.rayOrigin = ray.Origin;
+        payload.rayDirection = ray.Direction;
+        payload.isExt = true;
+
+        // Iterative reflection loop
+        while (payload.bounceDepth < pushConst.maxDepth && (payload.bsdf_cosine.x + payload.bsdf_cosine.y + payload.bsdf_cosine.z > 0.0001f))
+        {
+            #ifdef PathTracingMotionBlur
+            TraceMotionRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, pushConst.time, payload);
+            #else
+            TraceRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, payload);
+            #endif
+            accumulatedRadiance += payload.radiance;
+
+            float randomNumber = rand(payload.randomSeed);
+            if (randomNumber >= RR) break;
+            payload.pdf *= RR;
+
+            ray.Origin = payload.rayOrigin;
+            ray.Direction = payload.rayDirection;
+        }
     }
-
     if (any(isnan(accumulatedRadiance)) || any(isinf(accumulatedRadiance))) return;
+    accumulatedRadiance /= pushConst.spp;
+
     // When the maximum frame rate is reached, the original image will decay by ((maxframe-1)/maxframe)^k < 1, and the final image will turn black
-    if (pushConst.frameIndex > 0)
+    //if (pushConst.frameIndex > 0)
+    //{
+    //    float a = 1.0f / float(pushConst.frameIndex + 1);
+    //    float3 old_color = outImage[int2(launchID)].xyz;
+    //    outImage[int2(launchID)] = float4(lerp(old_color, accumulatedRadiance, a), 1.0f);
+    //}
+    //else outImage[int2(launchID)] = float4(accumulatedRadiance, 1.0f);
+
+    if (pushConst.maxFrameCount > 1 && pushConst.frameIndex > 0)
     {
         float a = 1.0f / float(pushConst.frameIndex + 1);
         float3 old_color = outImage[int2(launchID)].xyz;
@@ -82,10 +93,12 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
     CallablePayload callablePayload;
     initCallableShader(callablePayload, payload, barycentrics, sceneInfo);
 
+    getDirectionalLight(callablePayload, sceneInfo, pushConst.HitTestShaderIndex);
+
     CallShader<CallablePayload>(uint(callablePayload.material.type), callablePayload);
 
     payload.randomSeed = callablePayload.randomSeed;
-    payload.radiance = callablePayload.material.emissive * payload.bsdf_cosine / payload.pdf;
+    payload.radiance = (callablePayload.material.emissive + callablePayload.directionLightRadiance) * payload.bsdf_cosine / payload.pdf;
     payload.rayDirection = callablePayload.incidence;
     payload.rayOrigin = callablePayload.hitPos + 0.001f * payload.rayDirection;
     payload.bsdf_cosine *= callablePayload.bsdf * abs(dot(callablePayload.hitNormal, payload.rayDirection));
@@ -94,8 +107,6 @@ void rayClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionA
 
     payload.bounceDepth++;
 }
-[shader("closesthit")]
-void NEEClosestHitMain(inout HitPayload payload, in BuiltInTriangleIntersectionAttributes attr) {}
 
 [shader("miss")]
 void rayMissMain(inout HitPayload payload)

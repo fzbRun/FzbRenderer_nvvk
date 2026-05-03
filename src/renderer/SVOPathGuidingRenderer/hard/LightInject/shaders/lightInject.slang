@@ -48,7 +48,7 @@ void raygenMain()
     payload.rayOrigin = ray.Origin;
     payload.rayDirection = ray.Direction;
 
-    const uint maxPathDepth = 10;
+    const uint maxPathDepth = 1;
     while (payload.bounceDepth < maxPathDepth) {
         #ifdef PathTracingMotionBlur
         TraceMotionRay(topLevelAS, rayFlags, 0xff, 0, 0, 0, ray, pushConst.time, payload);
@@ -118,11 +118,12 @@ void rayClosestHitMain(inout LightInjectHitPayload payload, in BuiltInTriangleIn
     float3 incidence = sample_hemisphere_mean(callablePayload.randomSeed);
     callablePayload.incidence = mul(incidence, callablePayload.TBN);
     callablePayload.pdf = M_1_PI * 0.5f;
-    CallShader<CallablePayload>(uint(material.type), callablePayload);
+    CallShader<CallablePayload>(uint(0), callablePayload);
 
     payload.randomSeed = callablePayload.randomSeed;
-    payload.radiance = payload.radiance * callablePayload.bsdf * hitState.cosineON + callablePayload.radianceSum_nee + material.emissive;
-    payload.radiance = min(payload.radiance, sceneInfo.lights[0].color * sceneInfo.lights[0].intensity * 1.5f);
+    payload.radiance = payload.radiance * callablePayload.bsdf * hitState.cosineON + callablePayload.radianceSum_nee;
+    payload.radiance = min(payload.radiance, sceneInfo.lights[0].color * sceneInfo.lights[0].intensity * 2.0f);
+    payload.radiance += material.emissive;
 
     payload.rayDirection = callablePayload.incidence;
     payload.rayOrigin = hitState.pos + 0.001f * payload.rayDirection;

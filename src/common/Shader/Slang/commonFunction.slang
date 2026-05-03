@@ -1,3 +1,6 @@
+#ifndef FZBRENDERER_COMMON_FUNCTION_SLANG
+#define FZBRENDERER_COMMON_FUNCTION_SLANG
+
 #include "common/Shader/shaderStructType.h"
 #include "nvshaders/constants.h.slang"
 #include "nvshaders/random.h.slang"
@@ -64,9 +67,13 @@ float2x2 Inverse2x2(float2x2 m) {
 inline bool checkPointInAABB(float3 pos, AABB aabb) {
     return all((pos - aabb.minimum >= 0.0f) && (aabb.maximum - pos >= 0.0f));
 }
+inline bool checkPointInAABB2(float3 pos, AABB aabb) {
+    return all((pos - aabb.minimum >= -0.001f) && (aabb.maximum - pos >= -0.001f));
+}
 inline float getDistanceToAABB(float3 pos, AABB aabb) {
     float3 center = (aabb.maximum + aabb.minimum) * 0.5f;
-    return length(center - pos);
+    float3 centerToPos = abs(center - pos) + 1e-16f;
+    return length(centerToPos);
 }
 inline float3 getAABBPoint(float3 sampleDir, float3 aabbCenter, float3 aabbHalfSize) {
     float3 invDir = 1.0f / max(abs(sampleDir), 1e-6f);
@@ -78,12 +85,116 @@ inline float3 getAABBPoint(float3 sampleDir, float3 aabbCenter, float3 aabbHalfS
     float t = min(min(tCandidate.x, tCandidate.y), tCandidate.z);
     return aabbCenter + sampleDir * t * signHalfSize;
 }
+float3 getAABBPoint(AABB aabb, float3 x, float3 sampleDir) {
+    float tEnter = -1e30;
+    float tExit = 1e30;
+
+    for (int i = 0; i < 3; ++i)
+    {
+        float d = sampleDir[i];
+        float o = x[i];
+
+        if (abs(d) < 1e-12)
+        {
+            if (o < aabb.minimum[i] || o > aabb.maximum[i]) return x;
+            continue;
+        }
+
+        float t0 = (aabb.minimum[i] - o) / d;
+        float t1 = (aabb.maximum[i] - o) / d;
+        float tMin = min(t0, t1);
+        float tMax = max(t0, t1);
+
+        tEnter = max(tEnter, tMin);
+        tExit = min(tExit, tMax);
+
+        if (tEnter > tExit) return x;
+    }
+
+    return x + sampleDir * tExit;
+}
 float PointToAABBDistance(float3 pos, AABB aabb)
 {
     float dx = max(aabb.minimum.x - pos.x, max(0.0f, pos.x - aabb.maximum.x));
     float dy = max(aabb.minimum.y - pos.y, max(0.0f, pos.y - aabb.maximum.y));
     float dz = max(aabb.minimum.z - pos.z, max(0.0f, pos.z - aabb.maximum.z));
     return sqrt(max(dx * dx + dy * dy + dz * dz, 1e-6f));
+}
+float AABBDistance(AABB aabb1, AABB aabb2)
+{
+    float3 d1 = aabb2.minimum - aabb1.maximum;
+    float3 d2 = aabb1.minimum - aabb2.maximum;
+    float3 gap = max(d1, d2);
+    gap = max(gap, 0.0);
+    return length(gap);
+}
+float AABBContainmentRatio(inout AABB x, AABB y) {
+    float3 origLen = x.maximum - x.minimum;
+    float3 yLen = y.maximum - y.minimum;
+
+    x.minimum = max(x.minimum, y.minimum);
+    x.maximum = min(x.maximum, y.maximum);
+
+    float3 intersectLen = x.maximum - x.minimum;
+    if (intersectLen.x < -0.001f || intersectLen.y < -0.001f || intersectLen.z < -0.001f) return 0.0f;
+
+    intersectLen = abs(intersectLen);
+
+    float ratio = 1.0f;
+    for (int i = 0; i < 3; ++i) {
+        if (abs(yLen[i]) < 0.0001f) continue;
+
+        if (origLen[i] > 0.0f) ratio *= intersectLen[i] / origLen[i];
+        else ratio *= 1.0f;
+    }
+    return ratio;
+}
+float3 RandomPointOnAABBSurface(inout uint seed, AABB aabb)
+{
+    float3 extent = aabb.maximum - aabb.minimum;
+
+    float3 axisArea;
+    axisArea.x = 2.0f * extent.y * extent.z;
+    axisArea.y = 2.0f * extent.x * extent.z;
+    axisArea.z = 2.0f * extent.x * extent.y;
+    float totalArea = axisArea.x + axisArea.y + axisArea.z;
+
+    if (totalArea <= 0.0f) return aabb.minimum;
+
+    float r = rand(seed) * totalArea;
+    int axis;
+    if (r < axisArea.x) axis = 0;
+    else if (r < axisArea.x + axisArea.y) axis = 1;
+    else axis = 2;
+
+    bool useMax = rand(seed) >= 0.5f;
+
+    float u = rand(seed);
+    float v = rand(seed);
+    float3 pt;
+
+    if (axis == 0)
+    {
+        float y = aabb.minimum.y + u * extent.y;
+        float z = aabb.minimum.z + v * extent.z;
+        pt = useMax ? float3(aabb.maximum.x, y, z)
+                    : float3(aabb.minimum.x, y, z);
+    }
+    else if (axis == 1)
+    {
+        float x = aabb.minimum.x + u * extent.x;
+        float z = aabb.minimum.z + v * extent.z;
+        pt = useMax ? float3(x, aabb.maximum.y, z)
+                    : float3(x, aabb.minimum.y, z);
+    }
+    else
+    {
+        float x = aabb.minimum.x + u * extent.x;
+        float y = aabb.minimum.y + v * extent.y;
+        pt = useMax ? float3(x, y, aabb.maximum.z)
+                    : float3(x, y, aabb.minimum.z);
+    }
+    return pt;
 }
 //------------------------------------------------SphericalFibonacci---------------------------------------------
 #define M_PHI 1.618033988749895
@@ -117,6 +228,35 @@ uint inverseSF(float3 p, float n) {
         float i = floor(n * 0.5 - cosTheta * n * 0.5);
         float3 q = fibSpherePoint(i, n);
         float squaredDistance = dot(q - p, q - p);
+        if (squaredDistance < d) {
+            d = squaredDistance;
+            j = i;
+        }
+    }
+    return (uint)j;
+}
+uint inverseSF(float3 p, float n, float3 normal) {
+    float phi = min(atan2(p.z, p.x), M_PI), cosTheta = p.y;
+    float k = max(2, floor(
+        log(n * M_PI * sqrt(5) * (1 - cosTheta * cosTheta))
+        / log(M_PHI * M_PHI)));
+    float Fk = pow(M_PHI, k) / sqrt(5);
+    float F0 = round(Fk), F1 = round(Fk * M_PHI);
+    float2x2 B = float2x2(
+                2 * M_PI * madfrac(F0 + 1, M_PHI - 1) - 2 * M_PI * (M_PHI - 1),
+                          2 * M_PI * madfrac(F1 + 1, M_PHI - 1) - 2 * M_PI * (M_PHI - 1),
+                -2 * F0 / n,
+                -2 * F1 / n);
+    float2x2 invB = Inverse2x2(B);
+    float2 c = floor(mul(invB, float2(phi, cosTheta - (1 - 1 / n))));
+    float d = INFINITE, j = 0;
+    for (uint s = 0; s < 4; ++s) {
+        float cosTheta = dot(B[1], float2(s % 2, s / 2) + c) + (1 - 1 / n);
+        cosTheta = clamp(cosTheta, -1, +1) * 2 - cosTheta;
+        float i = floor(n * 0.5 - cosTheta * n * 0.5);
+        float3 q = fibSpherePoint(i, n);
+
+        float squaredDistance = dot(q - p, q - p) + (1.0f - uint(dot(q, normal) > 0.0));
         if (squaredDistance < d) {
             d = squaredDistance;
             j = i;
@@ -195,6 +335,102 @@ uint inverseSF(float3 p, float n, inout float probability) {
         if (totalWeight == 0) {
             probability = 1.0f;
             return 0;
+        }
+        for (int i = 0; i < 9; ++i) {
+            float probability_i = weights[i] / totalWeight;
+            if (probability <= probability_i) {
+                idx_result = idxs[i];
+                break;
+            }
+            probability -= probability_i;
+        }
+        probability = 0.0f;
+        for (int i = 0; i < 9; ++i) {
+            if (idxs[i] == idx_result) probability += weights[i] / totalWeight;
+        }
+        return idx_result;
+    }
+
+    probability = 1.0f;
+    return 0;
+}
+
+uint inverseSF(float3 p, float n, inout float probability, float3 normal) {
+    float phi = min(atan2(p.z, p.x), M_PI), cosTheta = p.y;
+    float k = max(2, floor(
+        log(n * M_PI * sqrt(5) * (1 - cosTheta * cosTheta))
+        / log(M_PHI * M_PHI)));
+    float Fk = pow(M_PHI, k) / sqrt(5);
+    float F0 = round(Fk), F1 = round(Fk * M_PHI);
+    float2x2 B = float2x2(
+                2 * M_PI * madfrac(F0 + 1, M_PHI - 1) - 2 * M_PI * (M_PHI - 1),
+                          2 * M_PI * madfrac(F1 + 1, M_PHI - 1) - 2 * M_PI * (M_PHI - 1),
+                -2 * F0 / n,
+                -2 * F1 / n);
+    float2x2 invB = Inverse2x2(B);
+
+    if (k <= 4.0f) {
+        float2 c = floor(mul(invB, float2(phi, cosTheta - (1 - 1 / n))));
+        float d = INFINITE, j = 0;
+        for (uint s = 0; s < 4; ++s) {
+            float cosTheta = dot(B[1], float2(s % 2, s / 2) + c) + (1 - 1 / n);
+            cosTheta = clamp(cosTheta, -1, +1) * 2 - cosTheta;
+            float i = floor(n * 0.5 - cosTheta * n * 0.5);
+            float3 q = fibSpherePoint(i, n);
+
+            if (dot(q, normal) <= 0.0) continue;
+
+            float squaredDistance = dot(q - p, q - p);
+            if (squaredDistance < d) {
+                d = squaredDistance;
+                j = i;
+            }
+        }
+
+        probability = 1.0f;
+        return (uint)j;
+    } else {
+        float2 c = mul(invB, float2(phi, cosTheta - (1.0 - 1.0 / n)));
+        int2 center = int2((int)round(c.x), (int)round(c.y));
+
+        float h = sqrt(4.0 * M_PI / n);
+        float totalWeight = 0.0;
+        float weights[9]; uint idxs[9];
+        uint idx_result = 0;
+        for (int di = -1; di <= 1; ++di) {
+            for (int dj = -1; dj <= 1; ++dj) {
+                int idx_index = (di + 1) * 3 + (dj + 1);
+                int2 gridCoord = center + int2(di, dj);
+
+                float cosCorner = B[1][0] * gridCoord.x + B[1][1] * gridCoord.y + (1.0 - 1.0 / n);
+                if (cosCorner > 1.0) cosCorner = 2.0 - cosCorner;
+                else if (cosCorner < -1.0) cosCorner = -2.0 - cosCorner;
+
+                float iEst = floor(n * 0.5 - cosCorner * n * 0.5);
+                int idx = (int)iEst;
+                idx = clamp(idx, 0, (int)n - 1);
+                idxs[idx_index] = idx;
+
+                float3 q = fibSpherePoint(idx, n);
+
+                float w = 0.0;
+                if (dot(q, normal) > 0.0) {
+                    float delta = distance(q, p);
+                    float t = max(0.0, 1.0 - delta / h);
+                    w = 3.0 * t * t - 2.0 * t * t * t;
+                }
+
+                if (w > 0.0) {
+                    totalWeight += w;
+                    weights[idx_index] = w;
+                } else {
+                    weights[idx_index] = 0.0;
+                }
+            }
+        }
+        if (totalWeight == 0) {
+            probability = 1.0f;
+            return 0; // fallback
         }
         for (int i = 0; i < 9; ++i) {
             float probability_i = weights[i] / totalWeight;
@@ -508,7 +744,7 @@ Quadrilateral_initialization initQuadrilateral(float3 hitPos, float3 quadRangleS
     quadrangle.b1 = n2.z;
     quadrangle.b0sq = quadrangle.b0 * quadrangle.b0;
     quadrangle.k = 2 * M_PI - g2 - g3;
-    quadrangle.S = g0 + g1 - quadrangle.k;
+    quadrangle.S = max(g0 + g1 - quadrangle.k, 0.0f);
 
     return quadrangle;
 }
@@ -531,3 +767,4 @@ float3 sphericalRectangleSample(Quadrilateral_initialization quadrangle, float u
 
     return xu * quadrangle.x + yv * quadrangle.y + quadrangle.z0 * quadrangle.z; // Î´¹éÒ»»¯
 }
+#endif

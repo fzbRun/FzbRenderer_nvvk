@@ -11,6 +11,8 @@ SVOPathGuidingRenderer::SVOPathGuidingRenderer(pugi::xml_node& rendererNode) {
 
 	if (pugi::xml_node maxDepthNode = rendererNode.child("maxDepth"))
 		pushConstant.maxDepth = std::stoi(maxDepthNode.attribute("value").value());
+	if (pugi::xml_node sppNode = rendererNode.child("spp"))
+		pushConstant.spp = std::stoi(sppNode.attribute("value").value());
 	if (pugi::xml_node rasterVoxelizationNode = rendererNode.child("RasterVoxelization"))
 		rasterVoxelization = std::make_shared<RasterVoxelization_SVOPG>(rasterVoxelizationNode);
 	if (pugi::xml_node lightInjectNode = rendererNode.child("LightInject"))
@@ -181,9 +183,9 @@ void FzbRenderer::SVOPathGuidingRenderer::preRender() {
 	if (scene.cameraChange) resetFrame();	//如果相机参数变化，则从新累计帧
 	if (scene.periodInstanceCount + scene.randomInstanceCount > 0 || scene.hasDynamicLight) maxFrames = 1;
 	pushConstant.VGBStartPos_Size = shaderio::float4(rasterVoxelization->setting.pushConstant.voxelGroupStartPos, rasterVoxelization->setting.pushConstant.voxelSize_Count.w);
-	pushConstant.frameIndex = std::min(Application::frameIndex, maxFrames - 1);
+	pushConstant.frameIndex = Application::frameIndex;
+	pushConstant.maxFrameCount = maxFrames;
 	pushConstant.time = Application::sceneResource.time;
-	pushConstant.voxelLength = std::sqrt(shaderio::dot(shaderio::float3(rasterVoxelization->setting.pushConstant.voxelSize_Count), shaderio::float3(rasterVoxelization->setting.pushConstant.voxelSize_Count)));
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 	pushConstant.maxOctreeLayer = octree->setting.OctreeLayerCount;
 	pushConstant.VGBVoxelSize = shaderio::float3(rasterVoxelization->setting.pushConstant.voxelSize_Count);
@@ -205,7 +207,7 @@ void FzbRenderer::SVOPathGuidingRenderer::render(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
 
 	updateDataPerFrame(cmd);
-	if (pushConstant.frameIndex == maxFrames - 1) return;
+	if (pushConstant.frameIndex >= maxFrames && maxFrames > 1) return;
 
 	rasterVoxelization->render(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR);
@@ -263,10 +265,17 @@ void FzbRenderer::SVOPathGuidingRenderer::createDescriptorSetLayout() {
 		.stageFlags = VK_SHADER_STAGE_ALL });
 	#else
 	bindings.addBinding({
-	.binding = (uint32_t)shaderio::StaticBindingPoints_SVOPG::eOctreeArray_G,
-	.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-	.descriptorCount = (uint32_t)octree->OctreeArray_G.size(),
-	.stageFlags = VK_SHADER_STAGE_ALL });
+		.binding = (uint32_t)shaderio::StaticBindingPoints_SVOPG::eOctreeArray_G,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = (uint32_t)octree->OctreeArray_G.size(),
+		.stageFlags = VK_SHADER_STAGE_ALL });
+	#ifdef NEARBYNODE_JITTER
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_SVOPG::eOctreeNearbyNodeInfos,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+	#endif
 	#endif
 	bindings.addBinding({
 		.binding = (uint32_t)shaderio::StaticBindingPoints_SVOPG::eNodeData_E,
@@ -324,10 +333,16 @@ void FzbRenderer::SVOPathGuidingRenderer::createDescriptorSet() {
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOPG::eSVO_G, 0, 0, 1);
 	write.append(SVOArrayWrite, svo->SVO_G, 0, svo->SVO_G.bufferSize);
 	#else
-	VkWriteDescriptorSet SVOArrayWrite =
+	VkWriteDescriptorSet OctreeArrayWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOPG::eOctreeArray_G, 0, 0, octree->OctreeArray_G.size());
 	nvvk::Buffer* octreeArrayPtr_G = octree->OctreeArray_G.data();
-	write.append(SVOArrayWrite, octreeArrayPtr_G);
+	write.append(OctreeArrayWrite, octreeArrayPtr_G);
+
+	#ifdef NEARBYNODE_JITTER
+	OctreeArrayWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOPG::eOctreeNearbyNodeInfos, 0, 0, 1);
+	write.append(OctreeArrayWrite, svoWeight->octreeNearbyNodeInfosBuffer, 0, svoWeight->octreeNearbyNodeInfosBuffer.bufferSize);
+	#endif
 	#endif
 	
 	VkWriteDescriptorSet Octree_EWrite =
@@ -341,7 +356,6 @@ void FzbRenderer::SVOPathGuidingRenderer::createDescriptorSet() {
 	VkWriteDescriptorSet weightsWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_SVOPG::eWeights, 0, 0, 1);
 	write.append(weightsWrite, svoWeight->weightBuffer, 0, svoWeight->weightBuffer.bufferSize);
-
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }

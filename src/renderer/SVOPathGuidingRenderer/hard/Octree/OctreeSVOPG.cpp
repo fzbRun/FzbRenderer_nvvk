@@ -186,8 +186,8 @@ void Octree_SVOPG::preRender() {
 	pushConstant.voxelVolume = setting.VGBVoxelSize.x * setting.VGBVoxelSize.y * setting.VGBVoxelSize.z;
 	pushConstant.VGBStartPos_Size = glm::vec4(setting.VGBStartPos, setting.VGBSize);
 	pushConstant.VGBVoxelSize = glm::vec4(setting.VGBVoxelSize, 1.0f);
-#ifndef NDEBUG
 	pushConstant.frameIndex = Application::frameIndex;
+#ifndef NDEBUG
 	pushConstant.normalIndex = RasterVoxelization_SVOPG::normalIndex;
 #endif
 }

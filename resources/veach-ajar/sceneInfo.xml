@@ -58,13 +58,12 @@
 			<eta value="1.65746, 0.880369, 0.521229" />
 			<k value="9.22387, 6.26952, 4.837" />
 		</bsdf>
-		<bsdf type="roughConductor" id="Pot1BSDF">
-			<roughness value="0.15" />
-			<eta value="1.65746, 0.880369, 0.521229" />
-			<k value="9.22387, 6.26952, 4.837" />
-		</bsdf>
-		<bsdf type="diffuse" id="Pot2BSDF">
+		<bsdf type="diffuse" id="Pot1BSDF">
 			<albedo value="0.8, 0.8, 0.8" />
+		</bsdf>
+		<bsdf type="roughConductor" id="Pot2BSDF">
+			<roughness value="0.05" />
+			<albedo value="1, 0.481361449, 0.481361449" />
 		</bsdf>
 		<bsdf type="roughDielectric" id="Pot2BSDF_RoughDieletric">
 			<roughness value="0.2" />
@@ -72,13 +71,13 @@
 			<ext_Ior value="1.0" />
 		</bsdf>
 		<bsdf type="roughConductor" id="Pot3BSDF">
-			<roughness value="0.1" />
+			<roughness value="0.01" />
 			<eta value="1.91, 1.31, 0.82" />
 			<k value="8.05, 6.93, 5.99" />
 		</bsdf>
 		<bsdf type="diffuse" id="LightBSDF">
 			<albedo value="0.8, 0.8, 0.8, 1.0" />
-			<emissive value="10, 10, 10" />
+			<emissive value="1000, 1000, 1000" />
 		</bsdf>
 	</bsdfs>
 	<meshes>
@@ -208,6 +207,7 @@
 			<meshRef id = "Diffuse_0001" />
 			<materialRef id = "DiffuseBSDF" />
 		</instance>
+
 		<instance>
 			<transform name="to_world">
 				<matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" />
@@ -222,6 +222,7 @@
 			<meshRef id = "Diffuse_0003" />
 			<materialRef id = "DiffuseBSDF" />
 		</instance>
+						
 		<instance>
 			<transform name="to_world">
 				<matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" />
@@ -229,6 +230,7 @@
 			<meshRef id = "Diffuse_0004" />
 			<materialRef id = "DiffuseBSDF" />
 		</instance>
+
 		<instance>
 			<transform name="to_world">
 				<matrix value="1.8 0 0 2.3 0 1 0 0 0 0 1 0 0 0 0 1" />
@@ -236,6 +238,7 @@
 			<meshRef id = "Diffuse_0005" />
 			<materialRef id = "DiffuseBSDF" />
 		</instance>
+
 		<instance>
 			<transform name="to_world">
 				<matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" />
@@ -243,7 +246,7 @@
 			<meshRef id = "Table" />
 			<materialRef id = "TableBSDF" />
 		</instance>
-		<!--
+
 		<instance>
 			<transform name="to_world">
 				<matrix value="-0.0757886 0 -0.0468591 -1.95645 0 0.0891049 0 0.648205 0.0468591 0 -0.0757886 -1.77687 0 0 0 1"/>
@@ -280,7 +283,7 @@
 			<meshRef id = "Pot" />
 			<materialRef id = "Pot3BSDF" />
 		</instance>
-
+		<!--
 		<instance type="periodMotion">
 			<transform name="to_world">
 				<matrix value="-0.0837611 0 0.0303939 -1.95645 0 0.0891049 0 0.651268 -0.0303939 0 -0.0837611 -3.57687 0 0 0 1"/>
@@ -294,6 +297,7 @@
 			<meshRef id = "Pot" />
 			<materialRef id = "Pot3BSDF" />
 		</instance>
+		-->
 		<instance>
 				<transform name="to_world">
 					<matrix value="-0.083761 0 0.0303938 -1.95645 0 0.0891049 0 0.651268 -0.0303938 0 -0.083761 -3.57687 0 0 0 1"/>
@@ -301,7 +305,7 @@
 				<meshRef id = "PotLid" />
 				<materialRef id = "Pot3BSDF" />
 		</instance>
-		-->
+		<!--
 		<instance>
 			<transform name="to_world">
 				<matrix value="0 0 0.125 -1.95645 0 0.175 0 0.900205 -0.125 0 0 -1.77687 0 0 0 1"/>
@@ -323,7 +327,7 @@
 			<meshRef id = "teapot" />
 			<materialRef id = "Pot3BSDF" />
 		</instance>
-
+		-->
 		<!--
 		<instance id="Light" type="periodMotion">
 			<transform name="to_world">
@@ -342,7 +346,8 @@
 		<instance id="Light">
 			<transform name="to_world">
 				<!--matrix value="0.730445 0 0 -4.4391 0 -1.32136 -1.42138e-007 1.50656 0 1.42138e-007 -1.93037 -4.44377 0 0 0 1" /-->
-				<matrix value="-0.730445 0 0 -1.4391 0 -1.32136 -1.42138e-007 1.50656 0 0 1.93037 -7.44377 0 0 0 1" />
+				<matrix value="0.730445 0 0 -5.7391 0 -1.32136 -1.42138e-007 1.50656 0 1.42138e-007 -1.93037 -4.44377 0 0 0 1" />
+				<!--matrix value="-0.600445 0 0 -1.2 0 -2.75 -1.42138e-007 2.75 0 0 1.93037 -7.59 0 0 0 1" /-->
 			</transform>
 			<meshRef id="custom" type="plane" />
 			<materialRef id="LightBSDF"/>
@@ -353,11 +358,19 @@
 	<lights>
 		<useSky value = "false" />
 		<backgroundColor value = "0.0, 0.0, 0.0" />
+
 		<light type="area" id="Light">
 			<emissive value = "1.0, 1.0, 1.0" />
-			<intensity value = "10.0" />
+			<intensity value = "1000.0" />
 			<SphericalRectangleSample value="true" />
 			<instanceRef id="Light"/>
 		</light>
+		<!--
+		<light type="direction" id="Light">
+			<emissive value = "1.0, 1.0, 1.0" />
+			<intensity value = "20.0" />
+			<direction value="1.0, -1.0, -1.0" />
+		</light>
+		-->
 	</lights>
 </scene>

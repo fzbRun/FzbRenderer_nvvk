@@ -32,6 +32,10 @@ struct AABBU {
 	uint3 minimum;
 	uint3 maximum;
 };
+struct AABBI {
+	int4 minimum;
+	int4 maximum;
+};
 /*
 G和E共用光栅体素化的aabb，而不是在lightInject中得到E的AABB
 好处是

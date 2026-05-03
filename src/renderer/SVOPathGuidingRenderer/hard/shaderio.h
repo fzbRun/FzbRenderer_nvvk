@@ -6,10 +6,11 @@
 #define FZBRENDERER_PATHGUIDING_SHADER_IO_H
 
 //#define CLUSTER_WITH_MATERIAL
-//#define WEIGHT_WITH_MATERIAL
+#define WEIGHT_WITH_MATERIAL
 //#define USE_SVO
 #define MERGE_SIMILIAR_E
 
+#define NEARBYNODE_JITTER
 #define NEARBY_NODE_COUNT 4	//must 2 exponent
 
 NAMESPACE_SHADERIO_BEGIN()
@@ -19,12 +20,13 @@ NAMESPACE_SHADERIO_BEGIN()
 struct SVOPathGuidingPushConstant
 {
 	float3x3 randomRotateMatrix;
-	int maxDepth = 6;
-	float time;
-	float voxelLength;
-	float4 VGBStartPos_Size;
 	float3 VGBVoxelSize;
+	int maxDepth = 6;
+	int spp = 1;
+	float time;
 	int maxOctreeLayer;
+	float4 VGBStartPos_Size;
+	int maxFrameCount;
 	int frameIndex = 0;
 	SceneInfo* sceneInfoAddress;
 	uint2 sceneSize;
@@ -39,6 +41,9 @@ enum class StaticBindingPoints_SVOPG
 	eSVO_G = 2,
 #else
 	eOctreeArray_G = 2,
+	#ifdef NEARBYNODE_JITTER
+	eOctreeNearbyNodeInfos,
+	#endif
 #endif
 	eNodeData_E,
 	eGlobalInfo,

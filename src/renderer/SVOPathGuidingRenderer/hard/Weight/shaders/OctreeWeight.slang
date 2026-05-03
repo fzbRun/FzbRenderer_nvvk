@@ -12,7 +12,8 @@
 [[vk::binding(StaticBindingPoints_SVOWeight::eIndivisibleNodeInfos_G)]] RWStructuredBuffer<uint2> IndivisibleNodeInfos_G;
 [[vk::binding(StaticBindingPoints_SVOWeight::eIndivisibleNodeInfos_E)]] RWStructuredBuffer<uint> IndivisibleNodeInfos_E;
 [[vk::binding(StaticBindingPoints_SVOWeight::eSVOWeights)]] RWStructuredBuffer<float> SVOWeights;
-[[vk::binding(StaticBindingPoints_SVOWeight::eIndivisibleNodeNearbyNodeInfos)]] RWStructuredBuffer<IndivisibleNodeNearbyNodeInfo> IndivisibleNodeNearbyNodeInfos;
+[[vk::binding(StaticBindingPoints_SVOWeight::eIndivisibleNodeNearbyNodeTempInfos)]] RWStructuredBuffer<IndivisibleNodeNearbyNodeTempInfo> IndivisibleNodeNearbyNodeTempInfos;
+[[vk::binding(StaticBindingPoints_SVOWeight::eOctreeNearbyNodeInofs)]] RWStructuredBuffer<OctreeNearbyNodeInfo> OctreeNearbyNodeInfos;
 
 struct IndivisibleNodeData_E {
     float3 normal;
@@ -33,7 +34,6 @@ struct HitPayload_SVOWeight {
     float3 normal;
     float E;
     float3 sampleDir;
-    float weight;
 };
 
 struct IndivisibleNodeData2_G {
@@ -55,8 +55,6 @@ groupshared HitPayload_SVOWeight groupHitPayloads[MAX_INDIVISIBLE_NODE_G_COUNT *
 groupshared IndivisibleNodeData2_G groupNodeInfo;
 groupshared int groupNearbyNodeDistanceIs[NEARBY_NODE_COUNT];
 groupshared int2 groupNearbyNodeInfos[NEARBY_NODE_COUNT];
-
-groupshared uint2 groupIndivisibleNodeInfos[GETNEARBYNODES2_CS_THREADGROUP_SIZE / 32];
 
 inline void fillGroupshared(uint groupThreadIndex) {
     if (groupThreadIndex == 0) {
@@ -114,7 +112,8 @@ void traceRay(RayDesc ray, inout HitPayload_SVOWeight payload, AABB nodeAABB_G)
         const float3 edge1 = triPos[1] - triPos[0];
         const float3 edge2 = triPos[2] - triPos[0];
         const float3 geoNormal = normalize(cross(edge1, edge2));
-        payload.normal = normalize(mul(worldToObject, geoNormal).xyz);
+        //payload.normal = normalize(mul(worldToObject, geoNormal).xyz);
+        payload.normal = normalize(mul(geoNormal, transpose(worldToObject)).xyz);
     }
     else payload.hit = 0.0f;
 }
@@ -140,6 +139,9 @@ void computeMain_initWeights(uint threadIndex: SV_DispatchThreadID, uint groupTh
 
         globalInfo.cmd.x = (octreeGlobalInfo.indivisibleNodeCount_E * octreeGlobalInfo.indivisibleNodeCount_G * OUTGOING_COUNT + GETWEIGHT_CS_THREADGROUP_SIZE - 1) / GETWEIGHT_CS_THREADGROUP_SIZE;
         globalInfo.cmd.y = 1; globalInfo.cmd.z = 1;
+
+        globalInfo.cmd2.x = octreeGlobalInfo.indivisibleNodeCount_G * ((octreeGlobalInfo.indivisibleNodeCount_G + GETNEARBYNODES_CS_THREADGROUP_SIZE - 1) / GETNEARBYNODES_CS_THREADGROUP_SIZE);
+        globalInfo.cmd2.y = 1; globalInfo.cmd2.z = 1;
 
         GlobalInfo[0] = globalInfo;
     }
@@ -220,7 +222,6 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
         hitPayload.hit = -1.0f;
         hitPayload.sampleDir = sampleDir;
         hitPayload.E = nodeData_E.E;
-        hitPayload.weight = 0.0f;
 
         bool normalCheck = dot(sampleDir, nodeData_E.normal) > 0.0f && dot(-sampleDir, nodeData_G.normal) > 0.0f;
         // if (hitPayload.material.type != MaterialType::Dielectric && hitPayload.material.type != MaterialType::RoughDielectric) {
@@ -234,20 +235,7 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
             ray.TMax = INFINITE;
 
             traceRay(ray, hitPayload, nodeData_G.aabb);
-            hitPayload.weight = 0.000001f;
         }
-
-        //if (pushConst.frameIndex == 0) {
-        //    bool printfAble = nodeData_G.nodeLabel == 9;
-        //    printfAble = printfAble && abs(nodeData_E.aabb.maximum.y - 1.95) <= 0.0001f && abs(nodeData_E.aabb.minimum.y - 1.95) <= 0.0001f;
-        //    if (printfAble) {
-        //        printf("\nnodeIndex_E: %d, hit: %f\nsamplePoint_E: %f %f %f, samplePoint_G: %f %f %f\n",
-        //               nodeData_E.nodeIndex, hitPayload.hit,
-        //               samplePoint_E.x, samplePoint_E.y, samplePoint_E.z,
-        //               samplePoint_G.x, samplePoint_G.y, samplePoint_G.z,
-        //        );
-        //    }
-        //}
 
         groupHitPayloads[hitTestIndex] = hitPayload;
     }
@@ -262,25 +250,10 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
     for (int hitTestIndex = 0; hitTestIndex < HITTEST_COUNT; ++hitTestIndex) {
         uint hitPayloadIndex = nodeLabel_G_group * HITTEST_COUNT + hitTestIndex;
         HitPayload_SVOWeight hitPayload = groupHitPayloads[hitPayloadIndex];
-        weight += hitPayload.weight;
-
-        //if (pushConst.frameIndex == 0) {
-        //    bool printfAble = (threadIndex / OUTGOING_COUNT) % indivisibleNodeCount_G == 8;
-        //    printfAble = printfAble && outgoingIndex == 41;
-        //    IndivisibleNodeData_E nodeData_E = groupNodeDatas_E[nodeLabel_E_group];
-        //    if (printfAble) {
-        //        printf("nodeIndex_E: %d, hit: %f E: %f\naabb: %f %f %f %f  %f %f\n\n",
-        //            nodeData_E.nodeIndex, hitPayload.hit,
-        //            nodeData_E.E,
-        //            nodeData_E.aabb.minimum.x, nodeData_E.aabb.minimum.y, nodeData_E.aabb.minimum.z,
-        //            nodeData_E.aabb.maximum.x, nodeData_E.aabb.maximum.y, nodeData_E.aabb.maximum.z,
-        //        );
-        //    }
-        //}
-
         if (hitPayload.hit <= 0.0f) continue;
 
         float cosine = dot(-hitPayload.sampleDir, hitPayload.normal);
+        if (cosine <= 0.0f) continue;
         bool isExt = true;
         // if (hitPayload.material.type != MaterialType::Dielectric && hitPayload.material.type != MaterialType::RoughDielectric) {
         //     if (cosine <= 0.0f || dot(outgoing, hitPayload.normal) <= 0.0f) continue;
@@ -296,35 +269,7 @@ void computeMain_getWeights(uint threadIndex: SV_DispatchThreadID, uint threadGr
         weight3 *= bsdf;
         #endif
         weight += max(0.299 * weight3.x + 0.587 * weight3.y + 0.114 * weight3.z, 0.0f);
-
-        //if (pushConst.frameIndex == 0) {
-        //    bool printfAble = (threadIndex / OUTGOING_COUNT) % indivisibleNodeCount_G == 8;
-        //    printfAble = printfAble && outgoingIndex == 41;
-        //    IndivisibleNodeData_E nodeData_E = groupNodeDatas_E[nodeLabel_E_group];
-        //    //printfAble = printfAble && nodeData_E.nodeIndex == 186;
-        //    if (printfAble) {
-        //        printf("nodeIndex_E: %d, hit: %f\nweight: %f, E: %f, cosine: %f, bsdf: %f %f %f\naabb: %f %f %f %f %f %f\n\n",
-        //            nodeData_E.nodeIndex, hitPayload.hit,
-        //            0.299 * weight3.x + 0.587 * weight3.y + 0.114 * weight3.z,
-        //            nodeData_E.E, cosine, bsdf.x, bsdf.y, bsdf.z,
-        //            nodeData_E.aabb.minimum.x, nodeData_E.aabb.minimum.y, nodeData_E.aabb.minimum.z,
-        //            nodeData_E.aabb.maximum.x, nodeData_E.aabb.maximum.y, nodeData_E.aabb.maximum.z,
-        //        );
-        //    }
-        //}
     }
-    //if (pushConst.frameIndex == 0) {
-    //    bool printfAble = (threadIndex / OUTGOING_COUNT) % indivisibleNodeCount_G == 8;
-    //    printfAble = printfAble && outgoingIndex == 41;
-    //    IndivisibleNodeData_E nodeData_E = groupNodeDatas_E[nodeLabel_E_group];
-    //    if (printfAble) {
-    //        printf("nodeIndex_E: %d weight: %f, E: %f\naabb: %f %f %f %f %f %f\n\n",
-    //                nodeData_E.nodeIndex, weight, nodeData_E.E,
-    //                nodeData_E.aabb.minimum.x, nodeData_E.aabb.minimum.y, nodeData_E.aabb.minimum.z,
-    //                nodeData_E.aabb.maximum.x, nodeData_E.aabb.maximum.y, nodeData_E.aabb.maximum.z,
-    //            );
-    //    }
-    //}
 
     if (weight > 0.0f) {
         uint nodeLabel_G = (threadIndex / OUTGOING_COUNT) % indivisibleNodeCount_G;
@@ -423,7 +368,7 @@ void computeMain_getNearbyNodes(uint threadIndex: SV_DispatchThreadID, uint thre
     fillGroupshared(groupThreadIndex);
     if (groupThreadIndex < NEARBY_NODE_COUNT) {
         groupNearbyNodeDistanceIs[groupThreadIndex] = 2147483647;
-        groupNearbyNodeInfos[groupThreadIndex] = uint2(0);
+        groupNearbyNodeInfos[groupThreadIndex] = int2(-1);
     }
     GroupMemoryBarrierWithGroupSync();
     int indivisibleNodeCount = groupIndivisibleNodeCount_G;
@@ -445,29 +390,23 @@ void computeMain_getNearbyNodes(uint threadIndex: SV_DispatchThreadID, uint thre
     uint nodeLabel2 = threadGroupOffset * GETNEARBYNODES_CS_THREADGROUP_SIZE + groupThreadIndex;
     if (nodeLabel2 >= indivisibleNodeCount) return;
 
+    //if (pushConst.frameIndex == 0 && groupThreadIndex == 0) printf("indivisibleNodeLabel1: %d\n", indivisibleNodeLabel1);
+
     IndivisibleNodeData2_G nodeData1 = groupNodeInfo;
+    float3 nodeCenter1 = (nodeData1.aabb.maximum + nodeData1.aabb.minimum) * 0.5f;
 
     uint2 nodeInfo2 = IndivisibleNodeInfos_G[nodeLabel2];
     OctreeNodeData_G nodeData2 = OctreeArray_G[nodeInfo2.x][nodeInfo2.y];
 
-    float3 nodeCenter1 = (nodeData1.aabb.maximum + nodeData1.aabb.minimum) * 0.5f;
-    float distance = PointToAABBDistance(nodeCenter1, nodeData2.aabb);
+    float distance = AABBDistance(nodeData1.aabb, nodeData2.aabb); //PointToAABBDistance(nodeCenter1, nodeData2.aabb);
     distance *= 1.0f / max(dot(nodeData1.normal, normalize(nodeData2.meanNormal.xyz)), 0.00001f);
     //distance *= nodeData1.materialIndex == nodeData2.materialIndex ? 1.0f : 100000.0f;
 
     uint randomSeed = pushConst.frameIndex;
-    distance += rand(randomSeed) * 0.0001f;
+    distance += rand(randomSeed) * 0.0001f;     // maybe multiple nodes have the same distance, so add small offset
 
     if (indivisibleNodeLabel1 == nodeLabel2) distance = 1e30f;
     int distanceI = FloatToOrderedInt(distance);
-
-    //if (pushConst.frameIndex == 0 && indivisibleNodeLabel1 == pushConst.sampleNodeLabel) {
-    //    printf("nodeLabel2: %d, distance: %f\nnormal1: %f %f %f, normal2: %f %f %f\n",
-    //           nodeLabel2, distance,
-    //           nodeData1.normal.x, nodeData1.normal.y, nodeData1.normal.z,
-    //           nodeData2.meanNormal.x, nodeData2.meanNormal.y, nodeData2.meanNormal.z
-    //    );
-    //}
 
     uint warpLane = groupThreadIndex & 31;
     int warpMinDistanceI = WaveActiveMin(distanceI);
@@ -477,49 +416,38 @@ void computeMain_getNearbyNodes(uint threadIndex: SV_DispatchThreadID, uint thre
 
         int groupMinDistanceI = groupNearbyNodeDistanceIs[i];
         uint minDistanceLabel = WavePrefixCountBits(distanceI == groupMinDistanceI);
-        if (distanceI == groupMinDistanceI && minDistanceLabel == 0) { // maybe multiple nodes have the same distance, but it is rare
+        if (distanceI == groupMinDistanceI && minDistanceLabel == 0) { 
             groupNearbyNodeInfos[i] = nodeInfo2;
             distanceI = 2147483647;
-
-            //if (pushConst.frameIndex == 0 && indivisibleNodeLabel1 == pushConst.sampleNodeLabel - 1) {
-            //    printf("nodeIndex2: %d, distance: %f\nnormal1: %f %f %f, normal2: %f %f %f\n",
-            //           nodeIndex2, distance,
-            //           nodeData1.normal.x, nodeData1.normal.y, nodeData1.normal.z,
-            //           nodeData2.meanNormal.x, nodeData2.meanNormal.y, nodeData2.meanNormal.z
-            //    );
-            //}
         }
         warpMinDistanceI = WaveActiveMin(distanceI);
     }
     GroupMemoryBarrierWithGroupSync();
 
     if (groupThreadIndex == 0) {
-        uint infoIndex = indivisibleNodeLabel1 * threadGroupCount_perIndivisibleNode + threadGroupOffset;
-        IndivisibleNodeNearbyNodeInfos[infoIndex].nearbyNodeInfos = groupNearbyNodeInfos;
-        for (int i = 0; i < NEARBY_NODE_COUNT; ++i)
-            IndivisibleNodeNearbyNodeInfos[infoIndex].nearbyNodeDistances[i] = OrderedIntToFloat(groupNearbyNodeDistanceIs[i]);
-
-        //if (pushConst.frameIndex == 0 && indivisibleNodeLabel1 == 20) {
-        //    for (int i = 0; i < NEARBY_NODE_COUNT; ++i) {
-        //        printf("nodeIndex2: %d, distance: %f\n",
-        //                groupNearbyNodeIndics[i], OrderedIntToFloat(groupNearbyNodeDistanceIs[i]),
-        //            );
-        //    }
-        //}
-    }
-
-    if (threadIndex == 0) {
-        DispatchIndirectCommand cmd2;
-        cmd2.x = (indivisibleNodeCount * 32 + GETNEARBYNODES2_CS_THREADGROUP_SIZE - 1) / GETNEARBYNODES2_CS_THREADGROUP_SIZE;
-        cmd2.y = 1; cmd2.z = 1;
-
-        if (threadGroupCount_perIndivisibleNode * NEARBY_NODE_COUNT > 32) {
-            printf("Error: Too many threads per indivisible node for getNearbyNodes. currentThreadCount: %u,    maxThreadCount: %u\n",
-                   threadGroupCount_perIndivisibleNode * NEARBY_NODE_COUNT, 32);
-            cmd2.x = 0; cmd2.y = 0; cmd2.z = 0;
+        if (threadGroupCount_perIndivisibleNode == 1) {
+            OctreeNearbyNodeInfos[indivisibleNodeLabel1].nearbyNodeInfos = groupNearbyNodeInfos;
+        } else {
+            uint infoIndex = indivisibleNodeLabel1 * threadGroupCount_perIndivisibleNode + threadGroupOffset;
+            IndivisibleNodeNearbyNodeTempInfos[infoIndex].nodeLabel = indivisibleNodeLabel1;
+            IndivisibleNodeNearbyNodeTempInfos[infoIndex].nearbyNodeInfos = groupNearbyNodeInfos;
+            for (int i = 0; i < NEARBY_NODE_COUNT; ++i)
+                IndivisibleNodeNearbyNodeTempInfos[infoIndex].nearbyNodeDistances[i] = OrderedIntToFloat(groupNearbyNodeDistanceIs[i]);
         }
+        if (threadIndex == 0) {
+            DispatchIndirectCommand cmd2;
+            if (threadGroupCount_perIndivisibleNode == 1) cmd2.x = 0;
+            else cmd2.x = (indivisibleNodeCount * 32 + GETNEARBYNODES2_CS_THREADGROUP_SIZE - 1) / GETNEARBYNODES2_CS_THREADGROUP_SIZE;
+            cmd2.y = 1; cmd2.z = 1;
 
-        GlobalInfo[0].cmd2 = cmd2;
+            if (threadGroupCount_perIndivisibleNode * NEARBY_NODE_COUNT > 32) {
+                printf("Error: Too many threads per indivisible node for getNearbyNodes. currentThreadCount: %u, maxThreadCount: %u\n",
+                       threadGroupCount_perIndivisibleNode * NEARBY_NODE_COUNT, 32);
+                cmd2.x = 0; cmd2.y = 0; cmd2.z = 0;
+            }
+
+            GlobalInfo[0].cmd2 = cmd2;
+        }
     }
 }
 [numthreads(GETNEARBYNODES2_CS_THREADGROUP_SIZE, 1, 1)]
@@ -528,15 +456,6 @@ void computeMain_getNearbyNodes2(uint threadIndex: SV_DispatchThreadID, uint thr
     fillGroupshared(groupThreadIndex);
     GroupMemoryBarrierWithGroupSync();
     int indivisibleNodeCount = groupIndivisibleNodeCount_G;
-    uint threadGroupIndivisibleNodeStartLabel = threadGroupIndex * (GETNEARBYNODES2_CS_THREADGROUP_SIZE / 32);
-    if (groupThreadIndex < GETNEARBYNODES2_CS_THREADGROUP_SIZE / 32) {
-        uint groupIndivisibleNodeLabel = threadGroupIndivisibleNodeStartLabel + groupThreadIndex;
-        if (groupIndivisibleNodeLabel < indivisibleNodeCount) {
-            uint2 indivisibleNodeInfo = IndivisibleNodeInfos_G[groupIndivisibleNodeLabel];
-            groupIndivisibleNodeInfos[groupThreadIndex] = indivisibleNodeInfo;
-        }
-    }
-    GroupMemoryBarrierWithGroupSync();
     uint indivisibleNodeLabel = threadIndex / 32;
     if (indivisibleNodeLabel >= indivisibleNodeCount) return;
 
@@ -545,31 +464,25 @@ void computeMain_getNearbyNodes2(uint threadIndex: SV_DispatchThreadID, uint thr
     uint warpLane = groupThreadIndex & 31;
     uint warpIndex = groupThreadIndex / 32;
 
-    float distance = 1e30f; int2 nearbyNodeIndex = -1;
+    float distance = 1e30f; int2 nearbyNodeIndex = -1; uint nodeLabel = 0;
     if (warpLane < threadGroupCount_perIndivisibleNode * NEARBY_NODE_COUNT) {
         uint infoIndex = indivisibleNodeLabel * threadGroupCount_perIndivisibleNode + warpLane / NEARBY_NODE_COUNT;
-        distance = IndivisibleNodeNearbyNodeInfos[infoIndex].nearbyNodeDistances[warpLane % NEARBY_NODE_COUNT];
-        nearbyNodeIndex = IndivisibleNodeNearbyNodeInfos[infoIndex].nearbyNodeInfos[warpLane % NEARBY_NODE_COUNT];
+        distance = IndivisibleNodeNearbyNodeTempInfos[infoIndex].nearbyNodeDistances[warpLane % NEARBY_NODE_COUNT];
+        nearbyNodeIndex = IndivisibleNodeNearbyNodeTempInfos[infoIndex].nearbyNodeInfos[warpLane % NEARBY_NODE_COUNT];
+
+        nodeLabel = IndivisibleNodeNearbyNodeTempInfos[indivisibleNodeLabel * threadGroupCount_perIndivisibleNode].nodeLabel;
     }
-    uint2 nodeInfo = groupIndivisibleNodeInfos[warpIndex];
+
     for (int i = 0; i < NEARBY_NODE_COUNT; ++i) {
         float minDistance = WaveActiveMin(distance);
-        //if (minDistance > 1.0f) {
-        //    if (warpLane == 0) {
-        //        for (int j = i; j < NEARBY_NODE_COUNT; ++j) SVO_G[nodeIndex].nearbyNodeIndices[j] = -1;
-        //    }
+        // if (minDistance > 1.0f) {
+        //    OctreeNearbyNodeInfos[nodeLabel].nearbyNodeInfos[i] = int2(-1);
         //    break;
         //}
         uint minDistanceLabel = WavePrefixCountBits(distance == minDistance);
         if (distance == minDistance && minDistanceLabel == 0) {
-            OctreeArray_G[nodeInfo.x][nodeInfo.y].nearbyNodeInfos[i] = nearbyNodeIndex;
+            OctreeNearbyNodeInfos[nodeLabel].nearbyNodeInfos[i] = nearbyNodeIndex;
             distance = 1e30f;
-
-            //if (pushConst.frameIndex == 0 && indivisibleNodeLabel == pushConst.sampleNodeLabel) {
-            //    printf("nodeIndex1: %d, nodeIndex2: %d, distance: %f\n",
-            //        nodeIndex, nearbyNodeIndex, minDistance,
-            //    );
-            //}
         }
     }
 }
@@ -764,28 +677,33 @@ VSout_nearby vertexMain_nearby(uint vertexIndex: SV_VertexID, int instanceIndex:
 {
     VSout_nearby output;
     output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
-    return output;
 
-    /*
     SVOWeightGlobalInfo globalInfo = GlobalInfo[0];
     if (pushConst.sampleNodeLabel - 1 >= globalInfo.indivisibleNodeCount_G) return output;
 
-    uint2 sampleNodeInfo = IndivisibleNodeInfos_G[pushConst.sampleNodeLabel - 1];
-    OctreeNodeData_G nodeData = OctreeArray_G[sampleNodeInfo.x][sampleNodeInfo.y];
-    bool show = instanceIndex == sampleNodeIndex;
-    if (show) output.color = float4(1.0f, 0.0f, 0.0f, 1.0f);
+    int2 nearbyNodeInfos[NEARBY_NODE_COUNT] = OctreeNearbyNodeInfos[pushConst.sampleNodeLabel - 1].nearbyNodeInfos;
+
+    OctreeNodeData_G nodeData;
+    bool show = instanceIndex == pushConst.sampleNodeLabel - 1;
+    if (show) {
+        uint2 sampleNodeInfo = IndivisibleNodeInfos_G[instanceIndex];
+        nodeData = OctreeArray_G[sampleNodeInfo.x][sampleNodeInfo.y];
+
+        if (vertexIndex == 0 && pushConst.frameIndex == 0) {
+            printf("sampleNode layerIndex: %d, sampleNodeIndex: %d\n", sampleNodeInfo.x, sampleNodeInfo.y);
+            for (int i = 0; i < NEARBY_NODE_COUNT; ++i) 
+                printf("nearbyNode layerIndex: %d, nodeIndex: %d\n", nearbyNodeInfos[i].x, nearbyNodeInfos[i].y);
+        }
+
+        output.color = float4(1.0f, 0.0f, 0.0f, 1.0f);
+    }
     else output.color = float4(0.0f, 1.0f, 0.0f, 1.0f);
 
-    if (instanceIndex == 0 && vertexIndex == 0 && pushConst.frameIndex == 0) {
-        printf("sampleNodeIndex: %d\n", sampleNodeIndex);
-        for (int i = 0; i < NEARBY_NODE_COUNT; ++i) printf("nearbyNodeIndex: %d\n", nodeData.nearbyNodeIndices[i]);
-    }
-
-    uint nodeIndex = instanceIndex;
+    uint2 nodeInfos = IndivisibleNodeInfos_G[instanceIndex];
     for (int i = 0; i < NEARBY_NODE_COUNT; ++i) {
-        if (nodeIndex == nodeData.nearbyNodeIndices[i]) {
+        if (all(nodeInfos == nearbyNodeInfos[i])) {
             show = true;
-            nodeData = SVO_G[nodeIndex];
+            nodeData = OctreeArray_G[nodeInfos.x][nodeInfos.y];
             break;
         }
     }
@@ -801,7 +719,6 @@ VSout_nearby vertexMain_nearby(uint vertexIndex: SV_VertexID, int instanceIndex:
         output.sv_position = mul(float4(output.sv_position.xyz, 1.0f), pushConst.sceneInfoAddress[0].viewProjMatrix);
     }
     return output;
-    */
 }
 [shader("pixel")]
 PSout fragmentMain_nearby(VSout_nearby input) {

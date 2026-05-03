@@ -44,8 +44,8 @@ struct SVONodeData_G {
 struct SVOPushConstant_SVOPG {
 	uint32_t svoMaxLayer;		//Octree max layerIndex, 32x32x32 is 5
 	uint32_t currentLayer;
+	uint32_t frameIndex;
 #ifndef NDEBUG
-	float frameIndex;
 	SceneInfo* sceneInfoAddress;
 #endif
 };

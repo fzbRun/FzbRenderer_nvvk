@@ -347,31 +347,6 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
                     if(pdf > 0.0f) materialEntropy -= pdf * log2(pdf);
                 }
             }
-            /*
-            if (pushConst.frameIndex == 0 && pushConst.currentLayer == 3) {
-                bool forward = abs(mergeNormal.y) > abs(mergeNormal.x) && abs(mergeNormal.y) > abs(mergeNormal.z);
-                aabbVolumeSum = WaveReadLaneAt(aabbVolumeSum, blockFirstWarpLane);
-                mergeAABBVolume = WaveReadLaneAt(mergeAABBVolume, blockFirstWarpLane);
-                materialEntropy = WaveReadLaneAt(materialEntropy, blockFirstWarpLane);
-                if (forward && fatherNodeIndex == 158) {
-                    printf("\nfatherNodeIndex: %d\naabb: %f %f %f %f %f %f\nfillRate: %f,aabbVolume: %f\n",
-                           fatherNodeIndex,
-                           nodeData_G.aabb.minimum.x, nodeData_G.aabb.minimum.y, nodeData_G.aabb.minimum.z,
-                           nodeData_G.aabb.maximum.x, nodeData_G.aabb.maximum.y, nodeData_G.aabb.maximum.z,
-                           nodeData_G.fillRate, aabbVolume,
-                           
-                    );
-                    if (warpLane == blockFirstWarpLane) {
-                        printf("\ncluster:\nmergeAABB: %f %f %f %f %f %f\nfillRate: %f, aabbVolumeSum: %f, mergeAABBVolume: %f\nmaterailEntropy: %f\n",
-                               mergeAABB.minimum.x, mergeAABB.minimum.y, mergeAABB.minimum.z,
-                               mergeAABB.maximum.x, mergeAABB.maximum.y, mergeAABB.maximum.z,
-                               aabbVolumeSum / mergeAABBVolume, aabbVolumeSum, mergeAABBVolume,
-                               materialEntropy
-                        );
-                    }
-                }
-            }
-            */
             #endif
 
             bool indivisible = true;
@@ -381,22 +356,8 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
                 indivisible &= materialEntropy < 0.2f;
                 #endif
                 indivisible &= length(mergeNormal) > 0.707f &&
-                              (nodeData_G.fillRate >= 0.7 ||
-                              (mergeAABBVolume - aabbVolumeSum) < pushConst.voxelVolume * (pushConst.octreeMaxLayer - OCTREE_CLUSTER_LAYER) * 4);
-                /*
-                if (pushConst.frameIndex == 0 && pushConst.currentLayer == 3) {
-                    bool forward = abs(mergeNormal.y) > abs(mergeNormal.x) && abs(mergeNormal.y) > abs(mergeNormal.z);
-                    if (forward && fatherNodeIndex == 158) {
-                        printf("\ncluster:%d\nmergeAABB: %f %f %f %f %f %f\nfillRate: %f, aabbVolumeSum: %f,   mergeAABBVolume: %f\nmaterailEntropy: %f\n",
-                               fatherNodeIndex,       
-                               mergeAABB.minimum.x, mergeAABB.minimum.y, mergeAABB.minimum.z,
-                               mergeAABB.maximum.x, mergeAABB.maximum.y, mergeAABB.maximum.z,
-                               nodeData_G.fillRate, aabbVolumeSum, mergeAABBVolume,
-                               materialEntropy
-                        );
-                    }
-                }
-                */
+                              (nodeData_G.fillRate >= 0.75 ||
+                              (mergeAABBVolume - aabbVolumeSum) < pushConst.voxelVolume * (pushConst.octreeMaxLayer - OCTREE_CLUSTER_LAYER) * 1.5f);
 
                 nodeData_G.indivisible = indivisible;
                 nodeData_G.label = 0;
@@ -470,9 +431,8 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
                     mergeAABB.maximum.y = -3.402823466e+38F;
                     mergeAABB.maximum.z = -3.402823466e+38F;}
                 float3 mergeNormal = float3(0.0f);
-
                 bool sampleAble = false; float probabilitySum = 0.0f;
-                if (probability / maxProbability >= 0.5f) {
+                if (probability / maxProbability >= 0.75f) {
                     sampleAble = true;
                     probabilitySum = probability;
                     mergeAABB = nodeData_E.aabb;

@@ -44,11 +44,11 @@ struct OctreePushConstant_SVOPG {
 	uint32_t currentLayerBlockCount;
 	uint32_t currentLayerNodeCount;
 	uint32_t VGBVoxelTotalCount;
+	float frameIndex;
 	SceneInfo* sceneInfoAddress;
 	float4 VGBStartPos_Size;
 	float4 VGBVoxelSize;
 #ifndef NDEBUG
-	float frameIndex;
 	uint32_t showOctreeNodeTotalCount;
 	int normalIndex;
 #endif
@@ -70,11 +70,11 @@ struct OctreeNodeData_G {
 	uint materialCountSum;
 	uint materialCounts[MAX_MATERIAL_COUNT];
 	#endif
-
-	#ifndef USE_SVO
-	int2 nearbyNodeInfos[NEARBY_NODE_COUNT];
-	#endif
 };
+struct OctreeNearbyNodeInfo {
+	int2 nearbyNodeInfos[NEARBY_NODE_COUNT];
+};
+
 struct OctreeNodeData_E {
 	float E;
 	float pdf;

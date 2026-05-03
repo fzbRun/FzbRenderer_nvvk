@@ -59,7 +59,7 @@ struct Mesh
 enum LightType {
 	Point = 0,
 	Spot = 1,
-	Directional = 2,
+	Direction = 2,
 	Area = 3
 };;
 struct Light {

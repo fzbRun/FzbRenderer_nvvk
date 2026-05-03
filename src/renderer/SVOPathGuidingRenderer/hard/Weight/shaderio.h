@@ -11,7 +11,7 @@
 #define FZBRENDERER_SVOWeight_SHADER_IO_H
 NAMESPACE_SHADERIO_BEGIN()
 
-#define HITTEST_COUNT 8
+#define HITTEST_COUNT 16
 #define OUTGOING_COUNT 64
 
 #define OUTGOING_TYPE 0
@@ -48,7 +48,10 @@ enum class StaticBindingPoints_SVOWeight {
 	eIndivisibleNodeInfos_G,
 	eIndivisibleNodeInfos_E,
 	eSVOWeights,
-	eIndivisibleNodeNearbyNodeInfos,
+	eIndivisibleNodeNearbyNodeTempInfos,
+#ifndef USE_SVO
+	eOctreeNearbyNodeInofs,
+#endif
 };
 
 struct SVOWeightGlobalInfo {
@@ -73,10 +76,11 @@ struct SVOIndivisibleNodeInfo {
 	uint32_t nodeIndex;
 };
 
-struct IndivisibleNodeNearbyNodeInfo {
+struct IndivisibleNodeNearbyNodeTempInfo {
 #ifdef USE_SVO
 	int nearbyNodeIndices[NEARBY_NODE_COUNT];
 #else
+	uint nodeLabel;
 	int2 nearbyNodeInfos[NEARBY_NODE_COUNT];
 #endif
 	float nearbyNodeDistances[NEARBY_NODE_COUNT];
