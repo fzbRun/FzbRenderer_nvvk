@@ -1,11 +1,11 @@
 #include "common/Shader/Slang/commonFunction.slang"
 #include "renderer/FzbPathGuidingRenderer/FzbPathGuidingShaderio.h"
-#include "renderer/SVOPathGuidingRenderer/hard/RasterVoxelization/shaderio.h"
+#include "renderer/FzbPathGuidingRenderer/RasterVoxelization/RasterVoxelizationShaderio_FzbPG.h"
 #include "renderer/FzbPathGuidingRenderer/Octree/OctreeShaderio_FzbPG.h"
 #include "feature/PathTracing/shaders/pathTracingCommon.slang"
 
 [[vk::push_constant]] ConstantBuffer<OctreePushConstant_FzbPG> pushConst;
-[[vk::binding(BindingPoints_Octree_FzbPG::eVGB)]] StructuredBuffer<VGBVoxelData_SVOPG, ScalarDataLayout> VGBs[];
+[[vk::binding(BindingPoints_Octree_FzbPG::eVGB)]] StructuredBuffer<VGBVoxelData_FzbPG, ScalarDataLayout> VGBs[];
 [[vk::binding(BindingPoints_Octree_FzbPG::eOctreeClusterData_G)]] RWStructuredBuffer<OctreeNodeClusterData_G_FzbPG, ScalarDataLayout> OctreeClusterDataBuffer_G[];
 [[vk::binding(BindingPoints_Octree_FzbPG::eOctreeData_G)]] RWStructuredBuffer<OctreeNodeData_G_FzbPG, ScalarDataLayout> OctreeDataBuffer_G[];
 [[vk::binding(BindingPoints_Octree_FzbPG::eOctreeClusterData_E)]] RWStructuredBuffer<OctreeNodeClusterData_E_FzbPG, ScalarDataLayout> OctreeClusterDataBuffer_E[];

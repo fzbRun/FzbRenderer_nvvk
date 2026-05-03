@@ -51,11 +51,11 @@ enum class BindingPoints_Octree_FzbPG : uint32_t {
 	eIndivisibleNodeInfos_G,
 	eIndivisibleNodeInfos_E,
 #ifdef ADAPTIVE_IMPORTANCE_SAMPLING
-	eOctreeNodePairPartialHitNodeInfo1,
-	eOOctreeNodePairPartialHitNodeInfo2Count,
-	eOctreeNodePairPartialHitNodeInfo2,
-	eOctreeNodePairE,
 	eOctreeNodePairData,
+	ePartialHitNodePairCount,
+	ePartialHitNodePairTempData,
+	eHitTestNodePairCount,
+	eHitTestNodePairInfo,
 #endif
 	eOctreeNodePairWeight,
 #ifdef NEARBYNODE_JITTER_FZBPG
@@ -98,9 +98,6 @@ struct OctreeNodeClusterData_E_FzbPG {
 	float E;
 	float4 meanNormal;
 	AABB aabb;
-#ifdef ADAPTIVE_IMPORTANCE_SAMPLING
-	int importantSampleNodeIndex;
-#endif
 };
 /*
 Octree_E is only 0 - OCTREE_CLUSTER_LAYER
@@ -150,15 +147,14 @@ struct OctreeThreadGroupInfo_FzbPG {
 #define inverseOutgoing inverseSH
 #endif
 
-#define HITTEST_COUNT_PERCHILDNODE_FZBPG 4  //dont change!!!
-
-struct OctreeNodePairPartialHitNodeInfo1_FzbPG {
+struct OctreePartialHiNodePairTempData_FzbPG {
 	float childNodeMergeE[8];
 	uint nodeIndex;
 };
-struct OctreeNodePairPartialHitNodeInfo2_FzbPG {
-	uint nodeIndex;
-	uint fatherNodeIndex;	//fatherNodeIndex in last layer PartialHitNodeInfo1Buffer
+struct OctreeHitTestNodePairInfo_FzbPG {
+	uint nodeIndex_E;
+	uint layerIndex_G;
+	uint nodeIndex_G;
 };
 struct OctreeNodePairData_FzbPG {
 	AABB aabb;
@@ -187,8 +183,6 @@ struct OctreeNearbyNodeInfo_FzbPG {
 
 #define GETNEARBYNODES_CS_THREADGROUP_SIZE 512
 #define GETNEARBYNODES2_CS_THREADGROUP_SIZE 1024
-
-#define HITTEST_CS_THREADGROUP_SIZE2 256
 
 NAMESPACE_SHADERIO_END()
 #endif

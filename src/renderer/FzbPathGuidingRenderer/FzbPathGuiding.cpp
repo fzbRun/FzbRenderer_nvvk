@@ -14,7 +14,7 @@ FzbPathGuidingRenderer::FzbPathGuidingRenderer(pugi::xml_node& rendererNode) {
 	if (pugi::xml_node sppNode = rendererNode.child("spp"))
 		pushConstant.spp = std::stoi(sppNode.attribute("value").value());
 	if (pugi::xml_node rasterVoxelizationNode = rendererNode.child("RasterVoxelization"))
-		rasterVoxelization = std::make_shared<RasterVoxelization_SVOPG>(rasterVoxelizationNode);
+		rasterVoxelization = std::make_shared<RasterVoxelization_FzbPG>(rasterVoxelizationNode);
 	if (pugi::xml_node lightInjectNode = rendererNode.child("LightInject"))
 		lightInject = std::make_shared<LightInject_FzbPG>(lightInjectNode);
 	if (pugi::xml_node octreeNode = rendererNode.child("Octree"))
@@ -205,7 +205,7 @@ void FzbPathGuidingRenderer::createDescriptorSetLayout() {
 		.stageFlags = VK_SHADER_STAGE_ALL });
 #ifdef ADAPTIVE_IMPORTANCE_SAMPLING
 	bindings.addBinding({
-		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodePairVisibleData,
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodePairData,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
@@ -282,8 +282,8 @@ void FzbPathGuidingRenderer::createDescriptorSet() {
 	write.append(NodePairInfoWrite, octree->octreeNodePairWeightBuffer, 0, octree->octreeNodePairWeightBuffer.bufferSize);
 #ifdef ADAPTIVE_IMPORTANCE_SAMPLING
 	NodePairInfoWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodePairVisibleData, 0, 0, 1);
-	write.append(NodePairInfoWrite, octree->octreeNodePairVisibleDataBuffer, 0, octree->octreeNodePairVisibleDataBuffer.bufferSize);
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodePairData, 0, 0, 1);
+	write.append(NodePairInfoWrite, octree->octreeNodePairDataBuffer, 0, octree->octreeNodePairDataBuffer.bufferSize);
 #endif
 
 	VkWriteDescriptorSet    GlobalInfoWrite =

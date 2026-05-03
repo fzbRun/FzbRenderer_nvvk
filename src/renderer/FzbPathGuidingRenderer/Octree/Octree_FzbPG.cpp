@@ -6,7 +6,7 @@
 #include <bit>
 #include <nvvk/default_structs.hpp>
 #include <nvgui/property_editor.hpp>
-#include <renderer/SVOPathGuidingRenderer/hard/RasterVoxelization/RasterVoxelizationSVOPG.h>
+#include "../RasterVoxelization/RasterVoxelization_FzbPG.h"
 #include "feature/PathTracing/shaderio.h"
 
 using namespace FzbRenderer;
@@ -52,13 +52,16 @@ void Octree_FzbPG::clean() {
 	Application::allocator.destroyBuffer(divisibleNodeInfoBuffer_G);
 	Application::allocator.destroyBuffer(threadGroupInfoBuffer);
 
-	Application::allocator.destroyBuffer(octreeNodePairVisibleDataBuffer);
 	Application::allocator.destroyBuffer(octreeNodePairWeightBuffer);
-
-	Application::allocator.destroyBuffer(octreeNodePairEBuffer);
 
 	Application::allocator.destroyBuffer(nearbyNodeTempInfoBuffer);
 	Application::allocator.destroyBuffer(nearbyNodeInfoBuffer);
+
+	Application::allocator.destroyBuffer(octreeNodePairDataBuffer);
+	Application::allocator.destroyBuffer(partialHitNodePairCountBuffer);
+	Application::allocator.destroyBuffer(partialHitNodePairTempDataBuffer);
+	Application::allocator.destroyBuffer(hitTestNodePairCountBuffer);
+	Application::allocator.destroyBuffer(hitTestNodePairInfoBuffer);
 
 	VkDevice device = Application::app->getDevice();
 	vkDestroyShaderEXT(device, computeShader_initOctreeArray, nullptr);
@@ -74,7 +77,6 @@ void Octree_FzbPG::clean() {
 
 	vkDestroyShaderEXT(device, computeShader_initWeights, nullptr);
 	vkDestroyShaderEXT(device, computeShader_octreeNodeHitTest, nullptr);
-	vkDestroyShaderEXT(device, computeShader_visibleAABBCluster, nullptr);
 	vkDestroyShaderEXT(device, computeShader_getProbability, nullptr);
 
 	vkDestroyShaderEXT(device, computeShader_getNearbyNodes1, nullptr);
@@ -244,6 +246,7 @@ void Octree_FzbPG::uiRender() {
 		}
 		PE::end();
 
+		/*
 #ifdef ADAPTIVE_IMPORTANCE_SAMPLING
 		if (PE::begin()) {
 			if (PE::entry("Node Pair Visible AABB Map", [&] {
@@ -272,6 +275,7 @@ void Octree_FzbPG::uiRender() {
 		}
 		PE::end();
 #endif
+		*/
 
 		PE::begin();
 		UIModified |= PE::DragInt("sampleNodeLabel_G", &pushConstant.sampleNodeLabel_G);
@@ -436,15 +440,31 @@ void Octree_FzbPG::createOctreeArray() {
 	NVVK_DBG_NAME(indivisibleNodeInfosBuffer_E.buffer);
 
 #ifdef ADAPTIVE_IMPORTANCE_SAMPLING
-	bufferSize = IndivisibleNodeCount_G_FZBPG * CLUSTER_LAYER_NODECOUNT_E_FZBPG * sizeof(shaderio::OctreeNodePairVisibleData_FzbPG);
-	allocator->createBuffer(octreeNodePairVisibleDataBuffer, bufferSize,
+	bufferSize = IndivisibleNodeCount_G_FZBPG * CLUSTER_LAYER_NODECOUNT_E_FZBPG * sizeof(shaderio::OctreeNodePairData_FzbPG);
+	allocator->createBuffer(octreeNodePairDataBuffer, bufferSize,
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-	NVVK_DBG_NAME(octreeNodePairVisibleDataBuffer.buffer);
+	NVVK_DBG_NAME(octreeNodePairDataBuffer.buffer);
 
-	bufferSize = IndivisibleNodeCount_G_FZBPG * CLUSTER_LAYER_NODECOUNT_E_FZBPG * sizeof(float);
-	allocator->createBuffer(octreeNodePairEBuffer, bufferSize,
+	uint32_t adaptiveImportantSampleLayerCount = ADAPTIVE_IMPORTANCE_SAMPLING_MAX_LAYER - OCTREE_CLUSTER_LAYER_FZBPG;
+	bufferSize = adaptiveImportantSampleLayerCount * sizeof(uint32_t);
+	allocator->createBuffer(partialHitNodePairCountBuffer, bufferSize,
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-	NVVK_DBG_NAME(octreeNodePairEBuffer.buffer);
+	NVVK_DBG_NAME(partialHitNodePairCountBuffer.buffer);
+
+	bufferSize = IndivisibleNodeCount_G_FZBPG * CLUSTER_LAYER_NODECOUNT_E_FZBPG * sizeof(shaderio::OctreePartialHiNodePairTempData_FzbPG);
+	allocator->createBuffer(partialHitNodePairTempDataBuffer, bufferSize,
+		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+	NVVK_DBG_NAME(partialHitNodePairTempDataBuffer.buffer);
+
+	bufferSize = sizeof(uint32_t);
+	allocator->createBuffer(hitTestNodePairCountBuffer, bufferSize,
+		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+	NVVK_DBG_NAME(hitTestNodePairCountBuffer.buffer);
+
+	bufferSize = IndivisibleNodeCount_G_FZBPG * CLUSTER_LAYER_NODECOUNT_E_FZBPG * sizeof(shaderio::OctreeHitTestNodePairInfo_FzbPG);
+	allocator->createBuffer(hitTestNodePairInfoBuffer, bufferSize,
+		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+	NVVK_DBG_NAME(hitTestNodePairInfoBuffer.buffer);
 #endif
 
 	bufferSize = OUTGOING_COUNT_FZBPG * IndivisibleNodeCount_G_FZBPG * OCTREE_NODECOUNT_E_FZBPG * sizeof(float);
@@ -548,12 +568,27 @@ void Octree_FzbPG::createDescriptorSetLayout() {
 		.stageFlags = VK_SHADER_STAGE_ALL });
 #ifdef ADAPTIVE_IMPORTANCE_SAMPLING
 	bindings.addBinding({
-		.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eOctreeNodePairVisibleData,
+		.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eOctreeNodePairData,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
-		.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eOctreeNodePairE,
+		.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::ePartialHitNodePairCount,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::ePartialHitNodePairTempData,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eHitTestNodePairCount,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eHitTestNodePairInfo,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
@@ -664,12 +699,24 @@ void Octree_FzbPG::createDescriptorSet() {
 
 #ifdef ADAPTIVE_IMPORTANCE_SAMPLING
 	NodePairInfoWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eOctreeNodePairVisibleData, 0, 0, 1);
-	write.append(NodePairInfoWrite, octreeNodePairVisibleDataBuffer, 0, octreeNodePairVisibleDataBuffer.bufferSize);
+		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eOctreeNodePairData, 0, 0, 1);
+	write.append(NodePairInfoWrite, octreeNodePairDataBuffer, 0, octreeNodePairDataBuffer.bufferSize);
 
 	NodePairInfoWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eOctreeNodePairE, 0, 0, 1);
-	write.append(NodePairInfoWrite, octreeNodePairEBuffer, 0, octreeNodePairEBuffer.bufferSize);
+		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::ePartialHitNodePairCount, 0, 0, 1);
+	write.append(NodePairInfoWrite, partialHitNodePairCountBuffer, 0, partialHitNodePairCountBuffer.bufferSize);
+
+	NodePairInfoWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::ePartialHitNodePairTempData, 0, 0, 1);
+	write.append(NodePairInfoWrite, partialHitNodePairTempDataBuffer, 0, partialHitNodePairTempDataBuffer.bufferSize);
+
+	NodePairInfoWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eHitTestNodePairCount, 0, 0, 1);
+	write.append(NodePairInfoWrite, hitTestNodePairCountBuffer, 0, hitTestNodePairCountBuffer.bufferSize);
+
+	NodePairInfoWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eHitTestNodePairInfo, 0, 0, 1);
+	write.append(NodePairInfoWrite, hitTestNodePairInfoBuffer, 0, hitTestNodePairInfoBuffer.bufferSize);
 #endif
 
 #ifdef NEARBYNODE_JITTER_FZBPG
@@ -715,11 +762,7 @@ void Octree_FzbPG::compileAndCreateShaders() {
 	#endif
 
 	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
-	#ifdef ADAPTIVE_IMPORTANCE_SAMPLING
-	std::filesystem::path shaderSource = shaderPath / "Octree.slang";
-	#else
 	std::filesystem::path shaderSource = shaderPath / "Octree2.slang";
-	#endif
 	VkShaderModuleCreateInfo shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
 
 	#ifndef NDEBUG
@@ -813,18 +856,6 @@ void Octree_FzbPG::compileAndCreateShaders() {
 	shaderInfo.pCode = shaderCode.pCode;
 	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_octreeNodeHitTest);
 	NVVK_DBG_NAME(computeShader_octreeNodeHitTest);
-#ifdef ADAPTIVE_IMPORTANCE_SAMPLING
-	//--------------------------------------------------------------------------------------
-	vkDestroyShaderEXT(device, computeShader_visibleAABBCluster, nullptr);
-
-	shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-	shaderInfo.nextStage = 0;
-	shaderInfo.pName = "computeMain_visibleAABBCluster";
-	shaderInfo.codeSize = shaderCode.codeSize;
-	shaderInfo.pCode = shaderCode.pCode;
-	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_visibleAABBCluster);
-	NVVK_DBG_NAME(computeShader_visibleAABBCluster);
-#endif
 	//--------------------------------------------------------------------------------------
 	vkDestroyShaderEXT(device, computeShader_getProbability, nullptr);
 
@@ -1088,35 +1119,10 @@ void Octree_FzbPG::getOctreeNodePairData(VkCommandBuffer cmd) {
 
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_octreeNodeHitTest);
 	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
-	
-#if !defined(NDEBUG) && defined(ADAPTIVE_IMPORTANCE_SAMPLING)
-	pushConstant.showVisibleAABB = 1;
-	vkCmdPushConstants2(cmd, &pushInfo);
-
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT);
-	debug_NodePairVisibleAABB_Visualization(cmd);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
-
-	pushConstant.showVisibleAABB = 0;
-
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
-	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_visibleAABBCluster);
-	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
-#endif
-	
+
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getProbability);
-#ifdef ADAPTIVE_IMPORTANCE_SAMPLING
-	for (int layerIndex = OCTREE_CLUSTER_LAYER_FZBPG; layerIndex >= 0; --layerIndex) {
-		pushConstant.currentLayer = layerIndex;
-		vkCmdPushConstants2(cmd, &pushInfo);
-	
-		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
-		vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
-	}
-#else
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
-#endif
 }
 void Octree_FzbPG::getNearbyNodeInfo(VkCommandBuffer cmd) {
 #ifdef NEARBYNODE_JITTER_FZBPG
@@ -1149,8 +1155,8 @@ void Octree_FzbPG::debug_Prepare() {
 #endif
 	Feature::createGBuffer(true, false, showMapCount);
 
-	pushConstant.sampleNodeLabel_G = 1;	// 45 - 23;   1 - 130  204 236
-	pushConstant.sampleNodeLabel_E = 30;
+	pushConstant.sampleNodeLabel_G = 151;	// 49
+	pushConstant.sampleNodeLabel_E = 15;
 
 	for (int i = OCTREE_CLUSTER_LAYER_FZBPG; i < octreeMaxLayer; ++i)
 		pushConstant.showOctreeNodeTotalCount += pow(8, i);
@@ -1239,7 +1245,7 @@ void Octree_FzbPG::debug_OctreeLayer_Visualization(VkCommandBuffer cmd) {
 	const shaderio::TriangleMesh& triMesh = mesh.triMesh;
 
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
-	pushConstant.normalIndex = RasterVoxelization_SVOPG::normalIndex;
+	pushConstant.normalIndex = RasterVoxelization_FzbPG::normalIndex;
 	vkCmdPushConstants2(cmd, &pushInfo);
 
 	uint32_t bufferIndex = scene.getMeshBufferIndex(wireframeMeshIndex);

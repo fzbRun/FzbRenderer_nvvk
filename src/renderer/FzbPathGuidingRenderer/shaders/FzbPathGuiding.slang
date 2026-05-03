@@ -6,11 +6,11 @@
 [[vk::push_constant]] ConstantBuffer<FzbPathGuidingPushConstant, ScalarDataLayout> pushConst;
 [[vk::binding(StaticBindingPoints_FzbPG::eOctreeData_G)]] RWStructuredBuffer<OctreeNodeData_G_FzbPG, ScalarDataLayout> OctreeDataBuffer_G[];
 [[vk::binding(StaticBindingPoints_FzbPG::eClusterLayerData_E)]] RWStructuredBuffer<OctreeNodeData_E_FzbPG, ScalarDataLayout> ClusterlayerDataBuffer_E;
-#ifdef ADAPTIVE_IMPORTANCE_SAMPLING
-[[vk::binding(StaticBindingPoints_FzbPG::eOctreeNodePairVisibleData)]] RWStructuredBuffer<OctreeNodePairVisibleData_FzbPG, ScalarDataLayout> OctreeNodePairVisibleDataBuffer;
-#endif
 [[vk::binding(StaticBindingPoints_FzbPG::eOctreeNodePairWeight)]] RWStructuredBuffer<float> OctreeNodePairWeightBuffer;
 [[vk::binding(StaticBindingPoints_FzbPG::eGlobalInfo)]] RWStructuredBuffer<OctreeGlobalInfo_FzbPG, ScalarDataLayout> GlobalInfoBuffer;
+#ifdef ADAPTIVE_IMPORTANCE_SAMPLING
+[[vk::binding(StaticBindingPoints_FzbPG::eOctreeNodePairData)]] RWStructuredBuffer<OctreeNodePairData_FzbPG, ScalarDataLayout> OctreeNodePairDataBuffer;
+#endif
 #ifdef NEARBYNODE_JITTER_FZBPG
 [[vk::binding(StaticBindingPoints_FzbPG::eOctreeClusterData_G)]] RWStructuredBuffer<OctreeNodeClusterData_G_FzbPG, ScalarDataLayout> OctreeClusterDataBuffer_G[];
 [[vk::binding(StaticBindingPoints_FzbPG::eNearbyNodeInfos)]] RWStructuredBuffer<OctreeNearbyNodeInfo_FzbPG, ScalarDataLayout> NearbyNodeInfoBuffer;
@@ -24,7 +24,9 @@ typedef CallablePayload HitPayload_FzbPG;
 groupshared OctreeGlobalInfo_FzbPG groupGlobalInfo;
 
 groupshared OctreeNodeData_G_FzbPG groupOctreeNodeData_G[3510];                                     // 13.7KB  6 + 48 + 384 + 3072 = 3510
+#ifndef ADAPTIVE_IMPORTANCE_SAMPLING
 groupshared OctreeNodeData_E_FzbPG groupClusterLayerNodeData_E[CLUSTER_LAYER_NODECOUNT_E_FZBPG];   //1.71KB
+#endif
 //-------------------------------------------------Function----------------------------------------------
 bool hitTestTraceRay(RayDesc ray, inout HitTestPayload payload) {
     RayQuery<RAY_FLAG_NONE> q;
@@ -286,16 +288,17 @@ bool getNodeAABB_E_FzbPG(inout AABB aabb, inout HitPayload_FzbPG payload, inout 
     if (getNode == false) return false;
     nodeIndex_E = nodeIndex_E + nodeOffset - OctreeLayerStartIndex_FzbPG[OCTREE_CLUSTER_LAYER_FZBPG];
 
-    OctreeNodeData_E_FzbPG nodeInfo_E = groupClusterLayerNodeData_E[nodeIndex_E];
     #ifdef ADAPTIVE_IMPORTANCE_SAMPLING
-    uint nodePairIndex = nodeLabel_G * groupGlobalInfo.indivisibleNodeCount_E + nodeInfo_E.label - 1;
-    OctreeNodePairVisibleData_FzbPG nodePairData = OctreeNodePairVisibleDataBuffer[nodePairIndex];
+    uint nodePairIndex = nodeLabel_G * CLUSTER_LAYER_NODECOUNT_E_FZBPG + nodeIndex_E;
+    OctreeNodePairData_FzbPG nodePairData = OctreeNodePairDataBuffer[nodePairIndex];
     aabb = nodePairData.aabb;
     nodeEPdf *= nodePairData.pdf;
     #else
+    OctreeNodeData_E_FzbPG nodeInfo_E = groupClusterLayerNodeData_E[nodeIndex_E];
     aabb = nodeInfo_E.aabb;
     nodeEPdf *= nodeInfo_E.pdf;
     #endif
+
 
     //if (pushConst.frameIndex == 1 && all(threadIndex == uint2(735, 2))) {
     //    printf("nodeLabel_G: %d, nodeLabel_E: %d\, nodeIndex_E: %d\npgSample_pgPdf: %f, nodePairData.pdf: %f,   jitterPdf: %f\n\n",
@@ -404,15 +407,15 @@ float getPgPdf(uint nodeLabel_G, uint outgoingIndex, float3 hitPos, float3 hitNo
         nodeIndex_temp /= 8;
     }
 
-    OctreeNodeData_E_FzbPG nodeInfo_E = groupClusterLayerNodeData_E[nodeIndex_E];
     #ifdef ADAPTIVE_IMPORTANCE_SAMPLING
-    uint nodePairIndex = nodeLabel_G * groupGlobalInfo.indivisibleNodeCount_E + nodeInfo_E.label - 1;
-    OctreeNodePairVisibleData_FzbPG nodePairData = OctreeNodePairVisibleDataBuffer[nodePairIndex];
+    uint nodePairIndex = nodeLabel_G * CLUSTER_LAYER_NODECOUNT_E_FZBPG + nodeIndex_E;
+    OctreeNodePairData_FzbPG nodePairData = OctreeNodePairDataBuffer[nodePairIndex];
     pg_Pdf *= nodePairData.pdf;
-    #define NodeAABB_E_GetPgPdf nodePairData.aabb
+    #define aabb_getPgPdf nodePairData.aabb
     #else
+    OctreeNodeData_E_FzbPG nodeInfo_E = groupClusterLayerNodeData_E[nodeIndex_E];
     pg_Pdf *= nodeInfo_E.pdf;
-    #define NodeAABB_E_GetPgPdf nodeInfo_E.aabb
+    #define aabb_getPgPdf nodeInfo_E.aabb
     #endif
 
     // if (checkPointInAABB(hitPos, nodeInfo_E.aabb)) pg_Pdf *= nodeInfo_E.pdf;
@@ -421,18 +424,18 @@ float getPgPdf(uint nodeLabel_G, uint outgoingIndex, float3 hitPos, float3 hitNo
 
     // getPdf from Sphere sample
     {
-        float3 distance = NodeAABB_E_GetPgPdf.maximum - NodeAABB_E_GetPgPdf.minimum;
-        float3 nodeDirection = (NodeAABB_E_GetPgPdf.maximum + NodeAABB_E_GetPgPdf.minimum) * 0.5f - viewPos;
+        float3 distance = aabb_getPgPdf.maximum - aabb_getPgPdf.minimum;
+        float3 nodeDirection = (aabb_getPgPdf.maximum + aabb_getPgPdf.minimum) * 0.5f - viewPos;
 
         float3 edge0 = float3(distance.x, 0.0f, 0.0f);
         float3 edge1 = float3(0.0f, distance.y, 0.0f);
         float3 edge2 = float3(0.0f, 0.0f, distance.z);
 
-        float3 face0StartPos = NodeAABB_E_GetPgPdf.minimum;
+        float3 face0StartPos = aabb_getPgPdf.minimum;
         face0StartPos.x += nodeDirection.x < 0 ? distance.x : 0.0f; // in left
-        float3 face1StartPos = NodeAABB_E_GetPgPdf.minimum;
+        float3 face1StartPos = aabb_getPgPdf.minimum;
         face1StartPos.y += nodeDirection.y < 0 ? distance.y : 0.0f; // in bottom
-        float3 face2StartPos = NodeAABB_E_GetPgPdf.minimum;
+        float3 face2StartPos = aabb_getPgPdf.minimum;
         face2StartPos.z += nodeDirection.z < 0 ? distance.z : 0.0f; // in back
 
         Quadrilateral_initialization quad0 = initQuadrilateral(viewPos, face0StartPos, edge2, edge1);
@@ -473,8 +476,11 @@ void computeMain_FzbPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
         }
         groupOctreeNodeData_G[i] = OctreeDataBuffer_G[layerIndex][nodeIndex];
     }
+
+    #ifndef ADAPTIVE_IMPORTANCE_SAMPLING
     for (int i = groupThreadIndex_linear; i < CLUSTER_LAYER_NODECOUNT_E_FZBPG; i += threadGroupThreadTotalCount)
         groupClusterLayerNodeData_E[i] = ClusterlayerDataBuffer_E[i];
+    #endif
     GroupMemoryBarrierWithGroupSync();
 
     float2 launchID = (float2)threadIndex;

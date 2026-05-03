@@ -14,7 +14,7 @@
 //------------------------------------------------getNearbyNode---------------------------------------------------------
 struct IndivisibleNodeData_G {
     AABB aabb;
-    float3 normal;
+    uint normalIndex;
 #ifdef GEOMETRY_CLUSTER_WITH_E
     float E;
 #endif
@@ -23,7 +23,11 @@ struct IndivisibleNodeData_G {
 groupshared uint groupIndivisibleNodeCount_G;
 groupshared uint groupIndivisibleNodeCount_E;
 groupshared IndivisibleNodeData_G groupIndivisibleNodeData;
-groupshared int groupNearbyNodeDistanceIs[NEARBY_NODE_COUNT_FZBPG];
+groupshared float groupWarpMinDistances[GETNEARBYNODES_CS_THREADGROUP_SIZE / 32];
+groupshared uint2 groupWarpMinDistanceNodeInfos[GETNEARBYNODES_CS_THREADGROUP_SIZE / 32];
+groupshared uint groupGroupMinDistanceCount;
+groupshared float groupGroupMinDistance;
+groupshared float groupNearbyNodeDistances[NEARBY_NODE_COUNT_FZBPG];
 groupshared int2 groupNearbyNodeInfos[NEARBY_NODE_COUNT_FZBPG];
 
 [numthreads(GETNEARBYNODES_CS_THREADGROUP_SIZE, 1, 1)]
@@ -34,7 +38,7 @@ void computeMain_getNearbyNodes1(uint threadIndex: SV_DispatchThreadID, uint thr
         groupIndivisibleNodeCount_E = GlobalInfoBuffer[0].indivisibleNodeCount_E;
     }
     if (groupThreadIndex < NEARBY_NODE_COUNT_FZBPG) {
-        groupNearbyNodeDistanceIs[groupThreadIndex] = 2147483647;
+        groupNearbyNodeDistances[groupThreadIndex] = 1e30f;
         groupNearbyNodeInfos[groupThreadIndex] = int2(-1);
     }
     GroupMemoryBarrierWithGroupSync();
@@ -45,7 +49,11 @@ void computeMain_getNearbyNodes1(uint threadIndex: SV_DispatchThreadID, uint thr
         uint2 nodeInfos = IndivisibleNodeInfoBuffer_G[indivisibleNodeLabel];
         OctreeNodeClusterData_G_FzbPG nodeData = OctreeClusterDataBuffer_G[nodeInfos.x - OCTREE_CLUSTER_LAYER_FZBPG][nodeInfos.y];
         IndivisibleNodeData_G nodeInfo;
-        nodeInfo.normal = normalize(nodeData.meanNormal.xyz);
+
+        // nodeInfo.normal = normalize(nodeData.meanNormal.xyz);
+        uint octreeLayerNode = 1 << (3 * nodeInfos.x);
+        nodeInfo.normalIndex = nodeInfos.y / octreeLayerNode;
+       
         nodeInfo.aabb = nodeData.aabb;
         #ifdef GEOMETRY_CLUSTER_WITH_E
         nodeInfo.E = nodeData.E;
@@ -58,41 +66,61 @@ void computeMain_getNearbyNodes1(uint threadIndex: SV_DispatchThreadID, uint thr
     if (nearbyNodeLabel >= indivisibleNodeCount) return;
 
     IndivisibleNodeData_G indivisibleNodeData = groupIndivisibleNodeData;
-    float3 indivisibleNodeCenter = (indivisibleNodeData.aabb.maximum + indivisibleNodeData.aabb.minimum) * 0.5f;
-
     uint2 nearbyNodeInfo = IndivisibleNodeInfoBuffer_G[nearbyNodeLabel];
     OctreeNodeClusterData_G_FzbPG nearbyNodeData = OctreeClusterDataBuffer_G[nearbyNodeInfo.x - OCTREE_CLUSTER_LAYER_FZBPG][nearbyNodeInfo.y];
+    uint octreeLayerNode = 1 << (3 * nearbyNodeInfo.x);
+    uint nearbyNormalIndex = nearbyNodeInfo.y / octreeLayerNode;
 
     float distance = AABBDistance(indivisibleNodeData.aabb, nearbyNodeData.aabb);
-    float cosine = dot(indivisibleNodeData.normal, normalize(nearbyNodeData.meanNormal.xyz));
-    distance *= cosine < 0.707f ? 100000.0f : (1.1f - cosine);
+    // float cosine = dot(indivisibleNodeData.normal, normalize(nearbyNodeData.meanNormal.xyz));
+    // distance *= cosine < 0.707f ? 100000.0f : (1.1f - cosine);
+    distance += nearbyNormalIndex == indivisibleNodeData.normalIndex ? 0.0f : 10000.0f;
     #ifdef GEOMETRY_CLUSTER_WITH_E
     distance *= (1.1f - (min(indivisibleNodeData.E, nearbyNodeData.E) / max(indivisibleNodeData.E, nearbyNodeData.E)));
     #endif
 
-    uint randomSeed = (uint)pushConst.frameIndex;
-    distance += rand(randomSeed) * 0.0001f;
-
     if (indivisibleNodeLabel == nearbyNodeLabel) distance = 1e30f;
-    int distanceI = FloatToOrderedInt(distance);
 
+    uint remainingThreadCount = indivisibleNodeCount - (threadGroupCount_perIndivisibleNode - 1) * GETNEARBYNODES_CS_THREADGROUP_SIZE;
+    uint warpCount = (threadGroupIndex % threadGroupCount_perIndivisibleNode) == 0 ? (remainingThreadCount + 31) / 32 : GETNEARBYNODES_CS_THREADGROUP_SIZE / 32;
     uint warpLane = groupThreadIndex & 31;
-    int warpMinDistanceI = WaveActiveMin(distanceI);
-    for (int i = 0; i < NEARBY_NODE_COUNT_FZBPG; ++i) {
-        if (warpLane == 0) InterlockedMin<int>(groupNearbyNodeDistanceIs[i], warpMinDistanceI);
+    uint warpIndex = groupThreadIndex / 32;
+
+    for (int i = 0; i < NEARBY_NODE_COUNT_FZBPG; i += groupGroupMinDistanceCount) {
+        float warpMinDistance = WaveActiveMin(distance);
+        if (warpLane == 0) groupWarpMinDistances[warpIndex] = warpMinDistance;
+        uint minDistanceLabel = WavePrefixCountBits(distance == warpMinDistance);
+        if (distance == warpMinDistance && minDistanceLabel == 0)
+            groupWarpMinDistanceNodeInfos[warpIndex] = nearbyNodeInfo;
         GroupMemoryBarrierWithGroupSync();
 
-        int groupMinDistanceI = groupNearbyNodeDistanceIs[i];
-        uint minDistanceLabel = WavePrefixCountBits(distanceI == groupMinDistanceI);
-        if (distanceI == groupMinDistanceI && minDistanceLabel == 0) {
-            //if (distance > 1.0f) break;
+        if (groupThreadIndex == 0) {
+            float groupMinDistance = groupWarpMinDistances[0]; uint minDistanceWarpIndex = 0;
+            for (int j = 1; j < warpCount; ++j) {
+                float other_warpMinDistance = groupWarpMinDistances[j];
+                if (other_warpMinDistance < groupMinDistance) {
+                    groupMinDistance = other_warpMinDistance;
+                    minDistanceWarpIndex = j;
+                }
+            }
+            groupGroupMinDistance = groupMinDistance;
 
-            groupNearbyNodeInfos[i] = nearbyNodeInfo;
-            distanceI = 2147483647;
+            uint groupMinDistanceCount = 0;
+            for (int j = 0; j < warpCount; ++j) {
+                float other_warpMinDistance = groupWarpMinDistances[j];
+                if (other_warpMinDistance == groupMinDistance) {
+                    if (i + groupMinDistanceCount >= NEARBY_NODE_COUNT_FZBPG) break;
+                    groupNearbyNodeInfos[i + groupMinDistanceCount] = groupWarpMinDistanceNodeInfos[j];   //should get minDistance node's nodeInfo
+                    groupNearbyNodeDistances[i + groupMinDistanceCount] = groupMinDistance;
+                    ++groupMinDistanceCount;
+                }
+            }
+            groupGroupMinDistanceCount = groupMinDistanceCount;
         }
-        warpMinDistanceI = WaveActiveMin(distanceI);
+        GroupMemoryBarrierWithGroupSync();
+
+        if (distance == groupGroupMinDistance && minDistanceLabel == 0) distance = 1e30f;
     }
-    GroupMemoryBarrierWithGroupSync();
 
     if (groupThreadIndex == 0) {
         if (threadGroupCount_perIndivisibleNode == 1) {
@@ -101,8 +129,7 @@ void computeMain_getNearbyNodes1(uint threadIndex: SV_DispatchThreadID, uint thr
             uint infoIndex = indivisibleNodeLabel * threadGroupCount_perIndivisibleNode + threadGroupOffset;
             NearbyNodeTempInfoBuffer[infoIndex].nodeLabel = indivisibleNodeLabel;
             NearbyNodeTempInfoBuffer[infoIndex].nearbyNodeInfos = groupNearbyNodeInfos;
-            for (int i = 0; i < NEARBY_NODE_COUNT; ++i)
-                NearbyNodeTempInfoBuffer[infoIndex].nearbyNodeDistances[i] = OrderedIntToFloat(groupNearbyNodeDistanceIs[i]);
+            NearbyNodeTempInfoBuffer[infoIndex].nearbyNodeDistances = groupNearbyNodeDistances;
         }
         if (threadIndex == 0) {
             DispatchIndirectCommand cmd2;
@@ -110,9 +137,9 @@ void computeMain_getNearbyNodes1(uint threadIndex: SV_DispatchThreadID, uint thr
             else cmd2.x = (indivisibleNodeCount * 32 + GETNEARBYNODES2_CS_THREADGROUP_SIZE - 1) / GETNEARBYNODES2_CS_THREADGROUP_SIZE;
             cmd2.y = 1; cmd2.z = 1;
 
-            if (threadGroupCount_perIndivisibleNode * NEARBY_NODE_COUNT > 32) {
-                printf("Error: Too many threads per indivisible node for getNearbyNodes. currentThreadCount: %u,    maxThreadCount: %u\n",
-                       threadGroupCount_perIndivisibleNode * NEARBY_NODE_COUNT, 32);
+            if (threadGroupCount_perIndivisibleNode * NEARBY_NODE_COUNT_FZBPG > 32) {
+                printf("Error: Too many threads per indivisible node for getNearbyNodes. currentThreadCount: %u,     maxThreadCount: %u\n",
+                       threadGroupCount_perIndivisibleNode * NEARBY_NODE_COUNT_FZBPG, 32);
                 cmd2.x = 0; cmd2.y = 0; cmd2.z = 0;
             }
 
@@ -178,7 +205,7 @@ VSout_nearby vertexMain_nearby(uint vertexIndex: SV_VertexID, int instanceIndex:
     OctreeGlobalInfo_FzbPG globalInfo = GlobalInfoBuffer[0];
     if (pushConst.sampleNodeLabel_G - 1 >= globalInfo.indivisibleNodeCount_G) return output;
 
-    int2 nearbyNodeInfos[NEARBY_NODE_COUNT] = NearbyNodeInfoBuffer[pushConst.sampleNodeLabel_G - 1].nearbyNodeInfos;
+    int2 nearbyNodeInfos[NEARBY_NODE_COUNT_FZBPG] = NearbyNodeInfoBuffer[pushConst.sampleNodeLabel_G - 1].nearbyNodeInfos;
 
     OctreeNodeClusterData_G_FzbPG nodeData;
     bool show = instanceIndex == pushConst.sampleNodeLabel_G - 1;
@@ -188,7 +215,7 @@ VSout_nearby vertexMain_nearby(uint vertexIndex: SV_VertexID, int instanceIndex:
 
         if (vertexIndex == 0 && pushConst.frameIndex == 1) {
             printf("sampleNode layerIndex: %d, sampleNodeIndex: %d\n", sampleNodeInfo.x, sampleNodeInfo.y);
-            for (int i = 0; i < NEARBY_NODE_COUNT; ++i)
+            for (int i = 0; i < NEARBY_NODE_COUNT_FZBPG; ++i)
                 printf("nearbyNode layerIndex: %d, nodeIndex: %d\n", nearbyNodeInfos[i].x, nearbyNodeInfos[i].y);
         }
 
@@ -197,7 +224,7 @@ VSout_nearby vertexMain_nearby(uint vertexIndex: SV_VertexID, int instanceIndex:
     else output.color = float4(0.0f, 1.0f, 0.0f, 1.0f);
 
     uint2 nodeInfos = IndivisibleNodeInfoBuffer_G[instanceIndex];
-    for (int i = 0; i < NEARBY_NODE_COUNT; ++i) {
+    for (int i = 0; i < NEARBY_NODE_COUNT_FZBPG; ++i) {
         if (all(nodeInfos == nearbyNodeInfos[i])) {
             show = true;
             nodeData = OctreeClusterDataBuffer_G[nodeInfos.x - OCTREE_CLUSTER_LAYER_FZBPG][nodeInfos.y];

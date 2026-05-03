@@ -27,10 +27,6 @@ struct VGBMaterialInfo_SVOPG {
 	uint materialCount[MAX_MATERIAL_COUNT];
 };
 
-struct AABBI {
-	int4 minimum;
-	int4 maximum;
-};
 struct VGBVoxelData_SVOPG {
 	float4 irradiance;
 	float4 sumNormal_G;

@@ -8,9 +8,9 @@ NAMESPACE_SHADERIO_BEGIN()
 
 //#define GEOMETRY_CLUSTER_WITH_E
 
-#define MERGE_SIMILIAR_E_FZBPG
-
-//#define ADAPTIVE_IMPORTANCE_SAMPLING	//Adaptive importance sampling
+#define ADAPTIVE_IMPORTANCE_SAMPLING	//Adaptive importance sampling
+#define HITTEST_COUNT_PER_CHILDNODE_FZBPG 4		//must <= 4
+#define ADAPTIVE_IMPORTANCE_SAMPLING_MAX_LAYER 3
 
 #define NEARBYNODE_JITTER_FZBPG
 #define NEARBY_NODE_COUNT_FZBPG 4
@@ -40,11 +40,11 @@ enum class StaticBindingPoints_FzbPG
 	//eOutImage = 1,
 	eOctreeData_G = 2,
 	eClusterLayerData_E,
-#ifdef ADAPTIVE_IMPORTANCE_SAMPLING
-	eOctreeNodePairVisibleData,
-#endif
 	eOctreeNodePairWeight,
 	eGlobalInfo,
+#ifdef ADAPTIVE_IMPORTANCE_SAMPLING
+	eOctreeNodePairData,
+#endif
 #ifdef NEARBYNODE_JITTER_FZBPG
 	eOctreeClusterData_G,
 	eNearbyNodeInfos,

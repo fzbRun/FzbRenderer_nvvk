@@ -1,22 +1,12 @@
 #define NEE
 
 #include "renderer/FzbPathGuidingRenderer/LightInject/LightInjectShaderio_FzbPG.h"
+#include "renderer/FzbPathGuidingRenderer/RasterVoxelization/RasterVoxelizationShaderio_FzbPG.h"
 #include "feature/PathTracing/shaders/pathTracingCommon.slang"
 #include "renderer/SVOPathGuidingRenderer/hard/shaders/SVOPGCommon.slang"
 
-struct AABBI {
-    int4 minimum;
-    int4 maximum;
-};
-struct VGBVoxelData_SVOPG {
-    float4 irradiance;
-    float4 sumNormal_G;
-    float4 sumNormal_E;
-    AABBI aabbI;
-};
-
 [[vk::push_constant]] ConstantBuffer<LightInjectPushConstant_FzbPG> pushConst;
-[[vk::binding(StaticBindingPoints_LightInject_FzbPG::eVGB)]] RWStructuredBuffer<VGBVoxelData_SVOPG, ScalarDataLayout> VGBs[];
+[[vk::binding(StaticBindingPoints_LightInject_FzbPG::eVGB)]] RWStructuredBuffer<VGBVoxelData_FzbPG, ScalarDataLayout> VGBs[];
 [[vk::binding(StaticBindingPoints_LightInject_FzbPG::eHasGeometryVoxelInfo)]] RWStructuredBuffer<HasGeometryVoxelInfo> HasGeometryVoxelInfoBuffer;
 [[vk::binding(StaticBindingPoints_LightInject_FzbPG::eGlobalInfo)]] RWStructuredBuffer<LightInjectGlobalInfo> GlobalInfoBuffer;
 //----------------------------------------------getHasGeometryVoxel--------------------------------------------
@@ -254,7 +244,7 @@ void computeMain_LightInject(uint threadIndex: SV_DispatchThreadID, uint groupTh
     uint normalIndex = voxelInfo & 7u;
     uint voxelIndex = voxelInfo >> 4;
     uint voxelIndex_atAll = normalIndex * pushConst.voxelCount + voxelIndex;
-    VGBVoxelData_SVOPG voxelData = VGBs[normalIndex][voxelIndex];
+    VGBVoxelData_FzbPG voxelData = VGBs[normalIndex][voxelIndex];
     AABB voxelAabb; {
         voxelAabb.minimum.x = OrderedIntToFloat(voxelData.aabbI.minimum.x);
         voxelAabb.minimum.y = OrderedIntToFloat(voxelData.aabbI.minimum.y);
@@ -318,7 +308,7 @@ void computeMain_LightInject(uint threadIndex: SV_DispatchThreadID, uint groupTh
                     initNEE(payload);
                     if (any(payload.lightRadiance > 0.0f)) {
                         float cosineIN = dot(payload.lightSampleDir, payload.hitNormal);
-                        radiance_nee = payload.lightRadiance * bsdf; // * cosineIN;
+                        radiance_nee = payload.lightRadiance * bsdf * cosineIN;
                     }
                 }
                 accumulatedRadiance += (payload.emissive + radiance_nee) * bsdf_cosine_pdf;
@@ -357,6 +347,15 @@ void computeMain_LightInject(uint threadIndex: SV_DispatchThreadID, uint groupTh
     }
     accumulatedRadiance /= LIGHTINJECT_SAMPLE_COUNT;
 
+    // any(accumulatedRadiance > 0.0f)
+    //if (pushConst.frameIndex == 1 && abs(voxelNormal.z - 1.0f) < 0.001f && voxelIndex == 1034) {
+    //    printf("voxelIndex: %d\naabb: %f %f %f %f %f %f\n\n",
+    //        voxelIndex,
+    //        voxelAabb.minimum.x, voxelAabb.minimum.y, voxelAabb.minimum.z,
+    //        voxelAabb.maximum.x, voxelAabb.maximum.y, voxelAabb.maximum.z,
+    //    );
+    //}
+
     if (any(accumulatedRadiance > 0.0f) && !any(isnan(accumulatedRadiance) || isinf(accumulatedRadiance))) {
         InterlockedAdd<float>(VGBs[normalIndex][voxelIndex].irradiance.w, 1.0f);
         InterlockedAdd<float>(VGBs[normalIndex][voxelIndex].irradiance.x, accumulatedRadiance.x);
@@ -382,7 +381,7 @@ VSout_Cube vertexMain_Cube(uint vertexIndex: SV_VertexID, int instanceIndex: SV_
     uint VGBIndex = instanceIndex / voxelTotalCount;
     uint voxelIndex = instanceIndex % voxelTotalCount;
 
-    VGBVoxelData_SVOPG voxelData = VGBs[VGBIndex][voxelIndex];
+    VGBVoxelData_FzbPG voxelData = VGBs[VGBIndex][voxelIndex];
     VSout_Cube output;
     if (voxelData.irradiance.w == 0.0f || VGBIndex != pushConst.normalIndex) output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
     else {
@@ -394,15 +393,24 @@ VSout_Cube vertexMain_Cube(uint vertexIndex: SV_VertexID, int instanceIndex: SV_
         output.sv_position = mul(float4(output.worldPos.xyz, 1.0f), sceneInfo.viewProjMatrix);
         output.color = voxelData.irradiance.xyz / voxelData.irradiance.w;
     }
-    //if (instanceIndex == 5246) {
-    //    output.worldPos.x = ((vertexIndex & 3) * 2) % 6 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.x) : OrderedIntToFloat(voxelData.aabbI.maximum.x);
-    //    output.worldPos.y = (vertexIndex & 3) <= 1 ? OrderedIntToFloat(voxelData.aabbI.minimum.y) : OrderedIntToFloat(voxelData.aabbI.maximum.y);
-    //    output.worldPos.z = vertexIndex / 4 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.z) : OrderedIntToFloat(voxelData.aabbI.maximum.z);
-    //
-    //    SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
-    //    output.sv_position = mul(float4(output.worldPos.xyz, 1.0f), sceneInfo.viewProjMatrix);
-    //    output.color = float3(1.0f, 0.0f, 0.0f);
-    //}
+    if (voxelIndex >= 160 && voxelIndex <= 167 && VGBIndex == 5) {
+        output.worldPos.x = ((vertexIndex & 3) * 2) % 6 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.x) : OrderedIntToFloat(voxelData.aabbI.maximum.x);
+        output.worldPos.y = (vertexIndex & 3) <= 1 ? OrderedIntToFloat(voxelData.aabbI.minimum.y) : OrderedIntToFloat(voxelData.aabbI.maximum.y);
+        output.worldPos.z = vertexIndex / 4 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.z) : OrderedIntToFloat(voxelData.aabbI.maximum.z);
+    
+        SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+        output.sv_position = mul(float4(output.worldPos.xyz, 1.0f), sceneInfo.viewProjMatrix);
+        output.color = float3(1.0f, 0.0f, 0.0f);
+    }
+    if (voxelIndex >= 152 && voxelIndex <= 159 && VGBIndex == 5) {
+        output.worldPos.x = ((vertexIndex & 3) * 2) % 6 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.x) : OrderedIntToFloat(voxelData.aabbI.maximum.x);
+        output.worldPos.y = (vertexIndex & 3) <= 1 ? OrderedIntToFloat(voxelData.aabbI.minimum.y) : OrderedIntToFloat(voxelData.aabbI.maximum.y);
+        output.worldPos.z = vertexIndex / 4 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.z) : OrderedIntToFloat(voxelData.aabbI.maximum.z);
+
+        SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+        output.sv_position = mul(float4(output.worldPos.xyz, 1.0f), sceneInfo.viewProjMatrix);
+        output.color = float3(0.0f, 1.0f, 0.0f);
+    }
 
     return output;
 }

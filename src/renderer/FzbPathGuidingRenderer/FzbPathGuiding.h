@@ -2,7 +2,7 @@
 
 #include "renderer/PathTracingRenderer/hard/PathTracingRenderer.h"
 #include "./FzbPathGuidingShaderio.h"
-#include <renderer/SVOPathGuidingRenderer/hard/RasterVoxelization/RasterVoxelizationSVOPG.h>
+#include "RasterVoxelization/RasterVoxelization_FzbPG.h"
 #include "LightInject/LightInject_FzbPG.h"
 #include "Octree/Octree_FzbPG.h"
 
@@ -32,7 +32,7 @@ public:
 
 	void pathGuiding(VkCommandBuffer cmd);
 private:
-	std::shared_ptr<RasterVoxelization_SVOPG> rasterVoxelization;
+	std::shared_ptr<RasterVoxelization_FzbPG> rasterVoxelization;
 	std::shared_ptr<LightInject_FzbPG> lightInject;
 	std::shared_ptr<Octree_FzbPG> octree;
 

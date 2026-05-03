@@ -59,10 +59,11 @@ public:
 	nvvk::Buffer indivisibleNodeInfosBuffer_G;
 	nvvk::Buffer indivisibleNodeInfosBuffer_E;
 
-	nvvk::Buffer octreeNodePairVisibleDataBuffer;
 	nvvk::Buffer octreeNodePairWeightBuffer;
 
 	nvvk::Buffer nearbyNodeInfoBuffer;
+
+	nvvk::Buffer octreeNodePairDataBuffer;
 private:
 	OctreeCreateInfo_FzbPG setting;
 
@@ -72,12 +73,15 @@ private:
 	nvvk::Buffer hasDataBlockIndexBuffer_E;
 	nvvk::Buffer hasDataBlockCountBuffer;
 
-	nvvk::Buffer divisibleNodeInfoBuffer_G;		//每层可细分节点的索引
+	nvvk::Buffer divisibleNodeInfoBuffer_G;	
 	nvvk::Buffer threadGroupInfoBuffer;
 
-	nvvk::Buffer octreeNodePairEBuffer;
-
 	nvvk::Buffer nearbyNodeTempInfoBuffer;
+
+	nvvk::Buffer partialHitNodePairCountBuffer;		//部分命中的子节点的数量
+	nvvk::Buffer partialHitNodePairTempDataBuffer;	//部分命中的节点的子节点的权重
+	nvvk::Buffer hitTestNodePairCountBuffer;
+	nvvk::Buffer hitTestNodePairInfoBuffer;		//部分命中的子节点的信息
 
 	VkShaderEXT computeShader_initOctreeArray{};
 	VkShaderEXT computeShader_initHasDataBlockInfo{};
@@ -92,7 +96,6 @@ private:
 
 	VkShaderEXT computeShader_initWeights{};
 	VkShaderEXT computeShader_octreeNodeHitTest{};
-	VkShaderEXT computeShader_visibleAABBCluster{};
 	VkShaderEXT computeShader_getProbability{};
 
 	VkShaderEXT computeShader_getNearbyNodes1{};
