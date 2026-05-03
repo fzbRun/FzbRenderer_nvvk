@@ -6,10 +6,10 @@
 	<renderer type = "FzbPathGuiding">  <!--FzbPathGuiding SVOPathGuiding PathTracing  Deferred-->
 		<maxDepth value = "4" />
 		<useNEE value = "true" />
-		<spp value = "1" />
+		<spp value = "6" />
 		<RasterVoxelization>
 			<resolution value = "256, 256" />
-			<voxelCount value="16" />
+			<voxelCount value="8" />
 		</RasterVoxelization>
 		<LightInject>
 		</LightInject>

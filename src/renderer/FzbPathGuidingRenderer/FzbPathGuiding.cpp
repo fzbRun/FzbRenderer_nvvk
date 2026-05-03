@@ -22,7 +22,7 @@ FzbPathGuidingRenderer::FzbPathGuidingRenderer(pugi::xml_node& rendererNode) {
 	//if (pugi::xml_node weightNode = rendererNode.child("Weight"))
 	//	weight = std::make_shared<FzbRenderer::Weight_FzbPG>(weightNode);
 }
-void FzbPathGuidingRenderer::FzbPathGuidingRenderer::init() {
+void FzbPathGuidingRenderer::init() {
 	ptContext.getRayTracingPropertiesAndFeature();
 	asManager.init();
 	sbtGenerator.init(Application::app->getDevice(), ptContext.rtProperties);

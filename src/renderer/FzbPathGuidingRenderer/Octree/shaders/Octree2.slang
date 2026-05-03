@@ -437,9 +437,7 @@ void computeMain_createOctreeArray2(uint threadIndex: SV_DispatchThreadID, uint 
             ClusterlayerDataBuffer_E[threadIndex] = nodeData_E;
         }
     }
-
 }
-
 //----------------------------------------------getNodePairData-------------------------------------------------
 [numthreads(INITWEIGHT_CS_THREADGROUP_SIZE, 1, 1)]
 [shader("compute")]
@@ -687,18 +685,18 @@ void computeMain_octreeNodeHitTest(uint threadIndex: SV_DispatchThreadID, uint t
         }
         groupHitPayloads[hitTestIndex] = hitPayload;
 
-        bool printfAble = pushConst.frameIndex == 2;
-        printfAble &= nodeLabel_G == 48;
-        printfAble &= nodeLabel_E == 15;
-        if (printfAble) {
-            printf("childLabel: %d, hitTestIndex: %d, hit: %f\nsamplePoint_E: %f %f %f  samplePoint_G: %f %f %f\nchildNodeAabb: %f %f %f %f %f %f\n\n",
-                   childNodeLabel, hitTestIndex % HITTEST_COUNT_PER_CHILDNODE_FZBPG, hitPayload.hit,
-                   samplePoint_E.x, samplePoint_E.y, samplePoint_E.z,
-                   samplePoint_G.x, samplePoint_G.y, samplePoint_G.z,
-                   childNodeInfo_E.aabb.minimum.x, childNodeInfo_E.aabb.minimum.y, childNodeInfo_E.aabb.minimum.z,
-                   childNodeInfo_E.aabb.maximum.x, childNodeInfo_E.aabb.maximum.y, childNodeInfo_E.aabb.maximum.z,
-            );
-        }
+        //bool printfAble = pushConst.frameIndex == 1;
+        //printfAble &= nodeLabel_G == 48;
+        //printfAble &= nodeLabel_E == 15;
+        //if (printfAble) {
+        //    printf("childLabel: %d, hitTestIndex: %d, hit: %f, E: %f\nsamplePoint_E: %f %f %f  samplePoint_G: %f %f %f\nchildNodeAabb: %f %f %f %f %f %f\n\n",
+        //           childNodeLabel, hitTestIndex % HITTEST_COUNT_PER_CHILDNODE_FZBPG, hitPayload.hit, childNodeInfo_E.E,
+        //           samplePoint_E.x, samplePoint_E.y, samplePoint_E.z,
+        //           samplePoint_G.x, samplePoint_G.y, samplePoint_G.z,
+        //           childNodeInfo_E.aabb.minimum.x, childNodeInfo_E.aabb.minimum.y, childNodeInfo_E.aabb.minimum.z,
+        //           childNodeInfo_E.aabb.maximum.x, childNodeInfo_E.aabb.maximum.y, childNodeInfo_E.aabb.maximum.z,
+        //    );
+        //}
     }
     GroupMemoryBarrierWithGroupSync();
     if (groupThreadIndex >= threadCount_currentThreadGroup) return;
@@ -777,6 +775,13 @@ void computeMain_octreeNodeHitTest(uint threadIndex: SV_DispatchThreadID, uint t
         }
         weight *= groupChildNodeInfos_E[childNodeLabel].E / HITTEST_COUNT_PER_CHILDNODE_FZBPG;
         weightSum += weight;
+
+        //bool printfAble = pushConst.frameIndex == 1;
+        //printfAble &= currentGroupNodeStartLabel_G + nodeLocalIndex_G == 48;
+        //printfAble &= nodeLabel_E == 15;
+        //if (printfAble) {
+        //    printf("weight: %f\n", weightSum);
+        //}
     }
     if (weightSum > 0.0f) {
         uint nodeLabel_G = currentGroupNodeStartLabel_G + nodeLocalIndex_G;
@@ -1342,17 +1347,22 @@ VSout_OctreeNodePairHitTestResult vertexMain_OctreeNodePairHitTestResult(uint ve
             nodeIndex_E /= 8;
         }
 
-        //if (pushConst.frameIndex == 1 && vertexIndex == 0){
-        //    printf("nodeIndex_E: %d\naabb: %f %f %f %f %f %f\nnodePdf: %f, layerPdf: %f\n\n",
-        //           IndivisibleNodeInfoBuffer_E[instanceIndex],
-        //           nodeAABB.minimum.x, nodeAABB.minimum.y, nodeAABB.minimum.z,
-        //           nodeAABB.maximum.x, nodeAABB.maximum.y, nodeAABB.maximum.z,
-        //           nodePdf, layerPdf
-        //    );
-        //}
+        bool printfAble = pushConst.frameIndex == 1;
+        printfAble &= vertexIndex == 0;
+        printfAble &= nodeLabel_G == 48;
+        printfAble &= outgoingIndex == 12;
+        printfAble &= nodeLabel_E == 15;
+        if (printfAble){
+            printf("nodeIndex_E: %d\naabb: %f %f %f %f %f %f\nnodePdf: %f, layerPdf: %f\n\n",
+                   IndivisibleNodeInfoBuffer_E[instanceIndex],
+                   nodeAABB.minimum.x, nodeAABB.minimum.y, nodeAABB.minimum.z,
+                   nodeAABB.maximum.x, nodeAABB.maximum.y, nodeAABB.maximum.z,
+                   nodePdf, layerPdf
+            );
+        }
 
         float pdf = layerPdf * nodePdf;
-        output.color = float4(0.0f, pdf * 100.0f, 0.0f, 1.0f);
+        output.color = float4(0.0f, pdf * 10.0f, 0.0f, 1.0f);
     }
     if (nodeAABB.minimum.x > 1e10f) return output;
 

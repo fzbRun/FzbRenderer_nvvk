@@ -74,15 +74,19 @@ void computeMain_getNearbyNodes1(uint threadIndex: SV_DispatchThreadID, uint thr
     float distance = AABBDistance(indivisibleNodeData.aabb, nearbyNodeData.aabb);
     // float cosine = dot(indivisibleNodeData.normal, normalize(nearbyNodeData.meanNormal.xyz));
     // distance *= cosine < 0.707f ? 100000.0f : (1.1f - cosine);
-    distance += nearbyNormalIndex == indivisibleNodeData.normalIndex ? 0.0f : 10000.0f;
+    distance += nearbyNormalIndex == indivisibleNodeData.normalIndex ? 0.0f : 1e10f;
     #ifdef GEOMETRY_CLUSTER_WITH_E
     distance *= (1.1f - (min(indivisibleNodeData.E, nearbyNodeData.E) / max(indivisibleNodeData.E, nearbyNodeData.E)));
     #endif
 
     if (indivisibleNodeLabel == nearbyNodeLabel) distance = 1e30f;
 
+    if (pushConst.frameIndex == 1 && indivisibleNodeLabel == 149) {
+        printf("nearbyNodeLabel: %d, distance: %f\n", nearbyNodeLabel, distance);
+    }
+
     uint remainingThreadCount = indivisibleNodeCount - (threadGroupCount_perIndivisibleNode - 1) * GETNEARBYNODES_CS_THREADGROUP_SIZE;
-    uint warpCount = (threadGroupIndex % threadGroupCount_perIndivisibleNode) == 0 ? (remainingThreadCount + 31) / 32 : GETNEARBYNODES_CS_THREADGROUP_SIZE / 32;
+    uint warpCount = (threadGroupIndex % threadGroupCount_perIndivisibleNode) == threadGroupCount_perIndivisibleNode - 1 ? (remainingThreadCount + 31) / 32 : GETNEARBYNODES_CS_THREADGROUP_SIZE / 32;
     uint warpLane = groupThreadIndex & 31;
     uint warpIndex = groupThreadIndex / 32;
 
@@ -110,7 +114,7 @@ void computeMain_getNearbyNodes1(uint threadIndex: SV_DispatchThreadID, uint thr
                 float other_warpMinDistance = groupWarpMinDistances[j];
                 if (other_warpMinDistance == groupMinDistance) {
                     if (i + groupMinDistanceCount >= NEARBY_NODE_COUNT_FZBPG) break;
-                    groupNearbyNodeInfos[i + groupMinDistanceCount] = groupWarpMinDistanceNodeInfos[j];   //should get minDistance node's nodeInfo
+                    groupNearbyNodeInfos[i + groupMinDistanceCount] = groupWarpMinDistanceNodeInfos[j];
                     groupNearbyNodeDistances[i + groupMinDistanceCount] = groupMinDistance;
                     ++groupMinDistanceCount;
                 }
@@ -130,6 +134,13 @@ void computeMain_getNearbyNodes1(uint threadIndex: SV_DispatchThreadID, uint thr
             NearbyNodeTempInfoBuffer[infoIndex].nodeLabel = indivisibleNodeLabel;
             NearbyNodeTempInfoBuffer[infoIndex].nearbyNodeInfos = groupNearbyNodeInfos;
             NearbyNodeTempInfoBuffer[infoIndex].nearbyNodeDistances = groupNearbyNodeDistances;
+
+            //if (pushConst.frameIndex == 1) {
+            //    printf("nearbyNodeIndex: 0, distance: %f, nodeInfo: %d %d, nearbyNodeIndex: 1, distance: %f,  nodeInfo: %d %d\n",
+            //           NearbyNodeTempInfoBuffer[infoIndex].nearbyNodeDistances[0], NearbyNodeTempInfoBuffer[infoIndex].nearbyNodeInfos[0].x, NearbyNodeTempInfoBuffer[infoIndex].nearbyNodeInfos[0].y,
+            //           NearbyNodeTempInfoBuffer[infoIndex].nearbyNodeDistances[1], NearbyNodeTempInfoBuffer[infoIndex].nearbyNodeInfos[1].x, NearbyNodeTempInfoBuffer[infoIndex].nearbyNodeInfos[1].y,
+            //    );
+            //}
         }
         if (threadIndex == 0) {
             DispatchIndirectCommand cmd2;

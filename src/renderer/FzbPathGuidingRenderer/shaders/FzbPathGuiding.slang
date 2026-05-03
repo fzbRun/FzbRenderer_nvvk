@@ -214,7 +214,6 @@ bool getNodeAABB_E_FzbPG(inout AABB aabb, inout HitPayload_FzbPG payload, inout 
     float distance = getDistanceToAABB(hitPos, nodeData_G.aabb);
     float cosine = dot(payload.hitNormal, normalize(nodeData_G.meanNormal.xyz));
     distance *= cosine < 0.707f ? 100000.0f : (1.1f - cosine);
-    //distance *= 0.1f;
     weights[0] = 1.0f / max(distance, 1e-16f);
     float weightSum = weights[0];
 
@@ -228,9 +227,6 @@ bool getNodeAABB_E_FzbPG(inout AABB aabb, inout HitPayload_FzbPG payload, inout 
         distance = getDistanceToAABB(hitPos, nearbyNodeData.aabb);
         cosine = dot(payload.hitNormal, normalize(nearbyNodeData.meanNormal.xyz));
         distance *= cosine < 0.707f ? 100000.0f : (1.1f - cosine);
-        //#ifdef GEOMETRY_CLUSTER_WITH_E
-        //distance *= 1.1f - (min(nodeData_G.E, nearbyNodeData.E) / max(nodeData_G.E, nearbyNodeData.E));
-        //#endif
         weights[nearbyNodeCount + 1] = 1.0f / max(distance, 1e-16f);
 
         weightSum += weights[nearbyNodeCount + 1];
@@ -299,11 +295,15 @@ bool getNodeAABB_E_FzbPG(inout AABB aabb, inout HitPayload_FzbPG payload, inout 
     nodeEPdf *= nodeInfo_E.pdf;
     #endif
 
-
-    //if (pushConst.frameIndex == 1 && all(threadIndex == uint2(735, 2))) {
-    //    printf("nodeLabel_G: %d, nodeLabel_E: %d\, nodeIndex_E: %d\npgSample_pgPdf: %f, nodePairData.pdf: %f,   jitterPdf: %f\n\n",
-    //           nodeLabel_G, nodeInfo_E.label - 1, nodeIndex_E,
-    //           nodeEPdf, nodeInfo_E.pdf, jitterPdf
+    //bool printffAble = pushConst.frameIndex == 1;
+    //printfAble &= nodeLabel_G == 149;
+    //printfAble &= outgoingIndex == 28;
+    //if (printffAble) {
+    //    printf("nodeIndex_E: %d\nlayerPdf: %f, nodePairPdf: %f\naabb: %f %f %f %f %f %f\n\n",
+    //           nodeIndex_E,
+    //           nodeEPdf / max(nodePairData.pdf, 1e-16f), nodePairData.pdf,
+    //           aabb.minimum.x, aabb.minimum.y, aabb.minimum.z,
+    //           aabb.maximum.x, aabb.maximum.y, aabb.maximum.z,
     //        );
     //}
 
@@ -458,6 +458,8 @@ float getPgPdf(uint nodeLabel_G, uint outgoingIndex, float3 hitPos, float3 hitNo
             pg_Pdf /= solidAngleSum;
         }
     }
+
+    #undef aabb_getPgPdf
     return pg_Pdf;
 }
 //---------------------------------------------PathGuiding-----------------------------------------
