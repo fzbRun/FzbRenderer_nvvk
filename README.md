@@ -21,6 +21,8 @@
 - **光栅体素化**
   - 三视图、体素结果以及线框结果可视化（如图）
     <img src="./result/rasterVoxelization_dragon.png" alt="FzbRenderer_nvvk" style="width:80%; border-radius:6px; display:block;" />
+- **动态实例**
+  - 利用 rayTracing pipeline 的运动模糊扩展加速周期运动的实例的 AS 创建与更新(nvida 显卡 30 系列及以上)
 
 ## 快速开始
 
