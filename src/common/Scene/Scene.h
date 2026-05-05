@@ -39,6 +39,7 @@ public:
 	std::shared_ptr<nvutils::CameraManipulator> cameraManip{ std::make_shared<nvutils::CameraManipulator>() };
 	bool cameraChange = false;
 	
+	bool isStaticScene = true;
 	std::vector<FzbRenderer::MeshSet> meshSets;
 	uint32_t staticInstanceCount = 0;
 	std::vector<InstanceSet> staticInstanceSets;

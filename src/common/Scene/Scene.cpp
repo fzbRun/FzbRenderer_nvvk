@@ -159,6 +159,8 @@ void FzbRenderer::Scene::createSceneFromXML() {
 		instanceSet.getInstance(instances, offset, 0);
 		offset += instanceSet.childInstances.size();
 	}
+
+	isStaticScene = instances.size() == staticInstanceCount;
 	//------------------------------------------------¹âÔ´---------------------------------------------------------------
 	if (pugi::xml_node lightsNode = sceneInfoNode.child("lights")) {
 		sceneInfo.useSky = false;
@@ -170,7 +172,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 
 		sceneInfo.numLights = 0;
 		for (pugi::xml_node lightNode : lightsNode.children("light")) {
-			++sceneInfo.numLights;
+			if (sceneInfo.numLights > LIGHT_COUNT) break;
 
 			LightInstance lightInstance = LightInstance(lightNode);
 			lightInstances.push_back(lightInstance);
@@ -234,8 +236,12 @@ void FzbRenderer::Scene::createSceneFromXML() {
 			}
 			else if (lightType == "direction") {
 				light.type = shaderio::Direction;
+				light.pos = FzbRenderer::getRGBFromString(lightNode.child("pos").attribute("value").value());
 				light.direction = glm::normalize(FzbRenderer::getRGBFromString(lightNode.child("direction").attribute("value").value()));
 			}
+
+			sceneInfo.lights[sceneInfo.numLights] = light;
+			++sceneInfo.numLights;
 		}
 	}
 

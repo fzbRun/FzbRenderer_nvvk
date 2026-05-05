@@ -81,10 +81,6 @@ void computeMain_getNearbyNodes1(uint threadIndex: SV_DispatchThreadID, uint thr
 
     if (indivisibleNodeLabel == nearbyNodeLabel) distance = 1e30f;
 
-    if (pushConst.frameIndex == 1 && indivisibleNodeLabel == 149) {
-        printf("nearbyNodeLabel: %d, distance: %f\n", nearbyNodeLabel, distance);
-    }
-
     uint remainingThreadCount = indivisibleNodeCount - (threadGroupCount_perIndivisibleNode - 1) * GETNEARBYNODES_CS_THREADGROUP_SIZE;
     uint warpCount = (threadGroupIndex % threadGroupCount_perIndivisibleNode) == threadGroupCount_perIndivisibleNode - 1 ? (remainingThreadCount + 31) / 32 : GETNEARBYNODES_CS_THREADGROUP_SIZE / 32;
     uint warpLane = groupThreadIndex & 31;

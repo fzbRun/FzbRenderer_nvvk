@@ -370,6 +370,7 @@
 		<light type="direction" id="Light">
 			<emissive value = "1.0, 1.0, 1.0" />
 			<intensity value = "100.0" />
+			<pos value="-5.0, 0.5, 5.0" />
 			<direction value="1.0, -0.1, -1.0" />
 		</light>
 

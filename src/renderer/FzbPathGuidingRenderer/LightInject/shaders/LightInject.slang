@@ -275,10 +275,10 @@ void computeMain_LightInject(uint threadIndex: SV_DispatchThreadID, uint groupTh
     VGBNormal.z = ((normalIndex & 4u) >> 2) * plusMinusSign;
 
     LightInjectHitPayload payload;
-    for (int sampleIndex = 0; sampleIndex < LIGHTINJECT_SAMPLE_COUNT; ++sampleIndex) {
+    for (int sampleIndex = 0; sampleIndex < pushConst.sampleCount; ++sampleIndex) {
         payload.randomSeed = xxhash32(uint3(voxelIndex_atAll, pushConst.frameIndex, sampleIndex));
 
-        float3 sampleDir = fibSpherePoint(sampleIndex, LIGHTINJECT_SAMPLE_COUNT);
+        float3 sampleDir = fibSpherePoint(sampleIndex, pushConst.sampleCount);
         sampleDir = mul(sampleDir, pushConst.randomRotateMatrix);
         sampleDir = mul(sampleDir, voxelTBN);
         float3 samplePos = getAABBPoint(sampleDir, voxelAabbCenter, voxelAabbHalfSize) + 0.01f * sampleDir;
@@ -345,7 +345,7 @@ void computeMain_LightInject(uint threadIndex: SV_DispatchThreadID, uint groupTh
             }
         }
     }
-    accumulatedRadiance /= LIGHTINJECT_SAMPLE_COUNT;
+    accumulatedRadiance /= pushConst.sampleCount;
 
     // any(accumulatedRadiance > 0.0f)
     //if (pushConst.frameIndex == 1 && abs(voxelNormal.z - 1.0f) < 0.001f && voxelIndex == 1034) {
@@ -393,24 +393,15 @@ VSout_Cube vertexMain_Cube(uint vertexIndex: SV_VertexID, int instanceIndex: SV_
         output.sv_position = mul(float4(output.worldPos.xyz, 1.0f), sceneInfo.viewProjMatrix);
         output.color = voxelData.irradiance.xyz / voxelData.irradiance.w;
     }
-    if (voxelIndex >= 160 && voxelIndex <= 167 && VGBIndex == 5) {
-        output.worldPos.x = ((vertexIndex & 3) * 2) % 6 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.x) : OrderedIntToFloat(voxelData.aabbI.maximum.x);
-        output.worldPos.y = (vertexIndex & 3) <= 1 ? OrderedIntToFloat(voxelData.aabbI.minimum.y) : OrderedIntToFloat(voxelData.aabbI.maximum.y);
-        output.worldPos.z = vertexIndex / 4 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.z) : OrderedIntToFloat(voxelData.aabbI.maximum.z);
-    
-        SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
-        output.sv_position = mul(float4(output.worldPos.xyz, 1.0f), sceneInfo.viewProjMatrix);
-        output.color = float3(1.0f, 0.0f, 0.0f);
-    }
-    if (voxelIndex >= 152 && voxelIndex <= 159 && VGBIndex == 5) {
-        output.worldPos.x = ((vertexIndex & 3) * 2) % 6 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.x) : OrderedIntToFloat(voxelData.aabbI.maximum.x);
-        output.worldPos.y = (vertexIndex & 3) <= 1 ? OrderedIntToFloat(voxelData.aabbI.minimum.y) : OrderedIntToFloat(voxelData.aabbI.maximum.y);
-        output.worldPos.z = vertexIndex / 4 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.z) : OrderedIntToFloat(voxelData.aabbI.maximum.z);
-
-        SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
-        output.sv_position = mul(float4(output.worldPos.xyz, 1.0f), sceneInfo.viewProjMatrix);
-        output.color = float3(0.0f, 1.0f, 0.0f);
-    }
+    //if (voxelIndex >= 160 && voxelIndex <= 167 && VGBIndex == 5) {
+    //    output.worldPos.x = ((vertexIndex & 3) * 2) % 6 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.x) : OrderedIntToFloat(voxelData.aabbI.maximum.x);
+    //    output.worldPos.y = (vertexIndex & 3) <= 1 ? OrderedIntToFloat(voxelData.aabbI.minimum.y) : OrderedIntToFloat(voxelData.aabbI.maximum.y);
+    //    output.worldPos.z = vertexIndex / 4 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.z) : OrderedIntToFloat(voxelData.aabbI.maximum.z);
+    //
+    //    SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+    //    output.sv_position = mul(float4(output.worldPos.xyz, 1.0f), sceneInfo.viewProjMatrix);
+    //    output.color = float3(1.0f, 0.0f, 0.0f);
+    //}
 
     return output;
 }
