@@ -42,6 +42,7 @@ struct VSout
 {
     float3 worldPos : POSITION;
     float3 worldNormal : NORMAL;
+    float3 emissive;
 };
 
 struct GSout {
@@ -91,6 +92,7 @@ VSout vertexMain(uint vertexIndex: SV_VertexID)
     VSout output;
     output.worldPos = pos.xyz;
     output.worldNormal = normal;
+    output.emissive = sceneInfo.materials[instance.materialIndex].emissive;
 
     return output;
 }
@@ -199,6 +201,7 @@ struct GSout_ThreeView {
     nointerpolation uint viewportIndex : SV_ViewportArrayIndex;
     float3 worldPos : POSITION;
     float3 worldNormal : NORMAL;
+    float3 emissive;
 };
 struct PSout_ThreeView
 {
@@ -232,6 +235,7 @@ void geometryMain_ThreeView(
         output.worldPos = input[i].worldPos;
         output.sv_position = mul(float4(output.worldPos, 1.0f), pushConst.VP[viewIndex]);
         output.worldNormal = input[i].worldNormal;
+        output.emissive = input[i].emissive;
         outputStream.Append(output);
     }
     outputStream.RestartStrip();
@@ -313,7 +317,7 @@ VSout_Cube vertexMain_Cube(uint vertexIndex: SV_VertexID, int instanceIndex : SV
 
         SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
         //Slightly reduce the depth to prevent depth conflicts in subsequent wireframes
-        output.sv_position = mul(float4(output.worldPos.xy, output.worldPos.z * 0.99f, 1.0f), sceneInfo.viewProjMatrix);
+        output.sv_position = mul(float4(output.worldPos.xy, output.worldPos.z, 1.0f), sceneInfo.viewProjMatrix);
         output.color = normalize(max(voxelData.sumNormal_G.xyz / voxelData.sumNormal_G.w, 0.0f));
     }
     return output;

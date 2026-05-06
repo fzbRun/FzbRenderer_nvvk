@@ -681,3 +681,97 @@ nvutils::PrimitiveMesh FzbRenderer::MeshSet::createWireframe(float width, float 
 
 	return mesh;
 }
+nvutils::PrimitiveMesh FzbRenderer::MeshSet::createSphere(bool normal, bool texCoords, uint32_t sectorCount, uint32_t stackCount){
+	// 保证至少能构成一个球体
+	assert(sectorCount >= 3 && stackCount >= 2);
+
+	nvutils::PrimitiveMesh mesh;
+	const float radius = 1.0f;
+
+	// 预计算所有顶点的位置、法线、纹理坐标（单位球）
+	std::vector<glm::vec3> posArray;
+	std::vector<glm::vec3> nrmArray;
+	std::vector<glm::vec2> texArray;
+
+	for (uint32_t i = 0; i <= stackCount; ++i)
+	{
+		float theta = (float)i * glm::pi<float>() / stackCount; // 0 到 PI
+		float sinTheta = sin(theta);
+		float cosTheta = cos(theta);
+
+		for (uint32_t j = 0; j <= sectorCount; ++j)
+		{
+			float phi = (float)j * 2.0f * glm::pi<float>() / sectorCount; // 0 到 2*PI
+			float sinPhi = sin(phi);
+			float cosPhi = cos(phi);
+
+			// 球面位置
+			glm::vec3 pos = glm::vec3(
+				radius * sinTheta * cosPhi,
+				radius * cosTheta,
+				radius * sinTheta * sinPhi);
+			posArray.push_back(pos);
+			nrmArray.push_back(glm::normalize(pos));   // 单位球法线即位置
+			texArray.push_back(glm::vec2((float)j / sectorCount, (float)i / stackCount));
+		}
+	}
+
+	// 填充顶点数据（与原有逻辑一致，但直接使用 posArray 等）
+	mesh.vertices.clear();
+	mesh.vertices.reserve(posArray.size());
+	for (size_t i = 0; i < posArray.size(); ++i)
+	{
+		nvutils::PrimitiveVertex v;
+		v.pos = posArray[i];
+		if (normal)    v.nrm = nrmArray[i];
+		if (texCoords) v.tex = texArray[i];
+		mesh.vertices.push_back(v);
+	}
+
+	// 索引生成：顶部/底部扇形 + 中间四边形条带（修正绕序，消除退化三角形）
+	mesh.triangles.clear();
+	mesh.triangles.reserve(sectorCount * stackCount * 2); // 预估
+
+	const uint32_t stride = sectorCount + 1;          // 每行顶点数
+	const uint32_t northPoleIdx = 0;                  // 北极点（使用第一个顶点）
+	const uint32_t southPoleIdx = stackCount * stride; // 南极点（使用最后一行的第一个顶点）
+
+	// 顶部扇形（i = 0 ~ 1）
+	for (uint32_t j = 0; j < sectorCount; ++j)
+	{
+		uint32_t nextRowCur = stride + j;
+		uint32_t nextRowNext = stride + j + 1;
+		mesh.triangles.push_back({ { northPoleIdx, nextRowCur, nextRowNext } });
+	}
+
+	// 中间四边形环（i = 1 ~ stackCount-1）
+	for (uint32_t i = 1; i < stackCount - 1; ++i)
+	{
+		uint32_t curRow = i * stride;
+		uint32_t nextRow = (i + 1) * stride;
+		for (uint32_t j = 0; j < sectorCount; ++j)
+		{
+			uint32_t cur = curRow + j;
+			uint32_t next = cur + 1;
+			uint32_t curUp = nextRow + j;
+			uint32_t nextUp = nextRow + j + 1;
+
+			// 两个三角形，保持逆时针绕序（外表面可见）
+			mesh.triangles.push_back({ { cur, next, curUp } });
+			mesh.triangles.push_back({ { next, nextUp, curUp } });
+		}
+	}
+
+	// 底部扇形（i = stackCount-1 ~ stackCount）
+	{
+		uint32_t lastRow = (stackCount - 1) * stride;
+		for (uint32_t j = 0; j < sectorCount; ++j)
+		{
+			uint32_t cur = lastRow + j;
+			uint32_t next = lastRow + j + 1;
+			mesh.triangles.push_back({ { cur, next, southPoleIdx } });
+		}
+	}
+
+	return mesh;
+}

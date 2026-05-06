@@ -45,7 +45,7 @@ RasterVoxelization_FzbPG::RasterVoxelization_FzbPG(pugi::xml_node& featureNode) 
 }
 
 void RasterVoxelization_FzbPG::init() {
-	if (Application::sceneResource.isStaticScene) setting.resolution = { 2048, 2048 };
+	if (Application::sceneResource.isStaticScene) setting.resolution = { 4096, 4096 };
 #ifndef NDEBUG
 	Feature::createGBuffer(true, true, 2, setting.resolution);		//第一张图：threeView，多视口；第二张图：Cube；第三张图(后处理图)：wireframe	//不随窗口分辨率
 	//---------------------------------------------cube----------------------------------------
@@ -284,7 +284,7 @@ void RasterVoxelization_FzbPG::createVGBs() {
 
 		//放大一点，防止边界处的数据错误（比方说2个voxel，那么右边界的索引是2不是1;不然会导致2->0，0voxel本没有数据先有了数据）
 		glm::vec3 distance = setting.sceneSize * 1.1f;
-		float maxDistance = std::max(distance.x, std::max(distance.y, distance.z));
+		//float maxDistance = std::max(distance.x, std::max(distance.y, distance.z));
 		glm::vec3 center = (aabb.maximum + aabb.minimum) * 0.5f;
 		glm::vec3 minimum = center - distance * 0.5f;
 		glm::vec3 maximum = center + distance * 0.5f;

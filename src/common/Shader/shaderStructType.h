@@ -36,12 +36,14 @@ enum MaterialType {
 	Conductor = 1,
 	Dielectric = 2,
 	RoughConductor = 3,
-	RoughDielectric = 4
+	RoughDielectric = 4,
+	RoughPlastic = 5,
 };
 struct BSDFMaterial {
 	MaterialType type;
 
-	float3 albedo;
+	float3 albedo;				//diffuse: reflectance;  other: albedo_specualr
+	float3 albedo_diffuse;		//roughPlastic
 	float3 emissive;
 	float3 eta;
 	float roughness;

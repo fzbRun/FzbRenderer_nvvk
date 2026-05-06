@@ -1,0 +1,18 @@
+<scene>
+	<sensor type="perspective">
+		<fov value="35"/>
+		<transform type = "lookAt">
+			<matrix value="-0.999971 0.000344842 -0.00764602 0.0324209 -2.91047e-011 0.998984 0.045055 1.52673 0.00765379 0.0450537 -0.998955 4.88197 0 0 0 1" />
+		</transform>
+	</sensor>
+
+	<bsdfs>
+		<bsdf type="diffuse" id="LandscapeBSDF">
+			<albedoMap type = "texture">
+				<filename value="textures/landscape-with-a-lake.jpg" />
+				<filter_type value="bilinear" />
+			</albedoMap>
+		</bsdf>
+
+	</bsdfs>
+</scene>

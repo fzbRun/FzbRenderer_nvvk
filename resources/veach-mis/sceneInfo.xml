@@ -1,0 +1,152 @@
+<scene>
+	<sensor type="perspective">
+		<fov value="35"/>
+		<transform type="lookAt">
+			<matrix value="-4.37113e-008 0 -1 28.2792 0 1 0 3.5 1 0 -4.37113e-008 1.23612e-006 0 0 0 1" />
+			<eye value = "24.547, 6.028, -10.514" />
+			<center value = "22.431, 5.648, -10.512" />
+			<up value = "0.00000, 1.00000, 0.00000" />
+		</transform>
+	</sensor>
+	
+	<bsdfs>
+		<bsdf type="diffuse" id="DiffuseBSDF">
+			<albedo value="0.5, 0.5, 0.5" />
+		</bsdf>
+
+		<bsdf type="roughConductor" id="SmoothBSDF">
+			<roughness value="0.01" />
+			<specular_reflectance value="0.3, 0.3, 0.3" />
+			<eta value="0.200438, 0.924033, 1.10221" />
+			<k value="3.91295, 2.45285, 2.14219" />
+		</bsdf>
+
+		<bsdf type="roughConductor" id="GlossyBSDF">
+			<roughness value="0.05" />
+			<specular_reflectance value="0.3, 0.3, 0.3" />
+			<eta value="0.200438, 0.924033, 1.10221" />
+			<k value="3.91295, 2.45285, 2.14219" />
+		</bsdf>
+
+		<bsdf type="roughConductor" id="RoughBSDF">
+			<roughness value="0.1" />
+			<specular_reflectance value="0.3, 0.3, 0.3" />
+			<eta value="0.200438, 0.924033, 1.10221" />
+			<k value="3.91295, 2.45285, 2.14219" />
+		</bsdf>
+
+		<bsdf type="roughConductor" id="SuperRoughBSDF">
+			<roughness value="0.25" />
+			<specular_reflectance value="0.3, 0.3, 0.3" />
+			<eta value="0.200438, 0.924033, 1.10221" />
+			<k value="3.91295, 2.45285, 2.14219" />
+		</bsdf>
+
+		<bsdf type="diffuse" id="NullBSDF1">
+			<albedo value="0, 0, 0" />
+			<emissive value="7.59909, 7.59909, 7.59909" />
+		</bsdf>
+
+		<bsdf type="diffuse" id="NullBSDF2">
+			<albedo value="0, 0, 0" />
+			<emissive value="30.3964, 30.3964, 30.3964" />
+		</bsdf>
+
+		<bsdf type="diffuse" id="NullBSDF3">
+			<albedo value="0, 0, 0" />
+			<emissive value="3039.64, 3039.64, 3039.64" />
+		</bsdf>
+	</bsdfs>
+
+	<instances>
+		<instance id="Smooth">
+			<transform name="to_world">
+				<translate value ="2.0, 4.2, -15" />
+				<rotate value = "0, 0, -45" />
+				<scale value = "2.2, 0.25, 9" />
+			</transform>
+			<meshRef id="custom" type="cube" />
+			<materialRef id="SmoothBSDF"/>
+		</instance>
+
+		<instance id="Glossy">
+			<transform name="to_world">
+				<translate value ="4.7, 2.5, -15" />
+				<rotate value = "0, 0, -20" />
+				<scale value = "2.2, 0.25, 9" />
+			</transform>
+			<meshRef id="custom" type="cube" />
+			<materialRef id="GlossyBSDF"/>
+		</instance>
+
+		<instance id="Rough">
+			<transform name="to_world">
+				<translate value ="8.5, 1.81891, -15" />
+				<rotate value = "0, 0, -5" />
+				<scale value = "2.2, 0.25, 9" />
+			</transform>
+			<meshRef id="custom" type="cube" />
+			<materialRef id="RoughBSDF"/>
+		</instance>
+
+		<instance id="SuperRough">
+			<transform name="to_world">
+				<translate value ="12.0, 1.7, -15" />
+				<rotate value = "0, 0, 0" />
+				<scale value = "2.2, 0.25, 9" />
+			</transform>
+			<meshRef id="custom" type="cube" />
+			<materialRef id="SuperRoughBSDF"/>
+		</instance>
+
+		<instance id="Diffuse_0001">
+			<transform name="to_world">
+				<translate value ="-5, 0, -25" />
+				<rotate value = "90, 0, 0" />
+				<scale value = "30, 30, 30" />
+			</transform>
+			<meshRef id="custom" type="plane" />
+			<materialRef id="DiffuseBSDF"/>
+		</instance>
+
+		<instance id="Diffuse_0002">
+			<transform name="to_world">
+				<translate value ="-5, 0, 5" />
+				<rotate value = "0, 90, 0" />
+				<scale value = "30, 30, 30" />
+			</transform>
+			<meshRef id="custom" type="plane" />
+			<materialRef id="DiffuseBSDF"/>
+		</instance>
+
+		<instance id="Null_0001">
+			<transform name="to_world">
+				<translate value ="3.2, 6.0, -13" />
+				<rotate value = "0, 0, 0" />
+				<scale value = "1, 1, 1" />
+			</transform>
+			<meshRef id="custom" type="sphere" />
+			<materialRef id="NullBSDF1"/>
+		</instance>
+
+		<instance id="Null_0002">
+			<transform name="to_world">
+				<translate value ="3.2, 6.0, -10" />
+				<rotate value = "0, 0, 0" />
+				<scale value = "0.5, 0.5, 0.5" />
+			</transform>
+			<meshRef id="custom" type="sphere" />
+			<materialRef id="NullBSDF2"/>
+		</instance>
+
+		<instance id="Null_0003">
+			<transform name="to_world">
+				<translate value ="3.2, 6.0, -7" />
+				<rotate value = "0, 0, 0" />
+				<scale value = "0.05, 0.05, 0.05" />
+			</transform>
+			<meshRef id="custom" type="sphere" />
+			<materialRef id="NullBSDF3"/>
+		</instance>
+	</instances>
+</scene>

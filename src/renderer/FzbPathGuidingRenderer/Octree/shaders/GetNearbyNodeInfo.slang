@@ -220,11 +220,11 @@ VSout_nearby vertexMain_nearby(uint vertexIndex: SV_VertexID, int instanceIndex:
         uint2 sampleNodeInfo = IndivisibleNodeInfoBuffer_G[instanceIndex];
         nodeData = OctreeClusterDataBuffer_G[sampleNodeInfo.x - OCTREE_CLUSTER_LAYER_FZBPG][sampleNodeInfo.y];
 
-        if (vertexIndex == 0 && pushConst.frameIndex == 1) {
-            printf("sampleNode layerIndex: %d, sampleNodeIndex: %d\n", sampleNodeInfo.x, sampleNodeInfo.y);
-            for (int i = 0; i < NEARBY_NODE_COUNT_FZBPG; ++i)
-                printf("nearbyNode layerIndex: %d, nodeIndex: %d\n", nearbyNodeInfos[i].x, nearbyNodeInfos[i].y);
-        }
+        //if (vertexIndex == 0 && pushConst.frameIndex == 1) {
+        //    printf("sampleNode layerIndex: %d, sampleNodeIndex: %d\n", sampleNodeInfo.x, sampleNodeInfo.y);
+        //    for (int i = 0; i < NEARBY_NODE_COUNT_FZBPG; ++i)
+        //        printf("nearbyNode layerIndex: %d, nodeIndex: %d\n", nearbyNodeInfos[i].x, nearbyNodeInfos[i].y);
+        //}
 
         output.color = float4(1.0f, 0.0f, 0.0f, 1.0f);
     }

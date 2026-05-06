@@ -34,7 +34,7 @@ void ShadowMap::clean() {
 	vkDestroyShaderEXT(device, fragmentShader_pointLight, nullptr);
 
 #ifndef NDEBUG
-	vkFreeDescriptorSets(device, descriptorPool, uint32_t(uiDescriptorSets.size()), uiDescriptorSets.data());
+	if(descriptorPool) vkFreeDescriptorSets(device, descriptorPool, uint32_t(uiDescriptorSets.size()), uiDescriptorSets.data());
 	vkDestroyDescriptorSetLayout(device, descLayout, nullptr);
 	uiDescriptorSets.clear();
 	descLayout = VK_NULL_HANDLE;

@@ -46,7 +46,7 @@ private:
 
 #ifndef NDEBUG
 	std::vector<VkImageView>     uiImageViews{};
-	VkDescriptorPool descriptorPool{};
+	VkDescriptorPool descriptorPool = nullptr;
 	VkDescriptorSetLayout descLayout{};
 	std::vector<VkDescriptorSet> uiDescriptorSets{};
 

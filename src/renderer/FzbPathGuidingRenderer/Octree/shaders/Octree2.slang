@@ -1324,7 +1324,7 @@ VSout_OctreeNodePairHitTestResult vertexMain_OctreeNodePairHitTestResult(uint ve
         nodeAABB = nodeData_G.aabb;
         output.color = float4(1.0f, 0.0f, 0.0f, 1.0f);
 
-        if (pushConst.frameIndex == 1 && vertexIndex == 0) printf("outgongIndex: %d\n\n", outgoingIndex);
+        //if (pushConst.frameIndex == 1 && vertexIndex == 0) printf("outgongIndex: %d\n\n", outgoingIndex);
     } else {
         uint nodeLabel_E = instanceIndex;
         uint nodeIndex_E = IndivisibleNodeInfoBuffer_E[instanceIndex];

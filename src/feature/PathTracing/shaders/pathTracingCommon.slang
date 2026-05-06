@@ -850,7 +850,7 @@ void PopulateCallablePayload_RoughConductorMaterial(inout CallablePayload payloa
         G1_incidence,
         outgoing_tangentSpace,
         incidence_tangentSpace,
-                                     float2(roughness)
+        float2(roughness)
     );
     if (G2 <= 0.0f) {
         payload.bsdf = float3(0.0f);

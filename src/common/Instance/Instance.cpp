@@ -116,6 +116,9 @@ InstanceSet::InstanceSet(pugi::xml_node& instanceNode) {
 		std::string meshType = instanceNode.child("meshRef").attribute("type").value();
 		nvutils::PrimitiveMesh primitive;
 		if (meshType == "plane") primitive = FzbRenderer::MeshSet::createPlane(1, 1.0f, 1.0f);
+		else if(meshType == "cube") primitive = FzbRenderer::MeshSet::createCube(true, false);
+		else if(meshType == "sphere") primitive = FzbRenderer::MeshSet::createSphere(true, false, 36, 18);
+
 		meshSetID = "custom" + meshType + std::to_string(customMeshSetCount++);
 		customMeshSet = FzbRenderer::MeshSet(meshSetID, primitive);
 		scene.addMeshSet(customMeshSet);
