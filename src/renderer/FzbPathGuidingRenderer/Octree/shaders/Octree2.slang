@@ -76,6 +76,9 @@ void computeMain_initOctreeArray(uint threadIndex: SV_DispatchThreadID, uint gro
             nodeClusterData_E.E = length(voxelData.irradiance.xyz / voxelData.irradiance.w);
             nodeClusterData_E.meanNormal = nodeClusterData_G.meanNormal;    // voxelData.sumNormal_E / voxelData.sumNormal_E.w;
             nodeClusterData_E.aabb = nodeAabb;
+            #ifndef NDEBUG
+            nodeClusterData_E.irradiance = voxelData.irradiance.xyz / voxelData.irradiance.w;
+            #endif
 
             #ifdef GEOMETRY_CLUSTER_WITH_E
             nodeClusterData_G.E = nodeClusterData_E.E;
@@ -1212,11 +1215,14 @@ VSout_OctreeLayer vertexMain_OctreeLayer(uint vertexIndex: SV_VertexID, int inst
         nodeAABB = octreeData_E.aabb;
         invisible = octreeData_E.E > 0.0f;
 
-        uint nodeIndex_sample = IndivisibleNodeInfoBuffer_E[pushConst.sampleNodeLabel_E];
-        if (layerIndex == 0 && nodeIndex == nodeIndex_sample) {
-            output.debug_color = true;
-            output.color = float4(0.0f, 1.0f, 0.0f, 1.0f);
-        }
+        //uint nodeIndex_sample = IndivisibleNodeInfoBuffer_E[pushConst.sampleNodeLabel_E];
+        //if (layerIndex == 0 && nodeIndex == nodeIndex_sample) {
+        //    output.debug_color = true;
+        //    output.color = float4(0.0f, 1.0f, 0.0f, 1.0f);
+        //}
+
+        output.debug_color = true;
+        output.color = float4(octreeData_E.irradiance, 1.0f);
     }
 
     if (normalIndex != pushConst.normalIndex) invisible = 0;

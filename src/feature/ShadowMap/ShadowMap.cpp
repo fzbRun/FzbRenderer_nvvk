@@ -245,7 +245,9 @@ VkResult ShadowMap::createShadowMap() {
 		}
 	}
 	shadowMaps.resize(lightCount);
+#ifndef NDEBUG
 	uiImageViews.resize(lightCount);
+#endif
 	if (lightCount == 0) return VK_SUCCESS;
 
 	FzbRenderer::ImageCreateInfo createInfo = createDefaultImageCreateInfo();

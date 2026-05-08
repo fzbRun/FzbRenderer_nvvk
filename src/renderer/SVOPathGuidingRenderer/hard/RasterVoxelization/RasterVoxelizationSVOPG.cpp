@@ -240,7 +240,6 @@ void RasterVoxelization_SVOPG::render(VkCommandBuffer cmd) {
 		.pValues = &setting.pushConstant,
 	};
 	setting.pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
-	setting.pushConstant.frameIndex = Application::frameIndex;
 
 	clearVGB(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);

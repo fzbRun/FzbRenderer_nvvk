@@ -154,7 +154,7 @@ void LightInject_FzbPG::createDescriptorSetLayout() {
 	nvvk::DescriptorBindings bindings;
 	bindings.addBinding({ .binding = shaderio::StaticSetBindingPoints_PT::eTextures_PT,
 					 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-					 .descriptorCount = 10,
+					 .descriptorCount = std::max(uint32_t(Application::sceneResource.textures.size()), 1u),
 					 .stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
 			.binding = shaderio::StaticSetBindingPoints_PT::eOutImage_PT,

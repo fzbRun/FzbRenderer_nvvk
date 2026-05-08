@@ -1155,7 +1155,7 @@ void Octree_FzbPG::debug_Prepare() {
 #endif
 	Feature::createGBuffer(true, false, showMapCount);
 
-	pushConstant.sampleNodeLabel_G = 150;	// 49
+	pushConstant.sampleNodeLabel_G = 156;	// 49
 	pushConstant.sampleNodeLabel_E = 15;
 
 	for (int i = OCTREE_CLUSTER_LAYER_FZBPG; i < octreeMaxLayer; ++i)
@@ -1208,11 +1208,15 @@ void Octree_FzbPG::debug_OctreeLayer_Visualization(VkCommandBuffer cmd) {
 
 	vkCmdBeginRendering(cmd, &renderingInfo);
 
+	bool useWireframe = false;
+
 	graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
-	graphicsDynamicPipeline.inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;		//如果想使用虚线可以设置rasterizationLineState
-	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;
-	graphicsDynamicPipeline.rasterizationState.lineWidth = 2.0f;
-	graphicsDynamicPipeline.rasterizationState.polygonMode = VK_POLYGON_MODE_LINE;
+	if (useWireframe) {
+		graphicsDynamicPipeline.inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;		//如果想使用虚线可以设置rasterizationLineState
+		graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;
+		graphicsDynamicPipeline.rasterizationState.lineWidth = 2.0f;
+		graphicsDynamicPipeline.rasterizationState.polygonMode = VK_POLYGON_MODE_LINE;
+	}else graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
 	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_TRUE;
 	graphicsDynamicPipeline.depthStencilState.depthWriteEnable = VK_FALSE;
 
@@ -1240,15 +1244,15 @@ void Octree_FzbPG::debug_OctreeLayer_Visualization(VkCommandBuffer cmd) {
 	VkVertexInputAttributeDescription2EXT attributeDescription = {};
 	vkCmdSetVertexInputEXT(cmd, 0, nullptr, 0, nullptr);
 
-	uint32_t wireframeMeshIndex = 0;
-	const shaderio::Mesh& mesh = scene.meshes[wireframeMeshIndex];
+	uint32_t meshIndex = useWireframe ? 0 : 1;
+	const shaderio::Mesh& mesh = scene.meshes[meshIndex];
 	const shaderio::TriangleMesh& triMesh = mesh.triMesh;
 
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 	pushConstant.normalIndex = RasterVoxelization_FzbPG::normalIndex;
 	vkCmdPushConstants2(cmd, &pushInfo);
 
-	uint32_t bufferIndex = scene.getMeshBufferIndex(wireframeMeshIndex);
+	uint32_t bufferIndex = scene.getMeshBufferIndex(meshIndex);
 	const nvvk::Buffer& v = scene.bDatas[bufferIndex];
 
 	vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(mesh.indexType));
@@ -1295,8 +1299,6 @@ void Octree_FzbPG::debug_OctreeIndivisibleNodes_Visualization(VkCommandBuffer cm
 	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;
 	graphicsDynamicPipeline.rasterizationState.lineWidth = 2.0f;
 	graphicsDynamicPipeline.rasterizationState.polygonMode = VK_POLYGON_MODE_LINE;
-	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_TRUE;
-	graphicsDynamicPipeline.depthStencilState.depthWriteEnable = VK_TRUE;
 
 	graphicsDynamicPipeline.cmdApplyAllStates(cmd);
 	graphicsDynamicPipeline.cmdSetViewportAndScissor(cmd, gBuffers.getSize());
@@ -1307,6 +1309,7 @@ void Octree_FzbPG::debug_OctreeIndivisibleNodes_Visualization(VkCommandBuffer cm
 	vkCmdSetVertexInputEXT(cmd, 0, nullptr, 0, nullptr);
 
 	uint32_t wireframeMeshIndex = 0;
+	uint32_t cubeMeshIndex = 1;
 	const shaderio::Mesh& mesh = scene.meshes[wireframeMeshIndex];
 	const shaderio::TriangleMesh& triMesh = mesh.triMesh;
 

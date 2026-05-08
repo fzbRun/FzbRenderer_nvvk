@@ -271,7 +271,7 @@ void SVOWeight::createDescriptorSetLayout() {
 	#ifndef NDEBUG
 	bindings.addBinding({ .binding = shaderio::StaticSetBindingPoints_PT::eTextures_PT,
 				 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-				 .descriptorCount = 10,
+				 .descriptorCount = uint32_t(Application::sceneResource.textures.size()),
 				 .stageFlags = VK_SHADER_STAGE_ALL });
 	#endif
 

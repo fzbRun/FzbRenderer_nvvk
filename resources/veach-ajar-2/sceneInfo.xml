@@ -2,9 +2,13 @@
 	<sensor type="perspective">
 		<fov value="60"/>
 		<transform type = "lookAt">
+			<!--
 			<matrix value="-0.137283 -0.0319925 -0.990015 6.05402 2.71355e-008 0.999478 -0.0322983 1.61647 0.990532 -0.00443408 -0.137213 -2.60652 0 0 0 1"/>
 			<eye value = "3.88, 1.38, -3.43" />
 			<center value = "2.88, 1.39, -3.5" />
+			-->
+			<eye value = "0.095, 1.303, -2.228" />
+			<center value = "-0.757, 1.204, -2.507" />
 			<up value = "0.00000, 1.00000, 0.00000" />
 		</transform>
 	</sensor>
@@ -51,7 +55,8 @@
 			<albedo value="0.247059, 0.168627, 0.0901961" />
 		</bsdf>
 		<bsdf type="diffuse" id="PictureFrameBSDF">
-			<albedo value="0.258824, 0.207843, 0.145098" />
+			<!--albedo value="0.258824, 0.207843, 0.145098" /-->
+			<albedo value="0.8, 0.8, 0.8" />
 		</bsdf>
 		<bsdf type="roughConductor" id="HingeBSDF">
 			<roughness value="0.1" />
@@ -61,6 +66,7 @@
 		<bsdf type="diffuse" id="Pot1BSDF">
 			<albedo value="0.8, 0.8, 0.8" />
 		</bsdf>
+		
 		<bsdf type="roughConductor" id="Pot2BSDF">
 			<roughness value="0.05" />
 			<albedo value="1, 0.481361449, 0.481361449" />
@@ -70,6 +76,12 @@
 			<int_ior value="1.5" />
 			<ext_Ior value="1.0" />
 		</bsdf>
+		<bsdf type="roughPlastic" id="Pot2BSDF_RoughPlastic">
+			<roughness value="0.05" />
+			<albedo value="1, 1, 1" />
+			<albedo_diffuse value="1.0, 0.48235294118, 0.48235294118" />
+		</bsdf>
+		
 		<bsdf type="roughConductor" id="Pot3BSDF">
 			<roughness value="0.01" />
 			<eta value="1.91, 1.31, 0.82" />
@@ -249,36 +261,51 @@
 
 		<instance>
 			<transform name="to_world">
-				<matrix value="-0.0757886 0 -0.0468591 -1.95645 0 0.0891049 0 0.648205 0.0468591 0 -0.0757886 -1.77687 0 0 0 1"/>
+				<!--matrix value="-0.0757886 0 -0.0468591 -1.95645 0 0.0891049 0 0.648205 0.0468591 0 -0.0757886 -1.77687 0 0 0 1"/-->
+				<translate value ="-1.95645, 0.648205, -1.77687" />
+				<rotate value = "0, 0, 0" />
+				<scale value = "0.0891049, 0.0891049, 0.0891049" />
 			</transform>
 			<meshRef id = "Pot" />
 			<materialRef id = "Pot1BSDF" />
 		</instance>
 		<instance>
 			<transform name="to_world">
-				<matrix value="-0.0757886 0 -0.0468591 -1.95645 0 0.0891049 0 0.648205 0.0468591 0 -0.0757886 -1.77687 0 0 0 1"/>
+				<!--matrix value="-0.0757886 0 -0.0468591 -1.95645 0 0.0891049 0 0.648205 0.0468591 0 -0.0757886 -1.77687 0 0 0 1"/-->
+				<translate value ="-1.95645, 0.648205, -1.77687" />
+				<rotate value = "0, 0, 0" />
+				<scale value = "0.0891049, 0.0891049, 0.0891049" />
 			</transform>
 			<meshRef id = "PotLid" />
 			<materialRef id = "Pot1BSDF" />
 		</instance>
 		<instance>
 			<transform name="to_world">
-				<matrix value="-0.0891049 0 7.7898e-009 -1.95645 0 0.0891049 0 0.648205 -7.7898e-009 0 -0.0891049 -2.67687 0 0 0 1"/>
+				<!--matrix value="-0.0891049 0 7.7898e-009 -1.95645 0 0.0891049 0 0.648205 -7.7898e-009 0 -0.0891049 -2.67687 0 0 0 1"/-->
+				<translate value ="-1.95645, 0.648205, -2.67687" />
+				<rotate value = "0, 0, 0" />
+				<scale value = "0.0891049, 0.0891049, 0.0891049" />
 			</transform>
 			<meshRef id = "Pot" />
-			<materialRef id = "Pot2BSDF" />
+			<materialRef id = "Pot2BSDF_RoughPlastic" />
 		</instance>
 		<instance>
 			<transform name="to_world">
-				<matrix value="-0.0891049 0 7.7898e-009 -1.95645 0 0.0891049 0 0.648205 -7.7898e-009 0 -0.0891049 -2.67687 0 0 0 1"/>
+				<!--matrix value="-0.0891049 0 7.7898e-009 -1.95645 0 0.0891049 0 0.648205 -7.7898e-009 0 -0.0891049 -2.67687 0 0 0 1"/-->
+				<translate value ="-1.95645, 0.648205, -2.67687" />
+				<rotate value = "0, 0, 0" />
+				<scale value = "0.0891049, 0.0891049, 0.0891049" />
 			</transform>
 			<meshRef id = "PotLid" />
-			<materialRef id = "Pot2BSDF" />
+			<materialRef id = "Pot2BSDF_RoughPlastic" />
 		</instance>
 
 		<instance>
 			<transform name="to_world">
-				<matrix value="-0.0837611 0 0.0303939 -1.95645 0 0.0891049 0 0.651268 -0.0303939 0 -0.0837611 -3.57687 0 0 0 1"/>
+				<!--matrix value="-0.0837611 0 0.0303939 -1.95645 0 0.0891049 0 0.651268 -0.0303939 0 -0.0837611 -3.57687 0 0 0 1"/-->
+				<translate value ="-1.95645, 0.648205, -3.57687" />
+				<rotate value = "0, 0, 0" />
+				<scale value = "0.0891049, 0.0891049, 0.0891049" />
 			</transform>
 			<meshRef id = "Pot" />
 			<materialRef id = "Pot3BSDF" />
@@ -299,11 +326,14 @@
 		</instance>
 		-->
 		<instance>
-				<transform name="to_world">
-					<matrix value="-0.083761 0 0.0303938 -1.95645 0 0.0891049 0 0.651268 -0.0303938 0 -0.083761 -3.57687 0 0 0 1"/>
-				</transform>
-				<meshRef id = "PotLid" />
-				<materialRef id = "Pot3BSDF" />
+			<transform name="to_world">
+				<!--matrix value="-0.0837611 0 0.0303939 -1.95645 0 0.0891049 0 0.651268 -0.0303939 0 -0.0837611 -3.57687 0 0 0 1"/-->
+				<translate value ="-1.95645, 0.648205, -3.57687" />
+				<rotate value = "0, 0, 0" />
+				<scale value = "0.0891049, 0.0891049, 0.0891049" />
+			</transform>
+			<meshRef id = "PotLid" />
+			<materialRef id = "Pot3BSDF" />
 		</instance>
 		<!--
 		<instance>
@@ -371,7 +401,7 @@
 			<emissive value = "1.0, 1.0, 1.0" />
 			<intensity value = "100.0" />
 			<pos value="-5.0, 0.5, 5.0" />
-			<direction value="1.0, -0.1, -1.0" />
+			<direction value="1.0, -0.133, -1.0" />
 		</light>
 
 	</lights>

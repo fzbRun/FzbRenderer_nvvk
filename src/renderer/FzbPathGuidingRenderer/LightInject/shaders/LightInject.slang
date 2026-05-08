@@ -383,7 +383,7 @@ VSout_Cube vertexMain_Cube(uint vertexIndex: SV_VertexID, int instanceIndex: SV_
 
     VGBVoxelData_FzbPG voxelData = VGBs[VGBIndex][voxelIndex];
     VSout_Cube output;
-    if (voxelData.irradiance.w == 0.0f || VGBIndex != pushConst.normalIndex) output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
+    if (voxelData.irradiance.w == 0.0f || VGBIndex != pushConst.normalIndex) output.sv_position = float4(2.0, 2.0, 2.0, 1.0); 
     else {
         output.worldPos.x = ((vertexIndex & 3) * 2) % 6 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.x) : OrderedIntToFloat(voxelData.aabbI.maximum.x);
         output.worldPos.y = (vertexIndex & 3) <= 1 ? OrderedIntToFloat(voxelData.aabbI.minimum.y) : OrderedIntToFloat(voxelData.aabbI.maximum.y);

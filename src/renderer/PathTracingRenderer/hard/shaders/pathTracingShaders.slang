@@ -147,3 +147,8 @@ void roughConductorMaterialMain(inout CallablePayload payload) {
 void roughDielectricMaterialMain(inout CallablePayload payload) {
     PopulateCallablePayload_RoughDielectricMaterial(payload);
 }
+
+[shader("callable")]
+void roughPlasticMaterialMain(inout CallablePayload payload) {
+    PopulateCallablePayload_RoughPlasticMaterial(payload);
+}

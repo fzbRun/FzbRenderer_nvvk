@@ -42,8 +42,9 @@ enum MaterialType {
 struct BSDFMaterial {
 	MaterialType type;
 
-	float3 albedo;				//diffuse: reflectance;  other: albedo_specualr
-	float3 albedo_diffuse;		//roughPlastic
+	//here is so mess, but I haven't time to change, stay behind
+	float3 albedo;				//diffuse: reflectance; roughPlastic: albedo_diffuse; other: albedo_specualr
+	float3 albedo_specular;		//only for roughPlastic
 	float3 emissive;
 	float3 eta;
 	float roughness;

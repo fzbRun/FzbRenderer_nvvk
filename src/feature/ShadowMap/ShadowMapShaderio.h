@@ -16,10 +16,10 @@ NAMESPACE_SHADERIO_BEGIN()
 //};
 struct ShadowMapPushConstant {
 	float4x4 lightVP;
+	int lightIndex;
 	int instanceIndex;
 	SceneInfo* sceneInfoAddress;
 #ifndef NDEBUG
-	int lightIndex;
 	float4x4 inverse_lightVP;
 	int frameIndex;
 #endif

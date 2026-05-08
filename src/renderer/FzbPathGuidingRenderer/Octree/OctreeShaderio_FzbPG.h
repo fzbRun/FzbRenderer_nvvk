@@ -6,8 +6,8 @@
 #ifndef FZBRENDERER_OCTREE_FZBPG_SHADERIO_H
 #define FZBRENDERER_OCTREE_FZBPG_SHADERIO_H
 
-#define MAX_OCTREE_LAYER_FZBPG 5
-#define IndivisibleNodeCount_G_FZBPG 1024
+#define MAX_OCTREE_LAYER_FZBPG 6
+#define IndivisibleNodeCount_G_FZBPG 1536
 
 NAMESPACE_SHADERIO_BEGIN()
 
@@ -22,6 +22,7 @@ struct OctreePushConstant_FzbPG {
 	uint32_t VGBVoxelTotalCount;
 	SceneInfo* sceneInfoAddress;
 	float frameIndex;
+	int maxFrameCount;
 	float4 VGBStartPos_Size;
 	float4 VGBVoxelSize;
 #ifndef NDEBUG
@@ -30,7 +31,6 @@ struct OctreePushConstant_FzbPG {
 	int sampleNodeLabel_G = 1;
 	int sampleNodeLabel_E = 1;
 	int showVisibleAABB = 1;
-	int maxFrameCount;
 #endif
 };
 
@@ -67,7 +67,7 @@ enum class BindingPoints_Octree_FzbPG : uint32_t {
 #define OCTREE_CLUSTER_LAYER_FZBPG 2		//don't change!!!!!
 #define OCTREE_NODECOUNT_E_FZBPG 440		//8 + 48 + 384
 #define CLUSTER_LAYER_NODECOUNT_E_FZBPG 384
-static const uint OctreeLayerNodeCount_FzbPG[MAX_OCTREE_LAYER_FZBPG] = { 8, 48, 384, 3072, 24576 };
+static const uint OctreeLayerNodeCount_FzbPG[MAX_OCTREE_LAYER_FZBPG] = { 8, 48, 384, 3072, 24576, 196608 };
 static const uint OctreeLayerStartIndex_FzbPG[3] = { 0, 8, 56 };
 
 struct OctreeNodeClusterData_G_FzbPG {
@@ -98,6 +98,9 @@ struct OctreeNodeClusterData_E_FzbPG {
 	float E;
 	float4 meanNormal;
 	AABB aabb;
+#ifndef NDEBUG
+	float3 irradiance;
+#endif
 };
 /*
 Octree_E is only 0 - OCTREE_CLUSTER_LAYER

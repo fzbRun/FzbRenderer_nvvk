@@ -403,3 +403,26 @@ void roughDielectricMaterialMain(inout CallablePayload payload) {
         }
     }
 }
+
+[shader("callable")]
+void roughPlasticMaterialMain(inout CallablePayload payload) {
+    PopulateCallablePayload_RoughPlasticMaterial(payload);
+
+    if (pushConst.HitTestShaderIndex > 0) {
+        uint lightNum = min(pushConst.sceneInfoAddress[0].numLights, NEE_MAX_SAMPLE_NUM);
+        for (int i = 0; i < lightNum; ++i) {
+            float3 radiance_nee = payload.radiance_nee[i];
+            if (radiance_nee.x + radiance_nee.y + radiance_nee.z < 0.001f) continue;
+
+            float3 sampleDir = payload.sampleDir_nee[i];
+            float3 bsdf = getBSDF_RoughtPlastic(payload.material.eta.x, payload.material.albedo, payload.material.albedo_specular, payload.material.roughness, sampleDir, payload.hitNormal, payload.outgoing, payload.TBN);
+            radiance_nee = radiance_nee * bsdf * max(dot(sampleDir, payload.hitNormal), 0.0f);
+
+            float pdf_directLightSample = payload.radiancePdf_nee[i];
+            float pdf_bsdfSample = getPdf_RoughPlastic(payload.material.albedo, payload.material.albedo_specular, payload.material.roughness, sampleDir, payload.hitNormal, payload.outgoing, payload.TBN);
+
+            radiance_nee /= (pdf_directLightSample + pdf_bsdfSample + 0.0001f);
+            payload.radianceSum_nee += radiance_nee;
+        }
+    }
+}

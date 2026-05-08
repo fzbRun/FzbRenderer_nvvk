@@ -238,7 +238,6 @@ void RasterVoxelization_FzbPG::render(VkCommandBuffer cmd) {
 		.pValues = &setting.pushConstant,
 	};
 	setting.pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
-	setting.pushConstant.frameIndex = Application::frameIndex;
 
 	clearVGB(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
@@ -331,7 +330,7 @@ void RasterVoxelization_FzbPG::createDescriptorSetLayout() {
 	nvvk::DescriptorBindings bindings;
 	bindings.addBinding({ .binding = (uint32_t)shaderio::RasterVoxelizationBindingPoints_FzbPG::eTextures,
 					 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-					 .descriptorCount = 10,
+					 .descriptorCount = std::max(uint32_t(Application::sceneResource.textures.size()), 1u),
 					 .stageFlags = VK_SHADER_STAGE_ALL },
 		VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
 		| VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);

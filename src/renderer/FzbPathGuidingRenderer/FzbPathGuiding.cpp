@@ -179,14 +179,14 @@ void FzbPathGuidingRenderer::render(VkCommandBuffer cmd) {
 
 	octree->render(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-
+	
 	pathGuiding(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-
+	
 	Renderer::postProcess(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
 		VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-
+	
 	if(renderStaticScene) shadowMap->postProcess(cmd);
 	rasterVoxelization->postProcess(cmd);
 	lightInject->postProcess(cmd);
@@ -201,7 +201,7 @@ void FzbPathGuidingRenderer::createDescriptorSetLayout() {
 	nvvk::DescriptorBindings bindings;
 	bindings.addBinding({ .binding = shaderio::StaticSetBindingPoints_PT::eTextures_PT,
 					 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-					 .descriptorCount = 10,
+					 .descriptorCount = std::max(uint32_t(Application::sceneResource.textures.size()), 1u),
 					 .stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
 			.binding = shaderio::StaticSetBindingPoints_PT::eOutImage_PT,

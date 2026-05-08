@@ -95,7 +95,7 @@ void FzbRenderer::PathTracingRenderer::createRayTracingDescriptorLayout() {
 	bindings.addBinding({ 
 			.binding = shaderio::StaticSetBindingPoints_PT::eTextures_PT,
 			.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-			.descriptorCount = 10,
+			.descriptorCount = std::max(uint32_t(Application::sceneResource.textures.size()), 1u),
 			.stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({	//分辨率变化的话就需要重新赋值
 			.binding = shaderio::StaticSetBindingPoints_PT::eOutImage_PT,
@@ -157,6 +157,7 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 		eCallable_DielectricMaterial,
 		eCallable_RoughConductorMaterial,
 		eCallable_RoughDielectricMaterial,
+		eCallable_RoughPlasticMaterial,
 		eShaderGroupCount
 	};
 	std::vector<VkPipelineShaderStageCreateInfo> stages(eShaderGroupCount);
@@ -215,6 +216,10 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 	stages[eCallable_RoughDielectricMaterial].pName = "roughDielectricMaterialMain";
 	stages[eCallable_RoughDielectricMaterial].stage = VK_SHADER_STAGE_CALLABLE_BIT_KHR;
 
+	stages[eCallable_RoughPlasticMaterial].pNext = &shaderCode;
+	stages[eCallable_RoughPlasticMaterial].pName = "roughPlasticMaterialMain";
+	stages[eCallable_RoughPlasticMaterial].stage = VK_SHADER_STAGE_CALLABLE_BIT_KHR;
+
 	std::vector<VkRayTracingShaderGroupCreateInfoKHR> shader_groups;	//表示光线追踪pipeline有几个阶段，光纤生成->打中/没打中
 	VkRayTracingShaderGroupCreateInfoKHR group{ VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR };
 	group.anyHitShader = VK_SHADER_UNUSED_KHR;
@@ -258,6 +263,9 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 	shader_groups.push_back(group);
 
 	group.generalShader = eCallable_RoughDielectricMaterial;
+	shader_groups.push_back(group);
+
+	group.generalShader = eCallable_RoughPlasticMaterial;
 	shader_groups.push_back(group);
 
 	const VkPushConstantRange push_constant{ VK_SHADER_STAGE_ALL, 0, sizeof(shaderio::PathTracingPushConstant) };

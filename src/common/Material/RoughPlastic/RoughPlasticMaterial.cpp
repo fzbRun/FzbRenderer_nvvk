@@ -22,9 +22,15 @@ void FzbRenderer::RoughPlasticMaterial::getMaterialInfoFromSceneInfoXML(
 			if (intIor == 0 || extIor == 0) LOGW("不允许折射率为0");
 
 			material.eta = glm::vec3(extIor / intIor);
-		}		
+		}
 	}
-	material.albedo = glm::vec3((material.eta - 1.0f) * (material.eta - 1.0f)) / ((material.eta + 1.0f) * (material.eta + 1.0f));
+
+	material.albedo_specular = glm::vec3(0.3f);
+	if (pugi::xml_node albedoNode = bsdfNode.child("albedo"))
+		material.albedo_specular = FzbRenderer::getRGBAFromString(albedoNode.attribute("value").value());
+
+	if(pugi::xml_node diffuseAlbedoNode = bsdfNode.child("albedo_diffuse")) 
+		material.albedo = FzbRenderer::getRGBFromString(diffuseAlbedoNode.attribute("value").value());
 
 	if (pugi::xml_node emissiveNode = bsdfNode.child("emissive"))
 		material.emissive = FzbRenderer::getRGBFromString(emissiveNode.attribute("value").value());
