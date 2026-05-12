@@ -93,6 +93,18 @@
 			<eta value="1.91, 1.31, 0.82" />
 			<k value="8.05, 6.93, 5.99" />
 		</bsdf>
+		<bsdf type="diffuse" id="LightBSDF">
+			<albedo value="0.0, 0.0, 0.0, 1.0" />
+			<emissive value="100, 100, 100" />
+		</bsdf>
+
+		<bsdf type="roughPlastic" id="dragonBSDF">
+			<roughness value="0.1" />
+			<int_ior value="1.5" />
+			<ext_Ior value="1.0" />
+			<albedo value="1, 1, 1" />
+			<albedo_diffuse value="1.0, 1.0, 1.0" />
+		</bsdf>
 	</bsdfs>
 	<meshes>
 		<mesh type="obj" id="PotLid">
@@ -148,6 +160,10 @@
 		</mesh>
 		<mesh type="obj" id="Diffuse_0005">
 			<filename value="models/Mesh014.obj" />
+		</mesh>
+
+		<mesh type="obj" id="dragon">
+			<filename value="models/dragon.obj" />
 		</mesh>
 	</meshes>
 	<instances>
@@ -302,11 +318,25 @@
 			<materialRef id = "Pot2BSDF_RoughPlastic" />
 		</instance>
 
+		<!--
 		<instance>
 			<transform name="to_world">
 				<translate value ="-1.95645, 0.648205, -3.57687" />
 				<rotate value = "0, 0, 0" />
 				<scale value = "0.0891049, 0.0891049, 0.0891049" />
+			</transform>
+			<meshRef id = "Pot" />
+			<materialRef id = "Pot3BSDF" />
+		</instance>
+		-->
+		<instance type="periodMotion">
+			<transform name="to_world">
+				<translate value ="-1.95645, 0.648205, -3.57687" />
+				<rotate value = "0, 0, 0" />
+				<scale value = "0.0891049, 0.0891049, 0.0891049" />
+				<period time="100">
+					<translate value = "1, 0, 0" />
+				</period>
 			</transform>
 			<meshRef id = "Pot" />
 			<materialRef id = "Pot3BSDF" />
@@ -322,6 +352,33 @@
 			<meshRef id = "PotLid" />
 			<materialRef id = "Pot3BSDF" />
 		</instance>
+
+		<instance type="periodMotion">
+			<transform name="to_world">
+				<translate value ="-2.0, 0.148205, -7" />
+				<rotate value = "0, 0, 0" />
+				<scale value = "0.0891049, 0.0891049, 0.0891049" />
+				<period time="100">
+					<translate value = "1, 0, 1" />
+				</period>
+			</transform>
+			<meshRef id = "dragon" />
+			<materialRef id = "dragonBSDF" />
+		</instance>
+
+		<instance id="Light" type="periodMotion">
+			<transform name="to_world">
+				<translate value ="0, 0, 0" />
+				<rotate value = "0, 0, 0" />
+				<scale value = "1, 1, 1" />
+				
+				<period time="100">
+					<rotate value = "0, 180, 0" />
+				</period>
+			</transform>
+			<meshRef id="custom" type="plane" />
+			<materialRef id="LightBSDF"/>
+		</instance>
 	</instances>
 
 	<lights>
@@ -332,6 +389,18 @@
 			<intensity value = "100.0" />
 			<pos value="-5.0, 0.5, 5.0" />
 			<direction value="1.0, -0.133, -1.0" />
+			<transform type="periodMotion">
+				<period time="100">
+					<rotate value = "0, 30, 0" />
+				</period>
+			</transform>
+		</light>
+
+		<light type="area" id="Light">
+			<emissive value = "1.0, 1.0, 1.0" />
+			<intensity value = "100.0" />
+			<SphericalRectangleSample value="true" />
+			<instanceRef id="Light"/>
 		</light>
 	</lights>
 </scene>

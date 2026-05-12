@@ -238,6 +238,9 @@ void FzbRenderer::Scene::createSceneFromXML() {
 				light.type = shaderio::Direction;
 				light.pos = FzbRenderer::getRGBFromString(lightNode.child("pos").attribute("value").value());
 				light.direction = glm::normalize(FzbRenderer::getRGBFromString(lightNode.child("direction").attribute("value").value()));
+
+				if (pugi::xml_node transformNode = lightNode.child("transform")) 
+					lightInstances[lightInstances.size() - 1].getTransformMatrixFromXML(transformNode);
 			}
 
 			sceneInfo.lights[sceneInfo.numLights] = light;

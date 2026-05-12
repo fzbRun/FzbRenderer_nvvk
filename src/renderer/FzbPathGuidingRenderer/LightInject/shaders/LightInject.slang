@@ -65,7 +65,6 @@ struct LightInjectHitPayload {
     float3 incidence;
 
     bool hitLight;
-    float3 lightSampleDir;
     float3 lightRadiance;
 }
 
@@ -186,50 +185,56 @@ bool traceRay_NEE(RayDesc ray, inout HitTestPayload payload) {
 }
 void initNEE(inout LightInjectHitPayload payload) {
     SceneInfo *sceneInfo = pushConst.sceneInfoAddress;
-    //uint lightNum = min(sceneInfo.numLights, NEE_MAX_SAMPLE_NUM);
+    uint lightCount = min(sceneInfo.numLights, 2);
     payload.lightRadiance = float3(0.0f);
 
-    Light light = sceneInfo.lights[0];
-    if (light.type == uint(LightType::Area)) {
-        Quadrilateral quad;
-        quad.startPos = light.pos;
-        quad.normal = light.direction;
-        quad.edge1 = light.edge1;
-        quad.edge2 = light.edge2;
-        float pdf = 1.0f;
-        payload.lightSampleDir = sphereRectangleSample(quad, payload.hitPos, rand(payload.randomSeed), rand(payload.randomSeed), pdf);
-        float distance = length(payload.lightSampleDir);
-        payload.lightSampleDir = normalize(payload.lightSampleDir);
+    for (int lightIndex = 0; lightIndex < lightCount; ++lightIndex) {
+        Light light = sceneInfo.lights[lightIndex];
+        if (light.type == uint(LightType::Area)) {
+            Quadrilateral quad;
+            quad.startPos = light.pos;
+            quad.normal = light.direction;
+            quad.edge1 = light.edge1;
+            quad.edge2 = light.edge2;
+            float pdf = 1.0f;
+            float3 lightSampleDir = sphereRectangleSample(quad, payload.hitPos, rand(payload.randomSeed), rand(payload.randomSeed), pdf);
+            float distance = length(lightSampleDir);
+            lightSampleDir = normalize(lightSampleDir);
 
-        if (isnan(pdf) || isinf(pdf)) return;
-        if (dot(-payload.lightSampleDir, light.direction) <= 0.001f) return;
-        if (dot(payload.lightSampleDir, payload.hitNormal) <= 0.001f) return;
+            if (isnan(pdf) || isinf(pdf)) return;
+            if (dot(-lightSampleDir, light.direction) <= 0.001f) return;
+            if (dot(lightSampleDir, payload.hitNormal) <= 0.001f) return;
 
-        RayDesc ray;
-        ray.TMin = 0.001;
-        ray.TMax = INFINITE;
-        ray.Origin = payload.hitPos + 0.0001f * payload.lightSampleDir;
-        ray.Direction = payload.lightSampleDir;
+            RayDesc ray;
+            ray.TMin = 0.001;
+            ray.TMax = INFINITE;
+            ray.Origin = payload.hitPos + 0.0001f * lightSampleDir;
+            ray.Direction = lightSampleDir;
 
-        HitTestPayload samplePayload;
-        if (traceRay_NEE(ray, samplePayload)) {
-            if (samplePayload.distance + 0.002f < distance) return;
-            payload.lightRadiance = light.color * light.intensity;
+            HitTestPayload samplePayload;
+            if (traceRay_NEE(ray, samplePayload)) {
+                if (samplePayload.distance + 0.002f < distance) return;
+
+                float cosineIN = dot(lightSampleDir, payload.hitNormal);
+                payload.lightRadiance += light.color * light.intensity * cosineIN;
+            }
+        } else if (light.type == uint(LightType::Direction)) {
+            float3 lightSampleDir = -light.direction;
+
+            if (dot(lightSampleDir, payload.hitNormal) <= 0.001f) return;
+
+            RayDesc ray;
+            ray.TMin = 0.001;
+            ray.TMax = INFINITE;
+            ray.Origin = payload.hitPos + 0.0001f * lightSampleDir;
+            ray.Direction = lightSampleDir;
+
+            HitTestPayload samplePayload;
+            if (!traceRay_NEE(ray, samplePayload)) {
+                float cosineIN = dot(lightSampleDir, payload.hitNormal);
+                payload.lightRadiance += light.color * light.intensity * cosineIN;
+            }
         }
-    } else if (light.type == uint(LightType::Direction)) {
-        payload.lightSampleDir = -light.direction;
-
-        if (dot(payload.lightSampleDir, payload.hitNormal) <= 0.001f) return;
-
-        RayDesc ray;
-        ray.TMin = 0.001;
-        ray.TMax = INFINITE;
-        ray.Origin = payload.hitPos + 0.0001f * payload.lightSampleDir;
-        ray.Direction = payload.lightSampleDir;
-
-        HitTestPayload samplePayload;
-        if (!traceRay_NEE(ray, samplePayload))
-            payload.lightRadiance = light.color * light.intensity;
     }
 }
 //----------------------------------------------LightInject--------------------------------------------
@@ -308,10 +313,7 @@ void computeMain_LightInject(uint threadIndex: SV_DispatchThreadID, uint groupTh
                 }
                 else {
                     initNEE(payload);
-                    if (any(payload.lightRadiance > 0.0f)) {
-                        float cosineIN = dot(payload.lightSampleDir, payload.hitNormal);
-                        radiance_nee = payload.lightRadiance * bsdf * cosineIN;
-                    }
+                    if (any(payload.lightRadiance > 0.0f)) radiance_nee = payload.lightRadiance * bsdf;
                 }
                 accumulatedRadiance += (payload.emissive + radiance_nee) * bsdf_cosine_pdf;
                 if(bounceDepth == 0 && any(payload.emissive > 0.0f)) accumulatedRadiance += payload.emissive * 10000.0f;
