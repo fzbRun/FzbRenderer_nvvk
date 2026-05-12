@@ -93,6 +93,13 @@ void FzbPathGuidingRenderer::uiRender() {
 				"Maximum Bounces depth");
 			PE::end();
 		}
+		ImGui::SeparatorText("SPP");
+		{
+			PE::begin();
+			UIModified |= PE::SliderInt("SPP", &pushConstant.spp, 1, 64, "%d", ImGuiSliderFlags_AlwaysClamp,
+				"Sample Per Pixel");
+			PE::end();
+		}
 
 		if (ptContext.rtPosFetchFeature.rayTracingPositionFetch == VK_FALSE)
 		{

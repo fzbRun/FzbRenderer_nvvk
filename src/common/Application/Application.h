@@ -21,7 +21,7 @@
 #ifndef FZB_APPLICATION_H
 #define FZB_APPLICATION_H
 
-#define MAX_FRAME 1 << 14
+#define MAX_FRAME 1 << 30
 //#define PathTracingMotionBlur
 
 #ifdef NDEBUG

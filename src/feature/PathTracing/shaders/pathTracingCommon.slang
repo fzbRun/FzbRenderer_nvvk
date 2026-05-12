@@ -467,10 +467,10 @@ float getPdf_directionLightSample(float3 pos, float3 sampleDir, Light light) {
 }
 
 //------------------------------------------Material BSDF---------------------------------------------------
-float GTR2_NDF(float cosineOH, float roughness) {
+float GTR2_NDF(float cosineNH, float roughness) {
     const float alpha = roughness * roughness;
     const float a2 = alpha * alpha;
-    const float t = 1 + (a2 - 1) * cosineOH * cosineOH;
+    const float t = 1 + (a2 - 1) * cosineNH * cosineNH;
     return a2 / (M_PI * t * t);
 }
 float IsotropicGGX_Masking(float3 v_local, float roughness) {
@@ -505,7 +505,7 @@ float3 SampleVisibleNormals(float3 local_o, float alpha, float2 rnd_param) {
     }
 
     // Transform the incoming direction to the "hemisphere configuration".
-    float3 hemi_dir_in = normalize(float3(alpha * local_o.x, alpha * local_o.y, local_o.z));
+    float3 hemi_dir_out = normalize(float3(alpha * local_o.x, alpha * local_o.y, local_o.z));
 
     // Parameterization of the projected area of a hemisphere.
     // First, sample a disk.
@@ -514,17 +514,19 @@ float3 SampleVisibleNormals(float3 local_o, float alpha, float2 rnd_param) {
     float t1 = r * cos(phi);
     float t2 = r * sin(phi);
     // Vertically scale the position of a sample to account for the projection.
-    float s = (1 + hemi_dir_in.z) / 2;
+    float s = (1 + hemi_dir_out.z) / 2;
     t2 = (1 - s) * sqrt(1 - t1 * t1) + s * t2;
     // Point in the disk space
     float3 disk_N = float3(t1, t2, sqrt(max(0, 1 - t1 * t1 - t2 * t2)));
 
     // Reprojection onto hemisphere -- we get our sampled normal in hemisphere space.
-    //float3x3 hemi_frame = createFrame(hemi_dir_in);
-    //float3 hemi_N = mul(disk_N, TBN);   //to_world(hemi_frame, disk_N);
+    float3 tangent, bitangent;
+    orthonormalBasis(hemi_dir_out, tangent, bitangent);
+    float3x3 TBN = float3x3(tangent, bitangent, hemi_dir_out);
+    float3 hemi_N = mul(disk_N, TBN);
 
     // Transforming the normal back to the ellipsoid configuration
-    return negative * normalize(float3(alpha * disk_N.x, alpha * disk_N.y, max(0, disk_N.z)));
+    return negative * normalize(float3(alpha * hemi_N.x, alpha * hemi_N.y, max(0, hemi_N.z)));
 }
 
 float3 getBSDF_Diffuse(float3 albedo, float3 incidence, float3 normal) {
@@ -588,6 +590,7 @@ float3 getBSDF_RoughConductor(float3 albedo, float roughness, float3 incidence, 
 
     float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h_tangentSpace);
     float D = D_costhetaNH / h_tangentSpace.z;
+    // float D = GTR2_NDF(h_tangentSpace.z, roughness);
 
     float3 F = schlickFresnel(albedo, float3(1.0F), cosineOH);
 
@@ -756,8 +759,10 @@ float getPdf_RoughConductor(float roughness, float3 incidence, float3 normal, fl
 
     float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h_tangentSpace); // h需要在切线空间中
     float D = D_costhetaNH / h_tangentSpace.z;                                   // max(h.z, 1e-6f);
-
     return D_costhetaNH / (abs(4.0f * cosineOH) + 1e-10f);
+
+    //float D = GTR2_NDF(h_tangentSpace.z, roughness);
+    //return D * h_tangentSpace.z / (abs(4.0f * cosineOH) + 1e-10f);
 }
 float getPdf_RoughDielectric(float eta, float3 albedo, float roughness, float3 incidence, float3 normal, float3 outgoing, float3x3 TBN) {
     float cosineIN = dot(incidence, normal);
@@ -932,9 +937,11 @@ void PopulateCallablePayload_RoughConductorMaterial(inout CallablePayload payloa
     float randomNumber1 = rand(payload.randomSeed);
     float randomNumber2 = rand(payload.randomSeed);
     float roughness = payload.material.roughness;
+    float alpha = roughness * roughness;
 
     float3 outgoing_tangentSpace = mul(payload.TBN, payload.outgoing);
-    float3 h_tangentSpace = hvd_ggx_sample_vndf(outgoing_tangentSpace, float2(roughness), float2(randomNumber1, randomNumber2));
+    // float3 h_tangentSpace = hvd_ggx_sample_vndf(outgoing_tangentSpace, float2(roughness), float2(randomNumber1, randomNumber2));
+    float3 h_tangentSpace = SampleVisibleNormals(outgoing_tangentSpace, alpha, float2(randomNumber1, randomNumber2));
     if (h_tangentSpace.z == 0.0f) {
         payload.bsdf = float3(0.0f);
         payload.pdf = 1.0f;
@@ -958,8 +965,9 @@ void PopulateCallablePayload_RoughConductorMaterial(inout CallablePayload payloa
 
     float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h_tangentSpace); // h需要在切线空间中
     float D = D_costhetaNH / h_tangentSpace.z;                                   // max(h.z, 1e-6f);
-
     payload.pdf = D_costhetaNH / (4.0f * cosineOH);
+    //float D = GTR2_NDF(h_tangentSpace.z, roughness);
+    //payload.pdf = D * h_tangentSpace.z / (4.0f * cosineOH);
 
     float G1_outgoing, G1_incidence;
     float G2 = ggx_smith_shadow_mask(

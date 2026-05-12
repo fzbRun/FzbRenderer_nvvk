@@ -388,6 +388,13 @@ void FzbRenderer::PathTracingRenderer::uiRender() {
 				"Maximum Bounces depth");
 			PE::end();
 		}
+		ImGui::SeparatorText("SPP");
+		{
+			PE::begin();
+			UIModified |= PE::SliderInt("SPP", &pushValues.spp, 1, 64, "%d", ImGuiSliderFlags_AlwaysClamp,
+				"Sample Per Pixel");
+			PE::end();
+		}
 
 		bool NEEChange = ImGui::Checkbox("USE NEE", (bool*)&useNEE);
 		if (NEEChange) {

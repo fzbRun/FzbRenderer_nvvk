@@ -149,6 +149,7 @@ float3 RayMiss(float3 rayDirection) {
     if (sceneInfo.useSky == 1) return evalSimpleSky(sceneInfo.skySimpleParam, rayDirection);
     else return sceneInfo.backgroundColor;
 }
+
 bool getNodeAABB_E_FzbPG(inout AABB aabb, inout HitPayload_FzbPG payload, inout float nodeEPdf, inout float jitterPdf,
                          inout int nodeLabel_G, inout uint outgoingIndex, uint2 threadIndex)
 {
@@ -211,44 +212,56 @@ bool getNodeAABB_E_FzbPG(inout AABB aabb, inout HitPayload_FzbPG payload, inout 
     OctreeNodeClusterData_G_FzbPG nodeData_G = OctreeClusterDataBuffer_G[layerIndex_G - OCTREE_CLUSTER_LAYER_FZBPG][nodeIndex_G];
     float weights[NEARBY_NODE_COUNT_FZBPG + 1];
 
-    float distance = getDistanceToAABB(hitPos, nodeData_G.aabb);
-    float cosine = dot(payload.hitNormal, normalize(nodeData_G.meanNormal.xyz));
-    distance *= cosine < 0.707f ? 100000.0f : (1.1f - cosine);
-    weights[0] = 1.0f / max(distance, 1e-16f);
+    float3 center = (nodeData_G.aabb.maximum + nodeData_G.aabb.minimum) * 0.5f;
+    float3 centerToPos = abs(center - hitPos) + 1e-16f;
+    float distance = length(centerToPos);
+    float maxDistance = 5.0f;
+    weights[0] = max(0.0f, 1.0f - distance / maxDistance);
     float weightSum = weights[0];
 
     int2 nearbyNodeInfos[NEARBY_NODE_COUNT_FZBPG] = NearbyNodeInfoBuffer[nodeLabel_G].nearbyNodeInfos;
     int nearbyNodeCount = 0;
     for (; nearbyNodeCount < NEARBY_NODE_COUNT_FZBPG; ++nearbyNodeCount) {
         int2 nearbyNodeInfo = nearbyNodeInfos[nearbyNodeCount];
-        if (nearbyNodeInfo.x == -1) break;
+        if (nearbyNodeInfo.x == -1) {
+            weights[nearbyNodeCount + 1] = 0.0f;
+            continue;
+        }
         OctreeNodeClusterData_G_FzbPG nearbyNodeData = OctreeClusterDataBuffer_G[nearbyNodeInfo.x - OCTREE_CLUSTER_LAYER_FZBPG][nearbyNodeInfo.y];
 
-        distance = getDistanceToAABB(hitPos, nearbyNodeData.aabb);
-        cosine = dot(payload.hitNormal, normalize(nearbyNodeData.meanNormal.xyz));
-        distance *= cosine < 0.707f ? 100000.0f : (1.1f - cosine);
-        weights[nearbyNodeCount + 1] = 1.0f / max(distance, 1e-16f);
+        center = (nearbyNodeData.aabb.maximum + nearbyNodeData.aabb.minimum) * 0.5f;
+        centerToPos = abs(center - hitPos) + 1e-16f;
+        distance = length(centerToPos);
+        weights[nearbyNodeCount + 1] = max(0.0f, 1.0f - distance / maxDistance);
 
         weightSum += weights[nearbyNodeCount + 1];
     }
-    float nearbyNodeSampleProbability = rand(payload.randomSeed);
-    for (int nearbyNodeIndex = 0; nearbyNodeIndex < nearbyNodeCount + 1; ++nearbyNodeIndex) {
-        float selectProbability = weights[nearbyNodeIndex] / weightSum;
-        if (nearbyNodeSampleProbability <= selectProbability) {
-            if (nearbyNodeIndex > 0) {
-                int2 nearbyNodeInfo = nearbyNodeInfos[nearbyNodeIndex - 1];
-                nodeLabel_G = 0; uint nodeSum = 0;
-                for (int l = 0; l < nearbyNodeInfo.x; ++l) {
-                    nodeLabel_G += groupGlobalInfo.layerInfos_G[l].indivisibleNodeCount;
-                    nodeSum += 6 * (1u << (l * 3));
-                }
-                if (nearbyNodeInfo.x < 4) nodeLabel_G += (groupOctreeNodeData_G[nodeSum + nearbyNodeInfo.y].label_indivisible >> 1) - 1;
-                else nodeLabel_G += (OctreeDataBuffer_G[nearbyNodeInfo.x][nearbyNodeInfo.y].label_indivisible >> 1) - 1;
+    if (weightSum > 0.0f) {
+        float nearbyNodeSampleProbability = rand(payload.randomSeed);
+        int selectNodeIndex = 0;
+        for (; selectNodeIndex < nearbyNodeCount + 1; ++selectNodeIndex) {
+            float selectProbability = weights[selectNodeIndex] / weightSum;
+            if (nearbyNodeSampleProbability <= selectProbability) {
+                jitterPdf *= selectProbability;
+                break;
             }
-            jitterPdf *= selectProbability;
-            break;
+            nearbyNodeSampleProbability -= selectProbability;
         }
-        nearbyNodeSampleProbability -= selectProbability;
+        if (selectNodeIndex > 0 && selectNodeIndex != nearbyNodeCount + 1) {
+            int2 nearbyNodeInfo = nearbyNodeInfos[selectNodeIndex - 1];
+            nodeLabel_G = 0; uint nodeSum = 0;
+            for (int l = 0; l < nearbyNodeInfo.x; ++l) {
+                nodeLabel_G += groupGlobalInfo.layerInfos_G[l].indivisibleNodeCount;
+                nodeSum += 6 * (1u << (l * 3));
+            }
+            if (nearbyNodeInfo.x < 4) nodeLabel_G += (groupOctreeNodeData_G[nodeSum + nearbyNodeInfo.y].label_indivisible >> 1) - 1;
+            else nodeLabel_G += (OctreeDataBuffer_G[nearbyNodeInfo.x][nearbyNodeInfo.y].label_indivisible >> 1) - 1;
+        }
+
+        // if (pushConst.frameIndex == 1 && lastNodeLabel_G == 18) {
+        //     printf("nodeLabel_G: %d\n", nodeLabel_G);
+        // }
+        // nodeLabel_G = lastNodeLabel_G;
     }
     #endif
 
@@ -410,16 +423,27 @@ float getPgPdf(uint nodeLabel_G, uint outgoingIndex, float3 hitPos, float3 hitNo
     #ifdef ADAPTIVE_IMPORTANCE_SAMPLING
     uint nodePairIndex = nodeLabel_G * CLUSTER_LAYER_NODECOUNT_E_FZBPG + nodeIndex_E;
     OctreeNodePairData_FzbPG nodePairData = OctreeNodePairDataBuffer[nodePairIndex];
-    pg_Pdf *= nodePairData.pdf;
+
+    #define pdf_getPgPdf nodePairData.pdf
     #define aabb_getPgPdf nodePairData.aabb
     #else
     OctreeNodeData_E_FzbPG nodeInfo_E = groupClusterLayerNodeData_E[nodeIndex_E];
-    pg_Pdf *= nodeInfo_E.pdf;
+    #define pdf_getPgPdf nodeInfo_E.pdf
     #define aabb_getPgPdf nodeInfo_E.aabb
     #endif
 
-    // if (checkPointInAABB(hitPos, nodeInfo_E.aabb)) pg_Pdf *= nodeInfo_E.pdf;
-    // else pg_Pdf *= (1.0f - nodeInfo_E.pdf) / pow(8, pushConst.maxOctreeLayer - OCTREE_CLUSTER_LAYER);
+    if (checkPointInAABB(hitPos, aabb_getPgPdf)) pg_Pdf *= pdf_getPgPdf;
+    else {
+        float3 nodeSize = 1 << (3 * (pushConst.maxOctreeLayer - OCTREE_CLUSTER_LAYER_FZBPG));
+        pg_Pdf *= (1.0f - pdf_getPgPdf) / pow(8, pushConst.maxOctreeLayer - OCTREE_CLUSTER_LAYER_FZBPG);
+
+        nodeSize *= pushConst.VGBVoxelSize;
+        int3 voxelOffset = int3((hitPos - pushConst.VGBStartPos_Size.xyz) / nodeSize);
+        float3 voxelStartPos = voxelOffset * nodeSize + pushConst.VGBStartPos_Size.xyz;
+        aabb_getPgPdf.minimum = voxelStartPos;
+        aabb_getPgPdf.maximum = voxelStartPos + nodeSize * nodeSize;
+    }
+    //pg_Pdf *= nodePairData.pdf;
     if (pg_Pdf == 0.0f) return pg_Pdf;
 
     // getPdf from Sphere sample
@@ -459,6 +483,7 @@ float getPgPdf(uint nodeLabel_G, uint outgoingIndex, float3 hitPos, float3 hitNo
         }
     }
 
+    #undef pdf_getPgPdf
     #undef aabb_getPgPdf
     return pg_Pdf;
 }
@@ -551,6 +576,13 @@ void computeMain_FzbPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
                 float3 pgSample_bsdf = float3(0.0f);
                 AABB nodeAABB_E;
                 bool useFzbPG = getNodeAABB_E_FzbPG(nodeAABB_E, payload, pgSample_pgPdf, jitterPdf, nodeLabel_G, outgoingIndex, threadIndex);
+
+                //if (!useFzbPG) {
+                //    accumulatedRadiance = float3(1.0f, 0.0f, 0.0f);
+                //    //if (pushConst.frameIndex == 1) printf("useFzbPG: %d, pgSample_pgPdf: %f\n", useFzbPG, pgSample_pgPdf);
+                //}
+                //break;
+
                 if (useFzbPG) {
                     useFzbPG = SphericalRectangleSample(nodeAABB_E, payload.hitPos, payload.randomSeed, pgSample, pgSample_pgPdf, threadIndex);
                     if (useFzbPG) {
@@ -562,7 +594,15 @@ void computeMain_FzbPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
                     pgSample_pgPdf = 0.0f;
                     pgSample_bsdfPdf = 0.0f;
                 }
-                float pgSample_weight = pgSample_pgPdf / max(pgSample_pgPdf + pgSample_bsdfPdf, 1e-16f);
+                float pgSample_weight = 1.0f / max(pgSample_pgPdf + pgSample_bsdfPdf, 1e-16f);
+
+                // if (pushConst.frameIndex == 1 && nodeLabel_G == 747) {
+                //     printf("pgSample_pgPdf: %f, aabb: %f %f %f %f %f %f\n",
+                //         pgSample_pgPdf,
+                //         nodeAABB_E.minimum.x, nodeAABB_E.minimum.y, nodeAABB_E.minimum.z,
+                //         nodeAABB_E.maximum.x, nodeAABB_E.maximum.y, nodeAABB_E.maximum.z,
+                //     );
+                // }
 
                 getDirectionLight(payload, sceneInfo);
                 BSDF_SAMPLE(payload);
@@ -584,19 +624,21 @@ void computeMain_FzbPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
                     bsdfSample_pgPdf = getPgPdf(nodeLabel_G, outgoingIndex, payload.hitPos, payload.hitNormal, hitPos, threadIndex);
                     //bsdfSample_pgPdf *= jitterPdf;
                 }
-                float bsdfSample_weight = bsdfSample_bsdfPdf / max(bsdfSample_pgPdf + bsdfSample_bsdfPdf, 1e-16f);
+                float bsdfSample_weight = 1.0f / max(bsdfSample_pgPdf + bsdfSample_bsdfPdf, 1e-16f);
 
                 // MIS
-                float probabilitySum = max(pgSample_weight + bsdfSample_weight, 1e-16f);
-                float pgSample_selectProbability = pgSample_weight / probabilitySum;
+                //float probabilitySum = max(pgSample_pgPdf * pgSample_bsdfPdf + bsdfSample_bsdfPdf, 1e-16f);
+                //float pgSample_selectProbability = pgSample_pgPdf * pgSample_bsdfPdf / probabilitySum;
+                float probabilitySum = max(pgSample_pgPdf * pgSample_weight + bsdfSample_bsdfPdf * bsdfSample_weight, 1e-16f);
+                float pgSample_selectProbability = pgSample_pgPdf * pgSample_weight / probabilitySum;
                 float randomNumber = rand(payload.randomSeed);
                 if (randomNumber <= pgSample_selectProbability) {
                     payload.incidence = pgSample;
-                    bsdf_cosine_pdf *= probabilitySum / max(pgSample_pgPdf, 1e-16f) * pgSample_bsdf;
+                    bsdf_cosine_pdf *= pgSample_weight * pgSample_bsdf / pgSample_selectProbability;
                 } else {
                     useBsdfSample = true;
                     payload.incidence = bsdfSample;
-                    bsdf_cosine_pdf *= probabilitySum / max(bsdfSample_bsdfPdf, 1e-16f) * bsdfSample_bsdf;
+                    bsdf_cosine_pdf *= bsdfSample_weight * bsdfSample_bsdf / (1.0f - pgSample_selectProbability);
                 }
 
                 float cosine = dot(hitNormal, payload.incidence);
@@ -605,9 +647,9 @@ void computeMain_FzbPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
                 bool end = any(bsdf_cosine_pdf <= 0.0f) || all(bsdf_cosine_pdf <= 0.0f) || any(isnan(bsdf_cosine_pdf)) || any(isinf(bsdf_cosine_pdf));
                 if (end) break;
 
-                randomNumber = rand(payload.randomSeed);
-                if (randomNumber >= RR) break;
-                bsdf_cosine_pdf /= RR;
+                //randomNumber = rand(payload.randomSeed);
+                //if (randomNumber >= RR) break;
+                //bsdf_cosine_pdf /= RR;
 
                 payload.outgoing = -payload.incidence;
                 if (!useBsdfSample) {

@@ -4,9 +4,13 @@
 		<transform type = "lookAt">
 			<!--
 			<matrix value="-0.137283 -0.0319925 -0.990015 6.05402 2.71355e-008 0.999478 -0.0322983 1.61647 0.990532 -0.00443408 -0.137213 -2.60652 0 0 0 1"/>
-			<eye value = "3.88, 1.38, -3.43" />
-			<center value = "2.88, 1.39, -3.5" />
+			<eye value = "0.095, 1.303, -2.228" />
+			<center value = "-0.757, 1.204, -2.507" />
+			
+			<eye value = "2.841, 1.305, -3.348" />
+			<center value = "1.945, 1.238, -3.425" />
 			-->
+
 			<eye value = "0.095, 1.303, -2.228" />
 			<center value = "-0.757, 1.204, -2.507" />
 			<up value = "0.00000, 1.00000, 0.00000" />
@@ -40,7 +44,7 @@
 			<albedo value="0.8, 0.8, 0.8, 1.0" />
 		</bsdf>
 		<bsdf type="roughConductor" id="FloorBSDF">
-			<roughness value="0.1" />
+			<roughness value="0.2" />
 			<albedoMap type="checkerboard">
 				<color1 value="0.2, 0.2, 0.2" />
 				<color0 value="0.8, 0.8, 0.8" />
@@ -78,6 +82,8 @@
 		</bsdf>
 		<bsdf type="roughPlastic" id="Pot2BSDF_RoughPlastic">
 			<roughness value="0.05" />
+			<int_ior value="1.5" />
+			<ext_Ior value="1.0" />
 			<albedo value="1, 1, 1" />
 			<albedo_diffuse value="1.0, 0.48235294118, 0.48235294118" />
 		</bsdf>
@@ -90,6 +96,14 @@
 		<bsdf type="diffuse" id="LightBSDF">
 			<albedo value="0.8, 0.8, 0.8, 1.0" />
 			<emissive value="1000, 1000, 1000" />
+		</bsdf>
+
+		<bsdf type="roughPlastic" id="dragonBSDF">
+			<roughness value="0.1" />
+			<int_ior value="1.5" />
+			<ext_Ior value="1.0" />
+			<albedo value="1, 1, 1" />
+			<albedo_diffuse value="1.0, 1.0, 1.0" />
 		</bsdf>
 	</bsdfs>
 	<meshes>
@@ -146,6 +160,10 @@
 		</mesh>
 		<mesh type="obj" id="Diffuse_0005">
 			<filename value="models/Mesh014.obj" />
+		</mesh>
+
+		<mesh type="obj" id="dragon">
+			<filename value="models/dragon.obj" />
 		</mesh>
 	</meshes>
 	<instances>
@@ -300,9 +318,9 @@
 			<materialRef id = "Pot2BSDF_RoughPlastic" />
 		</instance>
 
+		<!--
 		<instance>
 			<transform name="to_world">
-				<!--matrix value="-0.0837611 0 0.0303939 -1.95645 0 0.0891049 0 0.651268 -0.0303939 0 -0.0837611 -3.57687 0 0 0 1"/-->
 				<translate value ="-1.95645, 0.648205, -3.57687" />
 				<rotate value = "0, 0, 0" />
 				<scale value = "0.0891049, 0.0891049, 0.0891049" />
@@ -310,10 +328,12 @@
 			<meshRef id = "Pot" />
 			<materialRef id = "Pot3BSDF" />
 		</instance>
-		<!--
+		-->
 		<instance type="periodMotion">
 			<transform name="to_world">
-				<matrix value="-0.0837611 0 0.0303939 -1.95645 0 0.0891049 0 0.651268 -0.0303939 0 -0.0837611 -3.57687 0 0 0 1"/>
+				<translate value ="-1.95645, 0.648205, -3.57687" />
+				<rotate value = "0, 0, 0" />
+				<scale value = "0.0891049, 0.0891049, 0.0891049" />
 				<period time="100">
 					<translate>
 						<start value = "0, 0, 0" />
@@ -324,7 +344,7 @@
 			<meshRef id = "Pot" />
 			<materialRef id = "Pot3BSDF" />
 		</instance>
-		-->
+
 		<instance>
 			<transform name="to_world">
 				<!--matrix value="-0.0837611 0 0.0303939 -1.95645 0 0.0891049 0 0.651268 -0.0303939 0 -0.0837611 -3.57687 0 0 0 1"/-->
@@ -335,68 +355,27 @@
 			<meshRef id = "PotLid" />
 			<materialRef id = "Pot3BSDF" />
 		</instance>
-		<!--
-		<instance>
+
+		<instance type="periodMotion">
 			<transform name="to_world">
-				<matrix value="0 0 0.125 -1.95645 0 0.175 0 0.900205 -0.125 0 0 -1.77687 0 0 0 1"/>
-			</transform>
-			<meshRef id = "teapot" />
-			<materialRef id = "Pot1BSDF" />
-		</instance>
-		<instance>
-			<transform name="to_world">
-				<matrix value="0 0 0.125 -1.95645 0 0.175 0 0.900205 -0.125 0 0 -2.67687 0 0 0 1"/>
-			</transform>
-			<meshRef id = "teapot" />
-			<materialRef id = "Pot2BSDF" />
-		</instance>
-		<instance>
-			<transform name="to_world">
-				<matrix value="0 0 0.125 -1.95645 0 0.175 0 0.900205 -0.125 0 0 -3.57687 0 0 0 1"/>
-			</transform>
-			<meshRef id = "teapot" />
-			<materialRef id = "Pot3BSDF" />
-		</instance>
-		-->
-		<!--
-		<instance id="Light" type="periodMotion">
-			<transform name="to_world">
-				<matrix value="0.730445 0 0 -4.4391 0 -1.32136 -1.42138e-007 1.50656 0 1.42138e-007 -1.93037 -4.44377 0 0 0 1" />
+				<translate value ="-2.0, 0.148205, -7" />
+				<rotate value = "0, 0, 0" />
+				<scale value = "0.0891049, 0.0891049, 0.0891049" />
 				<period time="100">
 					<translate>
 						<start value = "0, 0, 0" />
-						<end value = "0, 0, 1" />
+						<end value = "1, 0, 0" />
 					</translate>
 				</period>
 			</transform>
-			<meshRef id="custom" type="plane" />
-			<materialRef id="LightBSDF"/>
+			<meshRef id = "dragon" />
+			<materialRef id = "dragonBSDF" />
 		</instance>
-		-->
-		<!--
-		<instance id="Light">
-			<transform name="to_world">
-				<matrix value="0.730445 0 0 -4.4391 0 -1.32136 -1.42138e-007 1.50656 0 1.42138e-007 -1.93037 -4.44377 0 0 0 1" />
-				<matrix value="0.730445 0 0 -5.7391 0 -1.32136 -1.42138e-007 1.50656 0 1.42138e-007 -1.93037 -4.44377 0 0 0 1" />
-				<matrix value="-0.600445 0 0 -1.2 0 -2.75 -1.42138e-007 2.75 0 0 1.93037 -7.59 0 0 0 1" />
-			</transform>
-			<meshRef id="custom" type="plane" />
-			<materialRef id="LightBSDF"/>
-		</instance>
-		-->
 	</instances>
 
 	<lights>
 		<useSky value = "false" />
 		<backgroundColor value = "0.0, 0.0, 0.0" />
-		<!--
-		<light type="area" id="Light">
-			<emissive value = "1.0, 1.0, 1.0" />
-			<intensity value = "1000.0" />
-			<SphericalRectangleSample value="true" />
-			<instanceRef id="Light"/>
-		</light>
-		-->
 		<light type="direction" id="Light">
 			<emissive value = "1.0, 1.0, 1.0" />
 			<intensity value = "100.0" />

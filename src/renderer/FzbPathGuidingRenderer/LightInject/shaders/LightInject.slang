@@ -294,10 +294,12 @@ void computeMain_LightInject(uint threadIndex: SV_DispatchThreadID, uint groupTh
         while (bounceDepth < maxPathDepth) {
             bool hit = traceRay(ray, payload);
             if (hit) {
-                bool reSample = payload.cosineON <= 0.0f;
-                reSample |= !checkPointInAABB(payload.hitPos, voxelAabb);
-                reSample |= dot(payload.hitNormal, VGBNormal) <= 0.0f;
-                if (reSample) break;
+                if (bounceDepth == 0) {
+                    bool reSample = payload.cosineON <= 0.0f;
+                    reSample |= !checkPointInAABB(payload.hitPos, voxelAabb);
+                    reSample |= dot(payload.hitNormal, VGBNormal) <= 0.0f;
+                    if (reSample) break;
+                }
 
                 float3 bsdf = M_1_PI * payload.albedo;
                 float3 radiance_nee = float3(0.0f);

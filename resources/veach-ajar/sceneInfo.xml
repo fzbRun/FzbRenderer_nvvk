@@ -3,8 +3,12 @@
 		<fov value="60"/>
 		<transform type = "lookAt">
 			<matrix value="-0.137283 -0.0319925 -0.990015 6.05402 2.71355e-008 0.999478 -0.0322983 1.61647 0.990532 -0.00443408 -0.137213 -2.60652 0 0 0 1"/>
+			<!--
 			<eye value = "3.88, 1.38, -3.43" />
 			<center value = "2.88, 1.39, -3.5" />
+			-->
+			<eye value = "2.841, 1.305, -3.348" />
+			<center value = "1.945, 1.238, -3.425" />
 			<up value = "0.00000, 1.00000, 0.00000" />
 		</transform>
 	</sensor>
@@ -70,8 +74,13 @@
 			<int_ior value="1.5" />
 			<ext_Ior value="1.0" />
 		</bsdf>
+		<bsdf type="roughPlastic" id="Pot2BSDF_RoughPlastic">
+			<roughness value="0.05" />
+			<albedo value="1, 1, 1" />
+			<albedo_diffuse value="1.0, 0.48235294118, 0.48235294118" />
+		</bsdf>
 		<bsdf type="roughConductor" id="Pot3BSDF">
-			<roughness value="0.01" />
+			<roughness value="0.015" />
 			<eta value="1.91, 1.31, 0.82" />
 			<k value="8.05, 6.93, 5.99" />
 		</bsdf>
@@ -266,14 +275,14 @@
 				<matrix value="-0.0891049 0 7.7898e-009 -1.95645 0 0.0891049 0 0.648205 -7.7898e-009 0 -0.0891049 -2.67687 0 0 0 1"/>
 			</transform>
 			<meshRef id = "Pot" />
-			<materialRef id = "Pot2BSDF" />
+			<materialRef id = "Pot2BSDF_RoughPlastic" />
 		</instance>
 		<instance>
 			<transform name="to_world">
 				<matrix value="-0.0891049 0 7.7898e-009 -1.95645 0 0.0891049 0 0.648205 -7.7898e-009 0 -0.0891049 -2.67687 0 0 0 1"/>
 			</transform>
 			<meshRef id = "PotLid" />
-			<materialRef id = "Pot2BSDF" />
+			<materialRef id = "Pot2BSDF_RoughPlastic" />
 		</instance>
 
 		<instance>

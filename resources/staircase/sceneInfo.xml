@@ -1,10 +1,18 @@
 <scene>
 	<sensor type="perspective">
+		<!--
 		<fov value="35"/>
 		<transform type = "lookAt">
 			<matrix value="-0.999971 0.000344842 -0.00764602 0.0324209 -2.91047e-011 0.998984 0.045055 1.52673 0.00765379 0.0450537 -0.998955 4.88197 0 0 0 1" />
 			<eye value = "-0.079, 1.094, 3.815" />
 			<center value = "-0.056, 1.083, 2.845" />
+			<up value = "0.00000, 1.00000, 0.00000" />
+		</transform>
+		-->
+		<fov value="30"/>
+		<transform type = "lookAt">
+			<eye value = "0.104, 1.373, 4.737" />
+			<center value = "0.118, 1.387, 3.767" />
 			<up value = "0.00000, 1.00000, 0.00000" />
 		</transform>
 	</sensor>
@@ -4814,7 +4822,7 @@
 			<meshRef id = "Lampshade_0003" />
 			<materialRef id = "LampshadeBSDF" />
 		</instance>
-
+		<!--
 		<instance>
 			<transform name="to_world">
 				<matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" />
@@ -4822,6 +4830,7 @@
 			<meshRef id = "Brass_0001" />
 			<materialRef id = "BrassBSDF" />
 		</instance>
+		-->
 		<instance>
 			<transform name="to_world">
 				<matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" />
@@ -4883,19 +4892,19 @@
 			<transform name="to_world">
 				<matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" />
 			</transform>
-			<meshRef id = "Brass_0002" />
-			<materialRef id = "BrassBSDF" />
+			<meshRef id = "WoodLamp" />
+			<materialRef id = "BrassBSDF" /> <!--WoodLampBSDF-->
 		</instance>
 
+		<!--
 		<instance>
 			<transform name="to_world">
 				<matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" />
 			</transform>
-			<meshRef id = "WoodLamp" />
-			<materialRef id = "BrassBSDF" /> <!--WoodLampBSDF-->
+			<meshRef id = "Brass_0002" />
+			<materialRef id = "BrassBSDF" />
 		</instance>
 		
-
 		<instance>
 			<transform name="to_world">
 				<matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" />
@@ -4952,6 +4961,7 @@
 			<meshRef id = "Brass_0010" />
 			<materialRef id = "BrassBSDF" />
 		</instance>
+		-->
 		<instance>
 			<transform name="to_world">
 				<matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" />
@@ -5968,6 +5978,7 @@
 			<meshRef id = "Copper" />
 			<materialRef id = "CopperBSDF" />
 		</instance>
+		<!--
 		<instance>
 			<transform name="to_world">
 				<matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" />
@@ -6689,6 +6700,7 @@
 			<meshRef id = "Glass_0103" />
 			<materialRef id = "GlassBSDF" />
 		</instance>
+
 		<instance>
 			<transform name="to_world">
 				<matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" />
@@ -7844,6 +7856,7 @@
 			<meshRef id = "Brass_0142" />
 			<materialRef id = "BrassBSDF" />
 		</instance>
+	
 		<instance>
 			<transform name="to_world">
 				<matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" />
@@ -7907,6 +7920,7 @@
 			<meshRef id = "Emission_0009" />
 			<materialRef id = "EmissionBSDF" />
 		</instance>
+		-->
 		<instance>
 			<transform name="to_world">
 				<!--matrix value="-1.03225 -6.81307e-015 1.55865e-007 -0.481175 -1.55865e-007 4.51209e-008 -1.03225 7.14059 0 -1.08037 -4.72247e-008 -1.65275 0 0 0 1" /-->

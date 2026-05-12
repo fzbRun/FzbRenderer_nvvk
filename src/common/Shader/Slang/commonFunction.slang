@@ -70,6 +70,22 @@ inline bool checkPointInAABB(float3 pos, AABB aabb) {
 inline bool checkPointInAABB2(float3 pos, AABB aabb) {
     return all((pos - aabb.minimum >= -0.001f) && (aabb.maximum - pos >= -0.001f));
 }
+inline bool checkOcclusion(float3 startPos, float3 endPos, AABB aabb) {
+    float3 dir = endPos - startPos;
+    float tmin = 0.0f;
+    float tmax = 1.0f;
+
+    float3 invD = 1.0f / (dir + 1e-20f);
+
+    for (int i = 0; i < 3; ++i) {
+        float t0 = (aabb.minimum[i] - startPos[i]) * invD[i];
+        float t1 = (aabb.maximum[i] - startPos[i]) * invD[i];
+        tmin = max(tmin, min(t0, t1));
+        tmax = min(tmax, max(t0, t1));
+    }
+
+    return tmin <= tmax;
+}
 inline float getDistanceToAABB(float3 pos, AABB aabb) {
     float3 center = (aabb.maximum + aabb.minimum) * 0.5f;
     float3 centerToPos = abs(center - pos) + 1e-16f;
@@ -128,6 +144,19 @@ float AABBDistance(AABB aabb1, AABB aabb2)
     gap = max(gap, 0.0);
     return length(gap);
 }
+float AABBDistance2(AABB aabb1, AABB aabb2)
+{
+    float3 center1 = (aabb1.minimum + aabb1.maximum) * 0.5f;
+    float3 center2 = (aabb2.minimum + aabb2.maximum) * 0.5f;
+    float3 dir = normalize(center2 - center1);
+
+    float3 pos1 = getAABBPoint(dir, center1, (aabb1.maximum - aabb1.minimum) * 0.5f);
+    float3 pos2 = getAABBPoint(-dir, center2, (aabb2.maximum - aabb2.minimum) * 0.5f);
+    float3 distance = pos1 - pos2;
+
+    return all(distance == 0) ? 0.0f : length(distance);
+}
+
 float AABBContainmentRatio(inout AABB x, AABB y) {
     float3 origLen = x.maximum - x.minimum;
     float3 yLen = y.maximum - y.minimum;
@@ -195,6 +224,17 @@ float3 RandomPointOnAABBSurface(inout uint seed, AABB aabb)
                     : float3(x, y, aabb.minimum.z);
     }
     return pt;
+}
+
+float3 AABBSeparationVector(AABB a, AABB b)
+{
+    float3 posGap = b.minimum - a.maximum; // b 在 a 的正方向时，这里为正
+    float3 negGap = a.minimum - b.maximum; // b 在 a 的负方向时，这里为正
+
+    float3 posMask = max(sign(posGap), 0.0f); // 正才保留
+    float3 negMask = max(sign(negGap), 0.0f); // 正才保留
+
+    return posGap * posMask - negGap * negMask;
 }
 //------------------------------------------------SphericalFibonacci---------------------------------------------
 #define M_PHI 1.618033988749895

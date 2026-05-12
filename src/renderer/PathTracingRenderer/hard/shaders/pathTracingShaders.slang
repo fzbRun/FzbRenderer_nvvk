@@ -64,7 +64,7 @@ void raygenMain()
             ray.Direction = payload.rayDirection;
         }
     }
-    if (any(isnan(accumulatedRadiance)) || any(isinf(accumulatedRadiance))) return;
+    if (any(isnan(accumulatedRadiance)) || any(isinf(accumulatedRadiance))) return; //accumulatedRadiance = float3(0.0f);
     accumulatedRadiance /= pushConst.spp;
 
     // When the maximum frame rate is reached, the original image will decay by ((maxframe-1)/maxframe)^k < 1, and the final image will turn black

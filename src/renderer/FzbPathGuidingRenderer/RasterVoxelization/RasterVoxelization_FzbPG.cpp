@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <nvgui/property_editor.hpp>
 #include <nvvk/compute_pipeline.hpp>
+#include <renderer/FzbPathGuidingRenderer/FzbPathGuiding.h>
 
 using namespace FzbRenderer;
 
