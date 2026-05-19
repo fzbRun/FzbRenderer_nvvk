@@ -1,7 +1,7 @@
 #include "common/Shader/shaderStructType.h"
 #include "nvshaders/functions.h.slang"
 #include "common/Shader/Slang/commonFunction.slang"
-#include "renderer/SVOPathGuidingRenderer/hard/shaders/SVOPGCommon.slang"
+#include "renderer/FzbPathGuidingRenderer/shaders/FzbPGCommon.slang"
 #include "renderer/FzbPathGuidingRenderer/RasterVoxelization/RasterVoxelizationShaderio_FzbPG.h"
 
 [[vk::push_constant]] ConstantBuffer<RasterVoxelizationPushConstant> pushConst;

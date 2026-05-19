@@ -1,7 +1,7 @@
 #include "feature/PathTracing/shaders/pathTracingCommon.slang"
 #include "renderer/FzbPathGuidingRenderer/FzbPathGuidingShaderio.h"
 #include "renderer/FzbPathGuidingRenderer/Octree/OctreeShaderio_FzbPG.h"
-#include "renderer/SVOPathGuidingRenderer/hard/shaders/SVOPGCommon.slang"
+#include "renderer/FzbPathGuidingRenderer/shaders/FzbPGCommon.slang"
 
 [[vk::push_constant]] ConstantBuffer<FzbPathGuidingPushConstant, ScalarDataLayout> pushConst;
 [[vk::binding(StaticBindingPoints_FzbPG::eOctreeData_G)]] RWStructuredBuffer<OctreeNodeData_G_FzbPG, ScalarDataLayout> OctreeDataBuffer_G[];

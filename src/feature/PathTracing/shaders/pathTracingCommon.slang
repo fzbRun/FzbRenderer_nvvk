@@ -1170,5 +1170,4 @@ void BSDF_SAMPLE(inout CallablePayload payload) {
     else if (payload.material.type == MaterialType::RoughDielectric) PopulateCallablePayload_RoughDielectricMaterial(payload);
     else if (payload.material.type == MaterialType::RoughPlastic) PopulateCallablePayload_RoughPlasticMaterial(payload);
 }
-
 #endif

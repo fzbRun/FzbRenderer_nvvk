@@ -3,7 +3,7 @@
 #include "renderer/FzbPathGuidingRenderer/LightInject/LightInjectShaderio_FzbPG.h"
 #include "renderer/FzbPathGuidingRenderer/RasterVoxelization/RasterVoxelizationShaderio_FzbPG.h"
 #include "feature/PathTracing/shaders/pathTracingCommon.slang"
-#include "renderer/SVOPathGuidingRenderer/hard/shaders/SVOPGCommon.slang"
+#include "renderer/FzbPathGuidingRenderer/shaders/FzbPGCommon.slang"
 
 [[vk::push_constant]] ConstantBuffer<LightInjectPushConstant_FzbPG> pushConst;
 [[vk::binding(StaticBindingPoints_LightInject_FzbPG::eVGB)]] RWStructuredBuffer<VGBVoxelData_FzbPG, ScalarDataLayout> VGBs[];

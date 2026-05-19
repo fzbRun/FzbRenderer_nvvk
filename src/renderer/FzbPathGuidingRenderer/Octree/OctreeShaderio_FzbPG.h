@@ -6,8 +6,8 @@
 #ifndef FZBRENDERER_OCTREE_FZBPG_SHADERIO_H
 #define FZBRENDERER_OCTREE_FZBPG_SHADERIO_H
 
-#define MAX_OCTREE_LAYER_FZBPG 6
-#define IndivisibleNodeCount_G_FZBPG 2500
+#define MAX_OCTREE_LAYER_FZBPG 7
+#define IndivisibleNodeCount_G_FZBPG 2000
 
 NAMESPACE_SHADERIO_BEGIN()
 
@@ -138,7 +138,7 @@ struct OctreeThreadGroupInfo_FzbPG {
 	uint threadGroupIndivisibleNodeCount_G;
 };
 //------------------------------------------------------------------------------------------
-#define OUTGOING_COUNT_FZBPG 32
+#define OUTGOING_COUNT_FZBPG 64
 #define HITTEST_COUNT_FZBPG 16		//not bigger than 32 or smaller than 8
 
 #define OUTGOING_TYPE_FZBPG 0

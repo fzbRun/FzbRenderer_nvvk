@@ -1,6 +1,5 @@
 #include "common/Shader/Slang/commonFunction.slang"
 #include "renderer/FzbPathGuidingRenderer/FzbPathGuidingShaderio.h"
-#include "renderer/SVOPathGuidingRenderer/hard/RasterVoxelization/shaderio.h"
 #include "renderer/FzbPathGuidingRenderer/Octree/OctreeShaderio_FzbPG.h"
 #include "feature/PathTracing/shaders/pathTracingCommon.slang"
 

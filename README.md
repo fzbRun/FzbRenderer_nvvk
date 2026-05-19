@@ -12,17 +12,21 @@
   - 用户可以在 resources/xxx/sceneInfo.xml 中指定 xxx 场景的信息，如相机参数、材质、光照、mesh 和实例(与[mitsuba 3](https://www.mitsuba-renderer.org/)相似)
 - **可视化界面**：基于 nvpro_core2 带有的 ImGui 库
 - **模型读取**：可以读取 gltf、glb 和 obj 文件
-- **BSDF 材质**：diffuse、conductor、dielectric、roughConductor 和 roughDielectric
+- **BSDF 材质**：diffuse、conductor、dielectric、roughConductor、 roughDielectric 和 roughPlastic
 - **延时渲染器**: 传统的延迟渲染
 - **路径追踪渲染器**: 传统的 PathTracing
   - 反射、折射
   - BSDF 重要性采样
   - NEE（均匀采样和球面矩形采样）
+  <img src="./result/cover2.png" alt="FzbRenderer_nvvk" style="width:80%; border-radius:6px; display:block;" />
 - **光栅体素化**
   - 三视图、体素结果以及线框结果可视化（如图）
     <img src="./result/rasterVoxelization_dragon.png" alt="FzbRenderer_nvvk" style="width:80%; border-radius:6px; display:block;" />
 - **动态实例**
   - 利用 rayTracing pipeline 的运动模糊扩展加速周期运动的实例的 AS 创建与更新(nvida 显卡 30 系列及以上)
+- **Stochastic Lightcuts PathGuiding**
+  - 利用随机光切简化空间结构，实现实时，多bounces的pathGuiding
+    <img src="./result/result.png" alt="FzbRenderer_nvvk" style="width:80%; border-radius:6px; display:block;" />
 
 ## 快速开始
 
@@ -43,7 +47,7 @@
 
 ## 未来计划
 
-- **SVO PathGuiding(正在进行)**
-- **[Bounding Voxel Sampling PathGuiding](https://dl.acm.org/doi/10.1145/3658203)**
+- **Stochastic Lightcuts PathGuiding**
+- **[Neural Parametric Mixtures for Path Guiding](https://dl.acm.org/doi/10.1145/3588432.3591533)（正在进行）**
 - **[ReSTIR](https://research.nvidia.com/publication/2021-06_restir-gi-path-resampling-real-time-path-tracing)**
 - **……**

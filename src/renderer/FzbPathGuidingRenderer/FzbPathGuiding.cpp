@@ -77,7 +77,7 @@ void FzbPathGuidingRenderer::uiRender() {
 	namespace PE = nvgui::PropertyEditor;
 	Application::viewportImage = gBuffers.getDescriptorSet(eImgTonemapped);
 
-	if (ImGui::Begin("FzbPathGuidingSettings"))
+	if (ImGui::Begin("SLPGSettings"))
 	{
 		ImGui::SeparatorText("Jitter");
 		//UIModified |= ImGui::SliderInt("Max Frames", &maxFrames, 1, MAX_FRAME);
@@ -101,18 +101,18 @@ void FzbPathGuidingRenderer::uiRender() {
 			PE::end();
 		}
 
-		if (ptContext.rtPosFetchFeature.rayTracingPositionFetch == VK_FALSE)
-		{
-			ImGui::TextColored({ 1, 0, 0, 1 }, "ERROR: Position Fetch not supported!");
-			ImGui::Text("This hardware does not support");
-			ImGui::Text("VK_KHR_ray_tracing_position_fetch");
-			ImGui::Text("Please use RTX 20 series or newer GPU.");
-		}
-		else
-		{
-			ImGui::TextColored({ 0, 1, 0, 1 }, "Position Fetch: SUPPORTED");
-			ImGui::Separator();
-		}
+		//if (ptContext.rtPosFetchFeature.rayTracingPositionFetch == VK_FALSE)
+		//{
+		//	ImGui::TextColored({ 1, 0, 0, 1 }, "ERROR: Position Fetch not supported!");
+		//	ImGui::Text("This hardware does not support");
+		//	ImGui::Text("VK_KHR_ray_tracing_position_fetch");
+		//	ImGui::Text("Please use RTX 20 series or newer GPU.");
+		//}
+		//else
+		//{
+		//	ImGui::TextColored({ 0, 1, 0, 1 }, "Position Fetch: SUPPORTED");
+		//	ImGui::Separator();
+		//}
 	}
 	ImGui::End();
 
