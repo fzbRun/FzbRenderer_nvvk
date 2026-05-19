@@ -36,12 +36,15 @@ enum MaterialType {
 	Conductor = 1,
 	Dielectric = 2,
 	RoughConductor = 3,
-	RoughDielectric = 4
+	RoughDielectric = 4,
+	RoughPlastic = 5,
 };
 struct BSDFMaterial {
 	MaterialType type;
 
-	float3 albedo;
+	//here is so mess, but I haven't time to change, stay behind
+	float3 albedo;				//diffuse: reflectance; roughPlastic: albedo_diffuse; other: albedo_specualr
+	float3 albedo_specular;		//only for roughPlastic
 	float3 emissive;
 	float3 eta;
 	float roughness;
@@ -60,11 +63,12 @@ enum LightType {
 	Point = 0,
 	Spot = 1,
 	Direction = 2,
-	Area = 3
+	Area = 3,
+	Non
 };;
 struct Light {
 	float3 pos;
-	int type;
+	int type = LightType::Non;
 	float3 direction;
 	float intensity;
 	float3 color;
@@ -77,6 +81,7 @@ struct Light {
 };
 CHECK_STRUCT_ALIGNMENT(Light)
 //-------------------------------------------------------SceneInfo------------------------------------------------------------
+#define LIGHT_COUNT 2
 struct SceneInfo
 {
 	float4x4               viewProjMatrix;     // View projection matrix for the scene
@@ -89,7 +94,7 @@ struct SceneInfo
 	Instance* instances;					// Address of the instance buffer containing GltfInstance data
 	Mesh* meshes;							// Address of the mesh buffer containing GltfMesh data
 	BSDFMaterial* materials;					// Material properties for the instance
-	Light           lights[2];			// Array of punctual lights in the scene (up to 2)
+	Light           lights[LIGHT_COUNT];			// Array of punctual lights in the scene (up to 2)
 	SkySimpleParameters    skySimpleParam;
 };
 CHECK_STRUCT_ALIGNMENT(SceneInfo)

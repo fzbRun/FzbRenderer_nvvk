@@ -3,7 +3,7 @@
 #include "renderer/FzbPathGuidingRenderer/LightInject/LightInjectShaderio_FzbPG.h"
 #include "renderer/FzbPathGuidingRenderer/RasterVoxelization/RasterVoxelizationShaderio_FzbPG.h"
 #include "feature/PathTracing/shaders/pathTracingCommon.slang"
-#include "renderer/SVOPathGuidingRenderer/hard/shaders/SVOPGCommon.slang"
+#include "renderer/FzbPathGuidingRenderer/shaders/FzbPGCommon.slang"
 
 [[vk::push_constant]] ConstantBuffer<LightInjectPushConstant_FzbPG> pushConst;
 [[vk::binding(StaticBindingPoints_LightInject_FzbPG::eVGB)]] RWStructuredBuffer<VGBVoxelData_FzbPG, ScalarDataLayout> VGBs[];
@@ -65,7 +65,6 @@ struct LightInjectHitPayload {
     float3 incidence;
 
     bool hitLight;
-    float3 lightSampleDir;
     float3 lightRadiance;
 }
 
@@ -186,50 +185,56 @@ bool traceRay_NEE(RayDesc ray, inout HitTestPayload payload) {
 }
 void initNEE(inout LightInjectHitPayload payload) {
     SceneInfo *sceneInfo = pushConst.sceneInfoAddress;
-    //uint lightNum = min(sceneInfo.numLights, NEE_MAX_SAMPLE_NUM);
+    uint lightCount = min(sceneInfo.numLights, 2);
     payload.lightRadiance = float3(0.0f);
 
-    Light light = sceneInfo.lights[0];
-    if (light.type == uint(LightType::Area)) {
-        Quadrilateral quad;
-        quad.startPos = light.pos;
-        quad.normal = light.direction;
-        quad.edge1 = light.edge1;
-        quad.edge2 = light.edge2;
-        float pdf = 1.0f;
-        payload.lightSampleDir = sphereRectangleSample(quad, payload.hitPos, rand(payload.randomSeed), rand(payload.randomSeed), pdf);
-        float distance = length(payload.lightSampleDir);
-        payload.lightSampleDir = normalize(payload.lightSampleDir);
+    for (int lightIndex = 0; lightIndex < lightCount; ++lightIndex) {
+        Light light = sceneInfo.lights[lightIndex];
+        if (light.type == uint(LightType::Area)) {
+            Quadrilateral quad;
+            quad.startPos = light.pos;
+            quad.normal = light.direction;
+            quad.edge1 = light.edge1;
+            quad.edge2 = light.edge2;
+            float pdf = 1.0f;
+            float3 lightSampleDir = sphereRectangleSample(quad, payload.hitPos, rand(payload.randomSeed), rand(payload.randomSeed), pdf);
+            float distance = length(lightSampleDir);
+            lightSampleDir = normalize(lightSampleDir);
 
-        if (isnan(pdf) || isinf(pdf)) return;
-        if (dot(-payload.lightSampleDir, light.direction) <= 0.001f) return;
-        if (dot(payload.lightSampleDir, payload.hitNormal) <= 0.001f) return;
+            if (isnan(pdf) || isinf(pdf)) return;
+            if (dot(-lightSampleDir, light.direction) <= 0.001f) return;
+            if (dot(lightSampleDir, payload.hitNormal) <= 0.001f) return;
 
-        RayDesc ray;
-        ray.TMin = 0.001;
-        ray.TMax = INFINITE;
-        ray.Origin = payload.hitPos + 0.0001f * payload.lightSampleDir;
-        ray.Direction = payload.lightSampleDir;
+            RayDesc ray;
+            ray.TMin = 0.001;
+            ray.TMax = INFINITE;
+            ray.Origin = payload.hitPos + 0.0001f * lightSampleDir;
+            ray.Direction = lightSampleDir;
 
-        HitTestPayload samplePayload;
-        if (traceRay_NEE(ray, samplePayload)) {
-            if (samplePayload.distance + 0.002f < distance) return;
-            payload.lightRadiance = light.color * light.intensity;
+            HitTestPayload samplePayload;
+            if (traceRay_NEE(ray, samplePayload)) {
+                if (samplePayload.distance + 0.002f < distance) return;
+
+                float cosineIN = dot(lightSampleDir, payload.hitNormal);
+                payload.lightRadiance += light.color * light.intensity * cosineIN;
+            }
+        } else if (light.type == uint(LightType::Direction)) {
+            float3 lightSampleDir = -light.direction;
+
+            if (dot(lightSampleDir, payload.hitNormal) <= 0.001f) return;
+
+            RayDesc ray;
+            ray.TMin = 0.001;
+            ray.TMax = INFINITE;
+            ray.Origin = payload.hitPos + 0.0001f * lightSampleDir;
+            ray.Direction = lightSampleDir;
+
+            HitTestPayload samplePayload;
+            if (!traceRay_NEE(ray, samplePayload)) {
+                float cosineIN = dot(lightSampleDir, payload.hitNormal);
+                payload.lightRadiance += light.color * light.intensity * cosineIN;
+            }
         }
-    } else if (light.type == uint(LightType::Direction)) {
-        payload.lightSampleDir = -light.direction;
-
-        if (dot(payload.lightSampleDir, payload.hitNormal) <= 0.001f) return;
-
-        RayDesc ray;
-        ray.TMin = 0.001;
-        ray.TMax = INFINITE;
-        ray.Origin = payload.hitPos + 0.0001f * payload.lightSampleDir;
-        ray.Direction = payload.lightSampleDir;
-
-        HitTestPayload samplePayload;
-        if (!traceRay_NEE(ray, samplePayload))
-            payload.lightRadiance = light.color * light.intensity;
     }
 }
 //----------------------------------------------LightInject--------------------------------------------
@@ -275,10 +280,10 @@ void computeMain_LightInject(uint threadIndex: SV_DispatchThreadID, uint groupTh
     VGBNormal.z = ((normalIndex & 4u) >> 2) * plusMinusSign;
 
     LightInjectHitPayload payload;
-    for (int sampleIndex = 0; sampleIndex < LIGHTINJECT_SAMPLE_COUNT; ++sampleIndex) {
+    for (int sampleIndex = 0; sampleIndex < pushConst.sampleCount; ++sampleIndex) {
         payload.randomSeed = xxhash32(uint3(voxelIndex_atAll, pushConst.frameIndex, sampleIndex));
 
-        float3 sampleDir = fibSpherePoint(sampleIndex, LIGHTINJECT_SAMPLE_COUNT);
+        float3 sampleDir = fibSpherePoint(sampleIndex, pushConst.sampleCount);
         sampleDir = mul(sampleDir, pushConst.randomRotateMatrix);
         sampleDir = mul(sampleDir, voxelTBN);
         float3 samplePos = getAABBPoint(sampleDir, voxelAabbCenter, voxelAabbHalfSize) + 0.01f * sampleDir;
@@ -294,10 +299,12 @@ void computeMain_LightInject(uint threadIndex: SV_DispatchThreadID, uint groupTh
         while (bounceDepth < maxPathDepth) {
             bool hit = traceRay(ray, payload);
             if (hit) {
-                bool reSample = payload.cosineON <= 0.0f;
-                reSample |= !checkPointInAABB(payload.hitPos, voxelAabb);
-                reSample |= dot(payload.hitNormal, VGBNormal) <= 0.0f;
-                if (reSample) break;
+                if (bounceDepth == 0) {
+                    bool reSample = payload.cosineON <= 0.0f;
+                    reSample |= !checkPointInAABB(payload.hitPos, voxelAabb);
+                    reSample |= dot(payload.hitNormal, VGBNormal) <= 0.0f;
+                    if (reSample) break;
+                }
 
                 float3 bsdf = M_1_PI * payload.albedo;
                 float3 radiance_nee = float3(0.0f);
@@ -306,10 +313,7 @@ void computeMain_LightInject(uint threadIndex: SV_DispatchThreadID, uint groupTh
                 }
                 else {
                     initNEE(payload);
-                    if (any(payload.lightRadiance > 0.0f)) {
-                        float cosineIN = dot(payload.lightSampleDir, payload.hitNormal);
-                        radiance_nee = payload.lightRadiance * bsdf * cosineIN;
-                    }
+                    if (any(payload.lightRadiance > 0.0f)) radiance_nee = payload.lightRadiance * bsdf;
                 }
                 accumulatedRadiance += (payload.emissive + radiance_nee) * bsdf_cosine_pdf;
                 if(bounceDepth == 0 && any(payload.emissive > 0.0f)) accumulatedRadiance += payload.emissive * 10000.0f;
@@ -345,7 +349,7 @@ void computeMain_LightInject(uint threadIndex: SV_DispatchThreadID, uint groupTh
             }
         }
     }
-    accumulatedRadiance /= LIGHTINJECT_SAMPLE_COUNT;
+    accumulatedRadiance /= pushConst.sampleCount;
 
     // any(accumulatedRadiance > 0.0f)
     //if (pushConst.frameIndex == 1 && abs(voxelNormal.z - 1.0f) < 0.001f && voxelIndex == 1034) {
@@ -383,7 +387,7 @@ VSout_Cube vertexMain_Cube(uint vertexIndex: SV_VertexID, int instanceIndex: SV_
 
     VGBVoxelData_FzbPG voxelData = VGBs[VGBIndex][voxelIndex];
     VSout_Cube output;
-    if (voxelData.irradiance.w == 0.0f || VGBIndex != pushConst.normalIndex) output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
+    if (voxelData.irradiance.w == 0.0f || VGBIndex != pushConst.normalIndex) output.sv_position = float4(2.0, 2.0, 2.0, 1.0); 
     else {
         output.worldPos.x = ((vertexIndex & 3) * 2) % 6 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.x) : OrderedIntToFloat(voxelData.aabbI.maximum.x);
         output.worldPos.y = (vertexIndex & 3) <= 1 ? OrderedIntToFloat(voxelData.aabbI.minimum.y) : OrderedIntToFloat(voxelData.aabbI.maximum.y);
@@ -393,24 +397,15 @@ VSout_Cube vertexMain_Cube(uint vertexIndex: SV_VertexID, int instanceIndex: SV_
         output.sv_position = mul(float4(output.worldPos.xyz, 1.0f), sceneInfo.viewProjMatrix);
         output.color = voxelData.irradiance.xyz / voxelData.irradiance.w;
     }
-    if (voxelIndex >= 160 && voxelIndex <= 167 && VGBIndex == 5) {
-        output.worldPos.x = ((vertexIndex & 3) * 2) % 6 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.x) : OrderedIntToFloat(voxelData.aabbI.maximum.x);
-        output.worldPos.y = (vertexIndex & 3) <= 1 ? OrderedIntToFloat(voxelData.aabbI.minimum.y) : OrderedIntToFloat(voxelData.aabbI.maximum.y);
-        output.worldPos.z = vertexIndex / 4 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.z) : OrderedIntToFloat(voxelData.aabbI.maximum.z);
-    
-        SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
-        output.sv_position = mul(float4(output.worldPos.xyz, 1.0f), sceneInfo.viewProjMatrix);
-        output.color = float3(1.0f, 0.0f, 0.0f);
-    }
-    if (voxelIndex >= 152 && voxelIndex <= 159 && VGBIndex == 5) {
-        output.worldPos.x = ((vertexIndex & 3) * 2) % 6 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.x) : OrderedIntToFloat(voxelData.aabbI.maximum.x);
-        output.worldPos.y = (vertexIndex & 3) <= 1 ? OrderedIntToFloat(voxelData.aabbI.minimum.y) : OrderedIntToFloat(voxelData.aabbI.maximum.y);
-        output.worldPos.z = vertexIndex / 4 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.z) : OrderedIntToFloat(voxelData.aabbI.maximum.z);
-
-        SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
-        output.sv_position = mul(float4(output.worldPos.xyz, 1.0f), sceneInfo.viewProjMatrix);
-        output.color = float3(0.0f, 1.0f, 0.0f);
-    }
+    //if (voxelIndex >= 160 && voxelIndex <= 167 && VGBIndex == 5) {
+    //    output.worldPos.x = ((vertexIndex & 3) * 2) % 6 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.x) : OrderedIntToFloat(voxelData.aabbI.maximum.x);
+    //    output.worldPos.y = (vertexIndex & 3) <= 1 ? OrderedIntToFloat(voxelData.aabbI.minimum.y) : OrderedIntToFloat(voxelData.aabbI.maximum.y);
+    //    output.worldPos.z = vertexIndex / 4 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.z) : OrderedIntToFloat(voxelData.aabbI.maximum.z);
+    //
+    //    SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+    //    output.sv_position = mul(float4(output.worldPos.xyz, 1.0f), sceneInfo.viewProjMatrix);
+    //    output.color = float3(1.0f, 0.0f, 0.0f);
+    //}
 
     return output;
 }

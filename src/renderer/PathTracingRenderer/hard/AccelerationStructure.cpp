@@ -184,8 +184,8 @@ void AccelerationStructureManager::createTopLevelMotionAS_nvvk() {
 		uint32_t index = i + offset;
 		InstanceSet& instanceSet = sceneResource.periodInstanceSets[sceneResource.periodInstanceIndexToInstanceSetIndex[index]];
 
-		glm::mat4 matT0 = instanceSet.startMatrix * instanceSet.baseMatrix;                 // Original position
-		glm::mat4 matT1 = instanceSet.endMatrix * instanceSet.baseMatrix;					// Translated position
+		glm::mat4 matT0 = instanceSet.baseMatrix;                 // Original position
+		glm::mat4 matT1 = instanceSet.translateMatrix * instanceSet.rotateMatrix * instanceSet.scaleMatrix * instanceSet.baseMatrix;					// Translated position
 
 		VkAccelerationStructureMatrixMotionInstanceNV matrixData{};
 		matrixData.transformT0 = nvvk::toTransformMatrixKHR(matT0);

@@ -58,7 +58,7 @@ void nvapp::ElementDefaultWindowTitle::onUIRender()
     {
       title += fmt::format("{} | ", m_prefix.c_str());
     }
-    const std::string exeName = nvutils::utf8FromPath(nvutils::getExecutablePath().stem());
+    const std::string exeName = "SLPG"; // nvutils::utf8FromPath(nvutils::getExecutablePath().stem());
     title += fmt::format("{} | {}x{} | {:.0f} FPS / {:.3f}ms", exeName, size.width, size.height,
                          ImGui::GetIO().Framerate, 1000.F / ImGui::GetIO().Framerate);
     if(!m_suffix.empty())

@@ -9,7 +9,7 @@
 #define FZBRENDERER_FZBPG_RASTER_VOXELIZATION
 
 namespace FzbRenderer {
-struct RasterVoxelizationCreateInfo_FzbPG {
+struct RasterVoxelizationSetting_FzbPG {
 	VkExtent2D resolution;
 	shaderio::RasterVoxelizationPushConstant pushConstant;
 	shaderio::float3 sceneStartPos;
@@ -39,7 +39,7 @@ public:
 
 	void clearVGB(VkCommandBuffer cmd);
 
-	RasterVoxelizationCreateInfo_FzbPG setting;
+	RasterVoxelizationSetting_FzbPG setting;
 	std::vector<nvvk::Buffer> VGBs;
 
 	VkShaderEXT computeShader_clearVGB{};
@@ -49,7 +49,6 @@ public:
 
 	VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures{};
 	VkPipelineRasterizationConservativeStateCreateInfoEXT conservativeRasterFeature{};
-
 private:
 	void createVGB(VkCommandBuffer cmd);
 

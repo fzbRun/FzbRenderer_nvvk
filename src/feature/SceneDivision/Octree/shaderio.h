@@ -26,10 +26,10 @@ struct OctreePushConstant {
 	uint32_t OctreeNodeTotalCount;
 	uint32_t currentLayerNodeCount;
 	SceneInfo* sceneInfoAddress;
+	uint32_t clusteringLevel;
 #ifndef NDEBUG
 	float4 VGBStartPos_Size;
 	float frameIndex;
-	uint32_t clusteringLevel;
 	uint32_t showOctreeNodeTotalCount;
 	int normalIndex;
 #endif

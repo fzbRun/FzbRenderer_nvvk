@@ -88,13 +88,6 @@ void LightInject_FzbPG::uiRender() {
 }
 void LightInject_FzbPG::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 	NVVK_CHECK(gBuffers.update(cmd, size));
-
-	nvvk::WriteSetContainer write{};
-	VkWriteDescriptorSet    OutImageWrite =
-		staticDescPack.makeWrite(shaderio::StaticSetBindingPoints_PT::eOutImage_PT, 0, 0, 1);
-	write.append(OutImageWrite, gBuffers.getColorImageView(0), VK_IMAGE_LAYOUT_GENERAL);
-
-	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 };
 void LightInject_FzbPG::preRender() {
 	if (Application::sceneResource.cameraChange) Application::frameIndex = 0;
@@ -105,6 +98,7 @@ void LightInject_FzbPG::preRender() {
 	pushConstant.voxelCount = (uint32_t)pow(setting.VGBSize, 3);
 	pushConstant.time = Application::sceneResource.time;
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
+	pushConstant.sampleCount = Application::sceneResource.isStaticScene ? LIGHTINJECT_SAMPLE_COUNT_STATIC_SCENE : LIGHTINJECT_SAMPLE_COUNT;
 
 	float angle = FzbRenderer::rand(Application::frameIndex) * glm::two_pi<float>();
 	pushConstant.randomRotateMatrix = glm::mat3(glm::rotate(glm::mat4(1.0f), angle, glm::vec3(0, 0, 1)));
@@ -160,7 +154,7 @@ void LightInject_FzbPG::createDescriptorSetLayout() {
 	nvvk::DescriptorBindings bindings;
 	bindings.addBinding({ .binding = shaderio::StaticSetBindingPoints_PT::eTextures_PT,
 					 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-					 .descriptorCount = 10,
+					 .descriptorCount = std::max(uint32_t(Application::sceneResource.textures.size()), 1u),
 					 .stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
 			.binding = shaderio::StaticSetBindingPoints_PT::eOutImage_PT,

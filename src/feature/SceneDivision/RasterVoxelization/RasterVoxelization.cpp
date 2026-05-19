@@ -445,6 +445,7 @@ void FzbRenderer::RasterVoxelization::resize(VkCommandBuffer cmd, const VkExtent
 
 void FzbRenderer::RasterVoxelization::preRender(VkCommandBuffer cmd) {
 #ifndef NDEBUG
+	setting.pushConstant.frameIndex = Application::frameIndex;
 	if (Application::frameIndex != 1) return;
 	VkBufferCopy2 copyRegionInfo{
 		.sType = VK_STRUCTURE_TYPE_BUFFER_COPY_2,
@@ -488,7 +489,6 @@ void FzbRenderer::RasterVoxelization::render(VkCommandBuffer cmd) {
 		.pValues = &setting.pushConstant,
 	};
 	setting.pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
-	setting.pushConstant.frameIndex = Application::frameIndex;
 
 	clearVGB(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);

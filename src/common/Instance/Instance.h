@@ -23,8 +23,9 @@ public:
 	glm::mat4 baseMatrix = glm::mat4(1.0f);
 
 	uint32_t time = 100;
-	glm::mat4 startMatrix = glm::mat4(1.0f);
-	glm::mat4 endMatrix = glm::mat4(1.0f);
+	glm::mat4 translateMatrix = glm::mat4(1.0f);
+	glm::mat4 rotateMatrix = glm::mat4(1.0f);
+	glm::mat4 scaleMatrix = glm::mat4(1.0f);
 
 	bool useCustomMeshSet = false;
 	MeshSet customMeshSet;

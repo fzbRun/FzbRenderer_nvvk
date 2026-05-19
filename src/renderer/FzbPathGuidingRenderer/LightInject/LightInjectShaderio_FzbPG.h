@@ -8,6 +8,7 @@
 NAMESPACE_SHADERIO_BEGIN()
 
 #define LIGHTINJECT_SAMPLE_COUNT 32
+#define LIGHTINJECT_SAMPLE_COUNT_STATIC_SCENE 512
 
 struct LightInjectPushConstant_FzbPG {
 	float4 VGBVoxelSize;
@@ -18,6 +19,7 @@ struct LightInjectPushConstant_FzbPG {
 	SceneInfo* sceneInfoAddress;
 	float3x3 randomRotateMatrix;
 	float time;
+	uint sampleCount;
 #ifndef NDEBUG
 	uint normalIndex;
 #endif

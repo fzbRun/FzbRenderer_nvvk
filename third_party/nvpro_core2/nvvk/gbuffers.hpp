@@ -93,7 +93,7 @@ public:
   VkSampleCountFlagBits        getSampleCount() const;
   float                        getAspectRatio() const;
 
-private:
+//private:
   /*--
    * Create the GBuffer with the specified configuration
    *

@@ -6,6 +6,7 @@
 #include "RoughDielectric/RoughDielectricMaterial.h"
 #include <common/Scene/Scene.h>
 #include <common/Application/Application.h>
+#include "RoughPlastic/RoughPlasticMaterial.h"
 
 const shaderio::BSDFMaterial FzbRenderer::defaultMaterial{
 	.albedo = glm::vec4(1.0f),
@@ -24,6 +25,7 @@ shaderio::BSDFMaterial  FzbRenderer::getMaterialInfoFromSceneInfoXML(pugi::xml_n
 	else if (materialType == "dielectric") FzbRenderer::DielectricMaterial::getMaterialInfoFromSceneInfoXML(bsdfNode, material);
 	else if (materialType == "roughConductor") FzbRenderer::RoughConductorMaterial::getMaterialInfoFromSceneInfoXML(bsdfNode, material);
 	else if (materialType == "roughDielectric") FzbRenderer::RoughDielectricMaterial::getMaterialInfoFromSceneInfoXML(bsdfNode, material);
+	else if (materialType == "roughPlastic") FzbRenderer::RoughPlasticMaterial::getMaterialInfoFromSceneInfoXML(bsdfNode, material);
 
 	addTexture(bsdfNode, material);
 	return material;

@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <nvgui/property_editor.hpp>
 #include <nvvk/compute_pipeline.hpp>
+#include <renderer/FzbPathGuidingRenderer/FzbPathGuiding.h>
 
 using namespace FzbRenderer;
 
@@ -45,9 +46,9 @@ RasterVoxelization_FzbPG::RasterVoxelization_FzbPG(pugi::xml_node& featureNode) 
 }
 
 void RasterVoxelization_FzbPG::init() {
+	if (Application::sceneResource.isStaticScene) setting.resolution = { 4096, 4096 };
 #ifndef NDEBUG
 	Feature::createGBuffer(true, true, 2, setting.resolution);		//第一张图：threeView，多视口；第二张图：Cube；第三张图(后处理图)：wireframe	//不随窗口分辨率
-	//Feature::createGBuffer(true, true, 2, {1, 1});
 	//---------------------------------------------cube----------------------------------------
 	nvutils::PrimitiveMesh primitive = FzbRenderer::MeshSet::createCube(false, false);
 	FzbRenderer::MeshSet mesh = FzbRenderer::MeshSet("Cube", primitive);
@@ -59,14 +60,12 @@ void RasterVoxelization_FzbPG::init() {
 
 	scene.createSceneInfoBuffer();
 #endif
-
 	//---------------------------------------------------------------------------------------------
 	createVGBs();
 	createDescriptorSetLayout();	//创建描述符集合布局
 	createDescriptorSet();
 	Feature::createPipelineLayout(sizeof(shaderio::RasterVoxelizationPushConstant));	//创建管线布局：pushConstant+描述符集合布局
 	compileAndCreateShaders();		//编译shader以及创建静态pipeline
-
 }
 void RasterVoxelization_FzbPG::clean() {
 	Feature::clean();
@@ -240,7 +239,6 @@ void RasterVoxelization_FzbPG::render(VkCommandBuffer cmd) {
 		.pValues = &setting.pushConstant,
 	};
 	setting.pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
-	setting.pushConstant.frameIndex = Application::frameIndex;
 
 	clearVGB(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
@@ -286,7 +284,7 @@ void RasterVoxelization_FzbPG::createVGBs() {
 
 		//放大一点，防止边界处的数据错误（比方说2个voxel，那么右边界的索引是2不是1;不然会导致2->0，0voxel本没有数据先有了数据）
 		glm::vec3 distance = setting.sceneSize * 1.1f;
-		float maxDistance = std::max(distance.x, std::max(distance.y, distance.z));
+		//float maxDistance = std::max(distance.x, std::max(distance.y, distance.z));
 		glm::vec3 center = (aabb.maximum + aabb.minimum) * 0.5f;
 		glm::vec3 minimum = center - distance * 0.5f;
 		glm::vec3 maximum = center + distance * 0.5f;
@@ -333,7 +331,7 @@ void RasterVoxelization_FzbPG::createDescriptorSetLayout() {
 	nvvk::DescriptorBindings bindings;
 	bindings.addBinding({ .binding = (uint32_t)shaderio::RasterVoxelizationBindingPoints_FzbPG::eTextures,
 					 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-					 .descriptorCount = 10,
+					 .descriptorCount = std::max(uint32_t(Application::sceneResource.textures.size()), 1u),
 					 .stageFlags = VK_SHADER_STAGE_ALL },
 		VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
 		| VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
@@ -705,7 +703,6 @@ void RasterVoxelization_FzbPG::createVGB_ThreeView(VkCommandBuffer cmd) {
 	}
 
 	vkCmdEndRendering(cmd);
-	//vkCmdSetConservativeRasterizationModeEXT(cmd, VK_CONSERVATIVE_RASTERIZATION_MODE_DISABLED_EXT);
 
 	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(0), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
 }
@@ -721,6 +718,7 @@ void RasterVoxelization_FzbPG::debug_Cube(VkCommandBuffer cmd) {
 											Application::sceneResource.sceneInfo.backgroundColor.y,
 											Application::sceneResource.sceneInfo.backgroundColor.z, 1.0f} };
 	VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
+	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 	depthAttachment.imageView = gBuffers.getDepthImageView();
 	depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
 

@@ -19,10 +19,13 @@ FzbPathGuidingRenderer::FzbPathGuidingRenderer(pugi::xml_node& rendererNode) {
 		lightInject = std::make_shared<LightInject_FzbPG>(lightInjectNode);
 	if (pugi::xml_node octreeNode = rendererNode.child("Octree"))
 		octree = std::make_shared<Octree_FzbPG>(octreeNode);
-	//if (pugi::xml_node weightNode = rendererNode.child("Weight"))
-	//	weight = std::make_shared<FzbRenderer::Weight_FzbPG>(weightNode);
+
+	shadowMap = std::make_shared<ShadowMap>();
 }
 void FzbPathGuidingRenderer::init() {
+	renderStaticScene = Application::sceneResource.isStaticScene;
+	if (renderStaticScene) shadowMap->init({ 1024, 1024 });
+
 	ptContext.getRayTracingPropertiesAndFeature();
 	asManager.init();
 	sbtGenerator.init(Application::app->getDevice(), ptContext.rtProperties);
@@ -57,6 +60,8 @@ void FzbPathGuidingRenderer::init() {
 	Renderer::init();
 }
 void FzbPathGuidingRenderer::clean() {
+	if (renderStaticScene) shadowMap->clean();
+
 	rasterVoxelization->clean();
 	lightInject->clean();
 	octree->clean();
@@ -72,7 +77,7 @@ void FzbPathGuidingRenderer::uiRender() {
 	namespace PE = nvgui::PropertyEditor;
 	Application::viewportImage = gBuffers.getDescriptorSet(eImgTonemapped);
 
-	if (ImGui::Begin("FzbPathGuidingSettings"))
+	if (ImGui::Begin("SLPGSettings"))
 	{
 		ImGui::SeparatorText("Jitter");
 		//UIModified |= ImGui::SliderInt("Max Frames", &maxFrames, 1, MAX_FRAME);
@@ -88,22 +93,30 @@ void FzbPathGuidingRenderer::uiRender() {
 				"Maximum Bounces depth");
 			PE::end();
 		}
+		ImGui::SeparatorText("SPP");
+		{
+			PE::begin();
+			UIModified |= PE::SliderInt("SPP", &pushConstant.spp, 1, 64, "%d", ImGuiSliderFlags_AlwaysClamp,
+				"Sample Per Pixel");
+			PE::end();
+		}
 
-		if (ptContext.rtPosFetchFeature.rayTracingPositionFetch == VK_FALSE)
-		{
-			ImGui::TextColored({ 1, 0, 0, 1 }, "ERROR: Position Fetch not supported!");
-			ImGui::Text("This hardware does not support");
-			ImGui::Text("VK_KHR_ray_tracing_position_fetch");
-			ImGui::Text("Please use RTX 20 series or newer GPU.");
-		}
-		else
-		{
-			ImGui::TextColored({ 0, 1, 0, 1 }, "Position Fetch: SUPPORTED");
-			ImGui::Separator();
-		}
+		//if (ptContext.rtPosFetchFeature.rayTracingPositionFetch == VK_FALSE)
+		//{
+		//	ImGui::TextColored({ 1, 0, 0, 1 }, "ERROR: Position Fetch not supported!");
+		//	ImGui::Text("This hardware does not support");
+		//	ImGui::Text("VK_KHR_ray_tracing_position_fetch");
+		//	ImGui::Text("Please use RTX 20 series or newer GPU.");
+		//}
+		//else
+		//{
+		//	ImGui::TextColored({ 0, 1, 0, 1 }, "Position Fetch: SUPPORTED");
+		//	ImGui::Separator();
+		//}
 	}
 	ImGui::End();
 
+	if (renderStaticScene) shadowMap->uiRender();
 	rasterVoxelization->uiRender();
 	lightInject->uiRender();
 	octree->uiRender();
@@ -126,6 +139,8 @@ void FzbPathGuidingRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size)
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 
+	if (renderStaticScene) shadowMap->resize(cmd, size);
+
 	IF_DEBUG(rasterVoxelization->resize(cmd, size, gBuffers, eImgTonemapped), rasterVoxelization->resize(cmd, size));
 	lightInject->resize(cmd, size);
 	IF_DEBUG(octree->resize(cmd, size, gBuffers, eImgTonemapped), octree->resize(cmd, size));
@@ -145,10 +160,10 @@ void FzbPathGuidingRenderer::preRender() {
 	pushConstant.VGBVoxelSize = shaderio::float3(rasterVoxelization->setting.pushConstant.voxelSize_Count);
 	asManager.updateToplevelAS(cmd);
 
+	shadowMap->preRender(cmd);
 	rasterVoxelization->preRender(cmd);
 	lightInject->preRender();
 	octree->preRender();
-
 	octree->pushConstant.maxFrameCount = maxFrames;
 
 	pushConstant.randomRotateMatrix = octree->pushConstant.randomRotateMatrix;
@@ -161,24 +176,31 @@ void FzbPathGuidingRenderer::render(VkCommandBuffer cmd) {
 	updateDataPerFrame(cmd);
 	if (pushConstant.frameIndex >= maxFrames && maxFrames > 1) return;
 
-	rasterVoxelization->render(cmd);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT);
-	lightInject->render(cmd);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	if (!renderStaticScene || frameIndex == 0) {
+		rasterVoxelization->render(cmd);
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT);
+		lightInject->render(cmd);
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	}
+	++frameIndex;
+
 	octree->render(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-
+	
 	pathGuiding(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-
+	
 	Renderer::postProcess(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
 		VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-
+	
+	if(renderStaticScene) shadowMap->postProcess(cmd);
 	rasterVoxelization->postProcess(cmd);
 	lightInject->postProcess(cmd);
 	octree->postProcess(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
+
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
 };
 
 void FzbPathGuidingRenderer::createDescriptorSetLayout() {
@@ -186,7 +208,7 @@ void FzbPathGuidingRenderer::createDescriptorSetLayout() {
 	nvvk::DescriptorBindings bindings;
 	bindings.addBinding({ .binding = shaderio::StaticSetBindingPoints_PT::eTextures_PT,
 					 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-					 .descriptorCount = 10,
+					 .descriptorCount = std::max(uint32_t(Application::sceneResource.textures.size()), 1u),
 					 .stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
 			.binding = shaderio::StaticSetBindingPoints_PT::eOutImage_PT,

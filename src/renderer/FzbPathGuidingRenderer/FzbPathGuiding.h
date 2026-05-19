@@ -5,6 +5,7 @@
 #include "RasterVoxelization/RasterVoxelization_FzbPG.h"
 #include "LightInject/LightInject_FzbPG.h"
 #include "Octree/Octree_FzbPG.h"
+#include <feature/ShadowMap/ShadowMap.h>
 
 #ifndef FZBRENDERER_FZB_PATHGUIDING_H
 #define FZBRENDERER_FZB_PATHGUIDING_H
@@ -32,6 +33,11 @@ public:
 
 	void pathGuiding(VkCommandBuffer cmd);
 private:
+	bool renderStaticScene = true;
+	inline static int frameIndex = 0;
+
+	std::shared_ptr<ShadowMap> shadowMap;
+
 	std::shared_ptr<RasterVoxelization_FzbPG> rasterVoxelization;
 	std::shared_ptr<LightInject_FzbPG> lightInject;
 	std::shared_ptr<Octree_FzbPG> octree;
