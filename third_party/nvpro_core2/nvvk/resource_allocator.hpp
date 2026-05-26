@@ -96,7 +96,7 @@ public:
   ResourceAllocator& operator=(const ResourceAllocator&) = delete;
   ResourceAllocator(ResourceAllocator&& other) noexcept;
   ResourceAllocator& operator=(ResourceAllocator&& other) noexcept;
-  ~ResourceAllocator();
+  virtual ~ResourceAllocator();
 
   operator VmaAllocator() const;
 

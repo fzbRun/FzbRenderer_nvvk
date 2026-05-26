@@ -1,9 +1,16 @@
-cmake_minimum_required(VERSION 3.22)
+cmake_minimum_required(VERSION 3.26)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+set(CMAKE_CUDA_ARCHITECTURES native)
 
 get_filename_component(PROJECT_NAME ${CMAKE_CURRENT_SOURCE_DIR} NAME)
 project(
     ${PROJECT_NAME}
     VERSION 1.0.0
+    LANGUAGES CXX CUDA
 )
 #--------------------------------------------------------------------------------------
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -81,5 +88,20 @@ source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/resources" PREFIX "resources" FIL
 source_group("rendererInfo" FILES ${RENDERERINFO_XML_FILES})
 set_source_files_properties(${RESOURCES_XML_FILES} PROPERTIES HEADER_FILE_ONLY ON)
 set_source_files_properties(${RENDERERINFO_XML_FILES} PROPERTIES HEADER_FILE_ONLY ON)
-
 #--------------------------------------------------------------------------------------
+find_package(CUDAToolkit REQUIRED)
+if(CUDAToolkit_FOUND)
+    message(STATUS "CUDAToolkit found successfully")
+endif()
+
+target_include_directories(${PROJECT_NAME} PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+
+#target_link_libraries(${PROJECT_NAME} PRIVATE
+    #CUDA::cudart
+    #CUDA::cublas
+    #CUDA::cufft
+    #CUDA::cusolver
+    #CUDA::cusparse
+#)
+
+set_target_properties(${PROJECT_NAME} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)

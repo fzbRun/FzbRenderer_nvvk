@@ -166,11 +166,9 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 
 	addPathTracingSlangMacro();
 	std::string shaderSlangName;
-	if (useNEE) {
-		shaderSlangName = "pathTracingNEEShaders.slang";
-		pushValues.HitTestShaderIndex = 1;
-	}
+	if (useNEE) shaderSlangName = "pathTracingNEEShaders.slang";
 	else shaderSlangName = "pathTracingShaders.slang";
+	pushValues.HitTestShaderIndex = 1;
 
 	//VkShaderModuleCreateInfo shaderCode = compileSlangShader("pathTracingShaders.slang", {});
 	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
@@ -445,7 +443,8 @@ void FzbRenderer::PathTracingRenderer::preRender() {
 
 	asManager.updateToplevelAS();
 }
-void FzbRenderer::PathTracingRenderer::render(VkCommandBuffer cmd) {
+void FzbRenderer::PathTracingRenderer::render(VkCommandBuffer* cmdPtr) {
+	VkCommandBuffer cmd = cmdPtr[0];
 	NVVK_DBG_SCOPE(cmd);
 
 	//maxFrames等于1表示只要一帧，我们就每帧都替换

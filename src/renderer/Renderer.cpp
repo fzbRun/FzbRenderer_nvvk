@@ -4,15 +4,14 @@
 #include "PathTracingRenderer/hard/PathTracingRenderer.h"
 #include <nvvk/formats.hpp>
 #include "FzbPathGuidingRenderer/FzbPathGuiding.h"
+#include "NPMPathGuiding/NPMPathGuiding.h"
 
 enum FzbRendererType {
 	FZB_RENDERER_FORWARD,
 	FZB_RENDERER_DEFERRED,
 	FZB_RENDERER_PATH_TRACING,
 	FZB_RENDERER_PATH_TRACING_SOFT,
-	FZB_RENDERER_SVO_PATH_GUIDING,
-	FZB_RENDERER_SVO_PATH_GUIDING_SOFT,
-	FZB_FEATURE_COMPONENT_BVH_DEBUG,
+	FZB_RENDERER_NPM_PATH_GUIDING,
 	FZB_FEATURE_COMPONENT_SVO_DEBUG,
 	FZB_FEATURE_COMPONENT_SVO_PG_DEBUG,
 	FZB_RENDERER_FZB_PATH_GUIDING,
@@ -22,9 +21,7 @@ std::map<std::string, FzbRendererType> RendererTypeMap{
 	{ "Deferred", FZB_RENDERER_DEFERRED},
 	{ "PathTracing", FZB_RENDERER_PATH_TRACING },
 	{ "PathTracing_soft", FZB_RENDERER_PATH_TRACING_SOFT },
-	{ "SVOPathGuiding", FZB_RENDERER_SVO_PATH_GUIDING },
-	{ "SVOPathGuiding_soft", FZB_RENDERER_SVO_PATH_GUIDING_SOFT },
-	{ "BVH_Debug", FZB_FEATURE_COMPONENT_BVH_DEBUG },
+	{ "NPMPathGuiding", FZB_RENDERER_NPM_PATH_GUIDING },
 	{ "FzbPathGuiding", FZB_RENDERER_FZB_PATH_GUIDING },
 };
 
@@ -36,6 +33,7 @@ std::shared_ptr<FzbRenderer::Renderer> FzbRenderer::createRenderer(RendererCreat
 			case FZB_RENDERER_DEFERRED: return std::make_shared<DeferredRenderer>(createInfo.rendererNode);
 			case FZB_RENDERER_PATH_TRACING: return std::make_shared<PathTracingRenderer>(createInfo.rendererNode);
 			case FZB_RENDERER_FZB_PATH_GUIDING: return std::make_shared<FzbPathGuidingRenderer>(createInfo.rendererNode);
+			case FZB_RENDERER_NPM_PATH_GUIDING: return std::make_shared<NPMPathGuiding>(createInfo.rendererNode);
 		}
 		return nullptr;
 	}
@@ -46,6 +44,7 @@ std::shared_ptr<FzbRenderer::Renderer> FzbRenderer::createRenderer(RendererCreat
 void FzbRenderer::Renderer::init() {
 	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
 	Application::stagingUploader.cmdUploadAppended(cmd);
+	Application::stagingUploaderExport.cmdUploadAppended(cmd);
 	Application::app->submitAndWaitTempCmdBuffer(cmd);
 }
 void FzbRenderer::Renderer::clean() {

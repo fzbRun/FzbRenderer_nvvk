@@ -17,7 +17,7 @@ void FzbRenderer::Feature::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 	NVVK_CHECK(gBuffers.update(cmd, size));
 };
 void FzbRenderer::Feature::preRender() {};
-void FzbRenderer::Feature::render(VkCommandBuffer cmd) {};
+void FzbRenderer::Feature::render(VkCommandBuffer* cmd) {};
 void FzbRenderer::Feature::postProcess(VkCommandBuffer cmd) {};
 
 void FzbRenderer::Feature::createGBuffer(bool useDepth, bool postProcess, uint32_t colorAttachmentCount, VkExtent2D resolution) {

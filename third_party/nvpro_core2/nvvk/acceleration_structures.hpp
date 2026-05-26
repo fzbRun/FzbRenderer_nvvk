@@ -338,7 +338,7 @@ public:
 
   nvvk::QueueInfo                                    m_queueInfo;
   nvvk::ResourceAllocator*                           m_alloc{nullptr};
-  nvvk::StagingUploader*                             m_uploader{};
+  nvvk::StagingUploader*                             m_uploader{nullptr};
   VkPhysicalDeviceAccelerationStructurePropertiesKHR m_accelStructProps{};
   VkDeviceSize                                       m_blasAccelerationStructureBudget{};
   VkDeviceSize                                       m_blasScratchBudget{};

@@ -21,7 +21,7 @@ public:
 	void clean() override;
 	void uiRender() override;
 	void resize(VkCommandBuffer cmd, const VkExtent2D& size) override;
-	void render(VkCommandBuffer cmd) override;
+	void render(VkCommandBuffer* cmdPtr) override;
 
 	void compileAndCreateShaders() override;
 private:

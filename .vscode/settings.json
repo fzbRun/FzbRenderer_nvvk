@@ -5,6 +5,7 @@
     "-DSlang_ROOT=C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/third_party/Slang-windows-x86_64-2025.13.1",
     "-DSlang_VERSION=2025.13.1",
     "-Dpugixml_ROOT=C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/third_party/pugixml",
-    "-Dassimp_ROOT=C:/Users/fangzanbo/Desktop/render/third_party/assimp-master"
+    "-Dassimp_ROOT=C:/Users/fangzanbo/Desktop/render/third_party/assimp-master",
+    "-DCUDAPath=C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.5/bin/nvcc.exe",
   ]
 }

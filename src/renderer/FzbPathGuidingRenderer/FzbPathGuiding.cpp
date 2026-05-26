@@ -170,7 +170,8 @@ void FzbPathGuidingRenderer::preRender() {
 
 	Application::app->submitAndWaitTempCmdBuffer(cmd);
 }
-void FzbPathGuidingRenderer::render(VkCommandBuffer cmd) {
+void FzbPathGuidingRenderer::render(VkCommandBuffer* cmdPtr) {
+	VkCommandBuffer cmd = cmdPtr[0];
 	NVVK_DBG_SCOPE(cmd);
 
 	updateDataPerFrame(cmd);

@@ -55,7 +55,7 @@ public:
 	并且其渲染顺序为UIRender->PreRender->Render
 	*/
 	void onPreRender() override;
-	void onRender(VkCommandBuffer cmd);
+	void onRender(VkCommandBuffer* cmd) override;
 
 	void onUIMenu() override;
 	void onLastHeadlessFrame() override;
@@ -68,6 +68,8 @@ public:
 	inline static nvapp::Application* app{};
 	inline static nvvk::ResourceAllocator allocator{};
 	inline static nvvk::StagingUploader   stagingUploader{};
+	inline static nvvk::ResourceAllocatorExport allocatorExport{};
+	inline static nvvk::StagingUploader   stagingUploaderExport{};
 	inline static nvvk::SamplerPool       samplerPool{};
 	inline static nvslang::SlangCompiler     slangCompiler{};
 
@@ -77,6 +79,7 @@ public:
 	inline static nvshaders::Tonemapper tonemapper{};
 	inline static shaderio::TonemapperData tonemapperData{};
 
+	inline static uint32_t cmdCount = 1;
 	inline static int frameIndex = -1;
 	inline static bool UIModified = false;
 	inline static VkDescriptorSet viewportImage = nullptr;
@@ -89,8 +92,6 @@ private:
 	*/
 	void getAppInfoFromXML(nvapp::ApplicationCreateInfo& appInfo);
 	void initSlangCompiler();
-
-	void updateDataPerFrame(VkCommandBuffer cmd);
 
 	std::vector<std::string> slangIncludes;	//slang的include地址
 

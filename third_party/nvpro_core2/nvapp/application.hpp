@@ -126,7 +126,7 @@ struct IAppElement
   virtual void onUIRender() {}                                           // Called for anything related to UI
   virtual void onUIMenu() {}                                             // This is the menubar to create
   virtual void onPreRender() {}                  // called post onUIRender and prior onRender (looped over all elements)
-  virtual void onRender(VkCommandBuffer cmd) {}  // For anything to render within a frame
+  virtual void onRender(VkCommandBuffer* cmd) {}  // For anything to render within a frame
   virtual void onFileDrop(const std::filesystem::path& filename) {}  // For when a file is dragged on top of the window
   virtual void onLastHeadlessFrame() {};  // Called at the end of the last frame in headless mode
 
@@ -165,6 +165,8 @@ struct ApplicationCreateInfo
   // VK_PRESENT_MODE_MAX_ENUM_KHR means no preference
   VkPresentModeKHR preferredVsyncOffMode = VK_PRESENT_MODE_MAX_ENUM_KHR;
   VkPresentModeKHR preferredVsyncOnMode  = VK_PRESENT_MODE_MAX_ENUM_KHR;
+
+  uint32_t cmdCount = 1;
 };
 
 
@@ -237,9 +239,9 @@ private:
   void            createDescriptorPool();
   void            onViewportSizeChange(VkExtent2D size);
   void            headlessRun();
-  VkCommandBuffer beginCommandRecording();
+  VkCommandBuffer* beginCommandRecording();
   void            addSwapchainSemaphores();
-  void            drawFrame(VkCommandBuffer cmd);
+  void            drawFrame(VkCommandBuffer* cmd);
   void            renderToSwapchain(VkCommandBuffer cmd);
   bool            prepareFrameResources();
   void            endFrame(VkCommandBuffer cmd, uint32_t frameInFlights);
@@ -277,10 +279,12 @@ private:
 
   // Frame resources and synchronization (Swapchain, Command buffers, Semaphores, Fences)
   nvvk::Swapchain m_swapchain;
+  uint32_t        cmdCount = 1;
   struct FrameData
   {
     VkCommandPool   cmdPool{};      // Command pool for recording commands for this frame
-    VkCommandBuffer cmdBuffer{};    // Command buffer containing the frame's rendering commands
+    //VkCommandBuffer cmdBuffer{};    // Command buffer containing the frame's rendering commands
+    std::vector<VkCommandBuffer> cmdBuffers;
     uint64_t        frameNumber{};  // Timeline value for synchronization (increases each frame)
   };
   std::vector<FrameData> m_frameData{};    // Collection of per-frame resources to support multiple frames in flight

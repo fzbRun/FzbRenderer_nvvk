@@ -147,6 +147,7 @@ void nvapp::Application::init(ApplicationCreateInfo& info)
   m_headlessFrameCount = info.headlessFrameCount;
   m_viewportSize       = {};  // Will be set by the first viewport size
   m_maxTexturePool     = info.texturePoolSize;
+  cmdCount             = info.cmdCount;
 
   if(info.hasUndockableViewport == true)
   {
@@ -282,7 +283,7 @@ void nvapp::Application::deinit()
   // Frame info
   for(size_t i = 0; i < m_frameData.size(); i++)
   {
-    vkFreeCommandBuffers(m_device, m_frameData[i].cmdPool, 1, &m_frameData[i].cmdBuffer);
+    vkFreeCommandBuffers(m_device, m_frameData[i].cmdPool, 1, &m_frameData[i].cmdBuffers[0]);
     vkDestroyCommandPool(m_device, m_frameData[i].cmdPool, nullptr);
   }
   vkDestroySemaphore(m_device, m_frameTimelineSemaphore, nullptr);
@@ -437,11 +438,11 @@ void nvapp::Application::run()
       prepareFrameToSignal(m_swapchain.getMaxFramesInFlight());
 
       // Record Commands
-      VkCommandBuffer cmd = beginCommandRecording();
+      VkCommandBuffer* cmd = beginCommandRecording();
       drawFrame(cmd);            // Call onUIRender() and onRender() for each element
-      renderToSwapchain(cmd);    // Render ImGui to swapchain
+      renderToSwapchain(cmd[cmdCount - 1]);  // Render ImGui to swapchain
       addSwapchainSemaphores();  // Setup synchronization
-      endFrame(cmd, m_swapchain.getMaxFramesInFlight());
+      endFrame(cmd[cmdCount - 1], m_swapchain.getMaxFramesInFlight());
 
       // Present Frame
       presentFrame();  // This can also trigger swapchain rebuild
@@ -523,7 +524,7 @@ void nvapp::Application::onViewportSizeChange(VkExtent2D size)
 // - Render the ImGui UI
 // - Present the image to the screen
 //
-void nvapp::Application::drawFrame(VkCommandBuffer cmd)
+void nvapp::Application::drawFrame(VkCommandBuffer* cmd)
 {
   // Reset the extra semaphores and command buffers
   m_waitSemaphores.clear();
@@ -592,21 +593,21 @@ bool nvapp::Application::prepareFrameResources()
 // Begin the command buffer recording for the frame
 // It resets the command pool to reuse the command buffer for recording new rendering commands for the current frame.
 // and it returns the command buffer for the frame.
-VkCommandBuffer nvapp::Application::beginCommandRecording()
+VkCommandBuffer* nvapp::Application::beginCommandRecording()
 {
   // Get the frame data for the current frame in the ring buffer
   FrameData& frame = m_frameData[m_frameRingCurrent];
 
   // Reset the command pool to reuse the command buffer for recording new rendering commands for the current frame.
   NVVK_CHECK(vkResetCommandPool(m_device, frame.cmdPool, 0));
-  VkCommandBuffer cmd = frame.cmdBuffer;
+  VkCommandBuffer* cmdPtr = frame.cmdBuffers.data();
 
   // Begin the command buffer recording for the frame
   const VkCommandBufferBeginInfo beginInfo{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
                                            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
-  NVVK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
+  NVVK_CHECK(vkBeginCommandBuffer(cmdPtr[0], &beginInfo));
 
-  return cmd;
+  return cmdPtr;
 }
 
 //-----------------------------------------------------------------------
@@ -795,9 +796,9 @@ void nvapp::Application::headlessRun()
 
     prepareFrameToSignal(getFrameCycleSize());
 
-    VkCommandBuffer cmd = beginCommandRecording();  // Start the command buffer
+    VkCommandBuffer* cmd = beginCommandRecording();  // Start the command buffer
     drawFrame(cmd);                                 // Call onUIRender() and onRender() for each element
-    endFrame(cmd, getFrameCycleSize());             // End the frame and submit it
+    endFrame(cmd[cmdCount - 1], getFrameCycleSize());  // End the frame and submit it
     advanceFrame(getFrameCycleSize());              // Advance to the next frame in the ring buffer
 
     ImGui::EndFrame();
@@ -873,14 +874,24 @@ void nvapp::Application::createFrameSubmission(uint32_t numFrames)
     NVVK_CHECK(vkCreateCommandPool(device, &cmdPoolCreateInfo, nullptr, &m_frameData[i].cmdPool));
     NVVK_DBG_NAME(m_frameData[i].cmdPool);
 
-    const VkCommandBufferAllocateInfo commandBufferAllocateInfo = {
+    //const VkCommandBufferAllocateInfo commandBufferAllocateInfo = {
+    //    .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+    //    .commandPool        = m_frameData[i].cmdPool,
+    //    .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+    //    .commandBufferCount = 1,
+    //};
+    //NVVK_CHECK(vkAllocateCommandBuffers(device, &commandBufferAllocateInfo, &m_frameData[i].cmdBuffer));
+    //NVVK_DBG_NAME(m_frameData[i].cmdBuffer);
+
+    m_frameData[i].cmdBuffers.resize(cmdCount);
+    const VkCommandBufferAllocateInfo commandBuffersAllocateInfo = {
         .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
         .commandPool        = m_frameData[i].cmdPool,
         .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandBufferCount = 1,
+        .commandBufferCount = cmdCount,
     };
-    NVVK_CHECK(vkAllocateCommandBuffers(device, &commandBufferAllocateInfo, &m_frameData[i].cmdBuffer));
-    NVVK_DBG_NAME(m_frameData[i].cmdBuffer);
+    NVVK_CHECK(vkAllocateCommandBuffers(device, &commandBuffersAllocateInfo, m_frameData[i].cmdBuffers.data()));
+    for (auto& cmdBuffer : m_frameData[i].cmdBuffers) NVVK_DBG_NAME(cmdBuffer);
   }
 }
 

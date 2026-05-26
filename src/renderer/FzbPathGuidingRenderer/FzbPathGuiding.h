@@ -23,7 +23,7 @@ public:
 	void uiRender() override;
 	void resize(VkCommandBuffer cmd, const VkExtent2D& size) override;
 	void preRender() override;
-	void render(VkCommandBuffer cmd) override;
+	void render(VkCommandBuffer* cmd) override;
 	
 	void createDescriptorSetLayout() override;
 	void createDescriptorSet();

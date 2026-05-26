@@ -82,7 +82,8 @@ void FzbRenderer::DeferredRenderer::resize(VkCommandBuffer cmd, const VkExtent2D
     NVVK_CHECK(gBuffers.update(cmd, size));
 }
 
-void FzbRenderer::DeferredRenderer::render(VkCommandBuffer cmd) {
+void FzbRenderer::DeferredRenderer::render(VkCommandBuffer* cmdPtr) {
+    VkCommandBuffer cmd = cmdPtr[0];
     NVVK_DBG_SCOPE(cmd);
     shaderio::DefaultPushConstant pushValues{
         .sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address,

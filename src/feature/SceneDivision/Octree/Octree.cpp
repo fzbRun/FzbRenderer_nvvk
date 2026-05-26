@@ -7,7 +7,7 @@
 #include <bit>
 #include <nvvk/default_structs.hpp>
 #include <nvgui/property_editor.hpp>
-#include <renderer/SVOPathGuidingRenderer/hard/RasterVoxelization/RasterVoxelizationSVOPG.h>
+#include "renderer/FzbPathGuidingRenderer/RasterVoxelization/RasterVoxelization_FzbPG.h"
 
 using namespace FzbRenderer;
 
@@ -141,7 +141,7 @@ void Octree::preRender() {
 	pushConstant.VGBStartPos_Size = glm::vec4(setting.VGBStartPos, setting.VGBSize);
 	pushConstant.frameIndex = Application::frameIndex;
 	pushConstant.clusteringLevel = setting.clusteringLevel;
-	pushConstant.normalIndex = RasterVoxelization_SVOPG::normalIndex;
+	pushConstant.normalIndex = RasterVoxelization_FzbPG::normalIndex;
 #endif
 }
 void Octree::render(VkCommandBuffer cmd) {
