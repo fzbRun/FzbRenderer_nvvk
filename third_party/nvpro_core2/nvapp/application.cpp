@@ -429,7 +429,7 @@ void nvapp::Application::run()
     }
 
     // Frame Resource Preparation
-    if(prepareFrameResources())
+    if(prepareFrameResources())     //等上一帧结束渲染结束，GPU才会开始这一帧的渲染
     {
       // Free resources from previous frame
       freeResourcesQueue();

@@ -14,7 +14,7 @@ public:
 	Image_yReversal() = default;
 
 	Image_yReversal(Image_yReversal_CreateInfo createInfo);
-	void reversal();
+	void reversal(uint64_t waitTimeline = 1);
 
 	void clean();
 

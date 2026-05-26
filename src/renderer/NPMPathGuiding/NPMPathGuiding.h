@@ -4,6 +4,7 @@
 #include "common/Image/Image.h"
 #include "common/Semaphore/Semaphore.h"
 #include "test.cuh"
+#include "./NPMPathGuidingShaderio.h"
 
 #ifndef FZBRENDERER_NPM_PATHGUIDING_H
 #define FZBRENDERER_NPM_PATHGUIDING_H
@@ -32,6 +33,9 @@ public:
 	void pathGuiding(VkCommandBuffer cmd);
 
 private:
+	shaderio::NPMPathGuidingPushConstant pushConstant{};
+	VkShaderEXT computeShader_NPMPathGuiding{};
+
 	FzbRenderer::Image flowerImage;
 	FzbRenderer::Semaphore vulkanToCudaSemaphore;
 	FzbRenderer::Semaphore cudaToVulkanSemaphore;

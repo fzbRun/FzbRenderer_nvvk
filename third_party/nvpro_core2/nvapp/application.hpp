@@ -212,6 +212,7 @@ public:
   inline VkInstance             getInstance() const { return m_instance; }
   inline VkPhysicalDevice       getPhysicalDevice() const { return m_physicalDevice; }
   inline VkDevice               getDevice() const { return m_device; }
+  inline const nvvk::Swapchain& getSwapchain() const { return m_swapchain; }    
   inline const nvvk::QueueInfo& getQueue(uint32_t index) const { return m_queues[index]; }
   inline VkCommandPool          getCommandPool() const { return m_transientCmdPool; }
   inline VkDescriptorPool       getTextureDescriptorPool() const { return m_descriptorPool; }
