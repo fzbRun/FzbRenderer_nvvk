@@ -37,6 +37,7 @@ private:
 	VkShaderEXT computeShader_NPMPathGuiding{};
 
 	FzbRenderer::Image flowerImage;
+	FzbRenderer::Image colorImage;
 	FzbRenderer::Semaphore vulkanToCudaSemaphore;
 	FzbRenderer::Semaphore cudaToVulkanSemaphore;
 

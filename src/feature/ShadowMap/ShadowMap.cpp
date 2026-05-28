@@ -222,7 +222,7 @@ void ShadowMap::postProcess(VkCommandBuffer cmd) {
 }
 
 VkResult ShadowMap::createShadowMap() {
-	VkSampler pointSampler{};
+	//VkSampler pointSampler{};
 	VkSamplerCreateInfo sampleCreateInfo = {
 		.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
 		.magFilter = VK_FILTER_NEAREST,
@@ -231,8 +231,8 @@ VkResult ShadowMap::createShadowMap() {
 		.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
 		.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
 	};
-	NVVK_CHECK(Application::samplerPool.acquireSampler(pointSampler, sampleCreateInfo));
-	NVVK_DBG_NAME(pointSampler);
+	//NVVK_CHECK(Application::samplerPool.acquireSampler(pointSampler, sampleCreateInfo));
+	//NVVK_DBG_NAME(pointSampler);
 
 	
 	int lightCount = 0; lightIndices.resize(0);
@@ -256,7 +256,7 @@ VkResult ShadowMap::createShadowMap() {
 	createInfo.info.format = nvvk::findDepthFormat(Application::app->getPhysicalDevice());
 	createInfo.viewInfo.format = nvvk::findDepthFormat(Application::app->getPhysicalDevice());
 	createInfo.viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-	createInfo.sampler = pointSampler;
+	createInfo.samplerInfo = sampleCreateInfo;
 	createInfo.info.extent = { setting.resolution.width, setting.resolution.height, 1 };
 	for (int i = 0; i < lightCount; ++i) {
 		const shaderio::Light& light = Application::sceneResource.sceneInfo.lights[lightIndices[i]];
@@ -340,7 +340,7 @@ VkResult ShadowMap::createShadowMap() {
 	NVVK_FAIL_RETURN(vkAllocateDescriptorSets(device, &allocInfos, uiDescriptorSets.data()));
 
 	for (uint32_t i = 0; i < lightCount; ++i){
-		descImages[i] = { pointSampler, uiImageViews[i], layout };
+		descImages[i] = { shadowMaps[i].descriptor.sampler, uiImageViews[i], layout };
 		writeDesc[i] = {
 			 .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
 			 .dstSet = uiDescriptorSets[i],

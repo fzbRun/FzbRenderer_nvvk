@@ -23,7 +23,7 @@ Image_yReversal::Image_yReversal(Image_yReversal_CreateInfo createInfo) {
 	CHECK(cudaStreamCreate(&stream));
 }
 
-__global__ void yReversalKernel(cudaSurfaceObject_t imageObj, uint32_t width, uint32_t height) {
+__global__ void yReversalKernel(cudaSurfaceObject_t imageObj, uint32_t width, uint32_t height, uint32_t frameIndex) {
 	uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
 	uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
 	if (x >= width || y >= height / 2) return;
@@ -32,7 +32,7 @@ __global__ void yReversalKernel(cudaSurfaceObject_t imageObj, uint32_t width, ui
 	uint32_t y_up = y;
 	uchar4 pixel_up = surf2Dread<uchar4>(imageObj, x * sizeof(uchar4), y_up);
 
-	// printf("x: %u, y_up: %u, pixel_up: (%u, %u, %u, %u)\n", x, y_up, pixel_up.x, pixel_up.y, pixel_up.z, pixel_up.w);
+	//if(x == 0 && y == 0) printf("cuda frameIndex: %d\n", frameIndex);
 	//return;
 
 	uint32_t y_bottom = height - y - 1;
@@ -41,7 +41,7 @@ __global__ void yReversalKernel(cudaSurfaceObject_t imageObj, uint32_t width, ui
 	surf2Dwrite(pixel_up, imageObj, x * sizeof(uchar4), y_bottom);
 	surf2Dwrite(pixel_bottom, imageObj, x * sizeof(uchar4), y_up);
 }
-void Image_yReversal::reversal(uint64_t waitTimeline) {
+void Image_yReversal::reversal(uint32_t frameIndex, uint64_t waitTimeline) {
 	CHECK(waitExternalSemaphore(startSemaphore, stream, waitTimeline));
 
 	uint32_t halfHeight = imageHeight / 2;
@@ -49,7 +49,7 @@ void Image_yReversal::reversal(uint64_t waitTimeline) {
 	dim3 blockSize(16, 16, 1);
 	dim3 gridSize = dim3((imageWidth + blockSize.x - 1) / blockSize.x, (halfHeight + blockSize.y - 1) / blockSize.y, 1);
 
-	yReversalKernel << < gridSize, blockSize, 0, stream >> > (imageObject, imageWidth, imageHeight);
+	yReversalKernel << < gridSize, blockSize, 0, stream >> > (imageObject, imageWidth, imageHeight, frameIndex);
 
 	CHECK(signalExternalSemaphore(endSemaphore, stream, waitTimeline));
 }

@@ -9,10 +9,14 @@ NAMESPACE_SHADERIO_BEGIN()
 struct NPMPathGuidingPushConstant{
 	int frameIndex;
 	int time;
+	uint2 screenSize;
 };
 
 enum class StaticBindingPoints_NPMPG {
-	eFlowerImage = 0,
+	eOutImage = 0,
+	eFlowerImage = 1,
+	eColorImageWrite = 2,
+	eColorImageRead = 3,
 };
 
 NAMESPACE_SHADERIO_END()

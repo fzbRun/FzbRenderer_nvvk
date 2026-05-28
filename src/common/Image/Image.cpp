@@ -34,16 +34,21 @@ FzbRenderer::ImageCreateInfo FzbRenderer::createDefaultImageCreateInfo() {
         .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1},
     };
 
+    VkSamplerCreateInfo sampleCreateInfo = {
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter = VK_FILTER_LINEAR,
+        .minFilter = VK_FILTER_LINEAR
+    };
+
     ImageCreateInfo createInfo = {
         .info = info,
         .viewInfo = viewInfo,
-        .sampler = nullptr
+        .samplerInfo = sampleCreateInfo
     };
     return createInfo;
 }
 VkResult FzbRenderer::createImage(nvvk::Image& image, ImageCreateInfo createInfo) {
     NVVK_FAIL_RETURN(Application::allocator.createImage(image, createInfo.info, createInfo.viewInfo));  //iamge.descriptor.imageView whill be writed
-    image.descriptor.sampler = createInfo.sampler;
     return VK_SUCCESS;
 }
 void FzbRenderer::destroyImage(nvvk::Image& image) {
@@ -56,17 +61,17 @@ FzbRenderer::Image::Image(std::string name, bool external) {
 }
 VkResult FzbRenderer::Image::init(ImageCreateInfo createInfo) {
     clean();
+	setting = createInfo;
 
     if (external) {
-        VkExternalMemoryImageCreateInfo externalMemoryImageCreateInfo{};
-        externalMemoryImageCreateInfo.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
-        externalMemoryImageCreateInfo.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
-        createInfo.info.pNext = &externalMemoryImageCreateInfo;
+        nvvk::StagingUploader& staging = Application::stagingUploaderExport;
+        nvvk::ResourceAllocatorExport* allocator = dynamic_cast<nvvk::ResourceAllocatorExport*>(staging.getResourceAllocator());
 
-        NVVK_FAIL_RETURN(Application::allocatorExport.createImage(image, createInfo.info, createInfo.viewInfo));  //iamge.descriptor.imageView whill be writed
-
+        NVVK_CHECK(allocator->createImageExport(image, createInfo.info, createInfo.viewInfo));
+        
         VmaAllocationInfo allocInfo;
         vmaGetAllocationInfo(Application::allocator, image.allocation, &allocInfo);
+        imageSize = allocInfo.size;
 
         VkMemoryGetWin32HandleInfoKHR handleInfo = {};
         handleInfo.sType = VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR;
@@ -75,7 +80,7 @@ VkResult FzbRenderer::Image::init(ImageCreateInfo createInfo) {
         GetMemoryWin32HandleKHR(&handleInfo, &this->handle);
     }
     else NVVK_FAIL_RETURN(Application::allocator.createImage(image, createInfo.info, createInfo.viewInfo));  //iamge.descriptor.imageView whill be writed
-    image.descriptor.sampler = createInfo.sampler;
+    Application::samplerPool.acquireSampler(image.descriptor.sampler, createInfo.samplerInfo);
 
     VkDevice device = Application::app->getDevice();
 
@@ -143,9 +148,9 @@ VkResult FzbRenderer::Image::init(ImageCreateInfo createInfo) {
     descriptorPool = Application::app->getTextureDescriptorPool();
 
     const VkDescriptorSetLayoutBinding binding = { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT };
-    const VkDescriptorSetLayoutCreateInfo info = {
+    const VkDescriptorSetLayoutCreateInfo descriptorLayoutInfo = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 1, .pBindings = &binding };
-    NVVK_FAIL_RETURN(vkCreateDescriptorSetLayout(device, &info, nullptr, &descLayout));
+    NVVK_FAIL_RETURN(vkCreateDescriptorSetLayout(device, &descriptorLayoutInfo, nullptr, &descLayout));
 
     VkDescriptorImageInfo descImage;
     VkWriteDescriptorSet  writeDesc;
@@ -157,7 +162,7 @@ VkResult FzbRenderer::Image::init(ImageCreateInfo createInfo) {
     };
     NVVK_FAIL_RETURN(vkAllocateDescriptorSets(device, &allocInfos, &uiDescriptorSet));
 
-    descImage = { createInfo.sampler, uiImageView, imageLayout };
+    descImage = { image.descriptor.sampler, uiImageView, imageLayout };
     writeDesc = {
          .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
          .dstSet = uiDescriptorSet,
@@ -226,7 +231,6 @@ VkResult FzbRenderer::Image::init(std::filesystem::path& imagePath) {
     //----------------------------------------------------------------------------------------------------------------
     VkDevice device = Application::app->getDevice();
 
-
     nvvk::DebugUtil& dutil = nvvk::DebugUtil::getInstance();
     dutil.setObjectName(image.image, name);
     dutil.setObjectName(image.descriptor.imageView, name + "View");
@@ -241,9 +245,9 @@ VkResult FzbRenderer::Image::init(std::filesystem::path& imagePath) {
     descriptorPool = Application::app->getTextureDescriptorPool();
 
     const VkDescriptorSetLayoutBinding binding = { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT };
-    const VkDescriptorSetLayoutCreateInfo info = {
+    const VkDescriptorSetLayoutCreateInfo descriptorLayoutInfo = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 1, .pBindings = &binding };
-    NVVK_FAIL_RETURN(vkCreateDescriptorSetLayout(device, &info, nullptr, &descLayout));
+    NVVK_FAIL_RETURN(vkCreateDescriptorSetLayout(device, &descriptorLayoutInfo, nullptr, &descLayout));
 
     VkDescriptorImageInfo descImage;
     VkWriteDescriptorSet  writeDesc;

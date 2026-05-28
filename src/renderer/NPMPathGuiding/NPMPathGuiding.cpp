@@ -25,9 +25,18 @@ void NPMPathGuiding::init() {
 
 	//测试一下cuda是否有问题，测试方案就是将一个image和一个buffer传给CUDA，然后写入数据，然后根据信号量进行同步，最后将数据读回来看看是否正确
 	//ImageCreateInfo imageCreateInfo = createDefaultImageCreateInfo();
-	flowerImage = FzbRenderer::Image("flowerImage", true);
+	flowerImage = FzbRenderer::Image("flowerImage", false);
 	std::filesystem::path texturePath = FzbRenderer::getProjectRootDir() / "src/renderer/NPMPathGuiding/testImage/rose.jpg";
 	flowerImage.init(texturePath);
+
+	colorImage = FzbRenderer::Image("colorImage", true);
+	FzbRenderer::ImageCreateInfo colorImageCreateInfo = FzbRenderer::createDefaultImageCreateInfo();
+	colorImageCreateInfo.info.format = VK_FORMAT_R8G8B8A8_UNORM;
+	colorImageCreateInfo.info.extent = { 512, 512, 1 };
+	colorImageCreateInfo.viewInfo.format = colorImageCreateInfo.info.format;
+	colorImage.init(colorImageCreateInfo);
+
+	Feature::createGBuffer(true, true, 1);
 
 	VkPhysicalDevice physicalDevice = Application::allocator.getPhysicalDevice();
 	VkDevice device = Application::allocator.getDevice();
@@ -43,10 +52,10 @@ void NPMPathGuiding::init() {
 	Renderer::init();
 
 	Image_yReversal_CreateInfo cudaCreateInfo = {
-	.physicalDevice = physicalDevice,
-	.image = flowerImage,
-	.startSemaphoreHandle = vulkanToCudaSemaphore.handle,
-	.endSemaphoreHandle = cudaToVulkanSemaphore.handle,
+		.physicalDevice = physicalDevice,
+		.image = colorImage,
+		.startSemaphoreHandle = vulkanToCudaSemaphore.handle,
+		.endSemaphoreHandle = cudaToVulkanSemaphore.handle,
 	};
 	cudaPrograme = Image_yReversal(cudaCreateInfo);
 
@@ -93,6 +102,7 @@ void NPMPathGuiding::init() {
 }
 void NPMPathGuiding::clean() {
 	flowerImage.clean();
+	colorImage.clean();
 	vulkanToCudaSemaphore.clean();
 	cudaToVulkanSemaphore.clean();
 
@@ -104,9 +114,20 @@ void NPMPathGuiding::clean() {
 	PathTracingRenderer::clean();
 }
 void NPMPathGuiding::uiRender() {
-	Application::viewportImage = flowerImage.uiDescriptorSet;
+	Application::viewportImage = gBuffers.getDescriptorSet(eImgTonemapped);
 }
-void NPMPathGuiding::resize(VkCommandBuffer cmd, const VkExtent2D& size) {}
+void NPMPathGuiding::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
+	NVVK_CHECK(gBuffers.update(cmd, size));
+
+	nvvk::WriteSetContainer write{};
+	VkWriteDescriptorSet    OutImageWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_NPMPG::eOutImage, 0, 0, 1);
+	write.append(OutImageWrite, gBuffers.getColorImageView(eImgRendered), VK_IMAGE_LAYOUT_GENERAL);
+
+	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
+
+	pushConstant.screenSize = shaderio::uint2(size.width, size.height);
+}
 void NPMPathGuiding::preRender() {
 	pushConstant.frameIndex = Application::frameIndex;
 }
@@ -137,7 +158,16 @@ void NPMPathGuiding::render(VkCommandBuffer* cmdPtr) {
 		.signalSemaphoreInfoCount = 1, .pSignalSemaphoreInfos = &signalSemaphoreInfo,}} };
 	vkQueueSubmit2(Application::app->getQueue(0).queue, uint32_t(submitInfo.size()), submitInfo.data(), nullptr);
 
-	cudaPrograme.reversal(timeline);
+	cudaPrograme.reversal(pushConstant.frameIndex, timeline);
+
+	VkSemaphoreSubmitInfo waitSemaphoreInfo{
+		.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+		.semaphore = cudaToVulkanSemaphore.semaphoreState.getSemaphore(),
+		.value = timeline,
+		.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT
+	};
+	Application::app->addWaitSemaphore(waitSemaphoreInfo);
+
 	//--------------------------------------------------------------------------------------------------------------
 	cmd = cmdPtr[1];
 	const VkCommandBufferBeginInfo beginInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -148,14 +178,10 @@ void NPMPathGuiding::render(VkCommandBuffer* cmdPtr) {
 
 	pushConstant.time = 1;
 	pathGuiding(cmd);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
-	VkSemaphoreSubmitInfo waitSemaphoreInfo{
-		.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-		.semaphore = cudaToVulkanSemaphore.semaphoreState.getSemaphore(),
-		.value = timeline,
-		.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT
-	};
-	Application::app->addWaitSemaphore(waitSemaphoreInfo);
+	Renderer::postProcess(cmd);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
 
 	++timeline;
 }
@@ -164,8 +190,23 @@ void NPMPathGuiding::createDescriptorSetLayout() {
 	SCOPED_TIMER(__FUNCTION__);
 	nvvk::DescriptorBindings bindings;
 	bindings.addBinding({
-		.binding = (uint32_t)shaderio::StaticBindingPoints_NPMPG::eFlowerImage,
+		.binding = (uint32_t)shaderio::StaticBindingPoints_NPMPG::eOutImage,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_NPMPG::eFlowerImage,
+		.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_NPMPG::eColorImageWrite,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_NPMPG::eColorImageRead,
+		.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
 
@@ -182,6 +223,14 @@ void NPMPathGuiding::createDescriptorSet() {
 	VkWriteDescriptorSet    flowerImageWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_NPMPG::eFlowerImage, 0, 0, 1);
 	write.append(flowerImageWrite, &flowerImage.image);
+
+	VkWriteDescriptorSet    colorImageWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_NPMPG::eColorImageWrite, 0, 0, 1);
+	write.append(colorImageWrite, &colorImage.image);
+
+	colorImageWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_NPMPG::eColorImageRead, 0, 0, 1);
+	write.append(colorImageWrite, &colorImage.image);
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }
@@ -260,6 +309,8 @@ void NPMPathGuiding::pathGuiding(VkCommandBuffer cmd) {
 	};
 
 	VkExtent2D sceneSize = Application::app->getViewportSize();
+	if (pushConstant.time == 0) sceneSize = { colorImage.setting.info.extent.width, colorImage.setting.info.extent.height };
+	pushConstant.screenSize = { sceneSize.width, sceneSize.height };
 	VkExtent2D groupSize = nvvk::getGroupCounts(sceneSize, VkExtent2D{ 16, 16 });
 
 	vkCmdPushConstants2(cmd, &pushInfo);

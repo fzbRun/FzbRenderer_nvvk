@@ -11,7 +11,7 @@ namespace FzbRenderer {
 struct ImageCreateInfo {
 	VkImageCreateInfo info;
 	VkImageViewCreateInfo viewInfo;
-	VkSampler sampler;
+	VkSamplerCreateInfo samplerInfo;
 };
 
 ImageCreateInfo createDefaultImageCreateInfo();

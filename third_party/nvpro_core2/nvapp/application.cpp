@@ -438,11 +438,11 @@ void nvapp::Application::run()
       prepareFrameToSignal(m_swapchain.getMaxFramesInFlight());
 
       // Record Commands
-      VkCommandBuffer* cmd = beginCommandRecording();
-      drawFrame(cmd);            // Call onUIRender() and onRender() for each element
-      renderToSwapchain(cmd[cmdCount - 1]);  // Render ImGui to swapchain
+      VkCommandBuffer* cmdPtr = beginCommandRecording();
+      drawFrame(cmdPtr);                     // Call onUIRender() and onRender() for each element
+      renderToSwapchain(cmdPtr[cmdCount - 1]);  // Render ImGui to swapchain
       addSwapchainSemaphores();  // Setup synchronization
-      endFrame(cmd[cmdCount - 1], m_swapchain.getMaxFramesInFlight());
+      endFrame(cmdPtr[cmdCount - 1], m_swapchain.getMaxFramesInFlight());
 
       // Present Frame
       presentFrame();  // This can also trigger swapchain rebuild
@@ -524,7 +524,7 @@ void nvapp::Application::onViewportSizeChange(VkExtent2D size)
 // - Render the ImGui UI
 // - Present the image to the screen
 //
-void nvapp::Application::drawFrame(VkCommandBuffer* cmd)
+void nvapp::Application::drawFrame(VkCommandBuffer* cmdPtr)
 {
   // Reset the extra semaphores and command buffers
   m_waitSemaphores.clear();
@@ -554,7 +554,7 @@ void nvapp::Application::drawFrame(VkCommandBuffer* cmd)
   // Call onRender for each element with the command buffer of the frame
   for(std::shared_ptr<IAppElement>& e : m_elements)
   {
-    e->onRender(cmd);
+    e->onRender(cmdPtr);
   }
 }
 
