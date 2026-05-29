@@ -7,5 +7,6 @@
     "-Dpugixml_ROOT=C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/third_party/pugixml",
     "-Dassimp_ROOT=C:/Users/fangzanbo/Desktop/render/third_party/assimp-master",
     "-DCUDAPath=C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.5/bin/nvcc.exe",
+    "-DTensorRTPath=C:/Users/fangzanbo/Desktop/AI/TensorRT/TensorRT-10.16.1.11.Windows.amd64.cuda-12.9/TensorRT-10.16.1.11"
   ]
 }

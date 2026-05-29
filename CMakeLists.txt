@@ -105,3 +105,15 @@ target_include_directories(${PROJECT_NAME} PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
 #)
 
 set_target_properties(${PROJECT_NAME} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+#--------------------------------------------------------------------------------------
+target_include_directories(${PROJECT_NAME} PRIVATE ${TensorRTPath}/include)
+target_link_directories(${PROJECT_NAME} PRIVATE ${TensorRTPath}/lib)
+message(STATUS "TensorRT path: ${TensorRTPath}")
+target_link_libraries(${PROJECT_NAME} PRIVATE
+    nvinfer_10
+    nvinfer_plugin_10
+    nvonnxparser_10
+    #nvinfer_dispatch_10
+    #nvinfer_lean_10
+    #nvinfer_vc_plugin_10
+)
