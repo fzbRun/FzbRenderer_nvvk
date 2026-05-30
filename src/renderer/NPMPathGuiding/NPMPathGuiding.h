@@ -3,7 +3,8 @@
 #include "renderer/PathTracingRenderer/hard/PathTracingRenderer.h"
 #include "common/Image/Image.h"
 #include "common/Semaphore/Semaphore.h"
-#include "test.cuh"
+#include <common/Buffer/Buffer.h>
+#include "./models/ImageRecognition.cuh"
 #include "./NPMPathGuidingShaderio.h"
 
 #ifndef FZBRENDERER_NPM_PATHGUIDING_H
@@ -37,11 +38,11 @@ private:
 	VkShaderEXT computeShader_NPMPathGuiding{};
 
 	FzbRenderer::Image flowerImage;
-	FzbRenderer::Image colorImage;
+	FzbRenderer::Buffer inputTensor;
 	FzbRenderer::Semaphore vulkanToCudaSemaphore;
 	FzbRenderer::Semaphore cudaToVulkanSemaphore;
 
-	Image_yReversal cudaPrograme;
+	ImageRecognition cudaPrograme;
 };
 }
 

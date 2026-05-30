@@ -1,10 +1,11 @@
 #pragma once
 
 #include "common/CUDA/vulkanCudaInterop.cuh"
+#include <common/CUDA/TensorRT/TensorRT.cuh>
 
 struct ImageRecognition_CreateInfo {
 	VkPhysicalDevice physicalDevice;
-	FzbRenderer::Image image;
+	FzbRenderer::Buffer buffer;
 
 	HANDLE startSemaphoreHandle;
 	HANDLE endSemaphoreHandle;
@@ -12,22 +13,22 @@ struct ImageRecognition_CreateInfo {
 class ImageRecognition {
 public:
 	ImageRecognition() = default;
+	virtual ~ImageRecognition() = default;
 
 	ImageRecognition(ImageRecognition_CreateInfo createInfo);
-	void recognition(uint32_t frameIndex, uint64_t waitTimeline = 1);
+	ImageRecognition& operator=(ImageRecognition&&) noexcept;
+	void recognition(uint64_t waitTimeline = 1);
 
 	void clean();
 
 private:
-	uint32_t imageWidth;
-	uint32_t imageHeight;
-
-	cudaExternalMemory_t imageExtMem;
-	cudaMipmappedArray_t imageMipmap;
-	cudaSurfaceObject_t imageObject;
+	cudaExternalMemory_t inputTensorExtMem;
+	float* inputTensor;
 
 	cudaExternalSemaphore_t startSemaphore;
 	cudaExternalSemaphore_t endSemaphore;
 
 	cudaStream_t stream = nullptr;
+
+	FzbRenderer::Model resNet34;
 };

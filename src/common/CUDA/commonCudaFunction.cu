@@ -229,6 +229,21 @@ __device__ __forceinline__ float4 unpackUnorm4x8(const uint32_t v) {
     out.w = (float)a / 255.0f;
     return out;
 }
+
+__device__ int FloatToOrderedInt(float value) {
+    unsigned int bits = __float_as_uint(value);
+    unsigned int ordered = (bits & 0x80000000u) != 0
+        ? ~bits
+        : (bits ^ 0x80000000u);
+    return (int)(ordered ^ 0x80000000u);
+}
+__device__ float OrderedIntToFloat(int value) {
+    unsigned int ordered = (unsigned int)value ^ 0x80000000u;
+    unsigned int bits = (ordered & 0x80000000u) != 0
+        ? (ordered ^ 0x80000000u)
+        : ~ordered;
+    return __uint_as_float(bits);
+}
 //------------------------------------------Ô­×Ó²Ù×÷-----------------------------------------------
 __device__ float atomicAddFloat(float* addr, float val) {
     int* iaddr = reinterpret_cast<int*>(addr);

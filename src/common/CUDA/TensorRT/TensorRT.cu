@@ -2,6 +2,7 @@
 
 #include <NvOnnxParser.h>
 #include <fstream>
+#include <sstream>
 
 class Logger : public nvinfer1::ILogger {
 	void log(Severity severity, const char* msg) noexcept override {
@@ -152,7 +153,10 @@ FzbRenderer::Model::Model(ModelCreateInfo createInfo) {
         nvinfer1::Dims dims = model.context->getTensorShape(tensorName);
         size_t count = 1;
         for (int d = 0; d < dims.nbDims; ++d) {
-            if (dims.d[d] < 0) throw std::runtime_error(std::string("Output shape still dynamic: ") + tensorName);
+            if (dims.d[d] < 0) {
+                if (d == 0) continue;   //batch temporarily set to 1
+                throw std::runtime_error(std::string("Output shape still dynamic: ") + tensorName);
+            }
             count *= static_cast<size_t>(dims.d[d]);
         }
 
@@ -163,9 +167,10 @@ FzbRenderer::Model::Model(ModelCreateInfo createInfo) {
             throw std::runtime_error(std::string("Failed to bind output: ") + tensorName);
 
 		outputTensors.insert({ tensorName, dPtr });
+        outputTensorSizes.insert({ tensorName, count });
     }
 }
-void FzbRenderer::Model::infer(std::vector<InputTensorInfo>& inputInfos, cudaStream_t stream) {
+void FzbRenderer::Model::infer(std::vector<InputTensorInfo> inputInfos, cudaStream_t stream) {
     for (const auto& inputInfo : inputInfos){
         nvinfer1::Dims dims{};
         dims.nbDims = static_cast<int>(inputInfo.shape.size());
@@ -191,9 +196,22 @@ void FzbRenderer::Model::infer(std::vector<InputTensorInfo>& inputInfos, cudaStr
     if (!model.context->enqueueV3(stream)) throw std::runtime_error( "TensorRT enqueueV3 failed");
 }
 
+FzbRenderer::Model& FzbRenderer::Model::operator=(FzbRenderer::Model&& other) noexcept {
+    if (this != &other) {
+        model = std::move(other.model);
+        outputTensors = std::move(other.outputTensors);
+		outputTensorSizes = std::move(other.outputTensorSizes);
+        setting = std::move(other.setting);
+        other.outputTensors.clear();
+        other.outputTensorSizes.clear();
+    }
+    return *this;
+}
+
 void FzbRenderer::Model::clean() {
     for (auto& [name, dPtr] : outputTensors) {
         if (dPtr) cudaFree(dPtr);
     }
 	outputTensors.clear();
 }
+

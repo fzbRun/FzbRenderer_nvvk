@@ -4,6 +4,7 @@
 #include <chrono>
 #include "./commonCudaFunction.cuh"
 #include "../Image/Image.h"
+#include "../Buffer/Buffer.h"
 
 //#ifndef __CUDACC__
 //#define __CUDACC__

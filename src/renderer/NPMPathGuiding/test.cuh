@@ -1,3 +1,4 @@
+/*
 #pragma once
 
 #include "common/CUDA/vulkanCudaInterop.cuh"
@@ -31,3 +32,4 @@ private:
 
 	cudaStream_t stream = nullptr;
 };
+*/

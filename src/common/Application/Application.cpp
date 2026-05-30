@@ -278,3 +278,10 @@ void FzbRenderer::Application::onUIMenu() {
 void FzbRenderer::Application::onLastHeadlessFrame() {
 	renderer->onLastHeadlessFrame();
 }
+
+void FzbRenderer::Application::uploadResource() {
+	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
+	Application::stagingUploader.cmdUploadAppended(cmd);
+	Application::stagingUploaderExport.cmdUploadAppended(cmd);
+	Application::app->submitAndWaitTempCmdBuffer(cmd);
+}

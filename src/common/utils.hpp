@@ -60,4 +60,5 @@ namespace FzbRenderer {
     float rand(uint32_t seed);
     
     nvvk::Buffer createStagingBuffer(size_t bufferSize, size_t dataSize, const void* data);
+    void GetMemoryWin32HandleKHR(VkMemoryGetWin32HandleInfoKHR* handleInfo, HANDLE* handle);
 }

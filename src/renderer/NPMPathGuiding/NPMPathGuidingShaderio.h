@@ -15,8 +15,7 @@ struct NPMPathGuidingPushConstant{
 enum class StaticBindingPoints_NPMPG {
 	eOutImage = 0,
 	eFlowerImage = 1,
-	eColorImageWrite = 2,
-	eColorImageRead = 3,
+	eInputTensor = 2,
 };
 
 NAMESPACE_SHADERIO_END()

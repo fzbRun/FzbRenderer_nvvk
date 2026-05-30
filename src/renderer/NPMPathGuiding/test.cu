@@ -1,3 +1,4 @@
+/*
 #include "./test.cuh"
 
 Image_yReversal::Image_yReversal(Image_yReversal_CreateInfo createInfo) {
@@ -63,3 +64,4 @@ void Image_yReversal::clean() {
 
 	CHECK(cudaStreamDestroy(stream));
 }
+*/

@@ -83,6 +83,8 @@ public:
 	inline static int frameIndex = -1;
 	inline static bool UIModified = false;
 	inline static VkDescriptorSet viewportImage = nullptr;
+
+	static void uploadResource();
 private:
 	/*
 		这个函数会从项目根目录/rendererInfo/rendererInfo.xml中读取信息，包括

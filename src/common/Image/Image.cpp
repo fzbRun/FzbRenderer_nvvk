@@ -4,14 +4,7 @@
 #include <nvvk/default_structs.hpp>
 
 #include <stb/stb_image.h>
-
-void GetMemoryWin32HandleKHR(VkMemoryGetWin32HandleInfoKHR* handleInfo, HANDLE* handle) {
-	VkDevice device = FzbRenderer::Application::app->getDevice();
-    auto func = (PFN_vkGetMemoryWin32HandleKHR)vkGetDeviceProcAddr(device, "vkGetMemoryWin32HandleKHR");
-    if (func != nullptr) {
-        func(device, handleInfo, handle);
-    }
-}
+#include <common/utils.hpp>
 
 FzbRenderer::ImageCreateInfo FzbRenderer::createDefaultImageCreateInfo() {
     const VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT
@@ -77,7 +70,7 @@ VkResult FzbRenderer::Image::init(ImageCreateInfo createInfo) {
         handleInfo.sType = VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR;
         handleInfo.memory = allocInfo.deviceMemory;
         handleInfo.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
-        GetMemoryWin32HandleKHR(&handleInfo, &this->handle);
+        FzbRenderer::GetMemoryWin32HandleKHR(&handleInfo, &this->handle);
     }
     else NVVK_FAIL_RETURN(Application::allocator.createImage(image, createInfo.info, createInfo.viewInfo));  //iamge.descriptor.imageView whill be writed
     Application::samplerPool.acquireSampler(image.descriptor.sampler, createInfo.samplerInfo);

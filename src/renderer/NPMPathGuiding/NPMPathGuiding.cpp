@@ -4,7 +4,6 @@
 #include <common/Shader/Shader.h>
 #include <nvvk/compute_pipeline.hpp>
 
-#include <common/Image/Image.h>
 #include <common/Semaphore/Semaphore.h>
 
 using namespace FzbRenderer;
@@ -22,19 +21,24 @@ NPMPathGuiding::NPMPathGuiding(pugi::xml_node& rendererNode) {
 	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME });
 }
 void NPMPathGuiding::init() {
-
-	//测试一下cuda是否有问题，测试方案就是将一个image和一个buffer传给CUDA，然后写入数据，然后根据信号量进行同步，最后将数据读回来看看是否正确
-	//ImageCreateInfo imageCreateInfo = createDefaultImageCreateInfo();
 	flowerImage = FzbRenderer::Image("flowerImage", false);
 	std::filesystem::path texturePath = FzbRenderer::getProjectRootDir() / "src/renderer/NPMPathGuiding/testImage/rose.jpg";
 	flowerImage.init(texturePath);
 
-	colorImage = FzbRenderer::Image("colorImage", true);
-	FzbRenderer::ImageCreateInfo colorImageCreateInfo = FzbRenderer::createDefaultImageCreateInfo();
-	colorImageCreateInfo.info.format = VK_FORMAT_R8G8B8A8_UNORM;
-	colorImageCreateInfo.info.extent = { 512, 512, 1 };
-	colorImageCreateInfo.viewInfo.format = colorImageCreateInfo.info.format;
-	colorImage.init(colorImageCreateInfo);
+	inputTensor = FzbRenderer::Buffer("inputTensor", true);
+	uint32_t inputTensorSize = 1 * 3 * 224 * 224 * sizeof(float);
+	inputTensor.init({
+		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+		.size = inputTensorSize,
+		.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT,
+		});
+	
+	//colorImage = FzbRenderer::Image("colorImage", true);
+	//FzbRenderer::ImageCreateInfo colorImageCreateInfo = FzbRenderer::createDefaultImageCreateInfo();
+	//colorImageCreateInfo.info.format = VK_FORMAT_R8G8B8A8_UNORM;
+	//colorImageCreateInfo.info.extent = { 512, 512, 1 };
+	//colorImageCreateInfo.viewInfo.format = colorImageCreateInfo.info.format;
+	//colorImage.init(colorImageCreateInfo);
 
 	Feature::createGBuffer(true, true, 1);
 
@@ -51,58 +55,17 @@ void NPMPathGuiding::init() {
 
 	Renderer::init();
 
-	Image_yReversal_CreateInfo cudaCreateInfo = {
+	ImageRecognition_CreateInfo cudaCreateInfo = {
 		.physicalDevice = physicalDevice,
-		.image = colorImage,
+		.buffer = inputTensor,
 		.startSemaphoreHandle = vulkanToCudaSemaphore.handle,
 		.endSemaphoreHandle = cudaToVulkanSemaphore.handle,
 	};
-	cudaPrograme = Image_yReversal(cudaCreateInfo);
-
-	/*
-	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
-	Application::stagingUploader.cmdUploadAppended(cmd);
-	Application::stagingUploaderExport.cmdUploadAppended(cmd);
-	// Submit and clean up
-	vkEndCommandBuffer(cmd);
-
-	// Create fence for synchronization
-	const VkFenceCreateInfo fenceInfo{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-	std::array<VkFence, 1>  fence{};
-	vkCreateFence(device, &fenceInfo, nullptr, fence.data());
-
-	const VkCommandBufferSubmitInfo cmdBufferInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = cmd };
-
-	VkSemaphoreSubmitInfo signalSemaphoreInfo{
-		.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-		.semaphore = vulkanToCudaSemaphore.semaphoreState.getSemaphore(),
-		.value = 1,
-		.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT
-	};
-	const std::array<VkSubmitInfo2, 1> submitInfo{
-		{{.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2, 
-		.commandBufferInfoCount = 1, .pCommandBufferInfos = &cmdBufferInfo,
-		.signalSemaphoreInfoCount = 1, .pSignalSemaphoreInfos = &signalSemaphoreInfo,}} };
-	vkQueueSubmit2(Application::app->getQueue(0).queue, uint32_t(submitInfo.size()), submitInfo.data(), fence[0]);
-
-	//VkSemaphoreSignalInfo signalInfo{};
-	//signalInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO;
-	//signalInfo.semaphore = vulkanToCudaSemaphore.semaphoreState.getSemaphore(); // 假设封装暴露了 VkSemaphore
-	//signalInfo.value = 1;                              // 时间线值 +1
-	//vkSignalSemaphore(device, &signalInfo);
-
-	cudaPrograme.reversal();
-
-	vkWaitForFences(device, uint32_t(fence.size()), fence.data(), VK_TRUE, UINT64_MAX);
-
-	// Cleanup
-	vkDestroyFence(device, fence[0], nullptr);
-	vkFreeCommandBuffers(device, Application::app->getCommandPool(), 1, &cmd);
-	*/
+	cudaPrograme = ImageRecognition(cudaCreateInfo);
 }
 void NPMPathGuiding::clean() {
 	flowerImage.clean();
-	colorImage.clean();
+	inputTensor.clean();
 	vulkanToCudaSemaphore.clean();
 	cudaToVulkanSemaphore.clean();
 
@@ -158,7 +121,7 @@ void NPMPathGuiding::render(VkCommandBuffer* cmdPtr) {
 		.signalSemaphoreInfoCount = 1, .pSignalSemaphoreInfos = &signalSemaphoreInfo,}} };
 	vkQueueSubmit2(Application::app->getQueue(0).queue, uint32_t(submitInfo.size()), submitInfo.data(), nullptr);
 
-	cudaPrograme.reversal(pushConstant.frameIndex, timeline);
+	cudaPrograme.recognition(timeline);
 
 	VkSemaphoreSubmitInfo waitSemaphoreInfo{
 		.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
@@ -200,13 +163,8 @@ void NPMPathGuiding::createDescriptorSetLayout() {
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
-		.binding = (uint32_t)shaderio::StaticBindingPoints_NPMPG::eColorImageWrite,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-		.descriptorCount = 1,
-		.stageFlags = VK_SHADER_STAGE_ALL });
-	bindings.addBinding({
-		.binding = (uint32_t)shaderio::StaticBindingPoints_NPMPG::eColorImageRead,
-		.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+		.binding = (uint32_t)shaderio::StaticBindingPoints_NPMPG::eInputTensor,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
 
@@ -224,13 +182,9 @@ void NPMPathGuiding::createDescriptorSet() {
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_NPMPG::eFlowerImage, 0, 0, 1);
 	write.append(flowerImageWrite, &flowerImage.image);
 
-	VkWriteDescriptorSet    colorImageWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_NPMPG::eColorImageWrite, 0, 0, 1);
-	write.append(colorImageWrite, &colorImage.image);
-
-	colorImageWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_NPMPG::eColorImageRead, 0, 0, 1);
-	write.append(colorImageWrite, &colorImage.image);
+	VkWriteDescriptorSet    inputTensorWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_NPMPG::eInputTensor, 0, 0, 1);
+	write.append(inputTensorWrite, &inputTensor.buffer);
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }
@@ -309,7 +263,7 @@ void NPMPathGuiding::pathGuiding(VkCommandBuffer cmd) {
 	};
 
 	VkExtent2D sceneSize = Application::app->getViewportSize();
-	if (pushConstant.time == 0) sceneSize = { colorImage.setting.info.extent.width, colorImage.setting.info.extent.height };
+	if (pushConstant.time == 0) sceneSize = { 224, 224 };
 	pushConstant.screenSize = { sceneSize.width, sceneSize.height };
 	VkExtent2D groupSize = nvvk::getGroupCounts(sceneSize, VkExtent2D{ 16, 16 });
 

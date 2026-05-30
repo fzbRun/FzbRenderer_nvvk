@@ -69,6 +69,9 @@ __device__ uint3 unpackUint(uint32_t value);
 __device__ uint32_t packUnorm4x8(const float4 v);
 __device__ float4 unpackUnorm4x8(const uint32_t v);
 
+__device__ int FloatToOrderedInt(float value);
+__device__ float OrderedIntToFloat(int value);
+
 __device__ float atomicAddFloat(float* addr, float val);
 __device__ float atomicMinFloat(float* addr, float val);
 __device__ float atomicMaxFloat(float* addr, float val);
