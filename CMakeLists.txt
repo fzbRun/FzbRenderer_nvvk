@@ -117,3 +117,10 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     #nvinfer_lean_10
     #nvinfer_vc_plugin_10
 )
+#--------------------------------------------------------------------------------------
+set(CUDNN_INCLUDE_PATH ${CUDNN_PATH}/include)
+set(CUDNN_LIBRARY_PATH ${CUDNN_PATH}/lib)
+
+find_package(Torch REQUIRED PATHS ${LibtorchPath})
+target_include_directories(${PROJECT_NAME} PRIVATE ${LibtorchPath}/include)
+target_link_libraries(${PROJECT_NAME} PRIVATE ${TORCH_LIBRARIES})

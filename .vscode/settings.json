@@ -6,7 +6,10 @@
     "-DSlang_VERSION=2025.13.1",
     "-Dpugixml_ROOT=C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/third_party/pugixml",
     "-Dassimp_ROOT=C:/Users/fangzanbo/Desktop/render/third_party/assimp-master",
-    "-DCUDAPath=C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.5/bin/nvcc.exe",
-    "-DTensorRTPath=C:/Users/fangzanbo/Desktop/AI/TensorRT/TensorRT-10.16.1.11.Windows.amd64.cuda-12.9/TensorRT-10.16.1.11"
+    "-DCUDAPath=C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.6",
+    "-DTensorRTPath=C:/Users/fangzanbo/Desktop/AI/TensorRT/TensorRT-10.16.1.11.Windows.amd64.cuda-12.9/TensorRT-10.16.1.11",
+    "-DLibtorchPath=C:/Users/fangzanbo/Desktop/AI/Libtorch/libtorch-win-shared-with-deps-2.12.0+cu126/libtorch",
+    "-DCAFFE2_USE_CUDNN=True",
+    "-DCUDNN_PATH=C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/cudnn-windows-x86_64-8.9.7.29_cuda12-archive",
   ]
 }
