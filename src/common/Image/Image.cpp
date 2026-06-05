@@ -42,6 +42,7 @@ FzbRenderer::ImageCreateInfo FzbRenderer::createDefaultImageCreateInfo() {
 }
 VkResult FzbRenderer::createImage(nvvk::Image& image, ImageCreateInfo createInfo) {
     NVVK_FAIL_RETURN(Application::allocator.createImage(image, createInfo.info, createInfo.viewInfo));  //iamge.descriptor.imageView whill be writed
+    Application::samplerPool.acquireSampler(image.descriptor.sampler, createInfo.samplerInfo);
     return VK_SUCCESS;
 }
 void FzbRenderer::destroyImage(nvvk::Image& image) {
