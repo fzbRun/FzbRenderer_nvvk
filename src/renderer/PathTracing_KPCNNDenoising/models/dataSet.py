@@ -83,7 +83,7 @@ def preprocess_input(samplePath, gtPath, debug=False):
   origAlbedo = data['albedo']
 
   #保存参考数据
-  diff_ref = preprocess_diffuse(gt_data['diffuse'], gt_data['albedo'])
+  diff_ref = gt_data['diffuse'] #preprocess_diffuse(gt_data['diffuse'], gt_data['albedo'])
   spec_ref = preprocess_specular(gt_data['specular'])
 
   data['diffuse'] = preprocess_diffuse(data['diffuse'], data['albedo'])   # color / albedo

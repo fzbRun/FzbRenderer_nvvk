@@ -55,9 +55,9 @@ void FzbRenderer::Renderer::onLastHeadlessFrame() {
 		nvutils::getExecutablePath().replace_extension(".jpg").string());
 };
 
-void FzbRenderer::Renderer::postProcess(VkCommandBuffer cmd) {
+void FzbRenderer::Renderer::postProcess(VkCommandBuffer cmd, VkDescriptorImageInfo* inImage) {
 	NVVK_DBG_SCOPE(cmd);
-	Application::tonemapper.runCompute(cmd, gBuffers.getSize(), Application::tonemapperData, gBuffers.getDescriptorImageInfo(eImgRendered),
+	Application::tonemapper.runCompute(cmd, gBuffers.getSize(), Application::tonemapperData, inImage == nullptr ? gBuffers.getDescriptorImageInfo(eImgRendered) : *inImage,
 		gBuffers.getDescriptorImageInfo(eImgTonemapped));
 	//nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
 }

@@ -109,7 +109,7 @@ save_path_diff = "weights/KPCNN_diff_Weights"
 save_path_spec = "weights/KPCNN_spec_Weights"
 best_loss = 1000000.0
 start = time.time()
-for epoch in range(100):
+for epoch in range(200):
     t1 = time.time()
     diffuseNet.train()
     specularNet.train()
@@ -120,7 +120,7 @@ for epoch in range(100):
     for step, sample_batched in enumerate(dataloader):
         sample_diff = sample_batched['input_diff'].permute(model.permutation).to(device)  #N C H W
         sample_spec = sample_batched['input_spec'].permute(model.permutation).to(device)
-        albedo = sample_batched['albedo'].permute(model.permutation).to(device)
+        sample_albedo = sample_batched['albedo'].permute(model.permutation).to(device)
         gt_diff = sample_batched['diff_ref'].permute(model.permutation).to(device)
         gt_spec = sample_batched['spec_ref'].permute(model.permutation).to(device)
         gt_final = sample_batched['gtColor'].permute(model.permutation).to(device)
@@ -128,9 +128,11 @@ for epoch in range(100):
         # ---------- Diffuse ----------
         optimizer_diff.zero_grad()
         kernel_diff = diffuseNet(sample_diff)
+
         filtered_diff = apply_kernel(kernel_diff, sample_diff[:, :3, :, :])
- 
+        filtered_diff = filtered_diff * (sample_albedo + eps)
         loss_diff = loss_function(filtered_diff, gt_diff)
+
         loss_diff.backward()
         optimizer_diff.step()
         total_loss_diff += loss_diff.item()
@@ -144,7 +146,7 @@ for epoch in range(100):
         optimizer_spec.step()
         total_loss_spec += loss_spec.item()
         # ---------- Final ----------
-        sample_final = filtered_diff * (albedo + eps) + torch.exp(filtered_spec) - 1.0
+        sample_final = filtered_diff + torch.exp(filtered_spec) - 1.0
         loss_final = loss_function(sample_final, gt_final)
         total_loss_final += loss_final.item()
 

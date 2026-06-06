@@ -1,6 +1,7 @@
 #include "./KPCNN.cuh"
 #include <common/path_utils.hpp>
 #include "common/CUDA/commonCudaFunction.cuh"
+#include "../PathTracing_KPCNNDenosingShaderio.h"
 
 //------------------------------------------------------------------------------------------------------------------------
 KPCNNDenoiser::KPCNNDenoiser(KPCNNDenoiser_CreateInfo createInfo) {
@@ -17,6 +18,17 @@ KPCNNDenoiser::KPCNNDenoiser(KPCNNDenoiser_CreateInfo createInfo) {
 	inputBufferExtMem_spec = importVulkanMemoryObjectFromNTHandle(buffer_spec.handle, buffer_spec.buffer.bufferSize, false);
 	inputBuffer_spec = (float*)mapBufferOntoExternalMemory(inputBufferExtMem_spec, 0, buffer_spec.buffer.bufferSize);
 
+	FzbRenderer::Buffer& buffer_albedo = createInfo.albedoBuffer;
+	albedoBufferExtMem_diff = importVulkanMemoryObjectFromNTHandle(buffer_albedo.handle, buffer_albedo.buffer.bufferSize, false);
+	albedoBuffer_diff = (float*)mapBufferOntoExternalMemory(albedoBufferExtMem_diff, 0, buffer_albedo.buffer.bufferSize);
+
+	uint32_t imageSize = createInfo.outputImage.imageSize;
+	fromVulkanImageToCudaSurface(
+		createInfo.physicalDevice,
+		createInfo.outputImage, createInfo.outputImage.handle, imageSize,
+		false, imageExtMem, imageMipmap, imageObject
+	);
+
 	startSemaphore = importVulkanSemaphoreObjectFromNTHandle(createInfo.startSemaphoreHandle);
 	endSemaphore = importVulkanSemaphoreObjectFromNTHandle(createInfo.endSemaphoreHandle);
 
@@ -29,25 +41,66 @@ KPCNNDenoiser::KPCNNDenoiser(KPCNNDenoiser_CreateInfo createInfo) {
 	KPCNN_spec = std::move(FzbRenderer::Model({ enginePath }));
 }
 
-__global__ void denoisingCuda(float* inputBuffer_diff, float* inputBuffer_spec, float* kernel_diff, float* kernel_spec, uint imageWidth, uint imageHeight, uint kernelSize) {
-	extern __shared__ float3 groupImageColor[];
+__global__ void denoisingCuda(
+	uint imageWidth, uint imageHeight, uint kernelSize,
+	float* inputBuffer_diff, float* inputBuffer_spec,
+	float* kernel_diff, float* kernel_spec,
+	float3* albedoBuffer,
+	cudaSurfaceObject_t outputImage
+) {
+	extern __shared__ float3 groupImageColors[];	//16KB
+	float3* groupImageColors_diff = (float3*)groupImageColors;
+	float3* groupImageColors_spec = (float3*)(groupImageColors + (blockDim.x + kernelSize / 2) * (blockDim.y + kernelSize / 2));
 
 	uint threadIndexX = blockIdx.x * blockDim.x + threadIdx.x;
 	uint threadIndexY = blockIdx.y * blockDim.y + threadIdx.y;
-	if()
+	uint2 threadIndex = uint2(threadIndexX, threadIndexY);
+	uint2 groupThreadIndex = uint2(blockDim.x * blockIdx.x, blockDim.y * blockIdx.y);
+	uint pixelIndex = threadIndexY * imageWidth + threadIndexX;
 
+	uint halfKernelSize = kernelSize / 2;
+	uint2 groupNeighborPixelStartIndex = groupThreadIndex - uint2(halfKernelSize, halfKernelSize);
+	for (int y = threadIdx.y; y < blockDim.y + 2 * halfKernelSize; y += blockDim.y) {
+		uint neighborPixelIndexY = groupNeighborPixelStartIndex.y + y;
+		for (int x = threadIdx.x; x < blockDim.x + 2 * halfKernelSize; x += blockDim.x) {
+			uint neighborPixelIndexX = groupNeighborPixelStartIndex.x + x;
 
-	if (x >= imageWidth || y >= imageHeight)
-		return;
-	uint pixelIndex = y * imageWidth + x;
-	uint kernelIndex = pixelIndex * kernelSize * kernelSize;
-	// 这里可以根据需要进行去噪处理，以下是一个简单的示例
-	float diffValue = inputBuffer_diff[pixelIndex];
-	float specValue = inputBuffer_spec[pixelIndex];
-	// 简单的加权平均作为示例
-	float denoisedValue = (diffValue + specValue) / 2.0f;
-	// 将结果写回到输出缓冲区
-	inputBuffer_diff[pixelIndex] = denoisedValue; // 或者写入另一个输出缓冲区
+			float3 neighborPixelColor_diff = float3(0.0f), neighborPixelColor_spec = float3(0.0f);
+			if (neighborPixelIndexX >= 0 && neighborPixelIndexX < imageWidth && neighborPixelIndexY >= 0 && neighborPixelIndexY < imageHeight) {
+				neighborPixelColor_diff = reinterpret_cast<float3*>(inputBuffer_diff)[neighborPixelIndexY * imageWidth + neighborPixelIndexX];
+				neighborPixelColor_spec = reinterpret_cast<float3*>(inputBuffer_spec)[neighborPixelIndexY * imageWidth + neighborPixelIndexX];
+			}
+
+			uint groupImageColorIndex = y * (blockDim.x + 2 * halfKernelSize) + x;
+			groupImageColors_diff[groupImageColorIndex] = neighborPixelColor_diff;
+			groupImageColors_spec[groupImageColorIndex] = neighborPixelColor_spec;
+		}
+	}
+	__syncthreads();
+
+	float3 pixelColor_diff = float3(0.0f), pixelColor_spec = float3(0.0f);
+	for (int y = 0; y < kernelSize; ++y) {
+		uint neighborPixelIndexY = threadIndexY - halfKernelSize + y;
+		for (int x = 0; x < kernelSize; ++x) {
+			uint neighborPixelIndexX = threadIndexX - halfKernelSize + x;
+			uint groupNeighborPixelColorIndex = (neighborPixelIndexY - groupNeighborPixelStartIndex.y) * (blockDim.x + 2 * halfKernelSize) +
+				(neighborPixelIndexX - groupNeighborPixelStartIndex.x);
+			float3 neighborPixelColor_diff = groupImageColors_diff[groupNeighborPixelColorIndex];
+			float3 neighborPixelColor_spec = groupImageColors_spec[groupNeighborPixelColorIndex];
+
+			//kernel数组是[1, C, H, W]形式的，所有像素的第i个核元素连续存储
+			uint kernelIndex = (y * kernelSize + x) * imageWidth * imageHeight + pixelIndex;
+			float kernelValue_diff = kernel_diff[kernelIndex];
+			float kernelValue_spec = kernel_spec[kernelIndex];
+
+			pixelColor_diff += neighborPixelColor_diff * kernelValue_diff;
+			pixelColor_spec += neighborPixelColor_spec * kernelValue_spec;
+		}
+	}
+
+	float3 pixelAlbedo = albedoBuffer[pixelIndex];
+	float3 filteredPixelColor = (pixelColor_diff + eps_kpcnn) * pixelAlbedo + float3(exp(pixelColor_spec.x), exp(pixelColor_spec.y), exp(pixelColor_spec.z)) - 1.0;
+	surf2Dwrite({ filteredPixelColor , 1.0f}, outputImage, threadIndexX * sizeof(float4), threadIndexY);
 }
 void KPCNNDenoiser::denoising(uint64_t waitTimeline) {
 	CHECK(waitExternalSemaphore(startSemaphore, stream, waitTimeline));
@@ -58,6 +111,7 @@ void KPCNNDenoiser::denoising(uint64_t waitTimeline) {
 		{ 1, 27, (int)setting.imageSize.height, (int)setting.imageSize.width }
 	};
 	KPCNN_diff.infer({ inputTensorInfo }, stream);
+	float* kernel_diff = (float*)KPCNN_diff.outputTensors["kernel_weights"];
 
 	inputTensorInfo = {
 		"input",
@@ -65,6 +119,7 @@ void KPCNNDenoiser::denoising(uint64_t waitTimeline) {
 		{ 1, 27, (int)setting.imageSize.height, (int)setting.imageSize.width }
 	};
 	KPCNN_spec.infer({ inputTensorInfo }, stream);
+	float* kernel_spec = (float*)KPCNN_spec.outputTensors["kernel_weights"];
 
 	uint outputSize = KPCNN_diff.outputTensorSizes["kernel_weights"];
 	uint imageSize = setting.imageSize.width * setting.imageSize.height;
@@ -73,9 +128,15 @@ void KPCNNDenoiser::denoising(uint64_t waitTimeline) {
 	dim3 blockSize = dim3(16, 16, 1);
 	dim3 gridSize = dim3((setting.imageSize.width + blockSize.x - 1) / blockSize.x, (setting.imageSize.height + blockSize.y - 1) / blockSize.y, 1);
 
-	uint groupSharedMemorySize = (blockSize.x + kernelSize / 2) * (blockSize.y + kernelSize / 2) * sizeof(float3);
+	uint groupSharedMemorySize = (blockSize.x + kernelSize / 2) * (blockSize.y + kernelSize / 2) * sizeof(float3) * 2;
 
-	denoisingCuda << <gridSize, blockSize, groupSharedMemorySize, stream >> > ((float*)resNet34.outputTensors["output"], outputCount);
+	denoisingCuda << <gridSize, blockSize, groupSharedMemorySize, stream >> > (
+		setting.imageSize.width, setting.imageSize.height,
+		inputBuffer_diff, inputBuffer_spec,
+		kernel_diff, kernel_spec,
+		albedoBuffer_diff,
+		imageObject
+		);
 
 	CHECK(signalExternalSemaphore(endSemaphore, stream, waitTimeline));
 }
@@ -85,6 +146,13 @@ void KPCNNDenoiser::clean() {
 	CHECK(cudaDestroyExternalMemory(inputBufferExtMem_diff));
 	CHECK(cudaFree(inputBuffer_spec));
 	CHECK(cudaDestroyExternalMemory(inputBufferExtMem_spec));
+
+	CHECK(cudaFree(albedoBuffer_diff));
+	CHECK(cudaDestroyExternalMemory(albedoBufferExtMem_diff));
+
+	CHECK(cudaDestroyTextureObject(imageObject));
+	CHECK(cudaFreeMipmappedArray(imageMipmap));
+	CHECK(cudaDestroyExternalMemory(imageExtMem));
 
 	cudaDestroyExternalSemaphore(startSemaphore);
 	cudaDestroyExternalSemaphore(endSemaphore);
@@ -103,6 +171,13 @@ KPCNNDenoiser& KPCNNDenoiser::operator=(KPCNNDenoiser&& other) noexcept {
 		inputBufferExtMem_diff = other.inputBufferExtMem_diff;
 		inputBuffer_spec = other.inputBuffer_spec;
 		inputBufferExtMem_spec = other.inputBufferExtMem_spec;
+
+		albedoBuffer_diff = other.albedoBuffer_diff;
+		albedoBufferExtMem_diff = other.albedoBufferExtMem_diff;
+
+		imageExtMem = other.imageExtMem;
+		imageMipmap = other.imageMipmap;
+		imageObject = other.imageObject;
 
 		startSemaphore = other.startSemaphore;
 		endSemaphore = other.endSemaphore;

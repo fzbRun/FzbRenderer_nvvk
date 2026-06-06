@@ -5,6 +5,7 @@
 #include "common/Semaphore/Semaphore.h"
 #include <common/Buffer/Buffer.h>
 #include "./PathTracing_KPCNNDenosingShaderio.h"
+#include "CUDA/KPCNN.cuh"
 
 #ifndef FZBRENDERER_KPCNN_DENOSING_PATHTRACING_H
 #define FZBRENDERER_KPCNN_DENOSING_PATHTRACING_H
@@ -23,7 +24,8 @@ public:
 	void resize(VkCommandBuffer cmd, const VkExtent2D& size) override;
 	void preRender() override;
 	void render(VkCommandBuffer* cmd) override;
-
+	
+	void createDataObject();
 	void createDescriptorSetLayout() override;
 	void createDescriptorSet();
 	void createPipelineLayout();
@@ -31,17 +33,29 @@ public:
 	void updateDataPerFrame(VkCommandBuffer cmd) override;
 
 	void pathTracing(VkCommandBuffer cmd);
+	void createInputBuffers(VkCommandBuffer cmd);
 
 private:
+	VkExtent2D screenSize{};
+
+	VkPushConstantsInfo pushInfo{};
 	shaderio::KPCNN_DenoisingPTPushConstant pushConstant{};
 	VkShaderEXT computeShader_PathTracing{};
-	VkShaderEXT computeShader_makeInputBuffer{};
-	VkShaderEXT computeShader_Denoising{};
+	VkShaderEXT computeShader_createGradBuffers{};
 
 	FzbRenderer::Buffer inputBuffer_diff;
 	FzbRenderer::Buffer inputBuffer_spec;
+
+	FzbRenderer::Buffer normalBuffer;
+	FzbRenderer::Buffer depthBuffer;
+	FzbRenderer::Buffer albedoBuffer;
+
+	FzbRenderer::Image colorImage;
+
 	FzbRenderer::Semaphore vulkanToCudaSemaphore;
 	FzbRenderer::Semaphore cudaToVulkanSemaphore;
+
+	KPCNNDenoiser kpcnDenoiser;
 };
 }
 

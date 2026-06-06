@@ -10,7 +10,9 @@ struct KPCNNDenoiser_CreateInfo {
 	VkPhysicalDevice physicalDevice;
 	FzbRenderer::Buffer inputBuffer_diff;
 	FzbRenderer::Buffer inputBuffer_spec;
+	FzbRenderer::Buffer albedoBuffer;
 	VkExtent2D imageSize;
+	FzbRenderer::Image outputImage;
 
 	HANDLE startSemaphoreHandle;
 	HANDLE endSemaphoreHandle;
@@ -35,6 +37,13 @@ private:
 
 	cudaExternalMemory_t inputBufferExtMem_spec;
 	float* inputBuffer_spec;
+
+	cudaExternalMemory_t albedoBufferExtMem_diff;
+	float* albedoBuffer_diff;
+
+	cudaExternalMemory_t imageExtMem;
+	cudaMipmappedArray_t imageMipmap;
+	cudaSurfaceObject_t imageObject;
 
 	cudaExternalSemaphore_t startSemaphore;
 	cudaExternalSemaphore_t endSemaphore;
