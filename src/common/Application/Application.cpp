@@ -119,7 +119,7 @@ void FzbRenderer::Application::onAttach(nvapp::Application* app) {
 	allocator.init(allocatorInfo);
 	stagingUploader.init(&allocator, true);   //所有的CPU、GPU只一方可见的缓冲的交互都要经过暂存缓冲区
 	for (auto& instanceExtension : vkContextInitInfo.instanceExtensions) {
-		if (instanceExtension == VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME) {
+		if (strcmp(instanceExtension, VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME) == 0) {
 			allocatorExport.init(allocatorInfo);
 			stagingUploaderExport.init(&allocatorExport, true);
 		}

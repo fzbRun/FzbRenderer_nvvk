@@ -11,7 +11,7 @@ class Logger : public nvinfer1::ILogger {
 	}
 } gLogger;
 
-std::vector<char> FzbRenderer::Model::loadModelData(const std::string& onnxPath){
+std::vector<char> FzbRenderer::Model::loadModelData(const std::string& onnxPath, ModelCreateInfo createInfo){
     TrtUniquePtr<nvinfer1::IBuilder> builder(nvinfer1::createInferBuilder(gLogger));
     if (!builder) throw std::runtime_error("Failed to create builder");
 
@@ -69,16 +69,19 @@ std::vector<char> FzbRenderer::Model::loadModelData(const std::string& onnxPath)
         for (int d = 0; d < dims.nbDims; ++d){
             if (dims.d[d] == -1){
                 // batch dimension
-                if (d == 0){
-                    minDims.d[d] = 1;
-                    optDims.d[d] = 1;
-                    maxDims.d[d] = 8;
-                } else{
-                    // spatial / sequence dimension
-                    minDims.d[d] = 1;
-                    optDims.d[d] = 224;
-                    maxDims.d[d] = 1024;
-                }
+                //if (d == 0){
+                //    minDims.d[d] = 1;
+                //    optDims.d[d] = 1;
+                //    maxDims.d[d] = 8;
+                //} else{
+                //    // spatial / sequence dimension
+                //    minDims.d[d] = 1;
+                //    optDims.d[d] = 224;
+                //    maxDims.d[d] = 1024;
+                //}
+                minDims.d[d] = createInfo.inputShape_min[d];
+                optDims.d[d] = createInfo.inputShape_opt[d];
+                maxDims.d[d] = createInfo.inputShape_max[d];
             }
         }
         std::cout << "Dynamic input detected: " << inputTensor->getName() << std::endl;
@@ -126,7 +129,7 @@ FzbRenderer::Model::Model(ModelCreateInfo createInfo) {
     }else{
         std::cout << "Engine not found, building from ONNX..." << std::endl;
         std::string onnxPath = createInfo.enginePath.substr(0, createInfo.enginePath.find_last_of('.')) + ".onnx";
-        engineData = loadModelData(onnxPath);
+        engineData = loadModelData(onnxPath, createInfo);
 
         std::ofstream outFile(createInfo.enginePath, std::ios::binary);
         outFile.write(engineData.data(), engineData.size());
@@ -154,8 +157,9 @@ FzbRenderer::Model::Model(ModelCreateInfo createInfo) {
         size_t count = 1;
         for (int d = 0; d < dims.nbDims; ++d) {
             if (dims.d[d] < 0) {
-                if (d == 0) continue;   //batch temporarily set to 1
-                throw std::runtime_error(std::string("Output shape still dynamic: ") + tensorName);
+                //if (d == 0) continue;   //batch temporarily set to 1
+                //throw std::runtime_error(std::string("Output shape still dynamic: ") + tensorName);
+                dims.d[d] = createInfo.outputShape[d];
             }
             count *= static_cast<size_t>(dims.d[d]);
         }
@@ -163,11 +167,10 @@ FzbRenderer::Model::Model(ModelCreateInfo createInfo) {
         void* dPtr = nullptr;
         CHECK(cudaMalloc(&dPtr, count * sizeof(float)));
 
-        if (!model.context->setTensorAddress(tensorName, dPtr))
-            throw std::runtime_error(std::string("Failed to bind output: ") + tensorName);
-
 		outputTensors.insert({ tensorName, dPtr });
         outputTensorSizes.insert({ tensorName, count });
+        if (!model.context->setOutputTensorAddress(tensorName, dPtr))
+            throw std::runtime_error(std::string("Failed to bind output: ") + tensorName);
     }
 }
 void FzbRenderer::Model::infer(std::vector<InputTensorInfo> inputInfos, cudaStream_t stream) {
@@ -175,22 +178,19 @@ void FzbRenderer::Model::infer(std::vector<InputTensorInfo> inputInfos, cudaStre
         nvinfer1::Dims dims{};
         dims.nbDims = static_cast<int>(inputInfo.shape.size());
         for (int j = 0; j < dims.nbDims; ++j) dims.d[j] = inputInfo.shape[j];
-
+    
         if (!model.context->setInputShape(inputInfo.name.c_str(), dims))
             throw std::runtime_error("Failed to set input shape: " + inputInfo.name);
-
-        if (!model.context->setTensorAddress(inputInfo.name.c_str(), inputInfo.inputTensor))
+    
+        if (!model.context->setInputTensorAddress(inputInfo.name.c_str(), inputInfo.inputTensor))
             throw std::runtime_error("Failed to set tensor address: " + inputInfo.name);
     }
 
     //ÔÝÊ±²»¿¼ÂÇ¶¯Ì¬output shape
     int nbTensors = model.engine->getNbIOTensors();
-    for (int i = 0; i < nbTensors; ++i){
-        const char* tensorName = model.engine->getIOTensorName(i);
-        if (model.engine->getTensorIOMode(tensorName) != nvinfer1::TensorIOMode::kOUTPUT) continue;
-
-        if (!model.context->setTensorAddress(tensorName, outputTensors[tensorName]))
-            throw std::runtime_error(std::string("Failed to bind output: ") + tensorName);
+    for (auto& [name, dPtr] : outputTensors) {
+        if (!model.context->setOutputTensorAddress(name.c_str(), dPtr))
+            throw std::runtime_error("Failed to set output address: " + name);
     }
 
     if (!model.context->enqueueV3(stream)) throw std::runtime_error( "TensorRT enqueueV3 failed");

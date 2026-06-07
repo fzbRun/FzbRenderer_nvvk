@@ -28,8 +28,8 @@
 [[vk::binding(StaticBindingPoints_KPCNNPT::eInputBuffer_albedoVariance_spec)]] RWStructuredBuffer<float> InputBuffer_albedoVariance_spec;
 [[vk::binding(StaticBindingPoints_KPCNNPT::eInputBuffer_gradAlbedo_spec)]] RWStructuredBuffer<float3> InputBuffer_gradAlbedo_spec;
 
-[[vk::binding(StaticBindingPoints_KPCNNPT::eNormalBuffer)]] RWStructuredBuffer<float3> normalBuffer;
-[[vk::binding(StaticBindingPoints_KPCNNPT::eDepthBuffer)]] RWStructuredBuffer<float> depthBuffer;
+[[vk::binding(StaticBindingPoints_KPCNNPT::eNormalBuffer)]] RWStructuredBuffer<float3> NormalBuffer;
+[[vk::binding(StaticBindingPoints_KPCNNPT::eDepthBuffer)]] RWStructuredBuffer<float> DepthBuffer;
 [[vk::binding(StaticBindingPoints_KPCNNPT::eAlbedoBuffer)]] RWStructuredBuffer<float3> AlbedoBuffer;
 //---------------------------------------------PathTracing-----------------------------------------
 typedef CallablePayload HitPayload_KPCNNPT;
@@ -217,7 +217,7 @@ void computeMain_PathTracing(uint2 threadIndex: SV_DispatchThreadID, uint2 group
     float3 meanAlbedo = accAlbedo / pushConst.spp;
     float3 meanDiffuse = accDiffuse / pushConst.spp;
 
-    float3 irradiance = meanDiffuse / meanAlbedo;
+    float3 irradiance = meanDiffuse / (meanAlbedo + eps_kpcnn);
     InputBuffer_irradiance[pixelIndex] = irradiance;
 
     /*
@@ -252,7 +252,7 @@ void computeMain_PathTracing(uint2 threadIndex: SV_DispatchThreadID, uint2 group
 
     InputBuffer_normalVariance_spec[pixelIndex] = normalVarianceS;
 
-    normalBuffer[pixelIndex] = meanNormal;
+    NormalBuffer[pixelIndex] = meanNormal;
     //-------------------------------depth-------------------------------------
     float meanDepth = accDepth / pushConst.spp;
     float depthVariance = accDepth2 / pushConst.spp - meanDepth * meanDepth;
@@ -261,7 +261,7 @@ void computeMain_PathTracing(uint2 threadIndex: SV_DispatchThreadID, uint2 group
 
     InputBuffer_depthVariance_spec[pixelIndex] = depthVariance;
 
-    depthBuffer[pixelIndex] = meanDepth;
+    DepthBuffer[pixelIndex] = meanDepth;
     //-------------------------------albedo-------------------------------------
     float3 albedoVariance = accAlbedo2 / pushConst.spp - meanAlbedo * meanAlbedo;
     float albedoVarianceS = albedoVariance.x * 0.2126f + albedoVariance.y * 0.7152f + albedoVariance.z * 0.0722f;
@@ -271,6 +271,7 @@ void computeMain_PathTracing(uint2 threadIndex: SV_DispatchThreadID, uint2 group
     InputBuffer_albedoVariance_spec[pixelIndex] = albedoVarianceS;
 
     AlbedoBuffer[pixelIndex] = meanAlbedo;
+    //if (pushConst.frameIndex == 1) printf("albedo: %f %f %f\n", meanAlbedo.x, meanAlbedo.y, meanAlbedo.z);
 }
 
 groupshared float3 groupNormals[33][33]; // 13KB
@@ -280,11 +281,9 @@ groupshared float3 groupAlbedos[33][33];
 [numthreads(32, 32, 1)]
 [shader("compute")]
 void computeMain_createGradBuffers(uint2 threadIndex: SV_DispatchThreadID, uint2 threadGroupIndex : SV_GroupID ,uint2 groupThreadIndex: SV_GroupThreadID) {
-    if (threadIndex.x >= pushConst.screenSize.x || threadIndex.y >= pushConst.screenSize.y) return;
-
     uint pixelIndex = threadIndex.y * pushConst.screenSize.x + threadIndex.x;
-    groupNormals[groupThreadIndex.y + 1][groupThreadIndex.x + 1] = normalBuffer[pixelIndex];
-    groupDepths[groupThreadIndex.y + 1][groupThreadIndex.x + 1] = depthBuffer[pixelIndex];
+    groupNormals[groupThreadIndex.y + 1][groupThreadIndex.x + 1] = NormalBuffer[pixelIndex];
+    groupDepths[groupThreadIndex.y + 1][groupThreadIndex.x + 1] = DepthBuffer[pixelIndex];
     groupAlbedos[groupThreadIndex.y + 1][groupThreadIndex.x + 1] = AlbedoBuffer[pixelIndex];
     GroupMemoryBarrierWithGroupSync();
 
@@ -294,14 +293,20 @@ void computeMain_createGradBuffers(uint2 threadIndex: SV_DispatchThreadID, uint2
 
     uint2 groupPixelStartIndex = threadGroupIndex * 32;
     if (warpIndex == 0) {
-        float3 leftNormal = groupNormals[warpLane + 1][1];
-        float leftDepth = groupDepths[warpLane + 1][1];
-        float3 leftAlbedo = groupAlbedos[warpLane + 1][1];
+        float3 leftNormal = 0.0f;
+        float leftDepth = 0.0f;
+        float3 leftAlbedo = 0.0f;
 
         if (groupPixelStartIndex.x == 0) {
-            leftNormal = 0.0f;
-            leftDepth = 0.0f;
-            leftAlbedo = 0.0f;
+            leftNormal = groupNormals[warpLane + 1][1]; ;
+            leftDepth = groupDepths[warpLane + 1][1];
+            leftAlbedo = groupAlbedos[warpLane + 1][1];
+        } else {
+            uint leftPixelIndex = (groupPixelStartIndex.y + warpLane) * pushConst.screenSize.x + (groupPixelStartIndex.x - 1);
+
+            leftNormal = NormalBuffer[leftPixelIndex];
+            leftDepth = DepthBuffer[leftPixelIndex];
+            leftAlbedo = AlbedoBuffer[leftPixelIndex];
         }
 
         groupNormals[warpLane + 1][0] = leftNormal;
@@ -314,9 +319,15 @@ void computeMain_createGradBuffers(uint2 threadIndex: SV_DispatchThreadID, uint2
         float3 upAlbedo = groupAlbedos[1][warpLane + 1];
 
         if (groupPixelStartIndex.y == 0) {
-            upNormal = 0.0f;
-            upDepth = 0.0f;
-            upAlbedo = 0.0f;
+            upNormal = groupNormals[1][warpLane + 1]; ;
+            upDepth = groupDepths[1][warpLane + 1];
+            upAlbedo = groupAlbedos[1][warpLane + 1];
+        } else {
+            uint upPixelIndex = (groupPixelStartIndex.y - 1) * pushConst.screenSize.x + groupPixelStartIndex.x + warpLane;
+
+            upNormal = NormalBuffer[upPixelIndex];
+            upDepth = DepthBuffer[upPixelIndex];
+            upAlbedo = AlbedoBuffer[upPixelIndex];
         }
 
         groupNormals[0][warpLane + 1] = upNormal;
@@ -324,6 +335,8 @@ void computeMain_createGradBuffers(uint2 threadIndex: SV_DispatchThreadID, uint2
         groupAlbedos[0][warpLane + 1] = upAlbedo;
     }
     GroupMemoryBarrierWithGroupSync();
+
+    if (threadIndex.x >= pushConst.screenSize.x || threadIndex.y >= pushConst.screenSize.y) return;
 
     // create dx
     float3 normal = groupNormals[groupThreadIndex.y + 1][groupThreadIndex.x + 1];
@@ -370,28 +383,38 @@ void computeMain_createGradBuffers(uint2 threadIndex: SV_DispatchThreadID, uint2
     GroupMemoryBarrierWithGroupSync();
 
     if (warpIndex == 0) {
-        float3 leftIrradiance = groupNormals[warpLane + 1][1];
-        float3 leftSpecular = groupAlbedos[warpLane + 1][1];
+        float3 leftDiff = 0.0f;
+        float3 leftSpec = 0.0f;
 
         if (groupPixelStartIndex.x == 0) {
-            leftIrradiance = 0.0f;
-            leftSpecular = 0.0f;
+            leftDiff = groupNormals[warpLane + 1][1];
+            leftSpec = groupAlbedos[warpLane + 1][1];
+        } else {
+            uint leftPixelIndex = (groupPixelStartIndex.y + warpLane) * pushConst.screenSize.x + (groupPixelStartIndex.x - 1);
+
+            leftDiff = InputBuffer_irradiance[leftPixelIndex];
+            leftSpec = InputBuffer_spec[leftPixelIndex];
         }
 
-        groupNormals[warpLane + 1][0] = leftIrradiance;
-        groupAlbedos[warpLane + 1][0] = leftSpecular;
+        groupNormals[warpLane + 1][0] = leftDiff;
+        groupAlbedos[warpLane + 1][0] = leftSpec;
     }
     if (warpIndex == 1) {
-        float3 upIrradiance = groupNormals[1][warpLane + 1];
-        float3 upSpecular = groupAlbedos[1][warpLane + 1];
+        float3 upDiff = groupNormals[1][warpLane + 1];
+        float3 upSpec = groupAlbedos[1][warpLane + 1];
 
         if (groupPixelStartIndex.y == 0) {
-            upIrradiance = 0.0f;
-            upSpecular = 0.0f;
+            upDiff = groupNormals[1][warpLane + 1];
+            upSpec = groupAlbedos[1][warpLane + 1];
+        } else {
+            uint upPixelIndex = (groupPixelStartIndex.y - 1) * pushConst.screenSize.x + groupPixelStartIndex.x + warpLane;
+
+            upDiff = InputBuffer_irradiance[upPixelIndex];
+            upSpec = InputBuffer_spec[upPixelIndex];
         }
 
-        groupNormals[0][warpLane + 1] = upIrradiance;
-        groupAlbedos[0][warpLane + 1] = upSpecular;
+        groupNormals[0][warpLane + 1] = upDiff;
+        groupAlbedos[0][warpLane + 1] = upSpec;
     }
     GroupMemoryBarrierWithGroupSync();
 

@@ -39,7 +39,7 @@ private:
 	float* inputBuffer_spec;
 
 	cudaExternalMemory_t albedoBufferExtMem_diff;
-	float* albedoBuffer_diff;
+	float3* albedoBuffer;
 
 	cudaExternalMemory_t imageExtMem;
 	cudaMipmappedArray_t imageMipmap;

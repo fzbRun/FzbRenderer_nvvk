@@ -63,17 +63,27 @@ VkResult FzbRenderer::Image::init(ImageCreateInfo createInfo) {
 
         NVVK_CHECK(allocator->createImageExport(image, createInfo.info, createInfo.viewInfo));
         
-        VmaAllocationInfo allocInfo;
-        vmaGetAllocationInfo(Application::allocator, image.allocation, &allocInfo);
-        imageSize = allocInfo.size;
+        VmaAllocationInfo2 allocInfo;
+        vmaGetAllocationInfo2(Application::allocator, image.allocation, &allocInfo);
+        allocMemTotalSize = allocInfo.blockSize;
+        allocMemSize = allocInfo.allocationInfo.size;
+        allocMemOffset = allocInfo.allocationInfo.offset;
 
         VkMemoryGetWin32HandleInfoKHR handleInfo = {};
         handleInfo.sType = VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR;
-        handleInfo.memory = allocInfo.deviceMemory;
+        handleInfo.memory = allocInfo.allocationInfo.deviceMemory;
         handleInfo.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
         FzbRenderer::GetMemoryWin32HandleKHR(&handleInfo, &this->handle);
     }
-    else NVVK_FAIL_RETURN(Application::allocator.createImage(image, createInfo.info, createInfo.viewInfo));  //iamge.descriptor.imageView whill be writed
+    else {
+        NVVK_FAIL_RETURN(Application::allocator.createImage(image, createInfo.info, createInfo.viewInfo));  //iamge.descriptor.imageView whill be writed
+
+        VmaAllocationInfo2 allocInfo;
+        vmaGetAllocationInfo2(Application::allocator, image.allocation, &allocInfo);
+        allocMemTotalSize = allocInfo.blockSize;
+        allocMemSize = allocInfo.allocationInfo.size;
+        allocMemOffset = allocInfo.allocationInfo.offset;
+    }
     Application::samplerPool.acquireSampler(image.descriptor.sampler, createInfo.samplerInfo);
 
     VkDevice device = Application::app->getDevice();
@@ -201,13 +211,15 @@ VkResult FzbRenderer::Image::init(std::filesystem::path& imagePath) {
         NVVK_CHECK(staging.appendImage(image, dataSpan, VK_IMAGE_LAYOUT_GENERAL));
         Application::samplerPool.acquireSampler(image.descriptor.sampler);
 
-        VmaAllocationInfo allocInfo;
-        vmaGetAllocationInfo(Application::allocator, image.allocation, &allocInfo);
-        imageSize = allocInfo.size;
+        VmaAllocationInfo2 allocInfo;
+        vmaGetAllocationInfo2(Application::allocator, image.allocation, &allocInfo);
+        allocMemTotalSize = allocInfo.blockSize;
+        allocMemSize = allocInfo.allocationInfo.size;
+        allocMemOffset = allocInfo.allocationInfo.offset;
 
         VkMemoryGetWin32HandleInfoKHR handleInfo = {};
         handleInfo.sType = VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR;
-        handleInfo.memory = allocInfo.deviceMemory;
+        handleInfo.memory = allocInfo.allocationInfo.deviceMemory;
         handleInfo.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
         GetMemoryWin32HandleKHR(&handleInfo, &this->handle);
     }
@@ -220,6 +232,12 @@ VkResult FzbRenderer::Image::init(std::filesystem::path& imagePath) {
         //Image will not have data immediately. After the staginguploader submits, the data will be copied in
         NVVK_CHECK(staging.appendImage(image, dataSpan, VK_IMAGE_LAYOUT_GENERAL));
         Application::samplerPool.acquireSampler(image.descriptor.sampler);
+
+        VmaAllocationInfo2 allocInfo;
+        vmaGetAllocationInfo2(Application::allocator, image.allocation, &allocInfo);
+        allocMemTotalSize = allocInfo.blockSize;
+        allocMemSize = allocInfo.allocationInfo.size;
+        allocMemOffset = allocInfo.allocationInfo.offset;
     }
 
     //----------------------------------------------------------------------------------------------------------------
@@ -275,7 +293,7 @@ void FzbRenderer::Image::clean() {
     vkDestroyDescriptorSetLayout(device, descLayout, nullptr);
     descLayout = VK_NULL_HANDLE;
 
-    if (handle != nullptr) { // HANDLE 在 Win32 下通常是 void* / HANDLE
+    if (handle != nullptr && allocMemOffset == 0) {     //sometime many buffer use same handle(distinguish by offet)
         CloseHandle(handle);
         handle = nullptr;
     }

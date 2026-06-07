@@ -33,7 +33,9 @@ public:
 	ImageCreateInfo setting;
 	nvvk::Image image;
 
-	uint32_t imageSize;
+	uint32_t allocMemSize;
+	uint32_t allocMemTotalSize;
+	uint32_t allocMemOffset;
 
 	VkImageView     uiImageView{};
 	VkDescriptorPool descriptorPool = nullptr;

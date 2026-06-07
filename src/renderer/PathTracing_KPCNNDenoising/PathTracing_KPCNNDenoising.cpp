@@ -21,7 +21,7 @@ PathTracing_KPCNNDenoising::PathTracing_KPCNNDenoising(pugi::xml_node& rendererN
 	Application::vkContextInitInfo.deviceExtensions.push_back({ VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME });
 }
 void PathTracing_KPCNNDenoising::init() {
-	screenSize = { 512, 512 };
+	screenSize = { 256, 256 };
 
 	ptContext.getRayTracingPropertiesAndFeature();
 	asManager.init();
@@ -66,7 +66,7 @@ void PathTracing_KPCNNDenoising::clean() {
 	PathTracingRenderer::clean();
 }
 void PathTracing_KPCNNDenoising::uiRender() {
-	Application::viewportImage = gBuffers.getDescriptorSet(eImgTonemapped);
+	Application::viewportImage = gBuffers.getDescriptorSet(0);
 }
 void PathTracing_KPCNNDenoising::resize(VkCommandBuffer cmd, const VkExtent2D& size) {}
 void PathTracing_KPCNNDenoising::preRender() {
@@ -76,7 +76,10 @@ void PathTracing_KPCNNDenoising::preRender() {
 
 	pushConstant.frameIndex = Application::frameIndex;
 	pushConstant.maxFrameCount = maxFrames;
+	pushConstant.spp = 16;
 	pushConstant.time = Application::sceneResource.time;
+	pushConstant.maxBounceCount = 10;
+	pushConstant.screenSize = { screenSize.width, screenSize.height };
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 
 	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
@@ -144,7 +147,8 @@ void PathTracing_KPCNNDenoising::render(VkCommandBuffer* cmdPtr) {
 
 	{ NVVK_DBG_SCOPE(cmd); }
 
-	Renderer::postProcess(cmd, &colorImage.image.descriptor);
+	//Renderer::postProcess(cmd, &colorImage.image.descriptor);
+	Application::tonemapper.runCompute(cmd, gBuffers.getSize(), Application::tonemapperData, colorImage.image.descriptor, gBuffers.getDescriptorImageInfo(0));
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
 
 	++timeline;
@@ -154,36 +158,44 @@ void PathTracing_KPCNNDenoising::createDataObject() {
 	Feature::createGBuffer(true, true, 0, screenSize);
 
 	uint32_t imageSize = screenSize.width * screenSize.height;
+	/*
+		diffuse: 3, diffuseVariance: 1, gradDiffuse: 6
+		normalVariance: 1, gradNormal: 6,
+		depthVariance: 1, gradDepth: 2,
+		albedoVariance: 1, gradAlbedo: 6
+		sum: 27
+	*/
+	uint32_t inputBufferSize = (3 + 1 + 6 + 1 + 6 + 1 + 2 + 1 + 6) * imageSize * sizeof(float);
 
 	inputBuffer_diff = FzbRenderer::Buffer("inputBuffer_diff", true);
-	/*
-	diffuse: 3, diffuseVariance: 1, gradDiffuse: 6
-	normalVariance: 1, gradNormal: 6,
-	depthVariance: 1, gradDepth: 1,
-	albedoVariance: 1, gradAlbedo: 6
-	sum: 27
-	*/
-	uint32_t inputBufferSize_diff = (3 + 1 + 6 + 1 + 6 + 1 + 1 + 1 + 6) * imageSize * sizeof(float4);	//	108MB for 512 * 512
 	inputBuffer_diff.init({
 		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-		.size = inputBufferSize_diff,
+		.size = inputBufferSize,
 		.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT,
 		});
+
+	inputBuffer_spec = FzbRenderer::Buffer("inputBuffer_spec", true);
 	inputBuffer_spec.init({
 		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-		.size = inputBufferSize_diff,
+		.size = inputBufferSize,
 		.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT,
 		});
+	
+	normalBuffer = FzbRenderer::Buffer("normalBuffer", false);
 	normalBuffer.init({
 		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
 		.size = imageSize * sizeof(float3),
 		.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT,
 		});
+	
+	depthBuffer = FzbRenderer::Buffer("depthBuffer", false);
 	depthBuffer.init({
 		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
 		.size = imageSize * sizeof(float),
 		.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT,
 		});
+	
+	albedoBuffer = FzbRenderer::Buffer("albedoBuffer", true);
 	albedoBuffer.init({
 		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
 		.size = imageSize * sizeof(float3),
@@ -380,7 +392,7 @@ void PathTracing_KPCNNDenoising::createDescriptorSet() {
 	offset += imageSize * sizeof(float);
 
 	inputBufferWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_normalVariance_diff, 0, 0, 1);
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_gradNormal_diff, 0, 0, 1);
 	write.append(inputBufferWrite, inputBuffer_diff.buffer, offset, imageSize * sizeof(float3) * 2);
 	offset += imageSize * sizeof(float3) * 2;
 	//-------------------------------------------Depth_Diff---------------------------------------------------
@@ -391,8 +403,8 @@ void PathTracing_KPCNNDenoising::createDescriptorSet() {
 
 	inputBufferWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_gradDepth_diff, 0, 0, 1);
-	write.append(inputBufferWrite, inputBuffer_diff.buffer, offset, imageSize * sizeof(float3) * 2);
-	offset += imageSize * sizeof(float3) * 2;
+	write.append(inputBufferWrite, inputBuffer_diff.buffer, offset, imageSize * sizeof(float) * 2);
+	offset += imageSize * sizeof(float) * 2;
 	//-------------------------------------------Albedo_Diff---------------------------------------------------
 	inputBufferWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_albedoVariance_diff, 0, 0, 1);
@@ -403,7 +415,12 @@ void PathTracing_KPCNNDenoising::createDescriptorSet() {
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_gradAlbedo_diff, 0, 0, 1);
 	write.append(inputBufferWrite, inputBuffer_diff.buffer, offset, imageSize * sizeof(float3) * 2);
 	offset += imageSize * sizeof(float3) * 2;
+
+
+
 	//-------------------------------------------Specular---------------------------------------------------
+	offset = 0;
+
 	inputBufferWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_spec, 0, 0, 1);
 	write.append(inputBufferWrite, inputBuffer_spec.buffer, offset, imageSize * sizeof(float3));
@@ -425,7 +442,7 @@ void PathTracing_KPCNNDenoising::createDescriptorSet() {
 	offset += imageSize * sizeof(float);
 
 	inputBufferWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_normalVariance_diff, 0, 0, 1);
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_gradNormal_spec, 0, 0, 1);
 	write.append(inputBufferWrite, inputBuffer_spec.buffer, offset, imageSize * sizeof(float3) * 2);
 	offset += imageSize * sizeof(float3) * 2;
 	//-------------------------------------------Depth_Spec---------------------------------------------------
@@ -436,8 +453,8 @@ void PathTracing_KPCNNDenoising::createDescriptorSet() {
 
 	inputBufferWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_gradDepth_spec, 0, 0, 1);
-	write.append(inputBufferWrite, inputBuffer_spec.buffer, offset, imageSize * sizeof(float3) * 2);
-	offset += imageSize * sizeof(float3) * 2;
+	write.append(inputBufferWrite, inputBuffer_spec.buffer, offset, imageSize * sizeof(float) * 2);
+	offset += imageSize * sizeof(float) * 2;
 	//-------------------------------------------Albedo_Spec---------------------------------------------------
 	inputBufferWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_albedoVariance_spec, 0, 0, 1);
@@ -448,6 +465,7 @@ void PathTracing_KPCNNDenoising::createDescriptorSet() {
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_gradAlbedo_spec, 0, 0, 1);
 	write.append(inputBufferWrite, inputBuffer_spec.buffer, offset, imageSize * sizeof(float3) * 2);
 	offset += imageSize * sizeof(float3) * 2;
+
 	//-------------------------------------------Normal, Depth, Albedo---------------------------------------------------
 	VkWriteDescriptorSet    dataBufferWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eNormalBuffer, 0, 0, 1);
@@ -458,7 +476,7 @@ void PathTracing_KPCNNDenoising::createDescriptorSet() {
 	write.append(dataBufferWrite, depthBuffer.buffer);
 
 	dataBufferWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eNormalBuffer, 0, 0, 1);
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eAlbedoBuffer, 0, 0, 1);
 	write.append(dataBufferWrite, albedoBuffer.buffer);
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
@@ -539,10 +557,8 @@ void PathTracing_KPCNNDenoising::pathTracing(VkCommandBuffer cmd) {
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_PathTracing);
 
 	//VkExtent2D sceneSize = Application::app->getViewportSize();
-	pushConstant.screenSize = { screenSize.width, screenSize.height };
 	VkExtent2D groupSize = nvvk::getGroupCounts(screenSize, VkExtent2D{ PATHTRACING_BLOCKSIZE_KPCNN, PATHTRACING_BLOCKSIZE_KPCNN });
 
-	pushConstant.spp = 16;
 	vkCmdPushConstants2(cmd, &pushInfo);
 	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
 }

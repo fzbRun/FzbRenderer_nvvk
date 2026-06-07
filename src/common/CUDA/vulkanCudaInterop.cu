@@ -69,7 +69,6 @@ cudaExternalMemory_t importVulkanMemoryObjectFromFileDescriptor(int fd, unsigned
     cudaImportExternalMemory(&extMem, &desc);
 
     return extMem;
-
 }
 
 /*
@@ -87,9 +86,7 @@ cudaExternalMemory_t importVulkanMemoryObjectFromNTHandle(HANDLE handle, unsigne
     desc.type = cudaExternalMemoryHandleTypeOpaqueWin32;
     desc.handle.win32.handle = handle;
     desc.size = size;
-    if (isDedicated) {
-        desc.flags |= cudaExternalMemoryDedicated;
-    }
+    if (isDedicated) desc.flags |= cudaExternalMemoryDedicated;
 
     CHECK(cudaImportExternalMemory(&extMem, &desc));
 
@@ -97,7 +94,6 @@ cudaExternalMemory_t importVulkanMemoryObjectFromNTHandle(HANDLE handle, unsigne
     //CloseHandle(handle);
 
     return extMem;
-
 }
 
 /*
@@ -163,7 +159,7 @@ void* mapBufferOntoExternalMemory(cudaExternalMemory_t extMem, unsigned long lon
     desc.offset = offset;
     desc.size = size;
 
-    cudaExternalMemoryGetMappedBuffer(&ptr, extMem, &desc);
+    CHECK(cudaExternalMemoryGetMappedBuffer(&ptr, extMem, &desc));
 
     // Note: ‘ptr’ must eventually be freed using cudaFree()
     return ptr;
@@ -286,7 +282,7 @@ unsigned int getCudaMipmappedArrayFlagsForVulkanImage(VkImageViewType vkImageVie
 
 }
 
-void fromVulkanImageToCudaTexture(VkPhysicalDevice vkPhysicalDevice, FzbRenderer::Image& vkImage, HANDLE handle, unsigned long long size,
+void fromVulkanImageToCudaTexture(VkPhysicalDevice vkPhysicalDevice, FzbRenderer::Image& vkImage,
     bool isDedicated, cudaExternalMemory_t& extMem, cudaMipmappedArray_t& mipmap, cudaTextureObject_t& texObj, bool sampleNormal) {
 
     //先判断是否是同一个物理设备
@@ -295,7 +291,7 @@ void fromVulkanImageToCudaTexture(VkPhysicalDevice vkPhysicalDevice, FzbRenderer
     }
 
     //获得Vulkan导出的内存对象
-    extMem = importVulkanMemoryObjectFromNTHandle(handle, size, isDedicated);
+    extMem = importVulkanMemoryObjectFromNTHandle(vkImage.handle, vkImage.allocMemTotalSize, isDedicated);
 
     //将纹理映射到外部内存对象
 	VkImageCreateInfo imageInfo = vkImage.setting.info;
@@ -303,7 +299,7 @@ void fromVulkanImageToCudaTexture(VkPhysicalDevice vkPhysicalDevice, FzbRenderer
     cudaChannelFormatDesc format = getCudaChannelFormatDescForVulkanFormat(imageInfo.format);
     cudaExtent extent = getCudaExtentForVulkanExtent({ imageInfo.extent.width, imageInfo.extent.height, imageInfo.extent.depth }, imageInfo.arrayLayers, imageViewInfo.viewType);
     unsigned int flags = getCudaMipmappedArrayFlagsForVulkanImage(imageViewInfo.viewType, imageInfo.usage, false);   //cudaArraySurfaceLoadStore表示是否可写
-    mipmap = mapMipmappedArrayOntoExternalMemory(extMem, 0, &format, &extent, flags, imageInfo.mipLevels);    //cudaMipmappedArray_t是只读的
+    mipmap = mapMipmappedArrayOntoExternalMemory(extMem, vkImage.allocMemOffset, &format, &extent, flags, imageInfo.mipLevels);    //cudaMipmappedArray_t是只读的
 
     cudaResourceDesc resDesc;
     memset(&resDesc, 0, sizeof(resDesc));
@@ -323,7 +319,7 @@ void fromVulkanImageToCudaTexture(VkPhysicalDevice vkPhysicalDevice, FzbRenderer
     CHECK(cudaCreateTextureObject(&texObj, &resDesc, &texDesc, NULL));
 }
 
-void fromVulkanImageToCudaSurface(VkPhysicalDevice vkPhysicalDevice, FzbRenderer::Image& vkImage, HANDLE handle, unsigned long long size,
+void fromVulkanImageToCudaSurface(VkPhysicalDevice vkPhysicalDevice, FzbRenderer::Image& vkImage,
     bool isDedicated, cudaExternalMemory_t& extMem, cudaMipmappedArray_t& mipmap, cudaSurfaceObject_t& surfObj) {
 
     //先判断是否是同一个物理设备
@@ -332,7 +328,7 @@ void fromVulkanImageToCudaSurface(VkPhysicalDevice vkPhysicalDevice, FzbRenderer
     }
 
     //获得Vulkan导出的内存对象
-    extMem = importVulkanMemoryObjectFromNTHandle(handle, size, isDedicated);
+    extMem = importVulkanMemoryObjectFromNTHandle(vkImage.handle, vkImage.allocMemTotalSize, isDedicated);
 
     //将纹理映射到外部内存对象
     VkImageCreateInfo imageInfo = vkImage.setting.info;
@@ -340,7 +336,7 @@ void fromVulkanImageToCudaSurface(VkPhysicalDevice vkPhysicalDevice, FzbRenderer
     cudaChannelFormatDesc format = getCudaChannelFormatDescForVulkanFormat(imageInfo.format);
     cudaExtent extent = getCudaExtentForVulkanExtent({ imageInfo.extent.width, imageInfo.extent.height, imageInfo.extent.depth }, imageInfo.arrayLayers, imageViewInfo.viewType);
     unsigned int flags = getCudaMipmappedArrayFlagsForVulkanImage(imageViewInfo.viewType, imageInfo.usage, true);   //cudaArraySurfaceLoadStore表示是否可写
-    mipmap = mapMipmappedArrayOntoExternalMemory(extMem, 0, &format, &extent, flags, imageInfo.mipLevels);
+    mipmap = mapMipmappedArrayOntoExternalMemory(extMem, vkImage.allocMemOffset, &format, &extent, flags, imageInfo.mipLevels);
 
     cudaArray_t cuArray;    //cudaArray_t不能直接在核函数中读写，包括原子运算
     CHECK(cudaGetMipmappedArrayLevel(&cuArray, mipmap, 0)); // 选择 Mipmap 层级

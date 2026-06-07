@@ -25,6 +25,11 @@ struct TrtModel {
 struct ModelCreateInfo {
 	std::string enginePath;
 	nvinfer1::BuilderFlag precision = nvinfer1::BuilderFlag::kFP16;
+
+	uint32_t inputShape_min[4] = { 1, 1, 1, 1 };	//N C H W
+	uint32_t inputShape_opt[4] = { 1, 3, 224, 224 };	//N C H W
+	uint32_t inputShape_max[4] = { 1, 3, 1024, 1024 };	//N C H W
+	uint32_t outputShape[4] = { 1, 3, 224, 224 };
 };
 struct InputTensorInfo {
 	std::string name;
@@ -47,7 +52,7 @@ public:
 	std::unordered_map<std::string, void*> outputTensors;
 	std::unordered_map<std::string, int> outputTensorSizes;
 private:
-	std::vector<char> loadModelData(const std::string& onnxPath);
+	std::vector<char> loadModelData(const std::string& onnxPath, ModelCreateInfo createInfo);
 	ModelCreateInfo setting;
 };
 }

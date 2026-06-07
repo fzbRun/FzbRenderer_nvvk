@@ -30,6 +30,10 @@ public:
 
 	std::string name = "buffer";
 	nvvk::Buffer buffer;
+	
+	uint32_t allocMemSize;
+	uint32_t allocMemTotalSize;
+	uint32_t allocMemOffset;
 
 	bool external = false;
 	HANDLE handle = nullptr;
