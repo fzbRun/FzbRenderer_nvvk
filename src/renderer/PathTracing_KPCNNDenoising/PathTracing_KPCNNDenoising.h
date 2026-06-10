@@ -11,6 +11,20 @@
 #define FZBRENDERER_KPCNN_DENOSING_PATHTRACING_H
 
 namespace FzbRenderer {
+enum class GBufferImageIndex_KPCNN {
+#ifndef NDEBUG
+	eColorDebugImage = 0,
+	eDiffuseDebugImage,
+	eSpecularDebugImage,
+	eIrradianceDebugImage,
+	eNormalDebugImage,
+	eDepthDebugImage,
+	eAlebdoDebugImage,
+#endif
+	eTonemapImage,
+	eElementCount,
+};
+
 class PathTracing_KPCNNDenoising : public PathTracingRenderer {
 public:
 	PathTracing_KPCNNDenoising() = default;
@@ -48,6 +62,7 @@ private:
 
 	FzbRenderer::Buffer normalBuffer;
 	FzbRenderer::Buffer depthBuffer;
+	FzbRenderer::Buffer maxDepthBuffer;
 	FzbRenderer::Buffer albedoBuffer;
 
 	FzbRenderer::Image colorImage;
@@ -56,6 +71,10 @@ private:
 	FzbRenderer::Semaphore cudaToVulkanSemaphore;
 
 	KPCNNDenoiser kpcnDenoiser;
+
+#ifndef NDEBUG
+	std::vector<bool> showImage;
+#endif
 };
 }
 

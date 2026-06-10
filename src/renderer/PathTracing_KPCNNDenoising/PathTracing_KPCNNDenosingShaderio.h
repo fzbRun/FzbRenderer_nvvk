@@ -11,9 +11,9 @@ NAMESPACE_SHADERIO_BEGIN()
 struct KPCNN_DenoisingPTPushConstant {
 	int frameIndex;
 	int maxFrameCount;
-	uint spp;
+	int spp = 16;
 	float time;
-	int maxBounceCount;
+	int maxBounceCount = 10;
 	uint2 screenSize;
 	SceneInfo* sceneInfoAddress;
 };
@@ -47,7 +47,18 @@ enum class StaticBindingPoints_KPCNNPT {
 
 	eNormalBuffer,
 	eDepthBuffer,
+	eMaxDepthBuffer,
 	eAlbedoBuffer,
+
+#ifndef NDEBUG
+	eColorDebugImage,
+	eDiffuseDebugImage,
+	eSpecularDebugImage,
+	eIrradianceDebugImage,
+	eNormalDebugImage,
+	eDepthDebugImage,
+	eAlebdoDebugImage,
+#endif
 };
 
 #define PATHTRACING_BLOCKSIZE_KPCNN 16

@@ -30,7 +30,18 @@
 
 [[vk::binding(StaticBindingPoints_KPCNNPT::eNormalBuffer)]] RWStructuredBuffer<float3> NormalBuffer;
 [[vk::binding(StaticBindingPoints_KPCNNPT::eDepthBuffer)]] RWStructuredBuffer<float> DepthBuffer;
+[[vk::binding(StaticBindingPoints_KPCNNPT::eMaxDepthBuffer)]] RWStructuredBuffer<int> MaxDepthBuffer;
 [[vk::binding(StaticBindingPoints_KPCNNPT::eAlbedoBuffer)]] RWStructuredBuffer<float3> AlbedoBuffer;
+
+#ifndef NDEBUG
+[[vk::binding(StaticBindingPoints_KPCNNPT::eColorDebugImage, 0)]] RWTexture2D<float4> ColorDebugImage;
+[[vk::binding(StaticBindingPoints_KPCNNPT::eDiffuseDebugImage, 0)]] RWTexture2D<float4> DiffuseDebugImage;
+[[vk::binding(StaticBindingPoints_KPCNNPT::eSpecularDebugImage, 0)]] RWTexture2D<float4> SpecularDebugImage;
+[[vk::binding(StaticBindingPoints_KPCNNPT::eIrradianceDebugImage, 0)]] RWTexture2D<float4> IrradianceDebugImage;
+[[vk::binding(StaticBindingPoints_KPCNNPT::eNormalDebugImage, 0)]] RWTexture2D<float4> NormalDebugImage;
+[[vk::binding(StaticBindingPoints_KPCNNPT::eDepthDebugImage, 0)]] RWTexture2D<float4> DepthDebugImage;
+[[vk::binding(StaticBindingPoints_KPCNNPT::eAlebdoDebugImage, 0)]] RWTexture2D<float4> AlebdoDebugImage;
+#endif
 //---------------------------------------------PathTracing-----------------------------------------
 typedef CallablePayload HitPayload_KPCNNPT;
 
@@ -106,11 +117,17 @@ float3 RayMiss(float3 rayDirection) {
     else return sceneInfo.backgroundColor;
 }
 
+groupshared float groupWarpMaxDepth[(PATHTRACING_BLOCKSIZE_KPCNN * PATHTRACING_BLOCKSIZE_KPCNN + 31) / 32];
+
 [numthreads(PATHTRACING_BLOCKSIZE_KPCNN, PATHTRACING_BLOCKSIZE_KPCNN, 1)]
 [shader("compute")]
 void computeMain_PathTracing(uint2 threadIndex: SV_DispatchThreadID, uint2 groupThreadIndex: SV_GroupThreadID) {
     float2 launchID = (float2)threadIndex;
     float2 launchSize = (float2)pushConst.screenSize;
+
+    uint groupThreadIndexLinear = groupThreadIndex.y * PATHTRACING_BLOCKSIZE_KPCNN + groupThreadIndex.x;
+    if (groupThreadIndexLinear < (PATHTRACING_BLOCKSIZE_KPCNN * PATHTRACING_BLOCKSIZE_KPCNN + 31) / 32) groupWarpMaxDepth[groupThreadIndexLinear] = 0.0f;
+    //don't need sync, becouse sync will be done in later
     if (threadIndex.x >= pushConst.screenSize.x || threadIndex.y >= pushConst.screenSize.y) return;
 
     SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
@@ -176,14 +193,14 @@ void computeMain_PathTracing(uint2 threadIndex: SV_DispatchThreadID, uint2 group
                 if (payload.material.roughness > 0.1f) { // diffuse
                     notHitDiffuse = false;
                     isDiffuse = bounceDepth == 0;
-
+            
                     accNormal += payload.hitNormal;
                     accNormal2 += payload.hitNormal * payload.hitNormal;
-
+            
                     float depth = length(payload.hitPos - sceneInfo.cameraPosition);
                     accDepth += depth;
                     accDepth2 += depth * depth;
-
+            
                     accAlbedo += payload.material.albedo;
                     accAlbedo2 += payload.material.albedo * payload.material.albedo;
                 }
@@ -193,7 +210,7 @@ void computeMain_PathTracing(uint2 threadIndex: SV_DispatchThreadID, uint2 group
             else specular += payload.material.emissive * bsdf_cosine_pdf;
 
             BSDF_SAMPLE(payload);
-            float cosine = dot(payload.hitNormal, payload.incidence);
+            float cosine = abs(dot(payload.hitNormal, payload.incidence));
             bsdf_cosine_pdf *= payload.bsdf * cosine / payload.pdf;
 
             bool end = any(bsdf_cosine_pdf <= 0.0f) || all(bsdf_cosine_pdf <= 0.0f) || any(isnan(bsdf_cosine_pdf)) || any(isinf(bsdf_cosine_pdf));
@@ -201,6 +218,9 @@ void computeMain_PathTracing(uint2 threadIndex: SV_DispatchThreadID, uint2 group
 
             if (rand(payload.randomSeed) >= RR) break;
             bsdf_cosine_pdf /= RR;
+
+            ray.Origin = payload.hitPos + 0.001f * payload.incidence;
+            ray.Direction = payload.incidence;
         }
 
         if (isDiffuse) {
@@ -232,7 +252,7 @@ void computeMain_PathTracing(uint2 threadIndex: SV_DispatchThreadID, uint2 group
 
     InputBuffer_irradianceVariance[pixelIndex] = irradianceVarianceS;
     //-------------------------------specular-------------------------------------
-    float3 meanSpecular = accSpecular / pushConst.spp;
+    float3 meanSpecular = max(accSpecular / pushConst.spp, 0.0f);
     InputBuffer_spec[pixelIndex] = log(meanSpecular + 1);
 
     float3 specularVariance = accSpecular2 / pushConst.spp - meanSpecular * meanSpecular;
@@ -262,6 +282,20 @@ void computeMain_PathTracing(uint2 threadIndex: SV_DispatchThreadID, uint2 group
     InputBuffer_depthVariance_spec[pixelIndex] = depthVariance;
 
     DepthBuffer[pixelIndex] = meanDepth;
+
+    uint warpIndex = groupThreadIndexLinear / 32;
+    uint warpLane = groupThreadIndexLinear & 31;
+    float warpMaxDepth = WaveActiveMax(meanDepth);
+    if (warpLane == 0) groupWarpMaxDepth[warpIndex] = warpMaxDepth;
+    GroupMemoryBarrierWithGroupSync();
+    if (warpIndex == 0 && warpLane < (PATHTRACING_BLOCKSIZE_KPCNN * PATHTRACING_BLOCKSIZE_KPCNN + 31) / 32) {
+        warpMaxDepth = groupWarpMaxDepth[warpLane];
+        float groupMaxDepth = WaveActiveMax(warpMaxDepth);
+        if (warpLane == 0) {
+            int groupMaxDepthU = FloatToOrderedInt(groupMaxDepth);
+            InterlockedMax<int>(MaxDepthBuffer[0], groupMaxDepthU);
+        }
+    }
     //-------------------------------albedo-------------------------------------
     float3 albedoVariance = accAlbedo2 / pushConst.spp - meanAlbedo * meanAlbedo;
     float albedoVarianceS = albedoVariance.x * 0.2126f + albedoVariance.y * 0.7152f + albedoVariance.z * 0.0722f;
@@ -272,8 +306,21 @@ void computeMain_PathTracing(uint2 threadIndex: SV_DispatchThreadID, uint2 group
 
     AlbedoBuffer[pixelIndex] = meanAlbedo;
     //if (pushConst.frameIndex == 1) printf("albedo: %f %f %f\n", meanAlbedo.x, meanAlbedo.y, meanAlbedo.z);
+
+    #ifndef NDEBUG
+    DiffuseDebugImage[threadIndex] = float4(meanDiffuse, 1.0f);
+    SpecularDebugImage[threadIndex] = float4(meanSpecular, 1.0f);
+    float3 color = meanDiffuse + meanSpecular;
+    ColorDebugImage[threadIndex]= float4(color, 1.0f);
+
+    IrradianceDebugImage[threadIndex] = float4(irradiance, 1.0f);
+    NormalDebugImage[threadIndex] = float4(meanNormal, 1.0f);
+    //DepthDebugImage[threadIndex] = meanDepth / 100.0f; // far plane is 100
+    AlebdoDebugImage[threadIndex] = float4(meanAlbedo, 1.0f);
+    #endif
 }
 
+groupshared float groupMaxDepth;
 groupshared float3 groupNormals[33][33]; // 13KB
 groupshared float groupDepths[33][33];
 groupshared float3 groupAlbedos[33][33];
@@ -285,6 +332,7 @@ void computeMain_createGradBuffers(uint2 threadIndex: SV_DispatchThreadID, uint2
     groupNormals[groupThreadIndex.y + 1][groupThreadIndex.x + 1] = NormalBuffer[pixelIndex];
     groupDepths[groupThreadIndex.y + 1][groupThreadIndex.x + 1] = DepthBuffer[pixelIndex];
     groupAlbedos[groupThreadIndex.y + 1][groupThreadIndex.x + 1] = AlbedoBuffer[pixelIndex];
+    if (groupThreadIndex.x == 0 && groupThreadIndex.y == 0) groupMaxDepth = OrderedIntToFloat(MaxDepthBuffer[0]);
     GroupMemoryBarrierWithGroupSync();
 
     uint groupThreadIndexLinear = groupThreadIndex.y * 32 + groupThreadIndex.x;
@@ -345,8 +393,9 @@ void computeMain_createGradBuffers(uint2 threadIndex: SV_DispatchThreadID, uint2
     InputBuffer_gradNormal_diff[pixelIndex] = normalDX;
     InputBuffer_gradNormal_spec[pixelIndex] = normalDX;
 
-    float depth = groupDepths[groupThreadIndex.y + 1][groupThreadIndex.x + 1];
-    float leftDepth = warpLane == 0 ? groupDepths[groupThreadIndex.y + 1][groupThreadIndex.x] : WaveReadLaneAt(depth, warpLane - 1);
+    float maxDepth = max(groupMaxDepth, 1e-30f);
+    float depth = groupDepths[groupThreadIndex.y + 1][groupThreadIndex.x + 1] / maxDepth;
+    float leftDepth = (warpLane == 0 ? groupDepths[groupThreadIndex.y + 1][groupThreadIndex.x] : WaveReadLaneAt(depth, warpLane - 1)) / maxDepth;
     float depthDX = depth - leftDepth;
     InputBuffer_gradDepth_diff[pixelIndex] = depthDX;
     InputBuffer_gradDepth_spec[pixelIndex] = depthDX;
@@ -365,7 +414,7 @@ void computeMain_createGradBuffers(uint2 threadIndex: SV_DispatchThreadID, uint2
     InputBuffer_gradNormal_diff[pixelIndex + imageSize] = normalDY;
     InputBuffer_gradNormal_spec[pixelIndex + imageSize] = normalDY;
 
-    float upDepth = groupDepths[groupThreadIndex.y][groupThreadIndex.x + 1];
+    float upDepth = groupDepths[groupThreadIndex.y][groupThreadIndex.x + 1] / maxDepth;
     float depthDY = depth - upDepth;
     InputBuffer_gradDepth_diff[pixelIndex + imageSize] = depthDY;
     InputBuffer_gradDepth_spec[pixelIndex + imageSize] = depthDY;
@@ -437,4 +486,9 @@ void computeMain_createGradBuffers(uint2 threadIndex: SV_DispatchThreadID, uint2
     float3 upSpecular = groupAlbedos[groupThreadIndex.y][groupThreadIndex.x + 1];
     float3 specularDY = specular - upSpecular;
     InputBuffer_gradSpec[pixelIndex + imageSize] = specularDY;
+
+    #ifndef NDEBUG
+    if (pushConst.frameIndex == 1 && threadIndex.x == 0 && threadIndex.y == 0) printf("maxDepth: %f\n", maxDepth);
+    DepthDebugImage[threadIndex] = depth;
+    #endif
 }

@@ -105,7 +105,7 @@ def denoise(diffuseNet, specularNet, data, debug=False):
             print("LossSpec:", lossSpec)
             print("LossFinal:", lossFinal)
 def main():
-    eval_data = dataSet.preprocess_input("dataSet/eval/eval3.exr", "dataSet/eval/evalRef3.exr")
+    eval_data = dataSet.preprocess_input("dataSet/eval/eval2.exr", "dataSet/eval/evalRef2.exr")
     eval_data = dataSet.crop(eval_data, (1280//2, 720//2), 300)
 
     diffuseNet = model.KPCNN(eval_data['input_diff'].shape[-1]).to(device)

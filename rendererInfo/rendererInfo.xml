@@ -6,7 +6,7 @@
 	<renderer type = "PathTracing_KPCNNDenoising">  <!--FzbPathGuiding NPMPathGuiding PathTracing PathTracing_KPCNNDenoising  Deferred-->
 		<maxDepth value = "4" />
 		<useNEE value = "false" />
-		<spp value = "1" />
+		<spp value = "16" />
 		<RasterVoxelization>
 			<resolution value = "256, 256" />
 			<voxelCount value="16" />
