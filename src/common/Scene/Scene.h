@@ -36,6 +36,7 @@ public:
 	void updateDataPerFrame(VkCommandBuffer cmd);
 
 	std::filesystem::path scenePath;
+	std::string name = "scene";
 	std::shared_ptr<nvutils::CameraManipulator> cameraManip{ std::make_shared<nvutils::CameraManipulator>() };
 	bool cameraChange = false;
 	

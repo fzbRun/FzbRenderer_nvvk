@@ -8,6 +8,12 @@
 
 using namespace FzbRenderer;
 
+std::vector<std::string> debugImageNames = {
+	"ColorImage", "DiffuseImage", "SpecularImage",
+	"IrradianceImage", "NormalImage", "DepthImage", "AlbedoImage",
+	"IrradianceVarianceImage", "SpecularVarianceImage", "NormalVarianceImage", "DepthVarianceImage", "AlbedoVarianceImage",
+};
+
 PathTracing_KPCNNDenoising::PathTracing_KPCNNDenoising(pugi::xml_node& rendererNode) {
 	ptContext.setContextInfo();
 	Application::cmdCount = 2;
@@ -95,7 +101,7 @@ void PathTracing_KPCNNDenoising::uiRender() {
 		ImGui::SeparatorText("SPP");
 		{
 			PE::begin();
-			UIModified |= PE::SliderInt("SPP", &pushConstant.spp, 1, 64, "%d", ImGuiSliderFlags_AlwaysClamp,
+			UIModified |= PE::SliderInt("SPP", &pushConstant.spp, 1, 512, "%d", ImGuiSliderFlags_AlwaysClamp,
 				"Sample Per Pixel");
 			PE::end();
 		}
@@ -130,9 +136,9 @@ void PathTracing_KPCNNDenoising::uiRender() {
 	ImGui::End();
 
 	if (ImGui::Begin("KPCNN")) {
-		for (int imageIndex = (int)GBufferImageIndex_KPCNN::eDiffuseDebugImage; imageIndex < showImage.size() - 2; ++imageIndex) {
+		for (int imageIndex = (int)GBufferImageIndex_KPCNN::eDiffuseDebugImage; imageIndex <= (int)GBufferImageIndex_KPCNN::eAlbedoVarianceDebugImage; ++imageIndex) {
 			if (PE::begin()) {
-				if (PE::entry("Debug Image" + std::to_string(imageIndex), [&] {
+				if (PE::entry(debugImageNames[imageIndex], [&] {
 					static const ImVec4 highlightColor = ImVec4(118.f / 255.f, 185.f / 255.f, 0.f, 1.f);
 					ImVec4 selectedColor = showImage[imageIndex] ? highlightColor : ImGui::GetStyleColorVec4(ImGuiCol_Button);
 					ImVec4 hoveredColor = ImVec4(selectedColor.x * 1.2f, selectedColor.y * 1.2f, selectedColor.z * 1.2f, 1.f);
@@ -254,7 +260,7 @@ void PathTracing_KPCNNDenoising::render(VkCommandBuffer* cmdPtr) {
 }
 
 void PathTracing_KPCNNDenoising::createDataObject() {
-	uint32_t debugImageCount = IF_DEBUG((uint32_t)GBufferImageIndex_KPCNN::eElementCount, 0);
+	uint32_t debugImageCount = IF_DEBUG((uint32_t)GBufferImageIndex_KPCNN::eDebugImageCount - 1, 0);
 	showImage.resize(debugImageCount);
 	Feature::createGBuffer(true, true, debugImageCount, screenSize);
 
@@ -492,6 +498,32 @@ void PathTracing_KPCNNDenoising::createDescriptorSetLayout() {
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
+
+		bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eIrradianceVarianceDebugImage,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eSpecularVariancDebugImage,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eNormalVarianceDebugImage,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eDepthVarianceDebugImage,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eAlbedoVarianceDebugImage,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
 	}
 #endif
 
@@ -667,7 +699,28 @@ void PathTracing_KPCNNDenoising::createDescriptorSet() {
 
 		debugImageWrite =
 			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eAlebdoDebugImage, 0, 0, 1);
-		write.append(debugImageWrite, gBuffers.getDescriptorImageInfo((uint32_t)GBufferImageIndex_KPCNN::eAlebdoDebugImage));
+		write.append(debugImageWrite, gBuffers.getDescriptorImageInfo((uint32_t)GBufferImageIndex_KPCNN::eAlbedoDebugImage));
+
+
+		debugImageWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eIrradianceVarianceDebugImage, 0, 0, 1);
+		write.append(debugImageWrite, gBuffers.getDescriptorImageInfo((uint32_t)GBufferImageIndex_KPCNN::eIrradianceVarianceDebugImage));
+
+		debugImageWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eSpecularVariancDebugImage, 0, 0, 1);
+		write.append(debugImageWrite, gBuffers.getDescriptorImageInfo((uint32_t)GBufferImageIndex_KPCNN::eSpecularVariancDebugImage));
+
+		debugImageWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eNormalVarianceDebugImage, 0, 0, 1);
+		write.append(debugImageWrite, gBuffers.getDescriptorImageInfo((uint32_t)GBufferImageIndex_KPCNN::eNormalVarianceDebugImage));
+
+		debugImageWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eDepthVarianceDebugImage, 0, 0, 1);
+		write.append(debugImageWrite, gBuffers.getDescriptorImageInfo((uint32_t)GBufferImageIndex_KPCNN::eDepthVarianceDebugImage));
+
+		debugImageWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eAlbedoVarianceDebugImage, 0, 0, 1);
+		write.append(debugImageWrite, gBuffers.getDescriptorImageInfo((uint32_t)GBufferImageIndex_KPCNN::eAlbedoVarianceDebugImage));
 	}
 #endif
 
@@ -768,4 +821,11 @@ void PathTracing_KPCNNDenoising::createInputBuffers(VkCommandBuffer cmd) {
 
 	vkCmdPushConstants2(cmd, &pushInfo);
 	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
+
+
+}
+
+void PathTracing_KPCNNDenoising::saveSampleBuffers(std::string fileName) {
+	std::string samplePath = FzbRenderer::getProjectRootDir().string() + "src/renderer/PathTracing_KPCNNDenoising/models_libtorch/train/" + Application::sceneResource.name;
+	inputBuffer_diff.save(samplePath + "/diff.bin");
 }

@@ -129,10 +129,11 @@ void FzbRenderer::Application::onAttach(nvapp::Application* app) {
 	samplerPool.init(app->getDevice());
 
 	sceneResource.createSceneFromXML();
-	renderer->init();
 
 	skySimple.init(&allocator, std::span(sky_simple_slang));
 	tonemapper.init(&allocator, std::span(tonemapper_slang));
+
+	renderer->init();
 }
 void FzbRenderer::Application::initSlangCompiler() {
 	//必须要有一个，否则在查询shader的for循环不会进入（数量为0），那么直接找不到;

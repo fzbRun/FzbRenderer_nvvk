@@ -56,3 +56,5 @@ conanbuildinfo.cmake
 
 _downloaded_resources/
 #third_party/
+
+*.exr

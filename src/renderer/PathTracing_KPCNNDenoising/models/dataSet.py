@@ -41,6 +41,9 @@ def gradients(data):
   dX = np.concatenate((np.zeros([h,1,c], dtype=np.float32),dX), axis=1)
   dY = np.concatenate((np.zeros([1,w,c], dtype=np.float32),dY), axis=0)
   
+  dX = data - data
+  dY = data - data
+
   return np.concatenate((dX, dY), axis=2)
 
 def remove_channels(data, channels):
@@ -142,14 +145,14 @@ def preprocess_input(samplePath, gtPath, debug=False):
     'gtColor': gt_data['default'],
     'albedo': origAlbedo,
     'sampleColor': data['default'],
-    'normal': normalData
+    'normal': normalData,
     }
 
 def show_data(data, figsize=(15, 15), normalize=False):
   if normalize:
     data = np.clip(data, 0, 1)**0.45454545
   plt.figure(figsize=figsize)
-  imgplot = plt.imshow(data, aspect='equal')
+  imgplot = plt.imshow(data, aspect='equal', cmap='gray')
   imgplot.axes.get_xaxis().set_visible(False)
   imgplot.axes.get_yaxis().set_visible(False)
   plt.show()
@@ -172,7 +175,8 @@ for k, v in data.items():
   print(k, "has nans:", np.isnan(v).any())
   
 print("Let's check finalGt: ")
-show_data(np.clip(data['finalGt'], 0, 1)**0.45454545)
+#show_data(np.clip(data['input_diff'][:, :, 3], 0, 1)**0.45454545)
+show_data(np.clip(data['normal'], 0, 1)**0.45454545)
 '''
 #---------------------------------------------------makePatchs-----------------------------------------------------------
 patch_size = 64 # patches are 64x64

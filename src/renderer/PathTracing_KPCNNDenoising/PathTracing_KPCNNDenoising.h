@@ -19,10 +19,16 @@ enum class GBufferImageIndex_KPCNN {
 	eIrradianceDebugImage,
 	eNormalDebugImage,
 	eDepthDebugImage,
-	eAlebdoDebugImage,
+	eAlbedoDebugImage,
+
+	eIrradianceVarianceDebugImage,
+	eSpecularVariancDebugImage,
+	eNormalVarianceDebugImage,
+	eDepthVarianceDebugImage,
+	eAlbedoVarianceDebugImage,
 #endif
 	eTonemapImage,
-	eElementCount,
+	eDebugImageCount,
 };
 
 class PathTracing_KPCNNDenoising : public PathTracingRenderer {
@@ -39,6 +45,7 @@ public:
 	void preRender() override;
 	void render(VkCommandBuffer* cmd) override;
 	
+private:
 	void createDataObject();
 	void createDescriptorSetLayout() override;
 	void createDescriptorSet();
@@ -49,7 +56,8 @@ public:
 	void pathTracing(VkCommandBuffer cmd);
 	void createInputBuffers(VkCommandBuffer cmd);
 
-private:
+	void saveSampleBuffers(std::string fileName);
+
 	VkExtent2D screenSize{};
 
 	VkPushConstantsInfo pushInfo{};

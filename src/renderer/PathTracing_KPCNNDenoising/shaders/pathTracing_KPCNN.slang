@@ -40,7 +40,13 @@
 [[vk::binding(StaticBindingPoints_KPCNNPT::eIrradianceDebugImage, 0)]] RWTexture2D<float4> IrradianceDebugImage;
 [[vk::binding(StaticBindingPoints_KPCNNPT::eNormalDebugImage, 0)]] RWTexture2D<float4> NormalDebugImage;
 [[vk::binding(StaticBindingPoints_KPCNNPT::eDepthDebugImage, 0)]] RWTexture2D<float4> DepthDebugImage;
-[[vk::binding(StaticBindingPoints_KPCNNPT::eAlebdoDebugImage, 0)]] RWTexture2D<float4> AlebdoDebugImage;
+[[vk::binding(StaticBindingPoints_KPCNNPT::eAlebdoDebugImage, 0)]] RWTexture2D<float4> AlbedoDebugImage;
+
+[[vk::binding(StaticBindingPoints_KPCNNPT::eIrradianceVarianceDebugImage, 0)]] RWTexture2D<float4> IrradianceVarianceDebugImage;
+[[vk::binding(StaticBindingPoints_KPCNNPT::eSpecularVariancDebugImage, 0)]] RWTexture2D<float4> SpecularVarianceDebugImage;
+[[vk::binding(StaticBindingPoints_KPCNNPT::eNormalVarianceDebugImage, 0)]] RWTexture2D<float4> NormalVarianceDebugImage;
+[[vk::binding(StaticBindingPoints_KPCNNPT::eDepthVarianceDebugImage, 0)]] RWTexture2D<float4> DepthVarianceDebugImage;
+[[vk::binding(StaticBindingPoints_KPCNNPT::eAlbedoVarianceDebugImage, 0)]] RWTexture2D<float4> AlbedoVarianceDebugImage;
 #endif
 //---------------------------------------------PathTracing-----------------------------------------
 typedef CallablePayload HitPayload_KPCNNPT;
@@ -247,9 +253,16 @@ void computeMain_PathTracing(uint2 threadIndex: SV_DispatchThreadID, uint2 group
     // float3 irradianceVariance = (accDiffuse2 / pushConst.spp - meanDiffuse * meanDiffuse) / (meanAlbedo * meanAlbedo);
     float3 irradianceVariance = accDiffuse2 / pushConst.spp - meanDiffuse * meanDiffuse;
     float irradianceVarianceS = irradianceVariance.x * 0.2126f + irradianceVariance.y * 0.7152f + irradianceVariance.z * 0.0722f;
-    float meanIrradianceS = irradiance.x * 0.2126f + irradiance.y * 0.7152f + irradiance.z * 0.0722f + eps_kpcnn;
-    irradianceVarianceS /= (meanIrradianceS * meanIrradianceS);
 
+    //if(pushConst.frameIndex == 1 && any(accDiffuse > 0.0f)) printf("X: %d Y: %d,  accDiffuse: %f %f %f, accDiffuse2: %f %f %f, V: %f\n",
+    //    threadIndex.x, threadIndex.y, 
+    //    accDiffuse.x, accDiffuse.y, accDiffuse.z,
+    //    accDiffuse2.x, accDiffuse2.y, accDiffuse2.z,
+    //    irradianceVarianceS
+    //);
+
+    float meanAlbedoS = meanAlbedo.x * 0.2126f + meanAlbedo.y * 0.7152f + meanAlbedo.z * 0.0722f + eps_kpcnn;
+    irradianceVarianceS /= (meanAlbedoS * meanAlbedoS);
     InputBuffer_irradianceVariance[pixelIndex] = irradianceVarianceS;
     //-------------------------------specular-------------------------------------
     float3 meanSpecular = max(accSpecular / pushConst.spp, 0.0f);
@@ -269,7 +282,6 @@ void computeMain_PathTracing(uint2 threadIndex: SV_DispatchThreadID, uint2 group
     float normalVarianceS = normalVariance.x * 0.2126f + normalVariance.y * 0.7152f + normalVariance.z * 0.0722f;
 
     InputBuffer_normalVariance_diff[pixelIndex] = normalVarianceS;
-
     InputBuffer_normalVariance_spec[pixelIndex] = normalVarianceS;
 
     NormalBuffer[pixelIndex] = meanNormal;
@@ -278,7 +290,6 @@ void computeMain_PathTracing(uint2 threadIndex: SV_DispatchThreadID, uint2 group
     float depthVariance = accDepth2 / pushConst.spp - meanDepth * meanDepth;
 
     InputBuffer_depthVariance_diff[pixelIndex] = depthVariance;
-
     InputBuffer_depthVariance_spec[pixelIndex] = depthVariance;
 
     DepthBuffer[pixelIndex] = meanDepth;
@@ -315,8 +326,14 @@ void computeMain_PathTracing(uint2 threadIndex: SV_DispatchThreadID, uint2 group
 
     IrradianceDebugImage[threadIndex] = float4(irradiance, 1.0f);
     NormalDebugImage[threadIndex] = float4(meanNormal, 1.0f);
-    //DepthDebugImage[threadIndex] = meanDepth / 100.0f; // far plane is 100
-    AlebdoDebugImage[threadIndex] = float4(meanAlbedo, 1.0f);
+    // DepthDebugImage[threadIndex] = meanDepth / 100.0f; // far plane is 100
+    AlbedoDebugImage[threadIndex] = float4(meanAlbedo, 1.0f);
+
+    IrradianceVarianceDebugImage[threadIndex] = float4(float3(irradianceVarianceS), 1.0f);
+    SpecularVarianceDebugImage[threadIndex] = float4(float3(logSpecularVariance), 1.0f);
+    NormalVarianceDebugImage[threadIndex] = float4(float3(normalVarianceS), 1.0f);
+    //DepthVarianceDebugImage[threadIndex] = float4(float3(depthVariance), 1.0f);
+    AlbedoVarianceDebugImage[threadIndex] = float4(float3(albedoVarianceS), 1.0f);
     #endif
 }
 
@@ -389,20 +406,24 @@ void computeMain_createGradBuffers(uint2 threadIndex: SV_DispatchThreadID, uint2
     // create dx
     float3 normal = groupNormals[groupThreadIndex.y + 1][groupThreadIndex.x + 1];
     float3 leftNormal = warpLane == 0 ? groupNormals[groupThreadIndex.y + 1][groupThreadIndex.x] : WaveReadLaneAt(normal, warpLane - 1);
-    float3 normalDX = normal - leftNormal;
+    float3 normalDX = 0.0f; //normal - leftNormal;
     InputBuffer_gradNormal_diff[pixelIndex] = normalDX;
     InputBuffer_gradNormal_spec[pixelIndex] = normalDX;
 
     float maxDepth = max(groupMaxDepth, 1e-30f);
     float depth = groupDepths[groupThreadIndex.y + 1][groupThreadIndex.x + 1] / maxDepth;
+    float depthVariance = InputBuffer_depthVariance_diff[pixelIndex];
+    InputBuffer_depthVariance_diff[pixelIndex] = depthVariance / (maxDepth * maxDepth);
+    InputBuffer_depthVariance_spec[pixelIndex] = depthVariance / (maxDepth * maxDepth);
+
     float leftDepth = (warpLane == 0 ? groupDepths[groupThreadIndex.y + 1][groupThreadIndex.x] : WaveReadLaneAt(depth, warpLane - 1)) / maxDepth;
-    float depthDX = depth - leftDepth;
+    float depthDX = 0.0f;   //depth - leftDepth;
     InputBuffer_gradDepth_diff[pixelIndex] = depthDX;
     InputBuffer_gradDepth_spec[pixelIndex] = depthDX;
 
     float3 albedo = groupAlbedos[groupThreadIndex.y + 1][groupThreadIndex.x + 1];
     float3 leftAlbedo = warpLane == 0 ? groupAlbedos[groupThreadIndex.y + 1][groupThreadIndex.x] : WaveReadLaneAt(albedo, warpLane - 1);
-    float3 albedoDX = albedo - leftAlbedo;
+    float3 albedoDX = 0.0f; //albedo - leftAlbedo;
     InputBuffer_gradAlbedo_diff[pixelIndex] = albedoDX;
     InputBuffer_gradAlbedo_spec[pixelIndex] = albedoDX;
 
@@ -410,17 +431,17 @@ void computeMain_createGradBuffers(uint2 threadIndex: SV_DispatchThreadID, uint2
     uint imageSize = pushConst.screenSize.x * pushConst.screenSize.y;
 
     float3 upNormal = groupNormals[groupThreadIndex.y][groupThreadIndex.x + 1];
-    float3 normalDY = normal - upNormal;
+    float3 normalDY = 0.0f; //normal - upNormal;
     InputBuffer_gradNormal_diff[pixelIndex + imageSize] = normalDY;
     InputBuffer_gradNormal_spec[pixelIndex + imageSize] = normalDY;
 
     float upDepth = groupDepths[groupThreadIndex.y][groupThreadIndex.x + 1] / maxDepth;
-    float depthDY = depth - upDepth;
+    float depthDY = 0.0f;   //depth - upDepth;
     InputBuffer_gradDepth_diff[pixelIndex + imageSize] = depthDY;
     InputBuffer_gradDepth_spec[pixelIndex + imageSize] = depthDY;
 
     float3 upAlbedo = groupAlbedos[groupThreadIndex.y][groupThreadIndex.x + 1];
-    float3 albedoDY = albedo - upAlbedo;
+    float3 albedoDY = 0.0f; //albedo - upAlbedo;
     InputBuffer_gradAlbedo_diff[pixelIndex + imageSize] = albedoDY;
     InputBuffer_gradAlbedo_spec[pixelIndex + imageSize] = albedoDY;
 
@@ -470,25 +491,26 @@ void computeMain_createGradBuffers(uint2 threadIndex: SV_DispatchThreadID, uint2
     // create dx
     float3 irradiance = groupNormals[groupThreadIndex.y + 1][groupThreadIndex.x + 1];
     float3 leftIrradiance = warpLane == 0 ? groupNormals[groupThreadIndex.y + 1][groupThreadIndex.x] : WaveReadLaneAt(irradiance, warpLane - 1);
-    float3 irradianceDX = irradiance - leftIrradiance;
+    float3 irradianceDX = 0.0f; //irradiance - leftIrradiance;
     InputBuffer_gradIrradiance[pixelIndex] = irradianceDX;
 
     float3 specular = groupAlbedos[groupThreadIndex.y + 1][groupThreadIndex.x + 1];
     float3 leftSpecular = warpLane == 0 ? groupAlbedos[groupThreadIndex.y + 1][groupThreadIndex.x] : WaveReadLaneAt(specular, warpLane - 1);
-    float3 specularDX = specular - leftSpecular;
+    float3 specularDX = 0.0f;   //specular - leftSpecular;
     InputBuffer_gradSpec[pixelIndex] = specularDX;
 
     // create dy
     float3 upIrradiance = groupNormals[groupThreadIndex.y][groupThreadIndex.x + 1];
-    float3 irradianceDY = irradiance - upIrradiance;
+    float3 irradianceDY = 0.0f; //irradiance - upIrradiance;
     InputBuffer_gradIrradiance[pixelIndex + imageSize] = irradianceDY;
 
     float3 upSpecular = groupAlbedos[groupThreadIndex.y][groupThreadIndex.x + 1];
-    float3 specularDY = specular - upSpecular;
+    float3 specularDY = 0.0f;   //specular - upSpecular;
     InputBuffer_gradSpec[pixelIndex + imageSize] = specularDY;
 
     #ifndef NDEBUG
     if (pushConst.frameIndex == 1 && threadIndex.x == 0 && threadIndex.y == 0) printf("maxDepth: %f\n", maxDepth);
     DepthDebugImage[threadIndex] = depth;
+    DepthVarianceDebugImage[threadIndex] = float4(float3(depthVariance / (maxDepth * maxDepth)), 1.0f);
     #endif
 }

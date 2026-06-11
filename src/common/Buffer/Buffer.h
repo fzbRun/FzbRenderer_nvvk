@@ -28,6 +28,9 @@ public:
 	//}
 	void clean();
 
+	void save(std::string path);
+	void load(std::string path);
+
 	std::string name = "buffer";
 	nvvk::Buffer buffer;
 	

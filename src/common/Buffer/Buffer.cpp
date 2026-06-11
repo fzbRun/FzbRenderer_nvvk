@@ -50,3 +50,82 @@ void FzbRenderer::Buffer::clean() {
 		handle = nullptr;
 	}
 }
+
+void FzbRenderer::Buffer::save(std::string path) {
+	nvvk::StagingUploader& stagingUploader = Application::stagingUploader;
+	nvvk::ResourceAllocator* allocator = stagingUploader.getResourceAllocator();
+
+	nvvk::BufferRange stagingSpace;
+	stagingUploader.acquireStagingSpace(stagingSpace, allocMemSize, nullptr);
+
+	VkBufferCopy2 copyRegionInfo{
+		.sType = VK_STRUCTURE_TYPE_BUFFER_COPY_2,
+		.srcOffset = allocMemOffset,
+		.dstOffset = stagingSpace.offset,
+		.size = allocMemSize,
+	};
+
+	VkCopyBufferInfo2 copyBufferInfo{
+		.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_INFO_2,
+		.srcBuffer = buffer.buffer,
+		.dstBuffer = stagingSpace.buffer,
+		.regionCount = 1,
+		.pRegions = &copyRegionInfo,
+	};
+
+	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
+	vkCmdCopyBuffer2(cmd, &copyBufferInfo);
+	Application::app->submitAndWaitTempCmdBuffer(cmd);
+
+	FILE* fp = fopen(path.c_str(), "wb");
+	if (!fp) { /* 错误处理 */ return; }
+
+	uint64_t size = static_cast<uint64_t>(allocMemSize);
+	fwrite(&size, sizeof(size), 1, fp);
+	fwrite(stagingSpace.mapping, 1, allocMemSize, fp);
+	fclose(fp);
+}
+void FzbRenderer::Buffer::load(std::string path) {
+	FILE* fp = fopen(path.c_str(), "rb");
+	if (!fp) { /* 错误处理 */ return;}
+
+	uint64_t size;
+	fread(&size, sizeof(size), 1, fp);
+	std::vector<uint8_t> fileData(size);
+	fread(fileData.data(), 1, size, fp);
+	fclose(fp);
+
+	nvvk::StagingUploader& stagingUploader = Application::stagingUploader;
+	nvvk::ResourceAllocator* allocator = stagingUploader.getResourceAllocator();
+
+	nvvk::BufferRange stagingSpace;
+	stagingUploader.acquireStagingSpace(stagingSpace, size, nullptr);
+
+	memcpy(stagingSpace.mapping, fileData.data(), size);
+
+	clean();
+	init({
+		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+		.size = size,
+		.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT,
+		});
+
+	VkBufferCopy2 copyRegionInfo{
+		.sType = VK_STRUCTURE_TYPE_BUFFER_COPY_2,
+		.srcOffset = stagingSpace.offset,
+		.dstOffset = allocMemOffset,
+		.size = size,
+	};
+
+	VkCopyBufferInfo2 copyBufferInfo{
+		.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_INFO_2,
+		.srcBuffer = stagingSpace.buffer,
+		.dstBuffer = buffer.buffer,
+		.regionCount = 1,
+		.pRegions = &copyRegionInfo,
+	};
+
+	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
+	vkCmdCopyBuffer2(cmd, &copyBufferInfo);
+	Application::app->submitAndWaitTempCmdBuffer(cmd);
+}

@@ -58,6 +58,12 @@ enum class StaticBindingPoints_KPCNNPT {
 	eNormalDebugImage,
 	eDepthDebugImage,
 	eAlebdoDebugImage,
+
+	eIrradianceVarianceDebugImage,
+	eSpecularVariancDebugImage,
+	eNormalVarianceDebugImage,
+	eDepthVarianceDebugImage,
+	eAlbedoVarianceDebugImage,
 #endif
 };
 

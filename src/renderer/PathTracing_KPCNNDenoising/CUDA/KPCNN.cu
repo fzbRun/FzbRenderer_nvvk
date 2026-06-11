@@ -114,7 +114,6 @@ __global__ void denoisingCuda(
 	float3 pixelAlbedo = albedoBuffer[pixelIndex];
 	float3 filteredPixelColor = pixelIrradiance * (pixelAlbedo + eps_kpcnn) + make_float3(exp(pixelSpecular.x), exp(pixelSpecular.y), exp(pixelSpecular.z)) - 1.0f;
 	surf2Dwrite(make_float4(filteredPixelColor, 1.0f), outputImage, threadIndexX * sizeof(float4), threadIndexY);
-	//surf2Dwrite(make_float4(pixelAlbedo, 1.0f), outputImage, threadIndexX * sizeof(float4), threadIndexY);
 }
 void KPCNNDenoiser::denoising(uint64_t waitTimeline) {
 	CHECK(waitExternalSemaphore(startSemaphore, stream, waitTimeline));
