@@ -71,16 +71,23 @@ __global__ void denoisingCuda(
 	uint2 groupThreadIndex = make_uint2(blockDim.x * blockIdx.x, blockDim.y * blockIdx.y);
 	uint pixelIndex = threadIndexY * imageWidth + threadIndexX;
 
-	uint2 groupNeighborPixelStartIndex = groupThreadIndex - make_uint2(halo, halo);
+	uint imageSize = imageWidth * imageHeight;
+
+	int2 groupNeighborPixelStartIndex = make_int2(groupThreadIndex) - make_int2(halo, halo);
 	for (int y = threadIdx.y; y < smemHeight; y += blockDim.y) {
-		uint neighborPixelIndexY = groupNeighborPixelStartIndex.y + y;
+		int neighborPixelIndexY = groupNeighborPixelStartIndex.y + y;
 		for (int x = threadIdx.x; x < smemWidth; x += blockDim.x) {
-			uint neighborPixelIndexX = groupNeighborPixelStartIndex.x + x;
+			int neighborPixelIndexX = groupNeighborPixelStartIndex.x + x;
 
 			float3 neighborPixelIrradiance = make_float3(0.0f), neighborPixelSpecular = make_float3(0.0f);
 			if (neighborPixelIndexX >= 0 && neighborPixelIndexX < imageWidth && neighborPixelIndexY >= 0 && neighborPixelIndexY < imageHeight) {
-				neighborPixelIrradiance = reinterpret_cast<float3*>(inputBuffer_diff)[neighborPixelIndexY * imageWidth + neighborPixelIndexX];
-				neighborPixelSpecular = reinterpret_cast<float3*>(inputBuffer_spec)[neighborPixelIndexY * imageWidth + neighborPixelIndexX];
+				neighborPixelIrradiance.x = inputBuffer_diff[neighborPixelIndexY * imageWidth + neighborPixelIndexX];
+				neighborPixelIrradiance.y = inputBuffer_diff[neighborPixelIndexY * imageWidth + neighborPixelIndexX + imageSize];
+				neighborPixelIrradiance.z = inputBuffer_diff[neighborPixelIndexY * imageWidth + neighborPixelIndexX + imageSize * 2];
+
+				neighborPixelSpecular.x = inputBuffer_spec[neighborPixelIndexY * imageWidth + neighborPixelIndexX];
+				neighborPixelSpecular.y = inputBuffer_spec[neighborPixelIndexY * imageWidth + neighborPixelIndexX + imageSize];
+				neighborPixelSpecular.z = inputBuffer_spec[neighborPixelIndexY * imageWidth + neighborPixelIndexX + imageSize * 2];
 			}
 
 			uint groupImageColorIndex = y * smemWidth + x;
@@ -90,6 +97,22 @@ __global__ void denoisingCuda(
 	}
 	__syncthreads();
 	if (threadIndexX >= imageWidth || threadIndexY >= imageHeight) return;
+
+	//float sumWeight_diff = 0.0f, sumWeight_spec = 0.0f;
+	//for (int y = 0; y < kernelSize; ++y) {
+	//	int neighborPixelIndexY = threadIndexY - halo + y;
+	//	for (int x = 0; x < kernelSize; ++x) {
+	//		//kernel数组是[1, C, H, W]形式的，所有像素的第i个核元素连续存储
+	//		int kernelIndex = (y * kernelSize + x) * imageWidth * imageHeight + pixelIndex;
+	//		float kernelValue_diff = kernel_diff[kernelIndex];
+	//		float kernelValue_spec = kernel_spec[kernelIndex];
+	//
+	//		sumWeight_diff += exp(kernelValue_diff);
+	//		sumWeight_spec += exp(kernelValue_spec);
+	//	}
+	//}
+	//sumWeight_diff = max(sumWeight_diff, 1e-30f);
+	//sumWeight_spec = max(sumWeight_spec, 1e-30f);
 
 	float3 pixelIrradiance = make_float3(0.0f), pixelSpecular = make_float3(0.0f);
 	for (int y = 0; y < kernelSize; ++y) {
@@ -103,6 +126,8 @@ __global__ void denoisingCuda(
 
 			//kernel数组是[1, C, H, W]形式的，所有像素的第i个核元素连续存储
 			uint kernelIndex = (y * kernelSize + x) * imageWidth * imageHeight + pixelIndex;
+			//float kernelValue_diff = exp(kernel_diff[kernelIndex]) / sumWeight_diff;
+			//float kernelValue_spec = exp(kernel_spec[kernelIndex]) / sumWeight_spec;
 			float kernelValue_diff = kernel_diff[kernelIndex];
 			float kernelValue_spec = kernel_spec[kernelIndex];
 
@@ -142,6 +167,7 @@ void KPCNNDenoiser::denoising(uint64_t waitTimeline) {
 	dim3 gridSize = dim3((setting.imageSize.width + blockSize.x - 1) / blockSize.x, (setting.imageSize.height + blockSize.y - 1) / blockSize.y, 1);
 
 	uint groupSharedMemorySize = (blockSize.x + kernelSize / 2 * 2) * (blockSize.y + kernelSize / 2 * 2) * sizeof(float3) * 2;
+
 
 	denoisingCuda << <gridSize, blockSize, groupSharedMemorySize, stream >> > (
 		setting.imageSize.width, setting.imageSize.height, 21,

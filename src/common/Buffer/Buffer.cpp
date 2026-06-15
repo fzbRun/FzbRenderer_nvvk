@@ -41,10 +41,15 @@ VkResult FzbRenderer::Buffer::init(VkBufferCreateInfo createInfo) {
 }
 void FzbRenderer::Buffer::clean() {
 	if (buffer.buffer != VK_NULL_HANDLE) {
-		Application::allocator.destroyBuffer(buffer);
+		if(external) Application::allocatorExport.destroyBuffer(buffer);
+		else Application::allocator.destroyBuffer(buffer);
 		buffer = {};
 	}
 
+	/*
+	这个handle的释放其实挺麻烦的，因为当clean然后重新init后，可能还是一块，但是offset变了，导致可能没有任何buffer的offset是0，导致无法closeHandle
+	不过这也不是什么大事情，漏就漏吧，屁点大的东西
+	*/
 	if (handle != nullptr && allocMemOffset == 0) {		//sometime many buffer use same handle(distinguish by offet)
 		CloseHandle(handle);
 		handle = nullptr;
@@ -60,7 +65,7 @@ void FzbRenderer::Buffer::save(std::string path) {
 
 	VkBufferCopy2 copyRegionInfo{
 		.sType = VK_STRUCTURE_TYPE_BUFFER_COPY_2,
-		.srcOffset = allocMemOffset,
+		.srcOffset = 0,
 		.dstOffset = stagingSpace.offset,
 		.size = allocMemSize,
 	};
@@ -77,8 +82,17 @@ void FzbRenderer::Buffer::save(std::string path) {
 	vkCmdCopyBuffer2(cmd, &copyBufferInfo);
 	Application::app->submitAndWaitTempCmdBuffer(cmd);
 
+	std::error_code ec;
+	std::filesystem::path filePath(path);
+	std::filesystem::create_directories(filePath.parent_path(), ec);
+	if (ec) throw std::system_error(ec, "创建目录失败: " + filePath.parent_path().string());
+
 	FILE* fp = fopen(path.c_str(), "wb");
-	if (!fp) { /* 错误处理 */ return; }
+	if (!fp) {
+		int err = errno;
+		std::string msg = "打开文件失败: " + path + " - " + std::strerror(err);
+		throw std::runtime_error(msg);
+	}
 
 	uint64_t size = static_cast<uint64_t>(allocMemSize);
 	fwrite(&size, sizeof(size), 1, fp);
@@ -87,7 +101,11 @@ void FzbRenderer::Buffer::save(std::string path) {
 }
 void FzbRenderer::Buffer::load(std::string path) {
 	FILE* fp = fopen(path.c_str(), "rb");
-	if (!fp) { /* 错误处理 */ return;}
+	if (!fp) {
+		int err = errno;
+		std::string msg = "打开文件失败: " + path + " - " + std::strerror(err);
+		throw std::runtime_error(msg);
+	}
 
 	uint64_t size;
 	fread(&size, sizeof(size), 1, fp);
@@ -103,7 +121,12 @@ void FzbRenderer::Buffer::load(std::string path) {
 
 	memcpy(stagingSpace.mapping, fileData.data(), size);
 
-	clean();
+	
+	if (buffer.buffer != VK_NULL_HANDLE) {
+		Application::allocator.destroyBuffer(buffer);
+		buffer = {};
+	}
+
 	init({
 		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
 		.size = size,
@@ -113,7 +136,7 @@ void FzbRenderer::Buffer::load(std::string path) {
 	VkBufferCopy2 copyRegionInfo{
 		.sType = VK_STRUCTURE_TYPE_BUFFER_COPY_2,
 		.srcOffset = stagingSpace.offset,
-		.dstOffset = allocMemOffset,
+		.dstOffset = 0,
 		.size = size,
 	};
 

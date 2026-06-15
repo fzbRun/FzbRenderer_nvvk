@@ -48,7 +48,7 @@ void FzbRenderer::Scene::addMeshSet(MeshSet& meshSet) {
 	meshSets.push_back(meshSet);
 }
 void FzbRenderer::Scene::createSceneFromXML() {
-	name = scenePath.string();
+	name = scenePath.filename().string();
 	scenePath = FzbRenderer::getProjectRootDir() / "resources" / scenePath;
 	std::filesystem::path sceneInfoXMLPath = scenePath / "sceneInfo.xml";
 	if(sceneInfoXMLPath.empty()) LOGW("\nsceneInfoÂ·¾¶Îª¿Õ\n");

@@ -1,3 +1,4 @@
+/*
 #pragma once
 
 #include "common/CUDA/vulkanCudaInterop.cuh"
@@ -43,3 +44,4 @@ private:
 };
 
 #endif
+*/

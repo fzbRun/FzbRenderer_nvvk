@@ -10,7 +10,11 @@ import os
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-eval_data = dataSet.preprocess_input("dataSet/eval/eval3.exr", "dataSet/eval/evalRef3.exr")
+#trainSetPath = 'C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/src/renderer/PathTracing_KPCNNDenoising/models_libtorch/train/'
+#samplePath = trainSetPath + 'staircase_32'
+#gtPath = trainSetPath + 'staircase_8192'
+#eval_data = dataSet.preprocess_input(samplePath, gtPath)
+eval_data = dataSet.preprocess_input("dataSet/eval/eval1.exr", "dataSet/eval/evalRef1.exr")
 input_channelCount = eval_data['input_diff'].shape[-1]
 diffuseNet = model.KPCNN(input_channelCount).to(device)
 specularNet = model.KPCNN(input_channelCount).to(device)

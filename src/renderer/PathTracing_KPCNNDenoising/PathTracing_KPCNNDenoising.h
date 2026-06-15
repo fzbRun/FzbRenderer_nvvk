@@ -56,7 +56,9 @@ private:
 	void pathTracing(VkCommandBuffer cmd);
 	void createInputBuffers(VkCommandBuffer cmd);
 
-	void saveSampleBuffers(std::string fileName);
+	void saveSampleBuffers();
+	void loadSampleBuffers();
+	void bufferToImage();
 
 	VkExtent2D screenSize{};
 
@@ -64,6 +66,7 @@ private:
 	shaderio::KPCNN_DenoisingPTPushConstant pushConstant{};
 	VkShaderEXT computeShader_PathTracing{};
 	VkShaderEXT computeShader_createGradBuffers{};
+	VkShaderEXT computeShader_bufferToImage{};
 
 	FzbRenderer::Buffer inputBuffer_diff;
 	FzbRenderer::Buffer inputBuffer_spec;

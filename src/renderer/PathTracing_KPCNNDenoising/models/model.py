@@ -38,4 +38,5 @@ class KPCNN(nn.Module):
         self.net = nn.Sequential(*layers)
         
     def forward(self, x):
-        return self.net(x)
+        logits = self.net(x)
+        return F.softmax(logits, dim=1)

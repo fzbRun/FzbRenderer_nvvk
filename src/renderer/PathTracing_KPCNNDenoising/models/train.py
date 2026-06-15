@@ -68,11 +68,12 @@ def apply_kernel(kernels, patch):
     kernels = kernels.permute(0, 2, 3, 1).contiguous().view(N, H * W, K * K)
 
     # 对每个像素自己的 K*K 权重归一化
-    kernels = F.softmax(kernels, dim=-1)  # [N, H*W, K*K]
+    #kernels = F.softmax(kernels, dim=-1)  # [N, H*W, K*K] #放在模型中做了
 
     # [N, C, H, W] -> unfold -> [N, C*K*K, H*W]
     neighborhood = F.unfold(
-        F.pad(patch, (r, r, r, r), mode='reflect'),
+        #F.pad(patch, (r, r, r, r), mode='reflect'),
+        F.pad(patch, (r, r, r, r), mode='constant', value=0.0),
         kernel_size=K
     )
 
@@ -92,6 +93,10 @@ torch.backends.cudnn.benchmark = True
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print(device)
 
+#trainSetPath = 'C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/src/renderer/PathTracing_KPCNNDenoising/models_libtorch/train/'
+#sampleFolders = [trainSetPath + 'staircase_32', trainSetPath + 'veach-ajar-2_32', trainSetPath + 'veach-mis_32']
+#gtFolders = [trainSetPath + 'staircase_8192', trainSetPath + 'veach-ajar-2_8192', trainSetPath + 'veach-mis_8192']
+#trainDataSet = KPCNNDataset(sampleFolders, gtFolders)
 trainDataSet = KPCNNDataset("dataSet/train")
 dataloader = torch.utils.data.DataLoader(trainDataSet, batch_size=10, shuffle=True, num_workers=0)
 
@@ -141,7 +146,7 @@ for epoch in range(200):
         kernel_spec = specularNet(sample_spec)
         filtered_spec = apply_kernel(kernel_spec, sample_spec[:, :3, :, :])
 
-        loss_spec = loss_function(filtered_spec, gt_spec)
+        loss_spec = loss_function(filtered_spec, gt_spec)   #log
         loss_spec.backward()
         optimizer_spec.step()
         total_loss_spec += loss_spec.item()

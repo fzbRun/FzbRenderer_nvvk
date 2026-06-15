@@ -28,6 +28,7 @@ groupshared OctreeNodeData_G_FzbPG groupOctreeNodeData_G[3510];                 
 groupshared OctreeNodeData_E_FzbPG groupClusterLayerNodeData_E[CLUSTER_LAYER_NODECOUNT_E_FZBPG];   //1.71KB
 #endif
 //-------------------------------------------------Function----------------------------------------------
+/*
 bool hitTestTraceRay(RayDesc ray, inout HitTestPayload payload) {
     RayQuery<RAY_FLAG_NONE> q;
     q.TraceRayInline(topLevelAS, RAY_FLAG_NONE, 0xFF, ray);
@@ -77,6 +78,7 @@ void getDirectionLight(inout HitPayload_FzbPG payload, SceneInfo sceneInfo) {
         }
     }
 }
+*/
 
 bool traceRay(RayDesc ray, inout HitPayload_FzbPG payload)
 {
@@ -644,7 +646,8 @@ void computeMain_FzbPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
                 float cosine = dot(hitNormal, payload.incidence);
                 bsdf_cosine_pdf *= cosine;
 
-                bool end = any(bsdf_cosine_pdf <= 0.0f) || all(bsdf_cosine_pdf <= 0.0f) || any(isnan(bsdf_cosine_pdf)) || any(isinf(bsdf_cosine_pdf));
+                //bool end = any(bsdf_cosine_pdf <= 0.0f) || all(bsdf_cosine_pdf <= 0.0f) || any(isnan(bsdf_cosine_pdf)) || any(isinf(bsdf_cosine_pdf));
+                bool end = any(bsdf_cosine_pdf < 0.0f) || all(bsdf_cosine_pdf == 0.0f) || any(isnan(bsdf_cosine_pdf)) || any(isinf(bsdf_cosine_pdf));
                 if (end) break;
 
                 //randomNumber = rand(payload.randomSeed);

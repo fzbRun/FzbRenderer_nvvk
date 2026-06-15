@@ -4,6 +4,25 @@
 
 #define eps_kpcnn  0.00316 
 
+//#define SAVE_TRAIN_BUFFERS
+#ifdef SAVE_TRAIN_BUFFERS
+#define IF_TRAIN_SAMPLE(train, eval) (train)
+#else
+#define IF_TRAIN_SAMPLE(train, eval) (eval)
+#endif
+
+//#define SAVE_SAMPLE_BUFFERS
+//#define SAVE_GROUNDTRUTH_BUFFERS
+
+#if defined(SAVE_SAMPLE_BUFFERS) && defined(SAVE_TRAIN_BUFFERS)
+#define IF_SAVE_SAMPLE(sample, gt) (sample)
+#elif defined(SAVE_GROUNDTRUTH_BUFFERS) && defined(SAVE_TRAIN_BUFFERS)
+#define IF_SAVE_SAMPLE(save, gt) (gt)
+#else 
+#define IF_SAVE_SAMPLE(sample, gt)
+#endif
+
+
 #ifndef FZBRENDERER_KPCNN_DENOSING_PATHTRACING_SHADER_IO_H
 #define FZBRENDERER_KPCNN_DENOSING_PATHTRACING_SHADER_IO_H
 NAMESPACE_SHADERIO_BEGIN()

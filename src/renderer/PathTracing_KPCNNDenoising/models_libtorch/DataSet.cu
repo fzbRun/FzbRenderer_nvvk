@@ -1,3 +1,4 @@
+/*
 #include "./DataSet.cuh"
 
 #include <algorithm>
@@ -44,3 +45,4 @@ KPCNNDataSet::KPCNNDataSet(std::string& folder) {
         samples.insert(samples.end(), patches.begin(), patches.end());
     }
 }
+*/

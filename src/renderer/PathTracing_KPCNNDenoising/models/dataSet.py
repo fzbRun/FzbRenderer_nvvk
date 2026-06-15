@@ -41,9 +41,6 @@ def gradients(data):
   dX = np.concatenate((np.zeros([h,1,c], dtype=np.float32),dX), axis=1)
   dY = np.concatenate((np.zeros([1,w,c], dtype=np.float32),dY), axis=0)
   
-  dX = data - data
-  dY = data - data
-
   return np.concatenate((dX, dY), axis=2)
 
 def remove_channels(data, channels):
@@ -52,6 +49,15 @@ def remove_channels(data, channels):
       del data[c]
     else:
       print("Channel {} not found in data!".format(c))
+
+def read_buffer_bin(filepath, shape, dtype=np.float32):
+    with open(filepath, 'rb') as f:
+        size_bytes = f.read(8)
+        stored_size = np.frombuffer(size_bytes, dtype=np.uint64)[0]
+        data_bytes = f.read(stored_size)
+    arr = np.frombuffer(data_bytes, dtype=dtype)
+    # 这里按行主序 reshape，Vulkan 通常也是 row‑major
+    return arr.reshape(shape)
 
 def preprocess_input(samplePath, gtPath, debug=False):
   script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -140,19 +146,59 @@ def preprocess_input(samplePath, gtPath, debug=False):
   return {
     'input_diff': X_diff, 
     'input_spec': X_spec,
+    'albedo': origAlbedo,
+    'normal': normalData,
+    'sampleColor': data['default'],
+
     'diff_ref': diff_ref,
     'spec_ref': spec_ref,
     'gtColor': gt_data['default'],
-    'albedo': origAlbedo,
-    'sampleColor': data['default'],
-    'normal': normalData,
+  }
+
+  '''
+    def load_bin(folder, name, shape):
+        path = os.path.join(folder, f'{name}.bin')
+        return read_buffer_bin(path, shape)
+  sample_diff  = load_bin(samplePath, 'diff',    (27, 1024, 1024))
+  sample_diff = np.transpose(sample_diff, (1, 2, 0))
+
+  sample_spec  = load_bin(samplePath, 'spec',    (27, 1024, 1024))
+  sample_spec = np.transpose(sample_spec, (1, 2, 0))
+
+  sample_albedo= load_bin(samplePath, 'albedo',  (1024, 1024, 3))
+  #sample_albedo = np.transpose(sample_albedo, (1, 2, 0))
+
+  sample_normal= load_bin(samplePath, 'normal',  (3, 1024, 1024))
+  sample_normal = np.transpose(sample_normal, (1, 2, 0))
+
+  gt_diff      = load_bin(gtPath, 'diff',        (3, 1024, 1024))
+  gt_diff = np.transpose(gt_diff, (1, 2, 0))
+
+  gt_spec      = load_bin(gtPath, 'spec',        (3, 1024, 1024))
+  gt_spec = np.transpose(gt_spec, (1, 2, 0))
+
+  sample_spec_noLog = np.exp(sample_spec[:, :, 0:3]) - 1.0
+  gt_spec_noLog = np.exp(gt_spec) - 1.0
+
+  return {
+    'input_diff': sample_diff, 
+    'input_spec': sample_spec,
+    'albedo': sample_albedo,
+    'normal': sample_normal,
+    'sampleColor': sample_diff[:, :, 0:3] * sample_albedo  + sample_spec_noLog,
+
+    'diff_ref': gt_diff,
+    'spec_ref': gt_spec,
+    'gtColor': gt_diff + gt_spec_noLog,
     }
+  '''
+
 
 def show_data(data, figsize=(15, 15), normalize=False):
   if normalize:
     data = np.clip(data, 0, 1)**0.45454545
   plt.figure(figsize=figsize)
-  imgplot = plt.imshow(data, aspect='equal', cmap='gray')
+  imgplot = plt.imshow(data, aspect='equal')
   imgplot.axes.get_xaxis().set_visible(False)
   imgplot.axes.get_yaxis().set_visible(False)
   plt.show()
@@ -169,14 +215,15 @@ def show_data2(data, figsize=(15, 15), normalize=False, ax=None, show=True):
         plt.show()
 
 '''
-data = preprocess_input("dataSet/train/sample.exr", "dataSet/train/gt.exr", debug=True)
+path = "C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/src/renderer/PathTracing_KPCNNDenoising/models_libtorch/train"
+data = preprocess_input(path + "/staircase_32", path + "/staircase_8192", debug=True)
 
 for k, v in data.items():
   print(k, "has nans:", np.isnan(v).any())
   
-print("Let's check finalGt: ")
 #show_data(np.clip(data['input_diff'][:, :, 3], 0, 1)**0.45454545)
-show_data(np.clip(data['normal'], 0, 1)**0.45454545)
+#show_data(np.clip(data['input_diff'][:,:, :3], 0, 1)**0.45454545)
+show_data(data['input_diff'][4:7, :, :].transpose(1, 2, 0), normalize=False)
 '''
 #---------------------------------------------------makePatchs-----------------------------------------------------------
 patch_size = 64 # patches are 64x64
@@ -327,6 +374,8 @@ def crop(data, pos, patch_size):
   px, py = pos
   return {key: val[(py-sy):(py+sy+1),(px-sx):(px+sx+1),:] 
           for key, val in data.items()}
+  #return {key: val[:, py-sy:py+sy+1, px-sx:px+sx+1]
+  #        for key, val in data.items()}
 
 '''
 cropped = list(crop(data, tuple(pos), patch_size) for pos in patches)
@@ -405,6 +454,15 @@ class KPCNNDataset(torch.utils.data.Dataset):
 
     #self.samples = to_torch_tensors(self.samples)
     #self.samples = send_to_device(self.samples)
+
+  '''
+    def __init__(self, sampleFolders, gtFolders):
+    self.samples = []
+    for sampleFolder, gtFolder in zip(sampleFolders, gtFolders):
+        print(sampleFolder, gtFolder)
+        self.samples.extend(get_cropped_patches(sampleFolder, gtFolder))
+  '''
+
 
   def __len__(self):
     return len(self.samples)

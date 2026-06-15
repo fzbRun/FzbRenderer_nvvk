@@ -2,33 +2,33 @@
 #include "renderer/PathTracing_KPCNNDenoising/PathTracing_KPCNNDenosingShaderio.h"
 
 [[vk::push_constant]] ConstantBuffer<KPCNN_DenoisingPTPushConstant, ScalarDataLayout> pushConst;
-[[vk::binding(StaticBindingPoints_KPCNNPT::eInputBuffer_irradiance)]] RWStructuredBuffer<float3> InputBuffer_irradiance;
+[[vk::binding(StaticBindingPoints_KPCNNPT::eInputBuffer_irradiance)]] RWStructuredBuffer<float> InputBuffer_irradiance;
 [[vk::binding(StaticBindingPoints_KPCNNPT::eInputBuffer_irradianceVariance)]] RWStructuredBuffer<float> InputBuffer_irradianceVariance;
-[[vk::binding(StaticBindingPoints_KPCNNPT::eInputBuffer_gradIrradiance)]] RWStructuredBuffer<float3> InputBuffer_gradIrradiance;
+[[vk::binding(StaticBindingPoints_KPCNNPT::eInputBuffer_gradIrradiance)]] RWStructuredBuffer<float> InputBuffer_gradIrradiance;
 
 [[vk::binding(StaticBindingPoints_KPCNNPT::eInputBuffer_normalVariance_diff)]] RWStructuredBuffer<float> InputBuffer_normalVariance_diff;
-[[vk::binding(StaticBindingPoints_KPCNNPT::eInputBuffer_gradNormal_diff)]] RWStructuredBuffer<float3> InputBuffer_gradNormal_diff;
+[[vk::binding(StaticBindingPoints_KPCNNPT::eInputBuffer_gradNormal_diff)]] RWStructuredBuffer<float> InputBuffer_gradNormal_diff;
 
 [[vk::binding(StaticBindingPoints_KPCNNPT::eInputBuffer_depthVariance_diff)]] RWStructuredBuffer<float> InputBuffer_depthVariance_diff;
 [[vk::binding(StaticBindingPoints_KPCNNPT::eInputBuffer_gradDepth_diff)]] RWStructuredBuffer<float> InputBuffer_gradDepth_diff;
 
 [[vk::binding(StaticBindingPoints_KPCNNPT::eInputBuffer_albedoVariance_diff)]] RWStructuredBuffer<float> InputBuffer_albedoVariance_diff;
-[[vk::binding(StaticBindingPoints_KPCNNPT::eInputBuffer_gradAlbedo_diff)]] RWStructuredBuffer<float3> InputBuffer_gradAlbedo_diff;
+[[vk::binding(StaticBindingPoints_KPCNNPT::eInputBuffer_gradAlbedo_diff)]] RWStructuredBuffer<float> InputBuffer_gradAlbedo_diff;
 
-[[vk::binding(StaticBindingPoints_KPCNNPT::eInputBuffer_spec)]] RWStructuredBuffer<float3> InputBuffer_spec;
+[[vk::binding(StaticBindingPoints_KPCNNPT::eInputBuffer_spec)]] RWStructuredBuffer<float> InputBuffer_spec;
 [[vk::binding(StaticBindingPoints_KPCNNPT::eInputBuffer_specVariance)]] RWStructuredBuffer<float> InputBuffer_specVariance;
-[[vk::binding(StaticBindingPoints_KPCNNPT::eInputBuffer_gradSpec)]] RWStructuredBuffer<float3> InputBuffer_gradSpec;
+[[vk::binding(StaticBindingPoints_KPCNNPT::eInputBuffer_gradSpec)]] RWStructuredBuffer<float> InputBuffer_gradSpec;
 
 [[vk::binding(StaticBindingPoints_KPCNNPT::eInputBuffer_normalVariance_spec)]] RWStructuredBuffer<float> InputBuffer_normalVariance_spec;
-[[vk::binding(StaticBindingPoints_KPCNNPT::eInputBuffer_gradNormal_spec)]] RWStructuredBuffer<float3> InputBuffer_gradNormal_spec;
+[[vk::binding(StaticBindingPoints_KPCNNPT::eInputBuffer_gradNormal_spec)]] RWStructuredBuffer<float> InputBuffer_gradNormal_spec;
 
 [[vk::binding(StaticBindingPoints_KPCNNPT::eInputBuffer_depthVariance_spec)]] RWStructuredBuffer<float> InputBuffer_depthVariance_spec;
 [[vk::binding(StaticBindingPoints_KPCNNPT::eInputBuffer_gradDepth_spec)]] RWStructuredBuffer<float> InputBuffer_gradDepth_spec;
 
 [[vk::binding(StaticBindingPoints_KPCNNPT::eInputBuffer_albedoVariance_spec)]] RWStructuredBuffer<float> InputBuffer_albedoVariance_spec;
-[[vk::binding(StaticBindingPoints_KPCNNPT::eInputBuffer_gradAlbedo_spec)]] RWStructuredBuffer<float3> InputBuffer_gradAlbedo_spec;
+[[vk::binding(StaticBindingPoints_KPCNNPT::eInputBuffer_gradAlbedo_spec)]] RWStructuredBuffer<float> InputBuffer_gradAlbedo_spec;
 
-[[vk::binding(StaticBindingPoints_KPCNNPT::eNormalBuffer)]] RWStructuredBuffer<float3> NormalBuffer;
+[[vk::binding(StaticBindingPoints_KPCNNPT::eNormalBuffer)]] RWStructuredBuffer<float> NormalBuffer;
 [[vk::binding(StaticBindingPoints_KPCNNPT::eDepthBuffer)]] RWStructuredBuffer<float> DepthBuffer;
 [[vk::binding(StaticBindingPoints_KPCNNPT::eMaxDepthBuffer)]] RWStructuredBuffer<int> MaxDepthBuffer;
 [[vk::binding(StaticBindingPoints_KPCNNPT::eAlbedoBuffer)]] RWStructuredBuffer<float3> AlbedoBuffer;
@@ -212,14 +212,17 @@ void computeMain_PathTracing(uint2 threadIndex: SV_DispatchThreadID, uint2 group
                 }
             }
 
-            if (isDiffuse) diffuse += payload.material.emissive * bsdf_cosine_pdf;
-            else specular += payload.material.emissive * bsdf_cosine_pdf;
-
+            getDirectionLight(payload, sceneInfo);
             BSDF_SAMPLE(payload);
+
+            float3 radiance = (payload.material.emissive + payload.directionLightRadiance) * bsdf_cosine_pdf;
+            if (isDiffuse) diffuse += radiance;
+            else specular += radiance;
+
             float cosine = abs(dot(payload.hitNormal, payload.incidence));
             bsdf_cosine_pdf *= payload.bsdf * cosine / payload.pdf;
 
-            bool end = any(bsdf_cosine_pdf <= 0.0f) || all(bsdf_cosine_pdf <= 0.0f) || any(isnan(bsdf_cosine_pdf)) || any(isinf(bsdf_cosine_pdf));
+            bool end = any(bsdf_cosine_pdf < 0.0f) || all(bsdf_cosine_pdf == 0.0f) || any(isnan(bsdf_cosine_pdf)) || any(isinf(bsdf_cosine_pdf));
             if (end) break;
 
             if (rand(payload.randomSeed) >= RR) break;
@@ -239,12 +242,16 @@ void computeMain_PathTracing(uint2 threadIndex: SV_DispatchThreadID, uint2 group
     }
 
     uint pixelIndex = threadIndex.y * pushConst.screenSize.x + threadIndex.x;
-    //-------------------------------irradiance-------------------------------------
+    uint imageSize = pushConst.screenSize.x * pushConst.screenSize.y;
+//-------------------------------irradiance-------------------------------------
+#ifndef SAVE_GROUNDTRUTH_BUFFERS
     float3 meanAlbedo = accAlbedo / pushConst.spp;
     float3 meanDiffuse = accDiffuse / pushConst.spp;
 
     float3 irradiance = meanDiffuse / (meanAlbedo + eps_kpcnn);
-    InputBuffer_irradiance[pixelIndex] = irradiance;
+    InputBuffer_irradiance[pixelIndex] = irradiance.x;
+    InputBuffer_irradiance[pixelIndex + imageSize] = irradiance.y;
+    InputBuffer_irradiance[pixelIndex + imageSize * 2] = irradiance.z;
 
     /*
     Because the variance of the training data set is single channel, we can only get the lightness first and then divide it
@@ -266,7 +273,9 @@ void computeMain_PathTracing(uint2 threadIndex: SV_DispatchThreadID, uint2 group
     InputBuffer_irradianceVariance[pixelIndex] = irradianceVarianceS;
     //-------------------------------specular-------------------------------------
     float3 meanSpecular = max(accSpecular / pushConst.spp, 0.0f);
-    InputBuffer_spec[pixelIndex] = log(meanSpecular + 1);
+    InputBuffer_spec[pixelIndex] = log(meanSpecular.x + 1);
+    InputBuffer_spec[pixelIndex + imageSize] = log(meanSpecular.y + 1);
+    InputBuffer_spec[pixelIndex + imageSize * 2] = log(meanSpecular.z + 1);
 
     float3 specularVariance = accSpecular2 / pushConst.spp - meanSpecular * meanSpecular;
 
@@ -284,7 +293,9 @@ void computeMain_PathTracing(uint2 threadIndex: SV_DispatchThreadID, uint2 group
     InputBuffer_normalVariance_diff[pixelIndex] = normalVarianceS;
     InputBuffer_normalVariance_spec[pixelIndex] = normalVarianceS;
 
-    NormalBuffer[pixelIndex] = meanNormal;
+    NormalBuffer[pixelIndex] = meanNormal.x;
+    NormalBuffer[pixelIndex + imageSize] = meanNormal.y;
+    NormalBuffer[pixelIndex + imageSize * 2] = meanNormal.z;
     //-------------------------------depth-------------------------------------
     float meanDepth = accDepth / pushConst.spp;
     float depthVariance = accDepth2 / pushConst.spp - meanDepth * meanDepth;
@@ -312,7 +323,6 @@ void computeMain_PathTracing(uint2 threadIndex: SV_DispatchThreadID, uint2 group
     float albedoVarianceS = albedoVariance.x * 0.2126f + albedoVariance.y * 0.7152f + albedoVariance.z * 0.0722f;
 
     InputBuffer_albedoVariance_diff[pixelIndex] = albedoVarianceS;
-
     InputBuffer_albedoVariance_spec[pixelIndex] = albedoVarianceS;
 
     AlbedoBuffer[pixelIndex] = meanAlbedo;
@@ -322,7 +332,7 @@ void computeMain_PathTracing(uint2 threadIndex: SV_DispatchThreadID, uint2 group
     DiffuseDebugImage[threadIndex] = float4(meanDiffuse, 1.0f);
     SpecularDebugImage[threadIndex] = float4(meanSpecular, 1.0f);
     float3 color = meanDiffuse + meanSpecular;
-    ColorDebugImage[threadIndex]= float4(color, 1.0f);
+    ColorDebugImage[threadIndex] = float4(color, 1.0f);
 
     IrradianceDebugImage[threadIndex] = float4(irradiance, 1.0f);
     NormalDebugImage[threadIndex] = float4(meanNormal, 1.0f);
@@ -332,9 +342,20 @@ void computeMain_PathTracing(uint2 threadIndex: SV_DispatchThreadID, uint2 group
     IrradianceVarianceDebugImage[threadIndex] = float4(float3(irradianceVarianceS), 1.0f);
     SpecularVarianceDebugImage[threadIndex] = float4(float3(logSpecularVariance), 1.0f);
     NormalVarianceDebugImage[threadIndex] = float4(float3(normalVarianceS), 1.0f);
-    //DepthVarianceDebugImage[threadIndex] = float4(float3(depthVariance), 1.0f);
+    // DepthVarianceDebugImage[threadIndex] = float4(float3(depthVariance), 1.0f);
     AlbedoVarianceDebugImage[threadIndex] = float4(float3(albedoVarianceS), 1.0f);
     #endif
+#else
+    float3 meanDiffuse = accDiffuse / pushConst.spp;
+    InputBuffer_irradiance[pixelIndex] = meanDiffuse.x;
+    InputBuffer_irradiance[pixelIndex + imageSize] = meanDiffuse.y;
+    InputBuffer_irradiance[pixelIndex + imageSize * 2] = meanDiffuse.z;
+
+    float3 meanSpecular = max(accSpecular / pushConst.spp, 0.0f);
+    InputBuffer_spec[pixelIndex] = log(meanSpecular.x + 1);
+    InputBuffer_spec[pixelIndex + imageSize] = log(meanSpecular.y + 1);
+    InputBuffer_spec[pixelIndex + imageSize * 2] = log(meanSpecular.z + 1);
+#endif
 }
 
 groupshared float groupMaxDepth;
@@ -344,11 +365,19 @@ groupshared float3 groupAlbedos[33][33];
 
 [numthreads(32, 32, 1)]
 [shader("compute")]
-void computeMain_createGradBuffers(uint2 threadIndex: SV_DispatchThreadID, uint2 threadGroupIndex : SV_GroupID ,uint2 groupThreadIndex: SV_GroupThreadID) {
+void computeMain_createGradBuffers(uint2 threadIndex: SV_DispatchThreadID, uint2 threadGroupIndex: SV_GroupID, uint2 groupThreadIndex: SV_GroupThreadID) {
     uint pixelIndex = threadIndex.y * pushConst.screenSize.x + threadIndex.x;
-    groupNormals[groupThreadIndex.y + 1][groupThreadIndex.x + 1] = NormalBuffer[pixelIndex];
+    uint imageSize = pushConst.screenSize.x * pushConst.screenSize.y;
+
+    float3 normal = float3(NormalBuffer[pixelIndex], NormalBuffer[pixelIndex + imageSize], NormalBuffer[pixelIndex + imageSize * 2]);
+    groupNormals[groupThreadIndex.y + 1][groupThreadIndex.x + 1] = normal;
+
     groupDepths[groupThreadIndex.y + 1][groupThreadIndex.x + 1] = DepthBuffer[pixelIndex];
-    groupAlbedos[groupThreadIndex.y + 1][groupThreadIndex.x + 1] = AlbedoBuffer[pixelIndex];
+
+    // float3 albedo = float3(AlbedoBuffer[pixelIndex], AlbedoBuffer[pixelIndex + imageSize], AlbedoBuffer[pixelIndex + imageSize * 2]);
+    float3 albedo = AlbedoBuffer[pixelIndex];
+    groupAlbedos[groupThreadIndex.y + 1][groupThreadIndex.x + 1] = albedo;
+
     if (groupThreadIndex.x == 0 && groupThreadIndex.y == 0) groupMaxDepth = OrderedIntToFloat(MaxDepthBuffer[0]);
     GroupMemoryBarrierWithGroupSync();
 
@@ -369,9 +398,10 @@ void computeMain_createGradBuffers(uint2 threadIndex: SV_DispatchThreadID, uint2
         } else {
             uint leftPixelIndex = (groupPixelStartIndex.y + warpLane) * pushConst.screenSize.x + (groupPixelStartIndex.x - 1);
 
-            leftNormal = NormalBuffer[leftPixelIndex];
+            leftNormal = float3(NormalBuffer[leftPixelIndex], NormalBuffer[leftPixelIndex + imageSize], NormalBuffer[leftPixelIndex + imageSize * 2]);
             leftDepth = DepthBuffer[leftPixelIndex];
-            leftAlbedo = AlbedoBuffer[leftPixelIndex];
+            // leftAlbedo = float3(AlbedoBuffer[leftPixelIndex], AlbedoBuffer[leftPixelIndex + imageSize], AlbedoBuffer[leftPixelIndex + imageSize * 2]);
+            leftAlbedo = AlbedoBuffer[pixelIndex];
         }
 
         groupNormals[warpLane + 1][0] = leftNormal;
@@ -390,8 +420,9 @@ void computeMain_createGradBuffers(uint2 threadIndex: SV_DispatchThreadID, uint2
         } else {
             uint upPixelIndex = (groupPixelStartIndex.y - 1) * pushConst.screenSize.x + groupPixelStartIndex.x + warpLane;
 
-            upNormal = NormalBuffer[upPixelIndex];
+            upNormal = float3(NormalBuffer[upPixelIndex], NormalBuffer[upPixelIndex + imageSize], NormalBuffer[upPixelIndex + imageSize * 2]);
             upDepth = DepthBuffer[upPixelIndex];
+            //upAlbedo = float3(AlbedoBuffer[upPixelIndex], AlbedoBuffer[upPixelIndex + imageSize], AlbedoBuffer[upPixelIndex + imageSize * 2]);
             upAlbedo = AlbedoBuffer[upPixelIndex];
         }
 
@@ -404,11 +435,14 @@ void computeMain_createGradBuffers(uint2 threadIndex: SV_DispatchThreadID, uint2
     if (threadIndex.x >= pushConst.screenSize.x || threadIndex.y >= pushConst.screenSize.y) return;
 
     // create dx
-    float3 normal = groupNormals[groupThreadIndex.y + 1][groupThreadIndex.x + 1];
     float3 leftNormal = warpLane == 0 ? groupNormals[groupThreadIndex.y + 1][groupThreadIndex.x] : WaveReadLaneAt(normal, warpLane - 1);
-    float3 normalDX = 0.0f; //normal - leftNormal;
-    InputBuffer_gradNormal_diff[pixelIndex] = normalDX;
-    InputBuffer_gradNormal_spec[pixelIndex] = normalDX;
+    float3 normalDX = normal - leftNormal;
+    InputBuffer_gradNormal_diff[pixelIndex] = normalDX.x;
+    InputBuffer_gradNormal_diff[pixelIndex + imageSize] = normalDX.y;
+    InputBuffer_gradNormal_diff[pixelIndex + imageSize * 2] = normalDX.z;
+    InputBuffer_gradNormal_spec[pixelIndex] = normalDX.x;
+    InputBuffer_gradNormal_spec[pixelIndex + imageSize] = normalDX.y;
+    InputBuffer_gradNormal_spec[pixelIndex + imageSize * 2] = normalDX.z;
 
     float maxDepth = max(groupMaxDepth, 1e-30f);
     float depth = groupDepths[groupThreadIndex.y + 1][groupThreadIndex.x + 1] / maxDepth;
@@ -417,39 +451,51 @@ void computeMain_createGradBuffers(uint2 threadIndex: SV_DispatchThreadID, uint2
     InputBuffer_depthVariance_spec[pixelIndex] = depthVariance / (maxDepth * maxDepth);
 
     float leftDepth = (warpLane == 0 ? groupDepths[groupThreadIndex.y + 1][groupThreadIndex.x] : WaveReadLaneAt(depth, warpLane - 1)) / maxDepth;
-    float depthDX = 0.0f;   //depth - leftDepth;
+    float depthDX = depth - leftDepth;
     InputBuffer_gradDepth_diff[pixelIndex] = depthDX;
     InputBuffer_gradDepth_spec[pixelIndex] = depthDX;
 
-    float3 albedo = groupAlbedos[groupThreadIndex.y + 1][groupThreadIndex.x + 1];
     float3 leftAlbedo = warpLane == 0 ? groupAlbedos[groupThreadIndex.y + 1][groupThreadIndex.x] : WaveReadLaneAt(albedo, warpLane - 1);
-    float3 albedoDX = 0.0f; //albedo - leftAlbedo;
-    InputBuffer_gradAlbedo_diff[pixelIndex] = albedoDX;
-    InputBuffer_gradAlbedo_spec[pixelIndex] = albedoDX;
+    float3 albedoDX = albedo - leftAlbedo;
+    InputBuffer_gradAlbedo_diff[pixelIndex] = albedoDX.x;
+    InputBuffer_gradAlbedo_diff[pixelIndex + imageSize] = albedoDX.y;
+    InputBuffer_gradAlbedo_diff[pixelIndex + imageSize * 2] = albedoDX.z;
+    InputBuffer_gradAlbedo_spec[pixelIndex] = albedoDX.x;
+    InputBuffer_gradAlbedo_spec[pixelIndex + imageSize] = albedoDX.y;
+    InputBuffer_gradAlbedo_spec[pixelIndex + imageSize * 2] = albedoDX.z;
 
     // create dy
-    uint imageSize = pushConst.screenSize.x * pushConst.screenSize.y;
-
     float3 upNormal = groupNormals[groupThreadIndex.y][groupThreadIndex.x + 1];
-    float3 normalDY = 0.0f; //normal - upNormal;
-    InputBuffer_gradNormal_diff[pixelIndex + imageSize] = normalDY;
-    InputBuffer_gradNormal_spec[pixelIndex + imageSize] = normalDY;
+    float3 normalDY = normal - upNormal;
+    InputBuffer_gradNormal_diff[pixelIndex + imageSize * 3] = normalDY.x;
+    InputBuffer_gradNormal_diff[pixelIndex + imageSize * 4] = normalDY.y;
+    InputBuffer_gradNormal_diff[pixelIndex + imageSize * 5] = normalDY.z;
+    InputBuffer_gradNormal_spec[pixelIndex + imageSize * 3] = normalDY.x;
+    InputBuffer_gradNormal_spec[pixelIndex + imageSize * 4] = normalDY.y;
+    InputBuffer_gradNormal_spec[pixelIndex + imageSize * 5] = normalDY.z;
 
     float upDepth = groupDepths[groupThreadIndex.y][groupThreadIndex.x + 1] / maxDepth;
-    float depthDY = 0.0f;   //depth - upDepth;
+    float depthDY = depth - upDepth;
     InputBuffer_gradDepth_diff[pixelIndex + imageSize] = depthDY;
     InputBuffer_gradDepth_spec[pixelIndex + imageSize] = depthDY;
 
     float3 upAlbedo = groupAlbedos[groupThreadIndex.y][groupThreadIndex.x + 1];
-    float3 albedoDY = 0.0f; //albedo - upAlbedo;
-    InputBuffer_gradAlbedo_diff[pixelIndex + imageSize] = albedoDY;
-    InputBuffer_gradAlbedo_spec[pixelIndex + imageSize] = albedoDY;
+    float3 albedoDY = albedo - upAlbedo;
+    InputBuffer_gradAlbedo_diff[pixelIndex + imageSize * 3] = albedoDY.x;
+    InputBuffer_gradAlbedo_diff[pixelIndex + imageSize * 4] = albedoDY.y;
+    InputBuffer_gradAlbedo_diff[pixelIndex + imageSize * 5] = albedoDY.z;
+    InputBuffer_gradAlbedo_spec[pixelIndex + imageSize * 3] = albedoDY.x;
+    InputBuffer_gradAlbedo_spec[pixelIndex + imageSize * 4] = albedoDY.y;
+    InputBuffer_gradAlbedo_spec[pixelIndex + imageSize * 5] = albedoDY.z;
 
     // Due to the limitation of shared memory, we reuse them
     GroupMemoryBarrierWithGroupSync();
 
-    groupNormals[groupThreadIndex.y + 1][groupThreadIndex.x + 1] = InputBuffer_irradiance[pixelIndex];
-    groupAlbedos[groupThreadIndex.y + 1][groupThreadIndex.x + 1] = InputBuffer_spec[pixelIndex];
+    float3 irradiance = float3(InputBuffer_irradiance[pixelIndex], InputBuffer_irradiance[pixelIndex + imageSize], InputBuffer_irradiance[pixelIndex + imageSize * 2]);
+    groupNormals[groupThreadIndex.y + 1][groupThreadIndex.x + 1] = irradiance;
+
+    float3 specular = float3(InputBuffer_spec[pixelIndex], InputBuffer_spec[pixelIndex + imageSize], InputBuffer_spec[pixelIndex + imageSize * 2]);
+    groupAlbedos[groupThreadIndex.y + 1][groupThreadIndex.x + 1] = specular;
     GroupMemoryBarrierWithGroupSync();
 
     if (warpIndex == 0) {
@@ -489,24 +535,30 @@ void computeMain_createGradBuffers(uint2 threadIndex: SV_DispatchThreadID, uint2
     GroupMemoryBarrierWithGroupSync();
 
     // create dx
-    float3 irradiance = groupNormals[groupThreadIndex.y + 1][groupThreadIndex.x + 1];
     float3 leftIrradiance = warpLane == 0 ? groupNormals[groupThreadIndex.y + 1][groupThreadIndex.x] : WaveReadLaneAt(irradiance, warpLane - 1);
-    float3 irradianceDX = 0.0f; //irradiance - leftIrradiance;
-    InputBuffer_gradIrradiance[pixelIndex] = irradianceDX;
+    float3 irradianceDX = irradiance - leftIrradiance;
+    InputBuffer_gradIrradiance[pixelIndex] = irradianceDX.x;
+    InputBuffer_gradIrradiance[pixelIndex + imageSize] = irradianceDX.y;
+    InputBuffer_gradIrradiance[pixelIndex + imageSize * 2] = irradianceDX.z;
 
-    float3 specular = groupAlbedos[groupThreadIndex.y + 1][groupThreadIndex.x + 1];
     float3 leftSpecular = warpLane == 0 ? groupAlbedos[groupThreadIndex.y + 1][groupThreadIndex.x] : WaveReadLaneAt(specular, warpLane - 1);
-    float3 specularDX = 0.0f;   //specular - leftSpecular;
-    InputBuffer_gradSpec[pixelIndex] = specularDX;
+    float3 specularDX = specular - leftSpecular;
+    InputBuffer_gradSpec[pixelIndex] = specularDX.x;
+    InputBuffer_gradSpec[pixelIndex + imageSize] = specularDX.y;
+    InputBuffer_gradSpec[pixelIndex + imageSize * 2] = specularDX.z;
 
     // create dy
     float3 upIrradiance = groupNormals[groupThreadIndex.y][groupThreadIndex.x + 1];
-    float3 irradianceDY = 0.0f; //irradiance - upIrradiance;
-    InputBuffer_gradIrradiance[pixelIndex + imageSize] = irradianceDY;
+    float3 irradianceDY = irradiance - upIrradiance;
+    InputBuffer_gradIrradiance[pixelIndex + imageSize * 3] = irradianceDY.x;
+    InputBuffer_gradIrradiance[pixelIndex + imageSize * 4] = irradianceDY.y;
+    InputBuffer_gradIrradiance[pixelIndex + imageSize * 5] = irradianceDY.z;
 
     float3 upSpecular = groupAlbedos[groupThreadIndex.y][groupThreadIndex.x + 1];
-    float3 specularDY = 0.0f;   //specular - upSpecular;
-    InputBuffer_gradSpec[pixelIndex + imageSize] = specularDY;
+    float3 specularDY = specular - upSpecular;
+    InputBuffer_gradSpec[pixelIndex + imageSize * 3] = specularDY.x;
+    InputBuffer_gradSpec[pixelIndex + imageSize * 4] = specularDY.y;
+    InputBuffer_gradSpec[pixelIndex + imageSize * 5] = specularDY.z;
 
     #ifndef NDEBUG
     if (pushConst.frameIndex == 1 && threadIndex.x == 0 && threadIndex.y == 0) printf("maxDepth: %f\n", maxDepth);
@@ -514,3 +566,34 @@ void computeMain_createGradBuffers(uint2 threadIndex: SV_DispatchThreadID, uint2
     DepthVarianceDebugImage[threadIndex] = float4(float3(depthVariance / (maxDepth * maxDepth)), 1.0f);
     #endif
 }
+
+/*
+#ifndef NDEBUG
+[numthreads(32, 32, 1)]
+[shader("compute")]
+void computeMain_bufferToImage(uint2 threadIndex: SV_DispatchThreadID) {
+    uint pixelIndex = threadIndex.y * pushConst.screenSize.x + threadIndex.x;
+    uint imageSize = pushConst.screenSize.x * pushConst.screenSize.y;
+
+    float3 irradiance = float3(InputBuffer_irradiance[pixelIndex], InputBuffer_irradiance[pixelIndex + imageSize], InputBuffer_irradiance[pixelIndex + imageSize * 2]);
+    IrradianceDebugImage[threadIndex] = float4(irradiance, 1.0f);
+
+    float3 logSpec = float3(InputBuffer_spec[pixelIndex], InputBuffer_spec[pixelIndex + imageSize], InputBuffer_spec[pixelIndex + imageSize * 2]);
+    SpecularDebugImage[threadIndex] = float4(exp(logSpec) - 1.0f,  1.0f);
+
+    float3 normal = float3(NormalBuffer[pixelIndex], NormalBuffer[pixelIndex + imageSize], NormalBuffer[pixelIndex + imageSize * 2]);
+    NormalDebugImage[threadIndex] = float4(normal, 1.0f);
+
+    DepthDebugImage[threadIndex] = float4(float3(DepthBuffer[pixelIndex]), 1.0f);
+
+    //float3 albedo = float3(AlbedoBuffer[pixelIndex], AlbedoBuffer[pixelIndex + imageSize], AlbedoBuffer[pixelIndex + imageSize * 2]);
+    AlbedoDebugImage[threadIndex] = float4(AlbedoBuffer[pixelIndex], 1.0f);
+
+    IrradianceVarianceDebugImage[threadIndex] = float4(float3(InputBuffer_irradianceVariance[pixelIndex]), 1.0f);
+    SpecularVarianceDebugImage[threadIndex] = float4(float3(InputBuffer_specVariance[pixelIndex]), 1.0f);
+    NormalVarianceDebugImage[threadIndex] = float4(float3(InputBuffer_normalVariance_diff[pixelIndex]), 1.0f);
+    DepthVarianceDebugImage[threadIndex] = float4(float3(InputBuffer_depthVariance_diff[pixelIndex]), 1.0f);
+    AlbedoVarianceDebugImage[threadIndex] = float4(float3(InputBuffer_albedoVariance_diff[pixelIndex]), 1.0f);
+}
+#endif
+*/

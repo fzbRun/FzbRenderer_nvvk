@@ -58,3 +58,4 @@ _downloaded_resources/
 #third_party/
 
 *.exr
+*.bin

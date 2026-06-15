@@ -16,7 +16,7 @@ std::vector<std::string> debugImageNames = {
 
 PathTracing_KPCNNDenoising::PathTracing_KPCNNDenoising(pugi::xml_node& rendererNode) {
 	ptContext.setContextInfo();
-	Application::cmdCount = 2;
+	Application::cmdCount = IF_TRAIN_SAMPLE(1, 2);
 
 	Application::vkContextInitInfo.instanceExtensions.push_back(VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME);
 	Application::vkContextInitInfo.instanceExtensions.push_back(VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME);
@@ -30,6 +30,8 @@ PathTracing_KPCNNDenoising::PathTracing_KPCNNDenoising(pugi::xml_node& rendererN
 		pushConstant.maxBounceCount = std::stoi(maxDepthNode.attribute("value").value());
 	if (pugi::xml_node sppNode = rendererNode.child("spp"))
 		pushConstant.spp = std::stoi(sppNode.attribute("value").value());
+
+	IF_SAVE_SAMPLE(pushConstant.spp = 32, pushConstant.spp = 8192);
 }
 void PathTracing_KPCNNDenoising::init() {
 	screenSize = { 256, 256 };
@@ -39,10 +41,15 @@ void PathTracing_KPCNNDenoising::init() {
 	sbtGenerator.init(Application::app->getDevice(), ptContext.rtProperties);
 
 	createDataObject();
+
+	//IF_TRAIN_SAMPLE(loadSampleBuffers(), );
+
 	createDescriptorSetLayout();
 	createDescriptorSet();
 	createPipelineLayout();
 	compileAndCreateShaders();
+
+	//IF_TRAIN_SAMPLE(bufferToImage(), );
 
 	Renderer::init();
 
@@ -56,7 +63,7 @@ void PathTracing_KPCNNDenoising::init() {
 		.startSemaphoreHandle = vulkanToCudaSemaphore.handle,
 		.endSemaphoreHandle = cudaToVulkanSemaphore.handle,
 	};
-	kpcnDenoiser = KPCNNDenoiser(createInfo);
+	IF_TRAIN_SAMPLE(void(0), kpcnDenoiser = KPCNNDenoiser(createInfo));
 }
 void PathTracing_KPCNNDenoising::clean() {
 	inputBuffer_diff.clean();
@@ -72,8 +79,9 @@ void PathTracing_KPCNNDenoising::clean() {
 	VkDevice device = Application::app->getDevice();
 	vkDestroyShaderEXT(device, computeShader_PathTracing, nullptr);
 	vkDestroyShaderEXT(device, computeShader_createGradBuffers, nullptr);
+	vkDestroyShaderEXT(device, computeShader_bufferToImage, nullptr);
 
-	kpcnDenoiser.clean();
+	IF_TRAIN_SAMPLE(void(), kpcnDenoiser.clean());
 
 	PathTracingRenderer::clean();
 }
@@ -101,7 +109,7 @@ void PathTracing_KPCNNDenoising::uiRender() {
 		ImGui::SeparatorText("SPP");
 		{
 			PE::begin();
-			UIModified |= PE::SliderInt("SPP", &pushConstant.spp, 1, 512, "%d", ImGuiSliderFlags_AlwaysClamp,
+			UIModified |= PE::SliderInt("SPP", &pushConstant.spp, 1, 8192, "%d", ImGuiSliderFlags_AlwaysClamp,
 				"Sample Per Pixel");
 			PE::end();
 		}
@@ -181,9 +189,7 @@ void PathTracing_KPCNNDenoising::preRender() {
 
 	pushConstant.frameIndex = Application::frameIndex;
 	pushConstant.maxFrameCount = maxFrames;
-	//pushConstant.spp = 16;
 	pushConstant.time = Application::sceneResource.time;
-	//pushConstant.maxBounceCount = 10;
 	pushConstant.screenSize = { screenSize.width, screenSize.height };
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 
@@ -215,9 +221,26 @@ void PathTracing_KPCNNDenoising::render(VkCommandBuffer* cmdPtr) {
 		.pValues = &pushConstant,
 	};
 
+#ifdef SAVE_TRAIN_BUFFERS
+	if (timeline == 1) {
+		pathTracing(cmd);
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+		IF_SAVE_SAMPLE(createInputBuffers(cmd), (void)0);
+
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
+	}
+	else if (timeline == 2) {
+		vkDeviceWaitIdle(Application::app->getDevice());	//after first frame end
+		saveSampleBuffers();
+	}
+
+	++timeline;
+	return;
+#else
 	pathTracing(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	createInputBuffers(cmd);
+#endif
 	//--------------------------------------------------------------------------------------------------------------
 	vkEndCommandBuffer(cmd);
 	const VkCommandBufferSubmitInfo cmdBufferInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = cmd };
@@ -273,6 +296,7 @@ void PathTracing_KPCNNDenoising::createDataObject() {
 		sum: 27
 	*/
 	uint32_t inputBufferSize = (3 + 1 + 6 + 1 + 6 + 1 + 2 + 1 + 6) * imageSize * sizeof(float);
+	IF_SAVE_SAMPLE(void(0), inputBufferSize = 3 * imageSize * sizeof(float));
 
 	inputBuffer_diff = FzbRenderer::Buffer("inputBuffer_diff", true);
 	inputBuffer_diff.init({
@@ -346,6 +370,7 @@ void PathTracing_KPCNNDenoising::createDescriptorSetLayout() {
 			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 			.descriptorCount = 1,
 			.stageFlags = VK_SHADER_STAGE_ALL });
+		#ifndef SAVE_GROUNDTRUTH_BUFFERS
 		bindings.addBinding({
 			.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_irradianceVariance,
 			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -356,109 +381,112 @@ void PathTracing_KPCNNDenoising::createDescriptorSetLayout() {
 			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 			.descriptorCount = 1,
 			.stageFlags = VK_SHADER_STAGE_ALL });
-			//--------------------------------normalDiff--------------------------------------
-			bindings.addBinding({
-				.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_normalVariance_diff,
-				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				.descriptorCount = 1,
-				.stageFlags = VK_SHADER_STAGE_ALL });
-			bindings.addBinding({
-				.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_gradNormal_diff,
-				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				.descriptorCount = 1,
-				.stageFlags = VK_SHADER_STAGE_ALL });
-			//--------------------------------depthDiff--------------------------------------
-			bindings.addBinding({
-				.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_depthVariance_diff,
-				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				.descriptorCount = 1,
-				.stageFlags = VK_SHADER_STAGE_ALL });
-			bindings.addBinding({
-				.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_gradDepth_diff,
-				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				.descriptorCount = 1,
-				.stageFlags = VK_SHADER_STAGE_ALL });
-			//--------------------------------albedoDiff--------------------------------------
-			bindings.addBinding({
-				.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_albedoVariance_diff,
-				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				.descriptorCount = 1,
-				.stageFlags = VK_SHADER_STAGE_ALL });
-			bindings.addBinding({
-				.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_gradAlbedo_diff,
-				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				.descriptorCount = 1,
-				.stageFlags = VK_SHADER_STAGE_ALL });
-			//--------------------------------specular--------------------------------------
-			bindings.addBinding({
-				.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_spec,
-				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				.descriptorCount = 1,
-				.stageFlags = VK_SHADER_STAGE_ALL });
-			bindings.addBinding({
-				.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_specVariance,
-				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				.descriptorCount = 1,
-				.stageFlags = VK_SHADER_STAGE_ALL });
-			bindings.addBinding({
-				.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_gradSpec,
-				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				.descriptorCount = 1,
-				.stageFlags = VK_SHADER_STAGE_ALL });
-			//--------------------------------normalSpec--------------------------------------
-			bindings.addBinding({
-				.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_normalVariance_spec,
-				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				.descriptorCount = 1,
-				.stageFlags = VK_SHADER_STAGE_ALL });
-			bindings.addBinding({
-				.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_gradNormal_spec,
-				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				.descriptorCount = 1,
-				.stageFlags = VK_SHADER_STAGE_ALL });
-			//--------------------------------depthSpec--------------------------------------
-			bindings.addBinding({
-				.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_depthVariance_spec,
-				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				.descriptorCount = 1,
-				.stageFlags = VK_SHADER_STAGE_ALL });
-			bindings.addBinding({
-				.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_gradDepth_spec,
-				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				.descriptorCount = 1,
-				.stageFlags = VK_SHADER_STAGE_ALL });
-			//--------------------------------albedoSpec--------------------------------------
-			bindings.addBinding({
-				.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_albedoVariance_spec,
-				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				.descriptorCount = 1,
-				.stageFlags = VK_SHADER_STAGE_ALL });
-			bindings.addBinding({
-				.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_gradAlbedo_spec,
-				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				.descriptorCount = 1,
-				.stageFlags = VK_SHADER_STAGE_ALL });
-			//--------------------------------Normal, Depth, Albedo--------------------------------------
-			bindings.addBinding({
-				.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eNormalBuffer,
-				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				.descriptorCount = 1,
-				.stageFlags = VK_SHADER_STAGE_ALL });
-			bindings.addBinding({
-				.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eDepthBuffer,
-				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				.descriptorCount = 1,
-				.stageFlags = VK_SHADER_STAGE_ALL });
-			bindings.addBinding({
-				.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eMaxDepthBuffer,
-				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				.descriptorCount = 1,
-				.stageFlags = VK_SHADER_STAGE_ALL });
-			bindings.addBinding({
-				.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eAlbedoBuffer,
-				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				.descriptorCount = 1,
-				.stageFlags = VK_SHADER_STAGE_ALL });
+		//--------------------------------normalDiff--------------------------------------
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_normalVariance_diff,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_gradNormal_diff,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		//--------------------------------depthDiff--------------------------------------
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_depthVariance_diff,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_gradDepth_diff,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		//--------------------------------albedoDiff--------------------------------------
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_albedoVariance_diff,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_gradAlbedo_diff,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		#endif
+		//--------------------------------specular--------------------------------------
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_spec,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		#ifndef SAVE_GROUNDTRUTH_BUFFERS
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_specVariance,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_gradSpec,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		//--------------------------------normalSpec--------------------------------------
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_normalVariance_spec,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_gradNormal_spec,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		//--------------------------------depthSpec--------------------------------------
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_depthVariance_spec,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_gradDepth_spec,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		//--------------------------------albedoSpec--------------------------------------
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_albedoVariance_spec,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_gradAlbedo_spec,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		//--------------------------------Normal, Depth, Albedo--------------------------------------
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eNormalBuffer,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eDepthBuffer,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eMaxDepthBuffer,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eAlbedoBuffer,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		#endif
 	}
 #ifndef NDEBUG
 	{
@@ -561,9 +589,10 @@ void PathTracing_KPCNNDenoising::createDescriptorSet() {
 		//-------------------------------------------Irradiance---------------------------------------------------
 		VkWriteDescriptorSet    inputBufferWrite =
 			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_irradiance, 0, 0, 1);
-		write.append(inputBufferWrite, inputBuffer_diff.buffer, offset, imageSize * sizeof(float3));
-		offset += imageSize * sizeof(float3);
+		write.append(inputBufferWrite, inputBuffer_diff.buffer, offset, imageSize * sizeof(float) * 3);
+		offset += imageSize * sizeof(float) * 3;
 
+		#ifndef SAVE_GROUNDTRUTH_BUFFERS
 		inputBufferWrite =
 			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_irradianceVariance, 0, 0, 1);
 		write.append(inputBufferWrite, inputBuffer_diff.buffer, offset, imageSize * sizeof(float));
@@ -603,7 +632,7 @@ void PathTracing_KPCNNDenoising::createDescriptorSet() {
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_gradAlbedo_diff, 0, 0, 1);
 		write.append(inputBufferWrite, inputBuffer_diff.buffer, offset, imageSize * sizeof(float3) * 2);
 		offset += imageSize * sizeof(float3) * 2;
-
+		#endif
 
 
 		//-------------------------------------------Specular---------------------------------------------------
@@ -611,9 +640,10 @@ void PathTracing_KPCNNDenoising::createDescriptorSet() {
 
 		inputBufferWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_spec, 0, 0, 1);
-		write.append(inputBufferWrite, inputBuffer_spec.buffer, offset, imageSize * sizeof(float3));
+		write.append(inputBufferWrite, inputBuffer_spec.buffer, offset, imageSize * sizeof(float) * 3);
 		offset += imageSize * sizeof(float3);
 
+		#ifndef SAVE_GROUNDTRUTH_BUFFERS
 		inputBufferWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eInputBuffer_specVariance, 0, 0, 1);
 		write.append(inputBufferWrite, inputBuffer_spec.buffer, offset, imageSize * sizeof(float));
@@ -656,11 +686,11 @@ void PathTracing_KPCNNDenoising::createDescriptorSet() {
 
 		//-------------------------------------------Normal, Depth, Albedo---------------------------------------------------
 		VkWriteDescriptorSet    dataBufferWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eNormalBuffer, 0, 0, 1);
+			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eNormalBuffer, 0, 0, 1);
 		write.append(dataBufferWrite, normalBuffer.buffer);
 
 		dataBufferWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eDepthBuffer, 0, 0, 1);
+			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eDepthBuffer, 0, 0, 1);
 		write.append(dataBufferWrite, depthBuffer.buffer);
 
 		dataBufferWrite =
@@ -668,8 +698,9 @@ void PathTracing_KPCNNDenoising::createDescriptorSet() {
 		write.append(dataBufferWrite, maxDepthBuffer.buffer);
 
 		dataBufferWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eAlbedoBuffer, 0, 0, 1);
+			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_KPCNNPT::eAlbedoBuffer, 0, 0, 1);
 		write.append(dataBufferWrite, albedoBuffer.buffer);
+		#endif
 	}
 #ifndef NDEBUG
 	{
@@ -780,6 +811,7 @@ void PathTracing_KPCNNDenoising::compileAndCreateShaders() {
 		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_PathTracing);
 		NVVK_DBG_NAME(computeShader_PathTracing);
 	}
+	#ifndef SAVE_GROUNDTRUTH_BUFFERS
 	//--------------------------------------------------------------------------------------
 	{
 		vkDestroyShaderEXT(device, computeShader_createGradBuffers, nullptr);
@@ -792,6 +824,21 @@ void PathTracing_KPCNNDenoising::compileAndCreateShaders() {
 		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_createGradBuffers);
 		NVVK_DBG_NAME(computeShader_createGradBuffers);
 	}
+	#endif
+//#ifndef NDEBUG
+//	//--------------------------------------------------------------------------------------
+//	{
+//		vkDestroyShaderEXT(device, computeShader_bufferToImage, nullptr);
+//
+//		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+//		shaderInfo.nextStage = 0;
+//		shaderInfo.pName = "computeMain_bufferToImage";
+//		shaderInfo.codeSize = shaderCode.codeSize;
+//		shaderInfo.pCode = shaderCode.pCode;
+//		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_bufferToImage);
+//		NVVK_DBG_NAME(computeShader_bufferToImage);
+//	}
+//#endif
 }
 void PathTracing_KPCNNDenoising::updateDataPerFrame(VkCommandBuffer cmd) {}
 
@@ -817,15 +864,51 @@ void PathTracing_KPCNNDenoising::createInputBuffers(VkCommandBuffer cmd) {
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createGradBuffers);
 
 	pushConstant.screenSize = { screenSize.width, screenSize.height };
-	VkExtent2D groupSize = nvvk::getGroupCounts(screenSize, VkExtent2D{ 16, 16 });
+	VkExtent2D groupSize = nvvk::getGroupCounts(screenSize, VkExtent2D{ 32, 32 });
+
+	vkCmdPushConstants2(cmd, &pushInfo);
+	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
+}
+
+void PathTracing_KPCNNDenoising::saveSampleBuffers() {
+	std::string samplePath = FzbRenderer::getProjectRootDir().string() + "src/renderer/PathTracing_KPCNNDenoising/models_libtorch/train/" + Application::sceneResource.name + "_" + std::to_string(pushConstant.spp);
+	inputBuffer_diff.save(samplePath + "/diff.bin");
+	inputBuffer_spec.save(samplePath + "/spec.bin");
+	normalBuffer.save(samplePath + "/normal.bin");
+	albedoBuffer.save(samplePath + "/albedo.bin");
+	depthBuffer.save(samplePath + "/depth.bin");
+}
+void PathTracing_KPCNNDenoising::loadSampleBuffers() {
+	std::string samplePath = FzbRenderer::getProjectRootDir().string() + "src/renderer/PathTracing_KPCNNDenoising/models_libtorch/train/" + Application::sceneResource.name + "_" + std::to_string(pushConstant.spp);
+	inputBuffer_diff.load(samplePath + "/diff.bin");
+	inputBuffer_spec.load(samplePath + "/spec.bin");
+	normalBuffer.load(samplePath + "/normal.bin");
+	albedoBuffer.load(samplePath + "/albedo.bin");
+	depthBuffer.load(samplePath + "/depth.bin");
+}
+void PathTracing_KPCNNDenoising::bufferToImage() {
+	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
+
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1,
+		staticDescPack.getSetPtr(), 0, nullptr);
+
+	pushInfo = {
+		.sType = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
+		.layout = pipelineLayout,
+		.stageFlags = VK_SHADER_STAGE_ALL,
+		.offset = 0,
+		.size = sizeof(shaderio::KPCNN_DenoisingPTPushConstant),
+		.pValues = &pushConstant,
+	};
+
+	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_bufferToImage);
+
+	pushConstant.screenSize = { screenSize.width, screenSize.height };
+	VkExtent2D groupSize = nvvk::getGroupCounts(screenSize, VkExtent2D{ 32, 32 });
 
 	vkCmdPushConstants2(cmd, &pushInfo);
 	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
 
-
-}
-
-void PathTracing_KPCNNDenoising::saveSampleBuffers(std::string fileName) {
-	std::string samplePath = FzbRenderer::getProjectRootDir().string() + "src/renderer/PathTracing_KPCNNDenoising/models_libtorch/train/" + Application::sceneResource.name;
-	inputBuffer_diff.save(samplePath + "/diff.bin");
+	Application::app->submitAndWaitTempCmdBuffer(cmd);
 }

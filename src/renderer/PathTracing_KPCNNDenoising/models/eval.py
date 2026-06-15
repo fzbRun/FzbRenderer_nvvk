@@ -29,11 +29,16 @@ def apply_kernel(kernels, patch):
     kernels = kernels.permute(0, 2, 3, 1).contiguous().view(N, H * W, K * K)
 
     # 对每个像素自己的 K*K 权重归一化
-    kernels = F.softmax(kernels, dim=-1)  # [N, H*W, K*K]
+    #kernels = F.softmax(kernels, dim=-1)  # [N, H*W, K*K]
 
     # [N, C, H, W] -> unfold -> [N, C*K*K, H*W]
+    #neighborhood = F.unfold(
+    #    F.pad(patch, (r, r, r, r), mode='reflect'),
+    #    kernel_size=K
+    #)
     neighborhood = F.unfold(
-        F.pad(patch, (r, r, r, r), mode='reflect'),
+        #F.pad(patch, (r, r, r, r), mode='reflect'),
+        F.pad(patch, (r, r, r, r), mode='constant', value=0.0),
         kernel_size=K
     )
 
@@ -105,7 +110,11 @@ def denoise(diffuseNet, specularNet, data, debug=False):
             print("LossSpec:", lossSpec)
             print("LossFinal:", lossFinal)
 def main():
-    eval_data = dataSet.preprocess_input("dataSet/eval/eval2.exr", "dataSet/eval/evalRef2.exr")
+    #trainSetPath = 'C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/src/renderer/PathTracing_KPCNNDenoising/models_libtorch/train/'
+    #samplePath = trainSetPath + 'staircase_32'
+    #gtPath = trainSetPath + 'staircase_8192'
+    #eval_data = dataSet.preprocess_input(samplePath, gtPath)
+    eval_data = dataSet.preprocess_input("dataSet/eval/eval1.exr", "dataSet/eval/evalRef1.exr")
     eval_data = dataSet.crop(eval_data, (1280//2, 720//2), 300)
 
     diffuseNet = model.KPCNN(eval_data['input_diff'].shape[-1]).to(device)
