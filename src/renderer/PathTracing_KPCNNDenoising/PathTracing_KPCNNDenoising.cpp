@@ -34,7 +34,7 @@ PathTracing_KPCNNDenoising::PathTracing_KPCNNDenoising(pugi::xml_node& rendererN
 	IF_SAVE_SAMPLE(pushConstant.spp = 32, pushConstant.spp = 8192);
 }
 void PathTracing_KPCNNDenoising::init() {
-	screenSize = { 256, 256 };
+	screenSize = { 512, 512 };
 
 	ptContext.getRayTracingPropertiesAndFeature();
 	asManager.init();
@@ -204,6 +204,15 @@ void PathTracing_KPCNNDenoising::render(VkCommandBuffer* cmdPtr) {
 	{ NVVK_DBG_SCOPE(cmd); }
 
 	updateDataPerFrame(cmd);
+	if (pushConstant.frameIndex >= maxFrames && maxFrames > 1) {
+		cmd = cmdPtr[1];
+		const VkCommandBufferBeginInfo beginInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+					 .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
+		NVVK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
+
+		++timeline;
+		return;
+	}
 
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1,
 		staticDescPack.getSetPtr(), 0, nullptr);
@@ -231,7 +240,7 @@ void PathTracing_KPCNNDenoising::render(VkCommandBuffer* cmdPtr) {
 	}
 	else if (timeline == 2) {
 		vkDeviceWaitIdle(Application::app->getDevice());	//after first frame end
-		saveSampleBuffers();
+		saveSampleBuffers("_7");
 	}
 
 	++timeline;
@@ -277,6 +286,8 @@ void PathTracing_KPCNNDenoising::render(VkCommandBuffer* cmdPtr) {
 
 	//Renderer::postProcess(cmd, &colorImage.image.descriptor);
 	Application::tonemapper.runCompute(cmd, gBuffers.getSize(), Application::tonemapperData, colorImage.image.descriptor, gBuffers.getDescriptorImageInfo((uint32_t)GBufferImageIndex_KPCNN::eTonemapImage));
+	//Application::tonemapper.runCompute(cmd, gBuffers.getSize(), Application::tonemapperData, 
+	//	gBuffers.getDescriptorImageInfo((uint32_t)GBufferImageIndex_KPCNN::eColorDebugImage), gBuffers.getDescriptorImageInfo((uint32_t)GBufferImageIndex_KPCNN::eTonemapImage));
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
 
 	++timeline;
@@ -870,8 +881,8 @@ void PathTracing_KPCNNDenoising::createInputBuffers(VkCommandBuffer cmd) {
 	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
 }
 
-void PathTracing_KPCNNDenoising::saveSampleBuffers() {
-	std::string samplePath = FzbRenderer::getProjectRootDir().string() + "src/renderer/PathTracing_KPCNNDenoising/models_libtorch/train/" + Application::sceneResource.name + "_" + std::to_string(pushConstant.spp);
+void PathTracing_KPCNNDenoising::saveSampleBuffers(std::string filename) {
+	std::string samplePath = FzbRenderer::getProjectRootDir().string() + "src/renderer/PathTracing_KPCNNDenoising/models_libtorch/train/" + Application::sceneResource.name + "_" + std::to_string(pushConstant.spp) + filename;
 	inputBuffer_diff.save(samplePath + "/diff.bin");
 	inputBuffer_spec.save(samplePath + "/spec.bin");
 	normalBuffer.save(samplePath + "/normal.bin");

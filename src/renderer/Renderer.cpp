@@ -6,6 +6,7 @@
 #include "FzbPathGuidingRenderer/FzbPathGuiding.h"
 #include "NPMPathGuiding/NPMPathGuiding.h"
 #include "PathTracing_KPCNNDenoising/PathTracing_KPCNNDenoising.h"
+#include "ZhiHuCode/ZhiHuCode.h"
 
 enum FzbRendererType {
 	FZB_RENDERER_FORWARD,
@@ -17,6 +18,7 @@ enum FzbRendererType {
 	FZB_FEATURE_COMPONENT_SVO_PG_DEBUG,
 	FZB_RENDERER_FZB_PATH_GUIDING,
 	FZB_RENDERER_PATH_TRACING_KPCNN_DENOISING,
+	FZB_ZHIHU_CODE,
 };
 std::map<std::string, FzbRendererType> RendererTypeMap{
 	{ "Forward", FZB_RENDERER_FORWARD },
@@ -26,6 +28,7 @@ std::map<std::string, FzbRendererType> RendererTypeMap{
 	{ "NPMPathGuiding", FZB_RENDERER_NPM_PATH_GUIDING },
 	{ "FzbPathGuiding", FZB_RENDERER_FZB_PATH_GUIDING },
 	{ "PathTracing_KPCNNDenoising", FZB_RENDERER_PATH_TRACING_KPCNN_DENOISING },
+	{ "ZhiHuCode", FZB_ZHIHU_CODE },
 };
 
 std::shared_ptr<FzbRenderer::Renderer> FzbRenderer::createRenderer(RendererCreateInfo& createInfo) {
@@ -36,8 +39,9 @@ std::shared_ptr<FzbRenderer::Renderer> FzbRenderer::createRenderer(RendererCreat
 			case FZB_RENDERER_DEFERRED: return std::make_shared<DeferredRenderer>(createInfo.rendererNode);
 			case FZB_RENDERER_PATH_TRACING: return std::make_shared<PathTracingRenderer>(createInfo.rendererNode);
 			case FZB_RENDERER_FZB_PATH_GUIDING: return std::make_shared<FzbPathGuidingRenderer>(createInfo.rendererNode);
-			case FZB_RENDERER_NPM_PATH_GUIDING: return std::make_shared<NPMPathGuiding>(createInfo.rendererNode);
+			//case FZB_RENDERER_NPM_PATH_GUIDING: return std::make_shared<NPMPathGuiding>(createInfo.rendererNode);
 			case FZB_RENDERER_PATH_TRACING_KPCNN_DENOISING: return std::make_shared<PathTracing_KPCNNDenoising>(createInfo.rendererNode);
+			case FZB_ZHIHU_CODE: return std::make_shared<ZhiHuCode>(createInfo.rendererNode);
 		}
 		return nullptr;
 	}

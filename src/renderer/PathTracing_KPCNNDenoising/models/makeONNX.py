@@ -10,11 +10,11 @@ import os
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-#trainSetPath = 'C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/src/renderer/PathTracing_KPCNNDenoising/models_libtorch/train/'
-#samplePath = trainSetPath + 'staircase_32'
-#gtPath = trainSetPath + 'staircase_8192'
-#eval_data = dataSet.preprocess_input(samplePath, gtPath)
-eval_data = dataSet.preprocess_input("dataSet/eval/eval1.exr", "dataSet/eval/evalRef1.exr")
+trainSetPath = 'C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/src/renderer/PathTracing_KPCNNDenoising/models_libtorch/train/'
+samplePath = trainSetPath + 'staircase_32_1'
+gtPath = trainSetPath + 'staircase_8192_1'
+eval_data = dataSet.preprocess_input(samplePath, gtPath)
+#eval_data = dataSet.preprocess_input("dataSet/eval/eval1.exr", "dataSet/eval/evalRef1.exr")
 input_channelCount = eval_data['input_diff'].shape[-1]
 diffuseNet = model.KPCNN(input_channelCount).to(device)
 specularNet = model.KPCNN(input_channelCount).to(device)
@@ -29,8 +29,8 @@ assert os.path.exists(weights_path), "file: '{}' dose not exist.".format(weights
 specularNet.load_state_dict(torch.load(weights_path))
 specularNet.eval()
 
-dummy_diff = torch.randn(1, input_channelCount, 256, 256, device=device)
-dummy_spec = torch.randn(1, input_channelCount, 256, 256, device=device)
+dummy_diff = torch.randn(1, input_channelCount, 512, 512, device=device)
+dummy_spec = torch.randn(1, input_channelCount, 512, 512, device=device)
 
 dynamic_axes = {
     'input':  {0: 'batch', 2: 'height', 3: 'width'},

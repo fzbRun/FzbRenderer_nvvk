@@ -42,7 +42,7 @@ std::vector<char> FzbRenderer::Model::loadModelData(const std::string& onnxPath,
 
     config->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE, 1ULL << 30);
     //if (builder->platformHasFastFp16()) config->setFlag(nvinfer1::BuilderFlag::kFP16);
-    config->setFlag(setting.precision);
+    if(setting.precision != -1)config->setFlag((nvinfer1::BuilderFlag)setting.precision);
 
     bool hasDynamicInput = false;
     auto* profile = builder->createOptimizationProfile();
@@ -147,7 +147,6 @@ FzbRenderer::Model::Model(ModelCreateInfo createInfo) {
     model.context.reset(model.engine->createExecutionContext());
     if (!model.context) throw std::runtime_error("Failed to create execution context");
 
-    //暂时不考虑动态output shape
     int nbTensors = model.engine->getNbIOTensors();
     for (int i = 0; i < nbTensors; ++i) {
         const char* tensorName = model.engine->getIOTensorName(i);
@@ -186,7 +185,6 @@ void FzbRenderer::Model::infer(std::vector<InputTensorInfo> inputInfos, cudaStre
             throw std::runtime_error("Failed to set tensor address: " + inputInfo.name);
     }
 
-    //暂时不考虑动态output shape
     int nbTensors = model.engine->getNbIOTensors();
     for (auto& [name, dPtr] : outputTensors) {
         if (!model.context->setOutputTensorAddress(name.c_str(), dPtr))

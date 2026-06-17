@@ -24,17 +24,18 @@ struct TrtModel {
 };
 struct ModelCreateInfo {
 	std::string enginePath;
-	nvinfer1::BuilderFlag precision = nvinfer1::BuilderFlag::kFP16;
+	//nvinfer1::BuilderFlag precision = nvinfer1::BuilderFlag::kFP16;
+	int precision = -1;
 
 	uint32_t inputShape_min[4] = { 1, 1, 1, 1 };	//N C H W
-	uint32_t inputShape_opt[4] = { 1, 3, 224, 224 };	//N C H W
-	uint32_t inputShape_max[4] = { 1, 3, 1024, 1024 };	//N C H W
+	uint32_t inputShape_opt[4] = { 1, 3, 224, 224 };
+	uint32_t inputShape_max[4] = { 1, 3, 1024, 1024 };
 	uint32_t outputShape[4] = { 1, 3, 224, 224 };
 };
 struct InputTensorInfo {
 	std::string name;
 	void* inputTensor;			//device point
-	std::vector<int> shape;		//batch channels height width;
+	std::vector<int> shape;		//N C H W
 };
 
 class Model {

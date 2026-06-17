@@ -6,10 +6,10 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print(device)
 
 mode = 'KPCN'
-recon_kernel_size = 21
+recon_kernel_size = 9   #21
 L = 9
 kernel_size = 5
-hidden_channels = 100
+hidden_channels = 50    #100
 
 permutation = [0, 3, 1, 2]
 
@@ -40,3 +40,4 @@ class KPCNN(nn.Module):
     def forward(self, x):
         logits = self.net(x)
         return F.softmax(logits, dim=1)
+        #return self.net(x)

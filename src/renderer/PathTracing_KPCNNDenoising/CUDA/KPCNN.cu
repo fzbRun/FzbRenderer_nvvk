@@ -36,11 +36,11 @@ KPCNNDenoiser::KPCNNDenoiser(KPCNNDenoiser_CreateInfo createInfo) {
 	std::string enginePath = FzbRenderer::getProjectRootDir().string() + "src/renderer/PathTracing_KPCNNDenoising/models/kpcnn_diffuse.engine";
 	FzbRenderer::ModelCreateInfo modelCreateInfo = {
 		enginePath,                                           // enginePath
-		nvinfer1::BuilderFlag::kFP16,                         // precision
+		-1,														// precision
 		{1, 27, setting.imageSize.height, setting.imageSize.width}, // inputShape_min
 		{1, 27, setting.imageSize.height, setting.imageSize.width}, // inputShape_opt
 		{1, 27, setting.imageSize.height, setting.imageSize.width}, // inputShape_max
-		{1, 21 * 21, setting.imageSize.height, setting.imageSize.width} // outputShape
+		{1, KERNEL_SIZE * KERNEL_SIZE, setting.imageSize.height, setting.imageSize.width} // outputShape
 	};
 	KPCNN_diff = std::move(FzbRenderer::Model(modelCreateInfo));
 
@@ -116,9 +116,9 @@ __global__ void denoisingCuda(
 
 	float3 pixelIrradiance = make_float3(0.0f), pixelSpecular = make_float3(0.0f);
 	for (int y = 0; y < kernelSize; ++y) {
-		uint neighborPixelIndexY = threadIndexY - halo + y;
+		int neighborPixelIndexY = threadIndexY - halo + y;
 		for (int x = 0; x < kernelSize; ++x) {
-			uint neighborPixelIndexX = threadIndexX - halo + x;
+			int neighborPixelIndexX = threadIndexX - halo + x;
 			uint groupNeighborPixelDataIndex = (neighborPixelIndexY - groupNeighborPixelStartIndex.y) * smemWidth +
 				(neighborPixelIndexX - groupNeighborPixelStartIndex.x);
 			float3 neighborPixelIrradiance = groupImageIrradiance[groupNeighborPixelDataIndex];
@@ -126,6 +126,7 @@ __global__ void denoisingCuda(
 
 			//kernel数组是[1, C, H, W]形式的，所有像素的第i个核元素连续存储
 			uint kernelIndex = (y * kernelSize + x) * imageWidth * imageHeight + pixelIndex;
+			
 			//float kernelValue_diff = exp(kernel_diff[kernelIndex]) / sumWeight_diff;
 			//float kernelValue_spec = exp(kernel_spec[kernelIndex]) / sumWeight_spec;
 			float kernelValue_diff = kernel_diff[kernelIndex];
@@ -161,16 +162,15 @@ void KPCNNDenoiser::denoising(uint64_t waitTimeline) {
 
 	uint outputSize = KPCNN_diff.outputTensorSizes["kernel_weights"];
 	uint imageSize = setting.imageSize.width * setting.imageSize.height;
-	uint kernelSize = sqrt(outputSize / imageSize);
+	uint kernelSize = KERNEL_SIZE;
 
 	dim3 blockSize = dim3(16, 16, 1);
 	dim3 gridSize = dim3((setting.imageSize.width + blockSize.x - 1) / blockSize.x, (setting.imageSize.height + blockSize.y - 1) / blockSize.y, 1);
 
 	uint groupSharedMemorySize = (blockSize.x + kernelSize / 2 * 2) * (blockSize.y + kernelSize / 2 * 2) * sizeof(float3) * 2;
 
-
 	denoisingCuda << <gridSize, blockSize, groupSharedMemorySize, stream >> > (
-		setting.imageSize.width, setting.imageSize.height, 21,
+		setting.imageSize.width, setting.imageSize.height, KERNEL_SIZE,
 		inputBuffer_diff, inputBuffer_spec,
 		kernel_diff, kernel_spec,
 		albedoBuffer,

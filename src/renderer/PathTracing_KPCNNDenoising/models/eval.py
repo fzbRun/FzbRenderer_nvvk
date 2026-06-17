@@ -110,12 +110,12 @@ def denoise(diffuseNet, specularNet, data, debug=False):
             print("LossSpec:", lossSpec)
             print("LossFinal:", lossFinal)
 def main():
-    #trainSetPath = 'C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/src/renderer/PathTracing_KPCNNDenoising/models_libtorch/train/'
-    #samplePath = trainSetPath + 'staircase_32'
-    #gtPath = trainSetPath + 'staircase_8192'
-    #eval_data = dataSet.preprocess_input(samplePath, gtPath)
-    eval_data = dataSet.preprocess_input("dataSet/eval/eval1.exr", "dataSet/eval/evalRef1.exr")
-    eval_data = dataSet.crop(eval_data, (1280//2, 720//2), 300)
+    trainSetPath = 'C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/src/renderer/PathTracing_KPCNNDenoising/models_libtorch/train/'
+    samplePath = trainSetPath + 'staircase_32_7'
+    gtPath = trainSetPath + 'staircase_8192_7'
+    eval_data = dataSet.preprocess_input(samplePath, gtPath)
+    #eval_data = dataSet.preprocess_input("dataSet/eval/eval3.exr", "dataSet/eval/evalRef3.exr")
+    #eval_data = dataSet.crop(eval_data, (1280//2, 720//2), 300)
 
     diffuseNet = model.KPCNN(eval_data['input_diff'].shape[-1]).to(device)
     specularNet = model.KPCNN(eval_data['input_spec'].shape[-1]).to(device)

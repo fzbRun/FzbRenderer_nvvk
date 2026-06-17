@@ -1,3 +1,4 @@
+/*
 #pragma once
 
 #include "renderer/PathTracingRenderer/hard/PathTracingRenderer.h"
@@ -47,3 +48,4 @@ private:
 }
 
 #endif
+*/

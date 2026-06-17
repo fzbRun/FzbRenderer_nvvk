@@ -196,7 +196,7 @@ void computeMain_PathTracing(uint2 threadIndex: SV_DispatchThreadID, uint2 group
             }
 
             if (notHitDiffuse) {
-                if (payload.material.roughness > 0.1f) { // diffuse
+                if (payload.material.roughness > 0.1f) {    // diffuse
                     notHitDiffuse = false;
                     isDiffuse = bounceDepth == 0;
             
@@ -211,6 +211,19 @@ void computeMain_PathTracing(uint2 threadIndex: SV_DispatchThreadID, uint2 group
                     accAlbedo2 += payload.material.albedo * payload.material.albedo;
                 }
             }
+            //if (bounceDepth == 0) {
+            //    isDiffuse = payload.material.roughness > 0.1f;
+            //
+            //    accNormal += payload.hitNormal;
+            //    accNormal2 += payload.hitNormal * payload.hitNormal;
+            //
+            //    float depth = length(payload.hitPos - sceneInfo.cameraPosition);
+            //    accDepth += depth;
+            //    accDepth2 += depth * depth;
+            //    
+            //    accAlbedo += payload.material.albedo;
+            //    accAlbedo2 += payload.material.albedo * payload.material.albedo;
+            //}
 
             getDirectionLight(payload, sceneInfo);
             BSDF_SAMPLE(payload);
@@ -230,6 +243,7 @@ void computeMain_PathTracing(uint2 threadIndex: SV_DispatchThreadID, uint2 group
 
             ray.Origin = payload.hitPos + 0.001f * payload.incidence;
             ray.Direction = payload.incidence;
+            payload.outgoing = -ray.Direction;
         }
 
         if (isDiffuse) {
@@ -331,6 +345,7 @@ void computeMain_PathTracing(uint2 threadIndex: SV_DispatchThreadID, uint2 group
     #ifndef NDEBUG
     DiffuseDebugImage[threadIndex] = float4(meanDiffuse, 1.0f);
     SpecularDebugImage[threadIndex] = float4(meanSpecular, 1.0f);
+
     float3 color = meanDiffuse + meanSpecular;
     ColorDebugImage[threadIndex] = float4(color, 1.0f);
 

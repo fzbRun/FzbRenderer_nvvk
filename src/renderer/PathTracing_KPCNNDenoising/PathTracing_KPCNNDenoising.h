@@ -56,7 +56,7 @@ private:
 	void pathTracing(VkCommandBuffer cmd);
 	void createInputBuffers(VkCommandBuffer cmd);
 
-	void saveSampleBuffers();
+	void saveSampleBuffers(std::string filename = "");
 	void loadSampleBuffers();
 	void bufferToImage();
 

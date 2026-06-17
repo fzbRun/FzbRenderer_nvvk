@@ -1,3 +1,4 @@
+/*
 #include "./NPMPathGuiding.h"
 #include <common/Application/Application.h>
 #include <nvgui/sky.hpp>
@@ -121,7 +122,7 @@ void NPMPathGuiding::render(VkCommandBuffer* cmdPtr) {
 		.signalSemaphoreInfoCount = 1, .pSignalSemaphoreInfos = &signalSemaphoreInfo,}} };
 	vkQueueSubmit2(Application::app->getQueue(0).queue, uint32_t(submitInfo.size()), submitInfo.data(), nullptr);
 
-	cudaPrograme.recognition(timeline);
+	cudaPrograme.infer(timeline);
 
 	VkSemaphoreSubmitInfo waitSemaphoreInfo{
 		.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
@@ -270,3 +271,4 @@ void NPMPathGuiding::pathGuiding(VkCommandBuffer cmd) {
 	vkCmdPushConstants2(cmd, &pushInfo);
 	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
 }
+*/

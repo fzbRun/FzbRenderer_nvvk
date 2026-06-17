@@ -93,11 +93,27 @@ torch.backends.cudnn.benchmark = True
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print(device)
 
-#trainSetPath = 'C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/src/renderer/PathTracing_KPCNNDenoising/models_libtorch/train/'
-#sampleFolders = [trainSetPath + 'staircase_32', trainSetPath + 'veach-ajar-2_32', trainSetPath + 'veach-mis_32']
-#gtFolders = [trainSetPath + 'staircase_8192', trainSetPath + 'veach-ajar-2_8192', trainSetPath + 'veach-mis_8192']
-#trainDataSet = KPCNNDataset(sampleFolders, gtFolders)
-trainDataSet = KPCNNDataset("dataSet/train")
+trainSetPath = 'C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/src/renderer/PathTracing_KPCNNDenoising/models_libtorch/train/'
+sampleFolders = [
+   trainSetPath + 'staircase_32_1', 
+   trainSetPath + 'staircase_32_2', 
+   trainSetPath + 'staircase_32_3',
+   trainSetPath + 'staircase_32_4',
+   trainSetPath + 'staircase_32_5',
+   trainSetPath + 'staircase_32_6',
+   trainSetPath + 'staircase_32_7',
+   ]
+gtFolders = [
+   trainSetPath + 'staircase_8192_1', 
+   trainSetPath + 'staircase_8192_2', 
+   trainSetPath + 'staircase_8192_3',
+   trainSetPath + 'staircase_8192_4',
+   trainSetPath + 'staircase_8192_5',
+   trainSetPath + 'staircase_8192_6',
+   trainSetPath + 'staircase_8192_7',
+   ]
+trainDataSet = KPCNNDataset(sampleFolders, gtFolders)
+#trainDataSet = KPCNNDataset("dataSet/train")
 dataloader = torch.utils.data.DataLoader(trainDataSet, batch_size=10, shuffle=True, num_workers=0)
 
 diffuseNet = model.KPCNN(trainDataSet[0]['input_diff'].shape[-1]).to(device)
@@ -163,7 +179,7 @@ for epoch in range(200):
         torch.save(diffuseNet.state_dict(), save_path_diff)
         torch.save(specularNet.state_dict(), save_path_spec)
 
-    print()
-    print(time.perf_counter() - t1)
+    #print()
+    #print(time.perf_counter() - t1)
 print('Finished Training')
 print('Took', time.time() - start, 'seconds.')
