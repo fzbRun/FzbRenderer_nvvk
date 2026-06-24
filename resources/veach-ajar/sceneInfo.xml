@@ -96,9 +96,11 @@
 		<mesh type="obj" id="Pot">
 			<filename value = "models/Mesh009.obj" />
 		</mesh>
+		<!--
 		<mesh type="obj" id="teapot">
 			<filename value = "models/teapot.obj" />
 		</mesh>
+		-->
 		<mesh type="obj" id="Landscape">
 			<filename value="models/Mesh008.obj" />
 		</mesh>
