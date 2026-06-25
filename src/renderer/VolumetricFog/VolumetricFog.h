@@ -3,6 +3,7 @@
 #include "renderer/Renderer.h"
 #include <common/Image/Image.h>
 #include "./VolumetricFogShaderio.h"
+#include <feature/ShadowMap/ShadowMap.h>
 
 #ifndef FZBRENDERER_VOLUMETRIC_FOG_H
 #define FZBRENDERER_VOLUMETRIC_FOG_H
@@ -13,8 +14,6 @@ enum class GBuffers_VolumetricFog{
 	eNormal,
 	eRendered,
 	eTonemapping,
-
-	eVoxelGridDebug,
 };
 
 class VolumetricFog : public Renderer {
@@ -46,15 +45,26 @@ private:
 
 	VkPushConstantsInfo pushInfo;
 
-	VkShaderEXT vertexShader_createGBuffer;
-	VkShaderEXT fragmentShader_createGBuffer;
+	VkShaderEXT vertexShader_createGBuffer{};
+	VkShaderEXT fragmentShader_createGBuffer{};
 
-	VkShaderEXT computeShader_createVolumetricFog;
+	VkShaderEXT computeShader_createVolumetricFog{};
 
-	VkShaderEXT computeShader_deferredRenderring;
+	VkShaderEXT computeShader_deferredRenderring{};
 
 	shaderio::VolumetricFogPushConstant pushConstant;
 	FzbRenderer::Image volumetricFogImage;
+
+	ShadowMap shadowMap;
+
+#ifndef NDEBUG
+	void renderVolumetricFogVoxelGrid(VkCommandBuffer cmd);
+
+	VkShaderEXT vertexShader_renderVoxelGrid{};
+	VkShaderEXT fragmentShader_renderVoxelGrid{};
+
+	bool showVolumetricFogVoxelGrid = false;
+#endif
 };
 }
 

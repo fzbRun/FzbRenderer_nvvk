@@ -85,28 +85,28 @@ void ShadowMap::uiRender() {
 		}
 		PE::end();
 
-		if (PE::begin()) {
-			if (PE::entry("Depth Restruct result", [&] {
-				static const ImVec4 highlightColor = ImVec4(118.f / 255.f, 185.f / 255.f, 0.f, 1.f);
-				ImVec4 selectedColor = showRestructResultMap ? highlightColor : ImGui::GetStyleColorVec4(ImGuiCol_Button);
-				ImVec4 hoveredColor = ImVec4(selectedColor.x * 1.2f, selectedColor.y * 1.2f, selectedColor.z * 1.2f, 1.f);
-				ImGui::PushStyleColor(ImGuiCol_Button, selectedColor);
-				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, hoveredColor);
-				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(5, 5));
-
-				bool result = ImGui::ImageButton("##but", (ImTextureID)gBuffers.getDescriptorSet(selectedShadowMapIndex),
-					ImVec2(100 * gBuffers.getAspectRatio(), 100));
-
-				ImGui::PopStyleColor(2);
-				ImGui::PopStyleVar();
-				return result;
-				}))
-			{
-				showRestructResultMap = !showRestructResultMap;
-				showShadowMap = false;
-			}
-		}
-		PE::end();
+		//if (PE::begin()) {
+		//	if (PE::entry("Depth Restruct result", [&] {
+		//		static const ImVec4 highlightColor = ImVec4(118.f / 255.f, 185.f / 255.f, 0.f, 1.f);
+		//		ImVec4 selectedColor = showRestructResultMap ? highlightColor : ImGui::GetStyleColorVec4(ImGuiCol_Button);
+		//		ImVec4 hoveredColor = ImVec4(selectedColor.x * 1.2f, selectedColor.y * 1.2f, selectedColor.z * 1.2f, 1.f);
+		//		ImGui::PushStyleColor(ImGuiCol_Button, selectedColor);
+		//		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, hoveredColor);
+		//		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(5, 5));
+		//
+		//		bool result = ImGui::ImageButton("##but", (ImTextureID)gBuffers.getDescriptorSet(selectedShadowMapIndex),
+		//			ImVec2(100 * gBuffers.getAspectRatio(), 100));
+		//
+		//		ImGui::PopStyleColor(2);
+		//		ImGui::PopStyleVar();
+		//		return result;
+		//		}))
+		//	{
+		//		showRestructResultMap = !showRestructResultMap;
+		//		showShadowMap = false;
+		//	}
+		//}
+		//PE::end();
 	}
 	ImGui::End();
 
@@ -115,7 +115,7 @@ void ShadowMap::uiRender() {
 #endif
 };
 void ShadowMap::resize(VkCommandBuffer cmd, const VkExtent2D& size) {}
-void ShadowMap::preRender(VkCommandBuffer cmd){}
+void ShadowMap::preRender(){}
 void ShadowMap::render(VkCommandBuffer cmd) {
 	if (shadowMaps.size() == 0) return;
 
@@ -138,6 +138,11 @@ void ShadowMap::render(VkCommandBuffer cmd) {
 	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_TRUE;
 	graphicsDynamicPipeline.depthStencilState.depthWriteEnable = VK_TRUE;
 	graphicsDynamicPipeline.depthStencilState.stencilTestEnable = VK_FALSE;
+
+	graphicsDynamicPipeline.rasterizationState.depthBiasEnable = VK_TRUE;
+	graphicsDynamicPipeline.rasterizationState.depthBiasConstantFactor = 1.5f;
+	graphicsDynamicPipeline.rasterizationState.depthBiasSlopeFactor = 1.0f;
+	graphicsDynamicPipeline.rasterizationState.depthBiasClamp = 0.0f;
 
 	for (int i = 0; i < shadowMaps.size(); ++i) {
 		shaderio::Light& light = Application::sceneResource.sceneInfo.lights[lightIndices[i]];

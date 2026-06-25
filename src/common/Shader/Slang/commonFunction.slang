@@ -236,6 +236,43 @@ float3 AABBSeparationVector(AABB a, AABB b)
 
     return posGap * posMask - negGap * negMask;
 }
+
+float hitAABB(float3 rayOrigin, float3 rayDirection, AABB box)
+{
+    float tEnter = 0.0;
+    float tExit = 1.0e38;
+
+    [unroll]
+    for (int i = 0; i < 3; ++i)
+    {
+        float dir = rayDirection[i];
+        float orig = rayOrigin[i];
+        float bMin = box.minimum[i];
+        float bMax = box.maximum[i];
+
+        if (abs(dir) < 1e-8)
+        {
+            if (orig < bMin || orig > bMax) return 0.0;
+        }
+        else
+        {
+            float t0 = (bMin - orig) / dir;
+            float t1 = (bMax - orig) / dir;
+            if (t0 > t1) { float tmp = t0; t0 = t1; t1 = tmp; }
+
+            tEnter = max(tEnter, t0);
+            tExit = min(tExit, t1);
+
+            if (tEnter > tExit)
+                return 0.0;
+        }
+    }
+
+    if (tExit < 0.0) return 0.0;
+
+    float startT = max(tEnter, 0.0);
+    return tExit - startT;
+}
 //------------------------------------------------SphericalFibonacci---------------------------------------------
 #define M_PHI 1.618033988749895
 //y axis is up, get worldPos

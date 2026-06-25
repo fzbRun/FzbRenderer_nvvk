@@ -165,13 +165,26 @@ void FzbRenderer::Scene::createSceneFromXML() {
 	//------------------------------------------------¹âÔ´---------------------------------------------------------------
 	if (pugi::xml_node lightsNode = sceneInfoNode.child("lights")) {
 		sceneInfo.useSky = false;
-		if (pugi::xml_node useSkyNode = lightsNode.child("useSky"))
+		sceneInfo.numLights = 0;
+		if (pugi::xml_node useSkyNode = lightsNode.child("useSky")) {
 			sceneInfo.useSky = std::string(useSkyNode.attribute("value").value()) == "true";
+
+			LightInstance lightInstance;
+			lightInstances.push_back(lightInstance);
+
+			shaderio::Light& light = lightInstances[lightInstances.size() - 1].light;
+			light.type = shaderio::Direction;
+			light.direction = -glm::normalize(sceneInfo.skySimpleParam.sunDirection);
+			light.pos = shaderio::float3(0.0f) - 10.0f * light.direction;
+
+			sceneInfo.lights[sceneInfo.numLights] = light;
+			++sceneInfo.numLights;
+		}
+			
 		sceneInfo.backgroundColor = glm::vec3(0.85f);
 		if (pugi::xml_node backgroudColorNode = lightsNode.child("backgroundColor"))
 			sceneInfo.backgroundColor = FzbRenderer::getRGBFromString(backgroudColorNode.attribute("value").value());
 
-		sceneInfo.numLights = 0;
 		for (pugi::xml_node lightNode : lightsNode.children("light")) {
 			if (sceneInfo.numLights > LIGHT_COUNT) break;
 

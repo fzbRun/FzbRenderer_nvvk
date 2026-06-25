@@ -41,6 +41,7 @@ public:
 
 class LightInstance : public InstanceSet {
 public:
+	LightInstance() = default;
 	LightInstance(pugi::xml_node& lightNode);
 	void copyInstanceInfo(const InstanceSet& instance);
 	shaderio::Light getLight(float time);

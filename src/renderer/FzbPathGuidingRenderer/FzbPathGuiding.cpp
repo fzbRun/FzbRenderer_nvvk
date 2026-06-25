@@ -160,7 +160,7 @@ void FzbPathGuidingRenderer::preRender() {
 	pushConstant.VGBVoxelSize = shaderio::float3(rasterVoxelization->setting.pushConstant.voxelSize_Count);
 	asManager.updateToplevelAS(cmd);
 
-	shadowMap->preRender(cmd);
+	shadowMap->preRender();
 	rasterVoxelization->preRender(cmd);
 	lightInject->preRender();
 	octree->preRender();
