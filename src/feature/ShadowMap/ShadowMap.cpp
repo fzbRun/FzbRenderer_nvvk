@@ -244,7 +244,7 @@ VkResult ShadowMap::createShadowMap() {
 	for (int i = 0; i < Application::sceneResource.sceneInfo.numLights; ++i) {
 		const shaderio::Light& light = Application::sceneResource.sceneInfo.lights[i];
 		if (light.type == shaderio::LightType::Non) break;
-		if (light.type == shaderio::LightType::Direction || light.type == shaderio::LightType::Point) {
+		if (light.type == shaderio::LightType::Direction) {
 			++lightCount;
 			lightIndices.push_back(i);
 		}

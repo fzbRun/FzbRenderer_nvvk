@@ -135,9 +135,18 @@ void FzbRenderer::Scene::createSceneFromXML() {
 		if(instanceSet.instanceID != "defaultInstanceID")
 			instanceIDToInstance.insert({ instanceSet.instanceID, {instanceSet.type, getInstanceSetSize(instanceSet.type)}});
 		addInstanceSet(instanceSet);
-		if(instanceSet.type == Static) staticInstanceCount += instanceSet.childInstances.size();
-		else if(instanceSet.type == PeriodMotion) periodInstanceCount += instanceSet.childInstances.size();
-		else if(instanceSet.type == RandomMotion) randomInstanceCount += instanceSet.childInstances.size();
+		if (instanceSet.type == Static) {
+			staticInstanceCount += instanceSet.childInstances.size();
+			++staticInstanceSetCount;
+		}
+		else if (instanceSet.type == PeriodMotion) {
+			periodInstanceCount += instanceSet.childInstances.size();
+			++periodInstanceSetCount;
+		}
+		else if (instanceSet.type == RandomMotion) {
+			randomInstanceCount += instanceSet.childInstances.size();
+			++randomInstanceSetCount;
+		}
 	}
 
 	uint32_t offset = 0;
@@ -168,17 +177,20 @@ void FzbRenderer::Scene::createSceneFromXML() {
 		sceneInfo.numLights = 0;
 		if (pugi::xml_node useSkyNode = lightsNode.child("useSky")) {
 			sceneInfo.useSky = std::string(useSkyNode.attribute("value").value()) == "true";
+			if (sceneInfo.useSky) {
+				LightInstance lightInstance;
+				lightInstances.push_back(lightInstance);
 
-			LightInstance lightInstance;
-			lightInstances.push_back(lightInstance);
+				shaderio::Light& light = lightInstances[lightInstances.size() - 1].light;
+				light.type = shaderio::Direction;
+				light.direction = -glm::normalize(sceneInfo.skySimpleParam.sunDirection);
+				light.pos = shaderio::float3(0.0f) - 10.0f * light.direction;
+				light.color = sceneInfo.skySimpleParam.sunColor;
+				light.intensity = sceneInfo.skySimpleParam.sunIntensity;
 
-			shaderio::Light& light = lightInstances[lightInstances.size() - 1].light;
-			light.type = shaderio::Direction;
-			light.direction = -glm::normalize(sceneInfo.skySimpleParam.sunDirection);
-			light.pos = shaderio::float3(0.0f) - 10.0f * light.direction;
-
-			sceneInfo.lights[sceneInfo.numLights] = light;
-			++sceneInfo.numLights;
+				sceneInfo.lights[sceneInfo.numLights] = light;
+				++sceneInfo.numLights;
+			}
 		}
 			
 		sceneInfo.backgroundColor = glm::vec3(0.85f);
@@ -186,7 +198,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 			sceneInfo.backgroundColor = FzbRenderer::getRGBFromString(backgroudColorNode.attribute("value").value());
 
 		for (pugi::xml_node lightNode : lightsNode.children("light")) {
-			if (sceneInfo.numLights > LIGHT_COUNT) break;
+			if (sceneInfo.numLights >= LIGHT_COUNT) break;
 
 			LightInstance lightInstance = LightInstance(lightNode);
 			lightInstances.push_back(lightInstance);
@@ -203,7 +215,9 @@ void FzbRenderer::Scene::createSceneFromXML() {
 
 			if (lightType == "point") {
 				light.type = shaderio::Point;
-				light.pos = glm::vec3(lightInstance.baseMatrix * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+				light.pos = FzbRenderer::getRGBFromString(lightNode.child("pos").attribute("value").value());
+				light.color = FzbRenderer::getRGBFromString(lightNode.child("emissive").attribute("value").value());
+				light.intensity = std::stof(lightNode.child("intensity").attribute("value").value());
 			}
 			else if (lightType == "spot") {
 				light.type = shaderio::Spot;
@@ -423,9 +437,9 @@ FzbRenderer::InstanceSet FzbRenderer::Scene::getInstanceSet(InstanceType type, u
 }
 uint32_t FzbRenderer::Scene::getInstanceSetSize(InstanceType type) {
 	switch (type) {
-		case Static: return staticInstanceCount; break;
-		case PeriodMotion: return periodInstanceCount; break;
-		case RandomMotion: return randomInstanceCount; break;
+		case Static: return staticInstanceSetCount; break;
+		case PeriodMotion: return periodInstanceSetCount; break;
+		case RandomMotion: return randomInstanceSetCount; break;
 		default: printf("实例没有相应类型"); return 0;
 	}
 

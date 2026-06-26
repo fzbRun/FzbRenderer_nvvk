@@ -43,14 +43,17 @@ public:
 	bool isStaticScene = true;
 	std::vector<FzbRenderer::MeshSet> meshSets;
 	uint32_t staticInstanceCount = 0;
+	uint32_t staticInstanceSetCount = 0;
 	std::vector<InstanceSet> staticInstanceSets;
 	uint32_t periodInstanceCount = 0;
+	uint32_t periodInstanceSetCount = 0;
 	std::vector<InstanceSet> periodInstanceSets;
 	uint32_t frameIndex = 0;
 	uint32_t periodFrameIndex = 100;
 	float time = 0.0f;
 
 	uint32_t randomInstanceCount = 0;
+	uint32_t randomInstanceSetCount = 0;
 	std::vector<InstanceSet> randomInstanceSets;
 
 	bool hasDynamicLight = false;
@@ -90,6 +93,7 @@ public:
 	std::vector<uint32_t> meshToBufferIndex;	//meshToBufferIndex[meshIndex] = bufferIndex，前向或延时渲染时按mesh渲染时使用
 	std::vector<uint32_t> meshIndexToMeshSetIndex;
 	std::map<std::string, std::pair<uint32_t, uint32_t>> instanceIDToInstance;
+	std::map<std::string, std::pair<uint32_t, uint32_t>> instanceIDToInstanceSet;
 	std::map<uint32_t, uint32_t> periodInstanceIndexToInstanceSetIndex;
 };
 

@@ -62,6 +62,7 @@ struct PSout
 {
     float4 albedo : SV_Target0;
     float4 normal : SV_Target1;
+    float4 emissive : SV_Target2;
 };
 
 [shader("pixel")]
@@ -71,5 +72,6 @@ PSout fragmentMain(VSout input)
     Instance instance = sceneInfo.instances[pushConst.instanceIndex];
     BSDFMaterial material = sceneInfo.materials[instance.materialIndex];
 
-    return { float4(material.albedo, 1.0f), float4(normalize(input.worldNormal), 1.0f) };
+    return { float4(material.albedo, 1.0f), float4(normalize(input.worldNormal), 1.0f), float4(material.emissive, 1.0f) };
+    //return { float4(material.albedo, 1.0f), float4(normalize(input.worldNormal), 1.0f), float4(0.0f, 0.0f, 0.0f, 1.0f) };
 }

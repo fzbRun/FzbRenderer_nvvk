@@ -8,7 +8,13 @@
 
 using namespace FzbRenderer;
 
-VolumetricFog::VolumetricFog(pugi::xml_node& rendererNode) {}
+VolumetricFog::VolumetricFog(pugi::xml_node& rendererNode) {
+	derivFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR;
+	derivFeatures.pNext = nullptr;
+	derivFeatures.computeDerivativeGroupQuads = VK_TRUE;
+	derivFeatures.computeDerivativeGroupLinear = VK_FALSE;
+	//Application::vkContextInitInfo.deviceExtensions.push_back({ VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME, &derivFeatures });
+}
 
 void VolumetricFog::init() {
 	VkSamplerCreateInfo samplerInfo = DEFAULT_VkSamplerCreateInfo;
@@ -29,7 +35,7 @@ void VolumetricFog::init() {
 
 	shadowMap.init({ 2048, 2048 });
 	
-	createVolumetricFogImage();
+	createVolumetricFogData();
 	createDescriptorSetLayout();
 	createDescriptorSet();
 	createPipelineLayout();
@@ -42,9 +48,11 @@ void VolumetricFog::clean() {
 	vkDestroyShaderEXT(device, vertexShader_createGBuffer, nullptr);
 	vkDestroyShaderEXT(device, fragmentShader_createGBuffer, nullptr);
 	vkDestroyShaderEXT(device, computeShader_createVolumetricFog, nullptr);
+	vkDestroyShaderEXT(device, computeShader_createLightAttenuationEstimator, nullptr);
 	vkDestroyShaderEXT(device, computeShader_deferredRenderring, nullptr);
 
 	volumetricFogImage.clean();
+	lightAttenuationEstimatorBuffer.clean();
 
 	shadowMap.clean();
 
@@ -66,13 +74,15 @@ void VolumetricFog::uiRender() {
 
 		bool change = ImGui::DragInt3("Volumetric Fog Voxel Grid Size", (int*)&pushConstant.fogVoxelGridSize);
 		if (change) {
-			createVolumetricFogImage();
+			createVolumetricFogData();
 			UIModified = true;
 		}
 
 		UIModified |= ImGui::DragFloat3("Volumetric Fog Voxel Size", (float*)&pushConstant.fogVoxelSize);
 
-		UIModified |= ImGui::DragFloat2("Extinction Coefficient", (float*)&pushConstant.extinctionCoefficient);
+		UIModified |= ImGui::DragFloat2("Extinction Coefficient", (float*)&pushConstant.extinctionCoefficient, 1.0f, 0.0f);
+		UIModified |= ImGui::DragFloat("Scatter Coefficient", (float*)&pushConstant.scatterCoefficient, 1.0f, 0.0f, 1.0f);
+		UIModified |= ImGui::DragFloat("Asymmetric Parameters", (float*)&pushConstant.asymmetricParameters, 1.0f, -1.0f, 1.0f);
 
 		UIModified |= ImGui::Checkbox("USE NEE", (bool*)&showVolumetricFogVoxelGrid);
 	}
@@ -127,6 +137,9 @@ void VolumetricFog::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 
 	imageWrite = staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eDepthImage, 0, 0, 1);
 	write.append(imageWrite, gBuffers.m_res.gBufferDepth);
+
+	imageWrite = staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eEmissiveImage, 0, 0, 1);
+	write.append(imageWrite, gBuffers.m_res.gBufferColor[(uint32_t)GBuffers_VolumetricFog::eEmissive]);
 
 	imageWrite = staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eRenderedImage, 0, 0, 1);
 	write.append(imageWrite, gBuffers.m_res.gBufferColor[(uint32_t)GBuffers_VolumetricFog::eRendered]);
@@ -187,7 +200,7 @@ void VolumetricFog::render(VkCommandBuffer* cmdPtr) {
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
 }
 
-void VolumetricFog::createVolumetricFogImage() {
+void VolumetricFog::createVolumetricFogData() {
 	volumetricFogImage.clean();
 
 	volumetricFogImage = FzbRenderer::Image("volumetricFog3DTexture");
@@ -204,6 +217,13 @@ void VolumetricFog::createVolumetricFogImage() {
 	colorImageCreateInfo.samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
 
 	volumetricFogImage.init(colorImageCreateInfo);
+
+	lightAttenuationEstimatorBuffer = FzbRenderer::Buffer("lightAttenuationEstimatorBuffer", false);
+	lightAttenuationEstimatorBuffer.init({
+		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+		.size = sizeof(shaderio::float3),
+		.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT,
+		});
 }
 void VolumetricFog::createDescriptorSetLayout() {
 	SCOPED_TIMER(__FUNCTION__);
@@ -228,8 +248,18 @@ void VolumetricFog::createDescriptorSetLayout() {
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eEmissiveImage,
+		.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+	bindings.addBinding({
 		.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eVolumetricFogImage,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eLightAttenuationEstimatorBuffer,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
@@ -278,6 +308,10 @@ void VolumetricFog::createDescriptorSet() {
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eDepthImage, 0, 0, 1);
 	write.append(gBuffersWrite, gBuffers.getDepthImageView(), VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, gBuffers.m_res.gBufferDepth.descriptor.sampler);
 
+	gBuffersWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eEmissiveImage, 0, 0, 1);
+	write.append(gBuffersWrite, gBuffers.getDescriptorImageInfo((uint32_t)GBuffers_VolumetricFog::eEmissive));
+
 	VkWriteDescriptorSet	volumetricFogImageWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eVolumetricFogImage, 0, 0, 1);
 	write.append(volumetricFogImageWrite, volumetricFogImage.image);
@@ -285,6 +319,10 @@ void VolumetricFog::createDescriptorSet() {
 	volumetricFogImageWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eVolumetricFogImage_sampler, 0, 0, 1);
 	write.append(volumetricFogImageWrite, volumetricFogImage.image);
+
+	VkWriteDescriptorSet lightAttenuationEstimatorBufferWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eLightAttenuationEstimatorBuffer, 0, 0, 1);
+	write.append(lightAttenuationEstimatorBufferWrite, lightAttenuationEstimatorBuffer.buffer);
 
 	VkWriteDescriptorSet	shadowMapWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eShadowMap, 0, 0, 1);
@@ -369,6 +407,16 @@ void VolumetricFog::compileAndCreateShaders() {
 	shaderInfo.pCode = shaderCode.pCode;
 	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_createVolumetricFog);
 	NVVK_DBG_NAME(computeShader_createVolumetricFog);
+
+	vkDestroyShaderEXT(device, computeShader_createLightAttenuationEstimator, nullptr);
+
+	shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	shaderInfo.nextStage = 0;
+	shaderInfo.pName = "computeMain_createLightAttenuationEstimator";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_createLightAttenuationEstimator);
+	NVVK_DBG_NAME(computeShader_createLightAttenuationEstimator);
 	//--------------------------------------------------------------------------------------
 	shaderSource = shaderPath / "deferredRendering.slang";
 	shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
@@ -413,15 +461,13 @@ void VolumetricFog::createGBuffers(VkCommandBuffer cmd) {
 
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, staticDescPack.getSetPtr(), 0, nullptr);
 
-	uint32_t numColorAttachments = (uint32_t)GBuffers_VolumetricFog::eNormal + 1;
+	uint32_t numColorAttachments = (uint32_t)GBuffers_VolumetricFog::eEmissive + 1;
 	std::vector<VkRenderingAttachmentInfo> colorAttachments(numColorAttachments);
-	for (int i = 0; i <= (uint32_t)GBuffers_VolumetricFog::eNormal; ++i) {
+	for (int i = 0; i <= (uint32_t)GBuffers_VolumetricFog::eEmissive; ++i) {
 		nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(i), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
 
 		colorAttachments[i] = DEFAULT_VkRenderingAttachmentInfo;
-		colorAttachments[i].clearValue = { .color = {Application::sceneResource.sceneInfo.backgroundColor.x,
-											Application::sceneResource.sceneInfo.backgroundColor.y,
-											Application::sceneResource.sceneInfo.backgroundColor.z, 1.0f} };
+		colorAttachments[i].clearValue = { .color = {0, 0, 0, 1.0f} };
 		colorAttachments[i].imageView = gBuffers.getColorImageView(i);
 	}
 
@@ -478,7 +524,7 @@ void VolumetricFog::createGBuffers(VkCommandBuffer cmd) {
 
 	vkCmdEndRendering(cmd);
 	
-	for (int i = 0; i <= (uint32_t)GBuffers_VolumetricFog::eNormal; ++i)
+	for (int i = 0; i <= (uint32_t)GBuffers_VolumetricFog::eEmissive; ++i)
 		nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(i), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
 	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getDepthImage(), VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
 }
@@ -488,12 +534,16 @@ void VolumetricFog::createVolumetricFog(VkCommandBuffer cmd) {
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, staticDescPack.getSetPtr(), 0, nullptr);
 
 	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
-	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createVolumetricFog);
-
 	vkCmdPushConstants2(cmd, &pushInfo);
 
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createVolumetricFog);
 	VkExtent3D groupSize = nvvk::getGroupCounts(VkExtent3D{pushConstant.fogVoxelGridSize.x, pushConstant.fogVoxelGridSize.y, pushConstant.fogVoxelGridSize.z}, VkExtent3D{4, 4, 4});
 	vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
+
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createVolumetricFog);
+	vkCmdDispatch(cmd, 1, 1, 1);
 }
 void VolumetricFog::deferredRenderring(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);

@@ -10,11 +10,37 @@
 	</sensor>
 	
 	<bsdfs>
+		<bsdf type="diffuse" id="directionalLightBSDF">
+			<albedo value="0.8, 0.8, 0.8, 1.0" />
+			<emissive value="1, 1, 1" />
+		</bsdf>
+		<bsdf type="diffuse" id="pointLightBSDF">
+			<albedo value="0.8, 0.8, 0.8, 1.0" />
+			<emissive value="1, 0, 0" />
+		</bsdf>
 	</bsdfs>
 	
 	<lights>
-		<useSky value = "true" />
+		<useSky value = "false" />
 		<backgroundColor value = "0.0, 0.0, 0.0" />
+		
+		<light type = "direction" id = "lightDirection">
+			<pos value="0, 5, 10" />
+			<direction value="0, -1, -2" />
+			<emissive value="1, 1, 1" />
+			<intensity value="10.0" />
+			<instanceRef id="directionLight" />
+		</light>
+
+		<!--
+		<light type = "point" id = "lightPoint">
+			<pos value="0, 0, 0" />
+			<emissive value="1, 0, 0" />
+			<intensity value="1.0" />
+			<instanceRef id="pointLight" />
+		</light>
+		-->
+
 		<light type = "area" id = "light0">
 			<shape type = "obj" value="models/bear_box_light.obj" />
 			<emissive value = "27.0, 22.0, 14.0" />
@@ -33,6 +59,25 @@
 		<instance>
 			<meshRef id = "bearBox"/>
 		</instance>
+		
+		<!--
+		<instance id="directionLight">
+			<meshRef id = "custom" type="sphere"/>
+			<materialRef id="directionalLightBSDF"/>
+			<transform>
+				<translate value="0, 5, 10" />
+			</transform>
+		</instance>
+
+
+		<instance id="pointLight">
+			<meshRef id = "custom" type="sphere"/>
+			<materialRef id="pointLightBSDF"/>
+			<transform>
+				<scale value="0.2, 0.2, 0.2" />
+			</transform>
+		</instance>
+		-->
 	</instances>
 </scene>
 

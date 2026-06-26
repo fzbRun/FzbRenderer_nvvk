@@ -8,13 +8,16 @@ NAMESPACE_SHADERIO_BEGIN()
 
 struct VolumetricFogPushConstant
 {
-	float3 fogStartPos = { -0.5f, 0.2f, -0.2f };
+	float3 fogStartPos = { -1.5f, 0.0f, -1.5f };
 	int frameIndex;
 	float3x3 normalMatrix;
-	uint3 fogVoxelGridSize = { 8, 8, 8 };
-	float3 fogVoxelSize = { 0.1f, 0.15f, 0.1f };
+	uint3 fogVoxelGridSize = { 16, 16, 16 };
+	float3 fogVoxelSize = { 0.2f, 0.2f, 0.2f };
 	int instanceIndex;
-	float2 extinctionCoefficient = { 4.0, 10.0 };
+	float2 extinctionCoefficient = { 0.0, 1.0 };
+	float scatterCoefficient = 0.7f;
+	float asymmetricParameters = 0.2;
+	float lightAttenuationStrength = 1.0f;
 	SceneInfo* sceneInfoAddress;
 	float4x4 lightVP;
 };
@@ -24,7 +27,9 @@ enum class StaticBindingPoints_VolumetricFog {
 	eAlbedoImage,
 	eNormalImage,
 	eDepthImage,
+	eEmissiveImage,
 	eVolumetricFogImage,
+	eLightAttenuationEstimatorBuffer,
 	eVolumetricFogImage_sampler,
 	eShadowMap,
 	eRenderedImage,

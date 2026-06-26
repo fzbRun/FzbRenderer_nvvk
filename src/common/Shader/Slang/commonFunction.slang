@@ -273,6 +273,33 @@ float hitAABB(float3 rayOrigin, float3 rayDirection, AABB box)
     float startT = max(tEnter, 0.0);
     return tExit - startT;
 }
+
+bool isHit(float3 startPos, float3 endPos, float3 gridMin, float3 gridMax, inout float tEnter, inout float tExit) {
+    tEnter = 1.0f;
+    tExit = 1.0f;
+
+    float3 rayDir = endPos - startPos;
+    float maxDist = length(rayDir);
+    if (maxDist < 1e-8) return false;
+    float3 dir = rayDir / maxDist;
+
+    float3 invDir;
+    invDir.x = (abs(dir.x) > 1e-8) ? rcp(dir.x) : 1e30;
+    invDir.y = (abs(dir.y) > 1e-8) ? rcp(dir.y) : 1e30;
+    invDir.z = (abs(dir.z) > 1e-8) ? rcp(dir.z) : 1e30;
+
+    float3 t0s = (gridMin - startPos) * invDir;
+    float3 t1s = (gridMax - startPos) * invDir;
+    float3 tmin3 = min(t0s, t1s);
+    float3 tmax3 = max(t0s, t1s);
+    tEnter = max(max(tmin3.x, tmin3.y), tmin3.z);
+    tExit = min(min(tmax3.x, tmax3.y), tmax3.z);
+    tEnter = max(tEnter, 0.0);
+    tExit = min(tExit, maxDist);
+    if (tEnter >= tExit) return false;
+
+    return true;
+}
 //------------------------------------------------SphericalFibonacci---------------------------------------------
 #define M_PHI 1.618033988749895
 //y axis is up, get worldPos

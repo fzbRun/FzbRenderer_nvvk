@@ -4,6 +4,7 @@
 #include <common/Image/Image.h>
 #include "./VolumetricFogShaderio.h"
 #include <feature/ShadowMap/ShadowMap.h>
+#include <common/Buffer/Buffer.h>
 
 #ifndef FZBRENDERER_VOLUMETRIC_FOG_H
 #define FZBRENDERER_VOLUMETRIC_FOG_H
@@ -12,6 +13,7 @@ namespace FzbRenderer {
 enum class GBuffers_VolumetricFog{
 	eAlbedo = 0,
 	eNormal,
+	eEmissive,
 	eRendered,
 	eTonemapping,
 };
@@ -31,7 +33,7 @@ public:
 	void render(VkCommandBuffer* cmd) override;
 
 private:
-	void createVolumetricFogImage();
+	void createVolumetricFogData();
 
 	void createDescriptorSetLayout() override;
 	void createDescriptorSet();
@@ -43,17 +45,21 @@ private:
 	void createVolumetricFog(VkCommandBuffer cmd);
 	void deferredRenderring(VkCommandBuffer cmd);
 
+	VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR derivFeatures = {};
+
 	VkPushConstantsInfo pushInfo;
 
 	VkShaderEXT vertexShader_createGBuffer{};
 	VkShaderEXT fragmentShader_createGBuffer{};
 
 	VkShaderEXT computeShader_createVolumetricFog{};
+	VkShaderEXT computeShader_createLightAttenuationEstimator{};
 
 	VkShaderEXT computeShader_deferredRenderring{};
 
 	shaderio::VolumetricFogPushConstant pushConstant;
 	FzbRenderer::Image volumetricFogImage;
+	FzbRenderer::Buffer lightAttenuationEstimatorBuffer;
 
 	ShadowMap shadowMap;
 
