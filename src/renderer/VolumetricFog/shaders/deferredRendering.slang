@@ -11,25 +11,30 @@
 [[vk::binding(StaticBindingPoints_VolumetricFog::eEmissiveImage)]] Texture2D<float4> emissiveImage;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eLightAttenuationEstimatorBuffer)]] StructuredBuffer<float3> lightAttenuationEstimatorBuffer;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogImage_sampler)]] Sampler3D<float4> volumetricFogImage;
-[[vk::binding(StaticBindingPoints_VolumetricFog::eShadowMap)]] Texture2D<float> shadowMap;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eShadowMap)]] Sampler2DShadow shadowMap;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eRenderedImage)]] RWTexture2D<float4> renderedImage;
 
 groupshared float3 groupLightAttenuationEstimator;
 
-bool getShadow(float4 worldPos) {
+float getShadow(float4 worldPos) {
     float4 lightMapNdcPos = mul(worldPos, pushConst.lightVP);
     lightMapNdcPos /= lightMapNdcPos.w;
 
-    uint2 shadowMapSize;
-    shadowMap.GetDimensions(shadowMapSize.x, shadowMapSize.y);
-    uint2 lightMapIndex = uint2(float2(lightMapNdcPos.x * 0.5f + 0.5f, (lightMapNdcPos.y * 0.5f + 0.5f)) * shadowMapSize);
-    float shadowDepth = shadowMap[lightMapIndex];
-    return lightMapNdcPos.z > shadowDepth;
+    //uint2 shadowMapSize;
+    //shadowMap.GetDimensions(shadowMapSize.x, shadowMapSize.y);
+    //uint2 lightMapIndex = uint2(float2(lightMapNdcPos.x * 0.5f + 0.5f, (lightMapNdcPos.y * 0.5f + 0.5f)) * shadowMapSize);
+    //float shadowDepth = shadowMap[lightMapIndex];
+    //return lightMapNdcPos.z > shadowDepth;
+
+    float2 screenPos = lightMapNdcPos.xy * 0.5f + 0.5f;
+    float shadow = shadowMap.SampleCmpLevel(screenPos, lightMapNdcPos.z, 0);
+    return shadow;
 }
 
-void getVolumetricFogScatter(float3 startPos, float3 endPos, uint randomSeed, out float3 L, out float3 attenuation) {
+void getVolumetricFogScatter(float3 startPos, float3 endPos, uint randomSeed, out float3 L, out float3 attenuation, out float3 attenuation2) {
     L = 0.0f;
     attenuation = 1.0f;
+    attenuation2 = 1.0f;
 
     float3 fogStartPos = pushConst.fogStartPos;
     float3 voxelSize = pushConst.fogVoxelSize;
@@ -116,19 +121,20 @@ void getVolumetricFogScatter(float3 startPos, float3 endPos, uint randomSeed, ou
                     lightPos = light.pos;
                 }
 
-                float fp = (1.0f - pushConst.asymmetricParameters * pushConst.asymmetricParameters) /
+                float fp = (1.0f - pushConst.phase * pushConst.phase) /
                            (4.0f * M_PI *
-                            pow((1 + pushConst.asymmetricParameters * pushConst.asymmetricParameters -
-                            2.0f * pushConst.asymmetricParameters * dot(-dir, lightDirection)), 1.5f));
+                            pow((1 + pushConst.phase * pushConst.phase -
+                            2.0f * pushConst.phase * dot(-dir, lightDirection)), 1.5f));
 
                 float tLightEnter, tLightExit;
                 isHit(lightPos, samplePoint, gridMin, gridMax, tLightEnter, tLightExit);
                 float lightDt = tLightExit - tLightEnter;
-                float3 activeSunColor = lightColor * lerp(1.0f, lightAttenuationEstimator, lightDt / gridLength);
+                if (lightIndex == 1) lightDt = max(lightDt - 0.1f, 0.0f);
 
-                if (lightIndex == 0 && getShadow(float4(samplePoint, 1.0f))) activeSunColor = 0.0f;
+                float3 activeSunColor = lightColor * lerp(1.0f, lightAttenuationEstimator, lightDt / gridLength) * pushConst.lightAttenuationStrength;
+                if (lightIndex == 0) activeSunColor *= getShadow(float4(samplePoint, 1.0f));
 
-                L += activeSunColor * fp * pushConst.scatterCoefficient * E / extinctionCoeff * (1.0f - exp(-extinctionCoeff * dt));
+                L += activeSunColor * fp * pushConst.scattering * E / extinctionCoeff * (1.0f - exp(-extinctionCoeff * dt));
             }
 
             E *= exp(-extinctionCoeff * dt);
@@ -149,6 +155,11 @@ void getVolumetricFogScatter(float3 startPos, float3 endPos, uint randomSeed, ou
     }
 
     attenuation = E;
+
+    float tLightEnter, tLightExit;
+    isHit(endPos - sceneInfo.lights[0].direction * 10.0f, endPos, gridMin, gridMax, tLightEnter, tLightExit);
+    float mainLightDt = tLightExit - tLightEnter;
+    attenuation2 = lerp(1.0f, lightAttenuationEstimator, mainLightDt / gridLength) * pushConst.lightAttenuationStrength;
 }
 
 [numthreads(16, 16, 1)]
@@ -172,17 +183,15 @@ void computeMain_deferredRendering(uint2 threadIndex: SV_DispatchThreadID, uint2
 
     uint randomSeed = xxhash32(uint3(pushConst.frameIndex, threadIndex));
 
-    float3 attenuation;
+    float3 attenuation, attenuation2;
     float3 L = 0.0f;
-    getVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, L, attenuation);
+    getVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, L, attenuation, attenuation2);
 
-    float shadow = 1.0f;
-    if (depth < 1.0f) {
-        if (getShadow(worldPos)) shadow = 0.0f;
-    } else {
+    if (depth >= 1.0f - 1e-30f) {
         renderedImage[threadIndex] = sceneInfo.useSky == 1 ? float4(renderedImage[threadIndex].xyz * attenuation + L, 1.0f) : float4(sceneInfo.backgroundColor * attenuation + L, 1.0f);
         return;
     }
+    float shadow = getShadow(worldPos);
 
     float3 albedo = albedoImage[threadIndex].xyz;
     float3 normal = normalImage[threadIndex].xyz;
@@ -197,9 +206,9 @@ void computeMain_deferredRendering(uint2 threadIndex: SV_DispatchThreadID, uint2
     float3 ambient = 0.1f * albedo;
     float3 diffuse = max(dot(lightDir, normal), 0.0f) * lightColor * albedo;
     float3 h = normalize(viewDir + lightDir);
-    float3 specular = pow(max(dot(h, normal), 0.0f), 8) * lightColor * max(dot(normal, lightDir), 0.0f);
+    float3 specular = pow(max(dot(h, normal), 0.0f), 32) * lightColor * max(dot(normal, lightDir), 0.0f);
 
     float3 emissive = emissiveImage[threadIndex].xyz;
 
-    renderedImage[threadIndex] = float4((ambient + (diffuse + specular) * shadow + emissive) * attenuation + L, 1.0f);
+    renderedImage[threadIndex] = float4((ambient + (diffuse + specular) * shadow * attenuation2 + emissive) * attenuation + L, 1.0f);
 }

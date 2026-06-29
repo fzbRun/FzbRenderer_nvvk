@@ -183,7 +183,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 
 				shaderio::Light& light = lightInstances[lightInstances.size() - 1].light;
 				light.type = shaderio::Direction;
-				light.direction = -glm::normalize(sceneInfo.skySimpleParam.sunDirection);
+				light.direction = glm::normalize(-sceneInfo.skySimpleParam.sunDirection);
 				light.pos = shaderio::float3(0.0f) - 10.0f * light.direction;
 				light.color = sceneInfo.skySimpleParam.sunColor;
 				light.intensity = sceneInfo.skySimpleParam.sunIntensity;
@@ -214,7 +214,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 				light.intensity = std::stof(intensityNode.attribute("value").value());
 
 			if (lightType == "point") {
-				light.type = shaderio::Point;
+				light.type = shaderio::LightType::Point;
 				light.pos = FzbRenderer::getRGBFromString(lightNode.child("pos").attribute("value").value());
 				light.color = FzbRenderer::getRGBFromString(lightNode.child("emissive").attribute("value").value());
 				light.intensity = std::stof(lightNode.child("intensity").attribute("value").value());

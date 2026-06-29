@@ -5,10 +5,15 @@
 #include <common/Shader/Shader.h>
 #include <nvvk/default_structs.hpp>
 #include <nvgui/property_editor.hpp>
-#include <nvvk/default_structs.hpp>
 #include <nvvk/compute_pipeline.hpp>
 
 using namespace FzbRenderer;
+
+ShadowMap::ShadowMap() {
+	//Application::vkContextInitInfo.deviceExtensions.push_back({ VK_NV_VIEWPORT_ARRAY2_EXTENSION_NAME });
+	//Application::vkContextInitInfo.deviceExtensions.push_back({ VK_KHR_MULTIVIEW_EXTENSION_NAME });
+	//Application::vkContextInitInfo.deviceExtensions.push_back({ VK_NV_VIEWPORT_SWIZZLE_EXTENSION_NAME });
+}
 
 void ShadowMap::init(ShadowMapCreateInfo createInfo) {
 	this->setting = createInfo;
@@ -23,28 +28,21 @@ void ShadowMap::init(ShadowMapCreateInfo createInfo) {
 }
 void ShadowMap::clean() {
 	Feature::clean();
-	for (int i = 0; i < shadowMaps.size(); ++i) Application::allocator.destroyImage(shadowMaps[i]);
+	for (int i = 0; i < shadowMaps.size(); ++i) shadowMaps[i].clean();
 
 	VkDevice device = Application::app->getDevice();
 	vkDestroyShaderEXT(device, vertexShader_directionLight, nullptr);
 	vkDestroyShaderEXT(device, fragmentShader_directionLight, nullptr);
 
 	vkDestroyShaderEXT(device, vertexShader_pointLight, nullptr);
-	vkDestroyShaderEXT(device, geometryShader_pointLight, nullptr);
 	vkDestroyShaderEXT(device, fragmentShader_pointLight, nullptr);
 
 #ifndef NDEBUG
-	if(descriptorPool) vkFreeDescriptorSets(device, descriptorPool, uint32_t(uiDescriptorSets.size()), uiDescriptorSets.data());
-	vkDestroyDescriptorSetLayout(device, descLayout, nullptr);
-	uiDescriptorSets.clear();
-	descLayout = VK_NULL_HANDLE;
-
-	for (const VkImageView& view : uiImageViews) vkDestroyImageView(device, view, nullptr);
-
 	vkDestroyShaderEXT(device, computeShader_debug, nullptr);
 #endif
 }
 void ShadowMap::uiRender() {
+	return;
 #ifndef NDEBUG
 	uint32_t mapCount = shadowMaps.size();
 	if (mapCount == 0) return;
@@ -71,8 +69,8 @@ void ShadowMap::uiRender() {
 				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, hoveredColor);
 				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(5, 5));
 	
-				bool result = ImGui::ImageButton("##but", (ImTextureID)uiDescriptorSets[selectedShadowMapIndex],
-					ImVec2(100, 100));		//ÕâÀïÓ¦¸ÃÓÐÒ»¸ö½µ²ÉÑù
+				bool result = ImGui::ImageButton("##but", (ImTextureID)shadowMaps[selectedShadowMapIndex].uiDescriptorSet,
+					ImVec2(100, 100));		//ï¿½ï¿½ï¿½ï¿½Ó¦ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 	
 				ImGui::PopStyleColor(2);
 				ImGui::PopStyleVar();
@@ -110,7 +108,7 @@ void ShadowMap::uiRender() {
 	}
 	ImGui::End();
 
-	if (showShadowMap) Application::viewportImage = uiDescriptorSets[selectedShadowMapIndex];
+	if (showShadowMap) Application::viewportImage = shadowMaps[selectedShadowMapIndex].uiDescriptorSet;
 	if (showRestructResultMap) Application::viewportImage = gBuffers.getDescriptorSet(selectedShadowMapIndex);
 #endif
 };
@@ -133,18 +131,24 @@ void ShadowMap::render(VkCommandBuffer cmd) {
 
 	graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
 	graphicsDynamicPipeline.inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_FRONT_BIT;	//ÕýÃæÌÞ³ý
+	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_FRONT_BIT;
 	graphicsDynamicPipeline.rasterizationState.polygonMode = VK_POLYGON_MODE_FILL;
 	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_TRUE;
 	graphicsDynamicPipeline.depthStencilState.depthWriteEnable = VK_TRUE;
 	graphicsDynamicPipeline.depthStencilState.stencilTestEnable = VK_FALSE;
 
-	graphicsDynamicPipeline.rasterizationState.depthBiasEnable = VK_TRUE;
-	graphicsDynamicPipeline.rasterizationState.depthBiasConstantFactor = 1.5f;
-	graphicsDynamicPipeline.rasterizationState.depthBiasSlopeFactor = 1.0f;
-	graphicsDynamicPipeline.rasterizationState.depthBiasClamp = 0.0f;
-
 	for (int i = 0; i < shadowMaps.size(); ++i) {
+		VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
+		depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
+		depthAttachment.imageView = shadowMaps[i].image.descriptor.imageView;
+
+		VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
+		renderingInfo.renderArea = { {0, 0}, setting.resolution };
+		renderingInfo.colorAttachmentCount = 0;
+		renderingInfo.pColorAttachments = nullptr;
+		renderingInfo.pDepthAttachment = &depthAttachment;
+
 		shaderio::Light& light = Application::sceneResource.sceneInfo.lights[lightIndices[i]];
 		VkShaderEXT vertexShader{}, fragmentShader{};
 		if (light.type == shaderio::LightType::Direction) {
@@ -154,43 +158,86 @@ void ShadowMap::render(VkCommandBuffer cmd) {
 			orthoMatrix[1][1] *= -1;
 			pushConstant.lightVP = orthoMatrix * viewMatrix;
 
+			graphicsDynamicPipeline.rasterizationState.depthBiasEnable = VK_TRUE;
+			graphicsDynamicPipeline.rasterizationState.depthBiasConstantFactor = 1.5f;
+			graphicsDynamicPipeline.rasterizationState.depthBiasSlopeFactor = 1.0f;
+			graphicsDynamicPipeline.rasterizationState.depthBiasClamp = 0.0f;
+			graphicsDynamicPipeline.cmdSetViewportAndScissor(cmd, setting.resolution);
+
+			//VkViewportSwizzleNV swizzle = {
+			//	VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_X_NV,  // r
+			//	VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_Y_NV,  // g
+			//	VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_Z_NV,  // b
+			//	VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_W_NV   // a
+			//};
+			//vkCmdSetViewportSwizzleNV(cmd, 0, 1, &swizzle);
+
 			vertexShader = vertexShader_directionLight;
 			fragmentShader = fragmentShader_directionLight;
+
+			nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(i), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL });
+			nvvk::cmdImageMemoryBarrier(cmd, { shadowMaps[i].image.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+				{ VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
 		}
-		else if (light.type == shaderio::LightType::Point) {}
+		else if (light.type == shaderio::LightType::Point) {
+			shaderio::float4x4 viewMatrix = glm::lookAt(light.pos, light.pos + shaderio::float3(0.0f, 0.0f, 1.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+			float near_plane = 0.1f, far_plane = 20.0f;
+			glm::mat4 projMatrix = glm::perspectiveRH_ZO(glm::radians(90.0f), 1.0f, far_plane, near_plane);
+			//projMatrix[1][1] *= -1;
+			pushConstant.lightVP = projMatrix * viewMatrix;
 
-		nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(i), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL });
-		nvvk::cmdImageMemoryBarrier(cmd, { shadowMaps[i].image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-			{ VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
+			VkViewport viewports[6];
+			VkRect2D scissors[6];
+			for (int j = 0; j < 6; j++){
+				viewports[j].x = 0;
+				viewports[j].y = 0;
+				viewports[j].width = setting.resolution.width;
+				viewports[j].height = setting.resolution.height;
+				viewports[j].minDepth = 0.0f;
+				viewports[j].maxDepth = 1.0f;
 
-#ifndef NDEBUG
-		VkRenderingAttachmentInfo colorAttachment = DEFAULT_VkRenderingAttachmentInfo;
-		colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-		colorAttachment.imageView = gBuffers.getColorImageView(i);
-		colorAttachment.clearValue = { .color = {0.0f, 0.0f, 0.0f, 0.0f} };
-#endif
-		VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
-		depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-		depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
-		depthAttachment.imageView = shadowMaps[i].descriptor.imageView;
+				scissors[j].offset = { 0, 0 };
+				scissors[j].extent = setting.resolution;
+			}
+			vkCmdSetViewport(cmd, 0, 6, viewports);
+			vkCmdSetScissor(cmd, 0, 6, scissors);
 
-		VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
-		renderingInfo.renderArea = { {0, 0}, setting.resolution };
-#ifndef NDEBUG
-		renderingInfo.colorAttachmentCount = 1;
-		renderingInfo.pColorAttachments = &colorAttachment;
-#else
-		renderingInfo.colorAttachmentCount = 0;
-		renderingInfo.pColorAttachments = nullptr;
-#endif
-		renderingInfo.pDepthAttachment = &depthAttachment;
+			VkViewportSwizzleNV swizzles[6] = {
+				{ VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_Z_NV, VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_Y_NV,
+				  VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_W_NV, VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_X_NV }, // +X
+				{ VK_VIEWPORT_COORDINATE_SWIZZLE_NEGATIVE_Z_NV, VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_Y_NV,
+				  VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_W_NV, VK_VIEWPORT_COORDINATE_SWIZZLE_NEGATIVE_X_NV }, // -X
+				{ VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_X_NV, VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_Z_NV,
+				  VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_W_NV, VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_Y_NV }, // +Y
+				{ VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_X_NV, VK_VIEWPORT_COORDINATE_SWIZZLE_NEGATIVE_Z_NV,
+				  VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_W_NV, VK_VIEWPORT_COORDINATE_SWIZZLE_NEGATIVE_Y_NV }, // -Y
+				{ VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_X_NV, VK_VIEWPORT_COORDINATE_SWIZZLE_NEGATIVE_Y_NV,
+				  VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_W_NV, VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_Z_NV }, // +Z
+				{ VK_VIEWPORT_COORDINATE_SWIZZLE_NEGATIVE_X_NV, VK_VIEWPORT_COORDINATE_SWIZZLE_NEGATIVE_Y_NV,
+				  VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_W_NV, VK_VIEWPORT_COORDINATE_SWIZZLE_NEGATIVE_Z_NV }  // -Z
+			};
+			vkCmdSetViewportSwizzleNV(cmd, 0, 6, swizzles);
+
+			graphicsDynamicPipeline.rasterizationState.depthClampEnable = VK_TRUE;
+			graphicsDynamicPipeline.depthStencilState.depthCompareOp = VK_COMPARE_OP_GREATER;
+
+			depthAttachment.imageView = shadowMaps[i].imageViews[0];	//VK_IMAGE_VIEW_TYPE_2D_ARRAY
+			depthAttachment.clearValue.depthStencil = { 0.0f, 0 };
+			renderingInfo.layerCount = 6;
+			renderingInfo.viewMask = 0x3F;
+
+			nvvk::cmdImageMemoryBarrier(cmd, { shadowMaps[i].image.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+				{ VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, 6} });
+
+			vertexShader = vertexShader_pointLight;
+			fragmentShader = fragmentShader_pointLight;
+		}
 
 		vkCmdBeginRendering(cmd, &renderingInfo);
 
 		//vkCmdSetDepthBias(cmd, 1.5f, 0.0f, 1.0f);
 		//vkCmdSetDepthBiasEnable(cmd, VK_TRUE);
 		graphicsDynamicPipeline.cmdApplyAllStates(cmd);
-		graphicsDynamicPipeline.cmdSetViewportAndScissor(cmd, setting.resolution);
 		graphicsDynamicPipeline.cmdBindShaders(cmd, { .vertex = vertexShader, .fragment = fragmentShader });
 
 		VkVertexInputBindingDescription2EXT bindingDescription{};
@@ -217,8 +264,18 @@ void ShadowMap::render(VkCommandBuffer cmd) {
 
 		vkCmdEndRendering(cmd);
 
+		if (light.type == shaderio::LightType::Point) {
+			VkViewportSwizzleNV identitySwizzle = {
+				VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_X_NV,
+				VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_Y_NV,
+				VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_Z_NV,
+				VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_W_NV
+			};
+			vkCmdSetViewportSwizzleNV(cmd, 0, 1, &identitySwizzle);
+		}
+
 		nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(i), VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
-		nvvk::cmdImageMemoryBarrier(cmd, { shadowMaps[i].image, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+		nvvk::cmdImageMemoryBarrier(cmd, { shadowMaps[i].image.image, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
 			{ VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
 	}
 }
@@ -227,35 +284,91 @@ void ShadowMap::postProcess(VkCommandBuffer cmd) {
 }
 
 VkResult ShadowMap::createShadowMap() {
-	//VkSampler pointSampler{};
+	int lightCount = 0; lightIndices.resize(0);
+	for (int i = 0; i < Application::sceneResource.sceneInfo.numLights; ++i) {
+		const shaderio::Light& light = Application::sceneResource.sceneInfo.lights[i];
+		if (light.type == shaderio::LightType::Non) break;
+		if (light.type == shaderio::LightType::Direction) {	// || light.type == shaderio::LightType::Point
+			++lightCount;
+			lightIndices.push_back(i);
+		}
+	}
+	shadowMaps.resize(lightCount);
+	if (lightCount == 0) return VK_SUCCESS;
+
 	VkSamplerCreateInfo sampleCreateInfo = {
 		.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
 		.magFilter = VK_FILTER_NEAREST,
 		.minFilter = VK_FILTER_NEAREST,
 		.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
 		.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-		.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
-	};
-	//NVVK_CHECK(Application::samplerPool.acquireSampler(pointSampler, sampleCreateInfo));
-	//NVVK_DBG_NAME(pointSampler);
+		.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+		.compareEnable = VK_TRUE,
+		.compareOp = VK_COMPARE_OP_LESS,
+		.maxLod = 0.0f,
+		.unnormalizedCoordinates = VK_FALSE
 
-	
-	int lightCount = 0; lightIndices.resize(0);
-	for (int i = 0; i < Application::sceneResource.sceneInfo.numLights; ++i) {
-		const shaderio::Light& light = Application::sceneResource.sceneInfo.lights[i];
-		if (light.type == shaderio::LightType::Non) break;
-		if (light.type == shaderio::LightType::Direction) {
-			++lightCount;
-			lightIndices.push_back(i);
+	};
+
+	for (int i = 0; i < lightCount; ++i) {
+		sampleCreateInfo.compareOp = VK_COMPARE_OP_LESS;
+
+		std::string shadowMapName = "";
+		FzbRenderer::ImageCreateInfo colorImageCreateInfo = FzbRenderer::createDefaultImageCreateInfo();
+		shaderio::LightType lightType = (shaderio::LightType)Application::sceneResource.sceneInfo.lights[lightIndices[i]].type;
+		if (lightType == shaderio::LightType::Direction) {
+			shadowMapName = "shadowMap_direction_" + std::to_string(i);
+			
+			colorImageCreateInfo.info.extent = { setting.resolution.width, setting.resolution.height, 1 };
+			colorImageCreateInfo.info.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT
+				| VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+
+			colorImageCreateInfo.viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+
+			colorImageCreateInfo.viewInfo.subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .levelCount = 1, .layerCount = 1 };
 		}
+		else if (lightType == shaderio::LightType::Point) {
+			sampleCreateInfo.compareOp = VK_COMPARE_OP_GREATER;
+
+			shadowMapName = "shadowMap_Point_" + std::to_string(i);
+
+			colorImageCreateInfo = FzbRenderer::createDefaultImageCreateInfo(2);
+
+			colorImageCreateInfo.info.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+			colorImageCreateInfo.info.arrayLayers = 6;
+
+			colorImageCreateInfo.viewInfos[0].format = colorImageCreateInfo.info.format;
+			colorImageCreateInfo.viewInfos[0].viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;	//ç”¨äºŽæ¸²æŸ“
+			colorImageCreateInfo.viewInfos[0].subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 6 };
+			colorImageCreateInfo.viewInfos[1].format = colorImageCreateInfo.info.format;
+			colorImageCreateInfo.viewInfos[1].viewType = VK_IMAGE_VIEW_TYPE_CUBE;	//ç”¨äºŽé‡‡æ ·
+			colorImageCreateInfo.viewInfos[1].subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 6 };
+
+			colorImageCreateInfo.viewInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;		//ç”¨äºŽé‡‡æ ·
+			colorImageCreateInfo.viewInfo.subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 6 };
+		}
+		shadowMaps[i] = FzbRenderer::Image(shadowMapName);
+		
+		colorImageCreateInfo.info.imageType = VK_IMAGE_TYPE_2D;
+		colorImageCreateInfo.info.extent = { setting.resolution.width, setting.resolution.height, 1 };
+		colorImageCreateInfo.info.format = VK_FORMAT_D32_SFLOAT;
+		colorImageCreateInfo.info.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT
+			| VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+
+		colorImageCreateInfo.viewInfo.format = colorImageCreateInfo.info.format;
+
+		colorImageCreateInfo.samplerInfo = sampleCreateInfo;
+
+		shadowMaps[i].init(colorImageCreateInfo);
 	}
-	shadowMaps.resize(lightCount);
-#ifndef NDEBUG
+
+
+	/*
+	#ifndef NDEBUG
 	uiImageViews.resize(lightCount);
 #endif
-	if (lightCount == 0) return VK_SUCCESS;
 
-	FzbRenderer::ImageCreateInfo createInfo = createDefaultImageCreateInfo();
+		FzbRenderer::ImageCreateInfo createInfo = createDefaultImageCreateInfo();
 	createInfo.info.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
 		| VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
 	createInfo.info.format = nvvk::findDepthFormat(Application::app->getPhysicalDevice());
@@ -267,7 +380,7 @@ VkResult ShadowMap::createShadowMap() {
 		const shaderio::Light& light = Application::sceneResource.sceneInfo.lights[lightIndices[i]];
 		if (light.type == shaderio::LightType::Direction) {}
 		else if (light.type == shaderio::LightType::Point) {
-			throw std::runtime_error("»¹Ã»ÓÐÊµÏÖµã¹âÔ´ÒõÓ°");
+			throw std::runtime_error("ï¿½ï¿½Ã»ï¿½ï¿½Êµï¿½Öµï¿½ï¿½Ô´ï¿½ï¿½Ó°");
 		}
 		NVVK_FAIL_RETURN(createImage(shadowMaps[i], createInfo));
 
@@ -356,6 +469,8 @@ VkResult ShadowMap::createShadowMap() {
 	}
 	vkUpdateDescriptorSets(device, uint32_t(uiDescriptorSets.size()), writeDesc.data(), 0, nullptr);
 #endif
+	*/
+
 
 	return VK_SUCCESS;
 }
@@ -420,6 +535,25 @@ void ShadowMap::compileAndCreateShaders(){
 	shaderInfo.pCode = shaderCode.pCode;
 	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &fragmentShader_directionLight);
 	NVVK_DBG_NAME(fragmentShader_directionLight);
+	//--------------------------------------------------------------------------------------
+	//vkDestroyShaderEXT(device, vertexShader_pointLight, nullptr);
+	//vkDestroyShaderEXT(device, fragmentShader_pointLight, nullptr);
+	//
+	//shaderInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+	//shaderInfo.nextStage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	//shaderInfo.pName = "vertexMain_pointLight";
+	//shaderInfo.codeSize = shaderCode.codeSize;
+	//shaderInfo.pCode = shaderCode.pCode;
+	//vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &vertexShader_pointLight);
+	//NVVK_DBG_NAME(vertexShader_pointLight);
+	//
+	//shaderInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	//shaderInfo.nextStage = 0;
+	//shaderInfo.pName = "fragmentMain_pointLight";
+	//shaderInfo.codeSize = shaderCode.codeSize;
+	//shaderInfo.pCode = shaderCode.pCode;
+	//vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &fragmentShader_pointLight);
+	//NVVK_DBG_NAME(fragmentShader_pointLight);
 //#ifndef NDEBUG
 //	//--------------------------------------------------------------------------------------
 //	vkDestroyShaderEXT(device, computeShader_debug, nullptr);
@@ -456,7 +590,9 @@ void ShadowMap::debug_prepare() {
 	nvvk::WriteSetContainer write{};
 	VkWriteDescriptorSet    shadowMapsWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_ShadowMap::eShadowMaps, 0, 0, shadowMaps.size());
-	nvvk::Image* shadowMapsPtr = shadowMaps.data();
+	std::vector<nvvk::Image> shadowMaps_nvvk(shadowMaps.size());
+	for (int i = 0; i < shadowMaps.size(); ++i) shadowMaps_nvvk[i] = shadowMaps[i].image;
+	nvvk::Image* shadowMapsPtr = shadowMaps_nvvk.data();
 	write.append(shadowMapsWrite, shadowMapsPtr);
 
 	VkWriteDescriptorSet    depthRestructResultMapsWrite =

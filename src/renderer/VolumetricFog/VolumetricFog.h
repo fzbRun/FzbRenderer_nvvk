@@ -58,7 +58,7 @@ private:
 	VkShaderEXT computeShader_deferredRenderring{};
 
 	shaderio::VolumetricFogPushConstant pushConstant;
-	FzbRenderer::Image volumetricFogImage;
+	FzbRenderer::Image volumetricFogImage = {};
 	FzbRenderer::Buffer lightAttenuationEstimatorBuffer;
 
 	ShadowMap shadowMap;

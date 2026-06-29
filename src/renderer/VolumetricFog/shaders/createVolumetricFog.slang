@@ -21,17 +21,19 @@ void computeMain_createVolumetricFog(uint3 threadIndex: SV_DispatchThreadID, uin
     float3 volumetricFogCenter = pushConst.fogStartPos + pushConst.fogVoxelSize * pushConst.fogVoxelGridSize * 0.5f;
     float3 voxelCenter = (voxelAABB.minimum + voxelAABB.maximum) * 0.5f;
 
-    float scale = distance(voxelCenter, volumetricFogCenter) / length(pushConst.fogVoxelSize * pushConst.fogVoxelGridSize * 0.5f);
-    float extinctionCoefficient = lerp(pushConst.extinctionCoefficient.y, pushConst.extinctionCoefficient.x, scale);
+    // float scale = distance(voxelCenter, volumetricFogCenter) / length(pushConst.fogVoxelSize * pushConst.fogVoxelGridSize * 0.5f);
+    float scale = (voxelCenter.y - pushConst.fogStartPos.y) / (pushConst.fogVoxelGridSize.y * pushConst.fogVoxelSize.y);
+    float absorption = lerp(pushConst.absorption.y, pushConst.absorption.x, scale);
 
-    uint threadIndexU = threadIndex.z * (pushConst.fogVoxelGridSize.x * pushConst.fogVoxelGridSize.y) + threadIndex.y * pushConst.fogVoxelGridSize.x + threadIndex.x;
-    uint randomSeed = xxhash32(uint3(threadIndexU, pushConst.frameIndex, 1));
+    //uint threadIndexU = threadIndex.z * (pushConst.fogVoxelGridSize.x * pushConst.fogVoxelGridSize.y) + threadIndex.y * pushConst.fogVoxelGridSize.x + threadIndex.x;
+    //uint randomSeed = xxhash32(uint3(threadIndexU, pushConst.frameIndex, 1));
 
     // float angle = (float(pushConst.frameIndex % 1000) / 999 * 2.0f - 1.0f) * M_PI_2;
     // float randomNumber = 1.0f - rand(randomSeed) * scale * scale * 0.2 * cos(angle);
     //float randomNumber = rand(randomSeed);
     //extinctionCoefficient *= randomNumber;
 
+    float extinctionCoefficient = absorption + pushConst.scattering;
     volumetricFogImage[threadIndex] = extinctionCoefficient;
 }
 
@@ -128,4 +130,6 @@ void computeMain_createLightAttenuationEstimator(uint threadIndex: SV_DispatchTh
     }
 
     lightAttenuationEstimatorBuffer[0] = attenuation;
+
+    //printf("%f\n", attenuation.x);
 }

@@ -7,6 +7,8 @@
 #include "./Mesh.h"
 #include <common/Material/Material.h>
 
+//#define USE_DEFAULT_MATERIAL
+
 shaderio::AABB FzbRenderer::MeshInfo::getAABB(glm::mat4 transformMatrix) {
 	//glm::vec3 maximum = { FLT_MAX, FLT_MAX, FLT_MAX };
 	//if (aabb.minimum != maximum && aabb.maximum != -maximum) return aabb;
@@ -392,11 +394,13 @@ void FzbRenderer::MeshSet::processMesh(aiMesh* meshData, const aiScene* sceneDat
 	
 	std::string materialID = "defaultMaterial";
 	shaderio::BSDFMaterial material = FzbRenderer::defaultMaterial;
+	#ifndef USE_DEFAULT_MATERIAL
 	if (sceneData->mNumMaterials > 1) {		//有一个默认材质
 		aiMaterial* mtlMaterial = sceneData->mMaterials[meshData->mMaterialIndex];
 		materialID = std::string(mtlMaterial->GetName().data);
 		material = loadMtlMaterial(mtlMaterial);
 	}
+	#endif
 
 	MeshInfo childMeshInfo = {
 		.meshID = meshID + meshData->mName.C_Str(),

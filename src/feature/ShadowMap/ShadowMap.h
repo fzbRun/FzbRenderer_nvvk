@@ -1,7 +1,12 @@
 #pragma once
+/*
+woc, multiview不能和shader object一起使用，也就是说shadowMap需要通过传统的pipeline模式
+服了，先不搞了
+*/
 
 #include "feature/Feature.h"
 #include "./ShadowMapShaderio.h"
+#include "common/Image/Image.h"
 
 #ifndef FZBRENDERER_SHADOWMAP_H
 #define FZBRENDERER_SHADOWMAP_H
@@ -12,7 +17,7 @@ struct ShadowMapCreateInfo{
 };
 class ShadowMap : public Feature{
 public:
-	ShadowMap() = default;
+	ShadowMap();
 	virtual ~ShadowMap() = default;
 
 	void init(ShadowMapCreateInfo createInfo);
@@ -28,7 +33,7 @@ public:
 	void compileAndCreateShaders();
 
 	std::vector<uint32_t> lightIndices;
-	std::vector<nvvk::Image> shadowMaps;
+	std::vector<FzbRenderer::Image> shadowMaps;
 	shaderio::ShadowMapPushConstant pushConstant;
 	VkPushConstantsInfo pushInfo;
 
@@ -41,15 +46,9 @@ private:
 	VkShaderEXT fragmentShader_directionLight{};
 
 	VkShaderEXT vertexShader_pointLight{};
-	VkShaderEXT geometryShader_pointLight{};
 	VkShaderEXT fragmentShader_pointLight{};
 
 #ifndef NDEBUG
-	std::vector<VkImageView>     uiImageViews{};
-	VkDescriptorPool descriptorPool = nullptr;
-	VkDescriptorSetLayout descLayout{};
-	std::vector<VkDescriptorSet> uiDescriptorSets{};
-
 	void debug_prepare();
 	void debug_Visualization(VkCommandBuffer cmd);
 	VkShaderEXT computeShader_debug{};

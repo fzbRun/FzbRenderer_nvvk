@@ -8,16 +8,16 @@ NAMESPACE_SHADERIO_BEGIN()
 
 struct VolumetricFogPushConstant
 {
-	float3 fogStartPos = { -1.5f, 0.0f, -1.5f };
+	float3 fogStartPos = { -1.5f, -0.75f, -1.75f };
 	int frameIndex;
 	float3x3 normalMatrix;
 	uint3 fogVoxelGridSize = { 16, 16, 16 };
 	float3 fogVoxelSize = { 0.2f, 0.2f, 0.2f };
 	int instanceIndex;
-	float2 extinctionCoefficient = { 0.0, 1.0 };
-	float scatterCoefficient = 0.7f;
-	float asymmetricParameters = 0.2;
-	float lightAttenuationStrength = 1.0f;
+	float2 absorption = { 0.0, 0.3 };
+	float scattering = 0.3f;
+	float phase = -0.5;
+	float lightAttenuationStrength = 0.2f;
 	SceneInfo* sceneInfoAddress;
 	float4x4 lightVP;
 };

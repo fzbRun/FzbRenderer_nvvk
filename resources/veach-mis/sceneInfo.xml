@@ -149,4 +149,9 @@
 			<materialRef id="NullBSDF3"/>
 		</instance>
 	</instances>
+
+	<lights>
+		<useSky value = "true" />
+		<backgroundColor value = "0.0, 0.0, 0.0" />
+	</lights>
 </scene>

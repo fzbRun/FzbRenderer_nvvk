@@ -1,0 +1,28 @@
+<scene>
+	<sensor type="perspective">
+		<fov value="60"/>
+		<transform type = "lookAt">
+			<matrix value="-1 0 0 0 0 1 0 1 0 0 -1 4 0 0 0 1"/>
+			<eye value = "5074.868, -64.86, -4457.854" />
+			<center value = "5075.865, -64.868, -4457.814" />
+			<up value = "0.00000, 1.00000, 0.00000" />
+		</transform>
+	</sensor>
+	
+	<lights>
+		<useSky value = "true" />
+		<backgroundColor value = "0.0, 0.0, 0.0" />
+	</lights>				
+	
+	<meshes>
+		<mesh type="obj" id="yanYun">
+			<filename value="models/jb_demo.obj" />
+		</mesh>
+	</meshes>
+
+	<instances>
+		<instance>
+			<meshRef id = "yanYun"/>
+		</instance>
+	</instances>
+</scene>

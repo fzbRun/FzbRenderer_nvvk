@@ -11,10 +11,11 @@ namespace FzbRenderer {
 struct ImageCreateInfo {
 	VkImageCreateInfo info;
 	VkImageViewCreateInfo viewInfo;
+	std::vector<VkImageViewCreateInfo> viewInfos;
 	VkSamplerCreateInfo samplerInfo;
 };
 
-ImageCreateInfo createDefaultImageCreateInfo();
+ImageCreateInfo createDefaultImageCreateInfo(uint32_t imageViewCount = 0);
 VkResult createImage(nvvk::Image& image, ImageCreateInfo createInfo);
 void destroyImage(nvvk::Image& image);
 
@@ -32,6 +33,7 @@ public:
 
 	ImageCreateInfo setting;
 	nvvk::Image image;
+	std::vector<VkImageView> imageViews;
 
 	uint32_t allocMemSize;
 	uint32_t allocMemTotalSize;

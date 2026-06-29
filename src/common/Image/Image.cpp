@@ -6,7 +6,7 @@
 #include <stb/stb_image.h>
 #include <common/utils.hpp>
 
-FzbRenderer::ImageCreateInfo FzbRenderer::createDefaultImageCreateInfo() {
+FzbRenderer::ImageCreateInfo FzbRenderer::createDefaultImageCreateInfo(uint32_t imageViewCount) {
     const VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT
         | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 
@@ -38,6 +38,9 @@ FzbRenderer::ImageCreateInfo FzbRenderer::createDefaultImageCreateInfo() {
         .viewInfo = viewInfo,
         .samplerInfo = sampleCreateInfo
     };
+    createInfo.viewInfos.resize(imageViewCount);
+    for (int i = 0; i < imageViewCount; ++i) createInfo.viewInfos[i] = viewInfo;
+
     return createInfo;
 }
 VkResult FzbRenderer::createImage(nvvk::Image& image, ImageCreateInfo createInfo) {
@@ -85,6 +88,14 @@ VkResult FzbRenderer::Image::init(ImageCreateInfo createInfo) {
         allocMemOffset = allocInfo.allocationInfo.offset;
     }
     Application::samplerPool.acquireSampler(image.descriptor.sampler, createInfo.samplerInfo);
+
+    imageViews.resize(createInfo.viewInfos.size());
+    for (int i = 0; i < imageViews.size(); ++i) {
+        VkImageViewCreateInfo viewInfo = createInfo.viewInfos[i];
+        viewInfo.image = image.image;
+        viewInfo.format = createInfo.info.format;
+        vkCreateImageView(Application::app->getDevice(), &viewInfo, nullptr, &imageViews[i]);
+    }
 
     VkDevice device = Application::app->getDevice();
 
@@ -288,6 +299,7 @@ void FzbRenderer::Image::clean() {
     else Application::allocator.destroyImage(image);
 
     VkDevice device = Application::app->getDevice();
+    for (int i = 0; i < imageViews.size(); ++i) vkDestroyImageView(device, imageViews[i], nullptr);
     vkDestroyImageView(device, uiImageView, nullptr);
     if (descriptorPool) vkFreeDescriptorSets(device, descriptorPool, 1, &uiDescriptorSet);
     vkDestroyDescriptorSetLayout(device, descLayout, nullptr);

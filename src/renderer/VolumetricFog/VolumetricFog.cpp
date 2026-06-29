@@ -5,6 +5,7 @@
 #include <common/Shader/Shader.h>
 #include <nvvk/compute_pipeline.hpp>
 #include <nvvk/default_structs.hpp>
+#include <iostream>
 
 using namespace FzbRenderer;
 
@@ -80,9 +81,10 @@ void VolumetricFog::uiRender() {
 
 		UIModified |= ImGui::DragFloat3("Volumetric Fog Voxel Size", (float*)&pushConstant.fogVoxelSize);
 
-		UIModified |= ImGui::DragFloat2("Extinction Coefficient", (float*)&pushConstant.extinctionCoefficient, 1.0f, 0.0f);
-		UIModified |= ImGui::DragFloat("Scatter Coefficient", (float*)&pushConstant.scatterCoefficient, 1.0f, 0.0f, 1.0f);
-		UIModified |= ImGui::DragFloat("Asymmetric Parameters", (float*)&pushConstant.asymmetricParameters, 1.0f, -1.0f, 1.0f);
+		UIModified |= ImGui::DragFloat2("Extinction Coefficient", (float*)&pushConstant.absorption, 0.1f, 0.0f);
+		UIModified |= ImGui::DragFloat("Scatter Coefficient", (float*)&pushConstant.scattering, 0.1f, 0.0f, 1.0f);
+		UIModified |= ImGui::DragFloat("Asymmetric Parameters", (float*)&pushConstant.phase, 0.1f, -1.0f, 1.0f);
+		UIModified |= ImGui::DragFloat("Light Attenuation Strength", (float*)&pushConstant.lightAttenuationStrength, 0.1f, 0.0f, 1.0f);
 
 		UIModified |= ImGui::Checkbox("USE NEE", (bool*)&showVolumetricFogVoxelGrid);
 	}
@@ -171,6 +173,16 @@ void VolumetricFog::render(VkCommandBuffer* cmdPtr) {
 		.pValues = &pushConstant,
 	};
 
+	//{
+	//	VkViewportSwizzleNV identitySwizzle = {
+	//		VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_X_NV,
+	//		VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_Y_NV,
+	//		VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_Z_NV,
+	//		VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_W_NV
+	//	};
+	//	vkCmdSetViewportSwizzleNV(cmd, 0, 1, &identitySwizzle);
+	//}
+
 	createGBuffers(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
@@ -206,7 +218,7 @@ void VolumetricFog::createVolumetricFogData() {
 	volumetricFogImage = FzbRenderer::Image("volumetricFog3DTexture");
 	FzbRenderer::ImageCreateInfo colorImageCreateInfo = FzbRenderer::createDefaultImageCreateInfo();
 	colorImageCreateInfo.info.format = VK_FORMAT_R32G32B32A32_SFLOAT;
-	colorImageCreateInfo.info.imageType = VK_IMAGE_TYPE_3D,
+	colorImageCreateInfo.info.imageType = VK_IMAGE_TYPE_3D;
 	colorImageCreateInfo.info.extent = { pushConstant.fogVoxelGridSize.x, pushConstant.fogVoxelGridSize.y, pushConstant.fogVoxelGridSize.z };
 
 	colorImageCreateInfo.viewInfo.format = colorImageCreateInfo.info.format;
@@ -326,7 +338,7 @@ void VolumetricFog::createDescriptorSet() {
 
 	VkWriteDescriptorSet	shadowMapWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eShadowMap, 0, 0, 1);
-	write.append(shadowMapWrite, shadowMap.shadowMaps[0]);
+	write.append(shadowMapWrite, shadowMap.shadowMaps[0].image);
 
 	VkWriteDescriptorSet	renderedImageWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eRenderedImage, 0, 0, 1);
@@ -542,7 +554,7 @@ void VolumetricFog::createVolumetricFog(VkCommandBuffer cmd) {
 
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
-	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createVolumetricFog);
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createLightAttenuationEstimator);
 	vkCmdDispatch(cmd, 1, 1, 1);
 }
 void VolumetricFog::deferredRenderring(VkCommandBuffer cmd) {
