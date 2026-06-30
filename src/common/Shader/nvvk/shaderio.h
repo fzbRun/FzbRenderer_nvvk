@@ -40,7 +40,10 @@ struct HeatState {
 	uint32_t maxDuration[2];
 };
 
-
+struct FrustumPlane { 
+	float3 normal;			//inward
+	float distance;
+};
 
 NAMESPACE_SHADERIO_END()
 #endif  // SHADERIO_H

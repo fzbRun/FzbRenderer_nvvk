@@ -53,6 +53,7 @@ private:
 	VkShaderEXT vertexShader_createGBuffer{};
 	VkShaderEXT fragmentShader_createGBuffer{};
 
+	VkShaderEXT computeShader_getVisibleVolumetricFog{};
 	VkShaderEXT computeShader_createVolumetricFog{};
 	VkShaderEXT computeShader_createLightAttenuationEstimator{};
 
@@ -62,16 +63,13 @@ private:
 
 	FzbRenderer::Buffer GlobalInfoBuffer;
 
-	FzbRenderer::Image volumetricFogImage = {};
-	FzbRenderer::Buffer lightAttenuationEstimatorBuffer;
+	uint32_t volumetricFogCount = 1;
+	std::vector<FzbRenderer::Image> volumetricFogImages;
+	std::vector<shaderio::VolumetricFogInfo> volumetricFogInfos;
+	FzbRenderer::Buffer volumetricFogInfosBuffer;
+	std::vector<int> volumetricFogInfoModified;
 
-	uint32_t localVolumetricFogCount= 0;
-	std::vector<FzbRenderer::Image> localVolumetricFogImages;
-	std::vector<shaderio::VolumetricFogInfo> localVolumetricFogInfos;
-	FzbRenderer::Buffer localVolumetricFogInfosBuffer;
-	std::vector<int> localVolumetricFogInfoModified;
-
-	FzbRenderer::Buffer adjacentLocalVolumetricFogIndexBuffer;
+	FzbRenderer::Buffer visibleVolumetricFogIndexBuffer;
 
 	ShadowMap shadowMap;
 
@@ -82,7 +80,7 @@ private:
 	VkShaderEXT fragmentShader_renderVoxelGrid{};
 
 	bool showVolumetricFogVoxelGrid = false;
-	std::vector<int> showLocalVolumetricFogVoxelGrids;
+	std::vector<int> showVolumetricFogVoxelGrids;
 #endif
 };
 }

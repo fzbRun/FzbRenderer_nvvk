@@ -9,12 +9,14 @@
 [[vk::binding(StaticBindingPoints_VolumetricFog::eNormalImage)]] Texture2D<float4> normalImage;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eDepthImage)]] Texture2D<float> depthImage;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eEmissiveImage)]] Texture2D<float4> emissiveImage;
-[[vk::binding(StaticBindingPoints_VolumetricFog::eLightAttenuationEstimatorBuffer)]] StructuredBuffer<float3> lightAttenuationEstimatorBuffer;
-[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogImage_sampler)]] Sampler3D<float4> volumetricFogImage;
+
+[[vk::binding(StaticBindingPoints_VolumetricFog::eGlobalInfoBuffer)]] RWStructuredBuffer<GlobalInfo_VolumetricFog> globalInfoBuffer;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogInfosBuffer)]] RWStructuredBuffer<VolumetricFogInfo, ScalarDataLayout> volumetricFogInfosBuffer;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eVisibleVolumetricFogIndexBuffer)]] RWStructuredBuffer<uint> visibleVolumetricFogIndexBuffer;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogImages_sampler)]] Sampler3D<float4> volumetricFogImages_sample[];
+
 [[vk::binding(StaticBindingPoints_VolumetricFog::eShadowMap)]] Sampler2DShadow shadowMap;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eRenderedImage)]] RWTexture2D<float4> renderedImage;
-
-groupshared float3 groupLightAttenuationEstimator;
 
 float getShadow(float4 worldPos) {
     float4 lightMapNdcPos = mul(worldPos, pushConst.lightVP);
@@ -31,14 +33,12 @@ float getShadow(float4 worldPos) {
     return shadow;
 }
 
-void getVolumetricFogScatter(float3 startPos, float3 endPos, uint randomSeed, out float3 L, out float3 attenuation, out float3 attenuation2) {
-    L = 0.0f;
-    attenuation = 1.0f;
-    attenuation2 = 1.0f;
+void getVolumetricFogScatter(float3 startPos, float3 endPos, uint randomSeed, uint fogIndex, inout float3 L, inout float3 attenuation, inout float3 attenuation2) {
+    VolumetricFogInfo fogInfo = volumetricFogInfosBuffer[fogIndex];
 
-    float3 fogStartPos = pushConst.fogStartPos;
-    float3 voxelSize = pushConst.fogVoxelSize;
-    int3 gridSize = pushConst.fogVoxelGridSize;
+    float3 fogStartPos = fogInfo.fogStartPos;
+    float3 voxelSize = fogInfo.fogVoxelSize;
+    int3 gridSize = fogInfo.fogVoxelGridSize;
 
     float3 gridMin = fogStartPos;
     float3 gridMax = fogStartPos + float3(gridSize) * voxelSize;
@@ -92,7 +92,6 @@ void getVolumetricFogScatter(float3 startPos, float3 endPos, uint randomSeed, ou
     SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
     float3 E = 1.0f;
     float gridLength = length((gridMax - gridMin));
-    float3 lightAttenuationEstimator = groupLightAttenuationEstimator;
 
     int maxIter = gridSize.x + gridSize.y + gridSize.z;
     for (int i = 0; i < maxIter; i++) {
@@ -106,8 +105,8 @@ void getVolumetricFogScatter(float3 startPos, float3 endPos, uint randomSeed, ou
             float tSample = tCurrent + dt * rand(randomSeed);
             float3 samplePoint = startPos + dir * tSample;
 
-            float3 uvw = (samplePoint - pushConst.fogStartPos) / (pushConst.fogVoxelGridSize * pushConst.fogVoxelSize);
-            float extinctionCoeff = volumetricFogImage.SampleLevel(uvw, 0).x;
+            float3 uvw = (samplePoint - fogInfo.fogStartPos) / (fogInfo.fogVoxelGridSize * fogInfo.fogVoxelSize);
+            float extinctionCoeff = volumetricFogImages_sample[fogIndex].SampleLevel(uvw, 0).x;
 
             for (int lightIndex = 0; lightIndex < sceneInfo.numLights; ++lightIndex) {
                 Light light = sceneInfo.lights[lightIndex];
@@ -121,20 +120,20 @@ void getVolumetricFogScatter(float3 startPos, float3 endPos, uint randomSeed, ou
                     lightPos = light.pos;
                 }
 
-                float fp = (1.0f - pushConst.phase * pushConst.phase) /
-                           (4.0f * M_PI *
-                            pow((1 + pushConst.phase * pushConst.phase -
-                            2.0f * pushConst.phase * dot(-dir, lightDirection)), 1.5f));
+                float fp = (1.0f - fogInfo.phase * fogInfo.phase) /
+                    (4.0f * M_PI *
+                     pow((1 + fogInfo.phase * fogInfo.phase -
+                     2.0f * fogInfo.phase * dot(-dir, lightDirection)), 1.5f));
 
                 float tLightEnter, tLightExit;
                 isHit(lightPos, samplePoint, gridMin, gridMax, tLightEnter, tLightExit);
                 float lightDt = tLightExit - tLightEnter;
                 if (lightIndex == 1) lightDt = max(lightDt - 0.1f, 0.0f);
 
-                float3 activeSunColor = lightColor * lerp(1.0f, lightAttenuationEstimator, lightDt / gridLength) * pushConst.lightAttenuationStrength;
+                float3 activeSunColor = lightColor * lerp(1.0f, fogInfo.lightAttenuationEstimator, lightDt / gridLength) * pushConst.lightAttenuationStrength;
                 if (lightIndex == 0) activeSunColor *= getShadow(float4(samplePoint, 1.0f)) ;
 
-                L += activeSunColor * fp * pushConst.scattering * E / extinctionCoeff * (1.0f - exp(-extinctionCoeff * dt));
+                L += activeSunColor * fp * fogInfo.scattering * E / extinctionCoeff * (1.0f - exp(-extinctionCoeff * dt));
             }
 
             E *= exp(-extinctionCoeff * dt);
@@ -154,25 +153,28 @@ void getVolumetricFogScatter(float3 startPos, float3 endPos, uint randomSeed, ou
         }
     }
 
-    attenuation = E;
+    attenuation *= E;
 
     float tLightEnter, tLightExit;
     isHit(endPos - sceneInfo.lights[0].direction * 10.0f, endPos, gridMin, gridMax, tLightEnter, tLightExit);
     float mainLightDt = tLightExit - tLightEnter;
-    attenuation2 = lerp(1.0f, lightAttenuationEstimator, mainLightDt / gridLength) * pushConst.lightAttenuationStrength;
+    attenuation2 *= lerp(1.0f, fogInfo.lightAttenuationEstimator, mainLightDt / gridLength) * pushConst.lightAttenuationStrength;
 }
+
+groupshared GlobalInfo_VolumetricFog groupGlobalInfo;
 
 [numthreads(16, 16, 1)]
 [shader("compute")]
 void computeMain_deferredRendering(uint2 threadIndex: SV_DispatchThreadID, uint2 groupThreadIndex: SV_GroupThreadID) {
-    if (all(groupThreadIndex == 0)) groupLightAttenuationEstimator = lightAttenuationEstimatorBuffer[0];
-    GroupMemoryBarrierWithGroupSync();
-
     uint2 screenSize;
     albedoImage.GetDimensions(screenSize.x, screenSize.y);
     if (threadIndex.x >= screenSize.x || threadIndex.y >= screenSize.y) return;
 
+    if (groupThreadIndex.x == 0 && groupThreadIndex.y == 0) groupGlobalInfo = globalInfoBuffer[0];
+    GroupMemoryBarrierWithGroupSync();
+
     SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+    GlobalInfo_VolumetricFog globalInfo = groupGlobalInfo;
 
     float depth = depthImage[threadIndex];
     float2 uv = (float2(threadIndex) + 0.5f) / float2(screenSize);
@@ -183,10 +185,13 @@ void computeMain_deferredRendering(uint2 threadIndex: SV_DispatchThreadID, uint2
 
     uint randomSeed = xxhash32(uint3(pushConst.frameIndex, threadIndex));
 
-    float3 attenuation, attenuation2;
+    float3 attenuation = 1.0f, attenuation2 = 1.0f;
     float3 L = 0.0f;
-    getVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, L, attenuation, attenuation2);
-
+    for (int i = 0; i < globalInfo.visibleVolumetricFogCount; ++i) {
+        uint fogIndex = visibleVolumetricFogIndexBuffer[i];
+        getVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, fogIndex, L, attenuation, attenuation2);
+    }
+        
     if (depth >= 1.0f - 1e-30f) {
         renderedImage[threadIndex] = sceneInfo.useSky == 1 ? float4(renderedImage[threadIndex].xyz * attenuation + L, 1.0f) : float4(sceneInfo.backgroundColor * attenuation + L, 1.0f);
         return;

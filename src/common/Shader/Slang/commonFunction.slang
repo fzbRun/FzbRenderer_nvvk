@@ -300,6 +300,40 @@ bool isHit(float3 startPos, float3 endPos, float3 gridMin, float3 gridMax, inout
 
     return true;
 }
+
+bool isAABBInsideFrustum(AABB aabb, FrustumPlane planes[6]) {
+    [unroll]
+    for (int p = 0; p < 6; ++p) {
+        float3 extent = (aabb.maximum - aabb.minimum) * 0.5f;
+        float3 center = (aabb.minimum + aabb.maximum) * 0.5f;
+        float r = dot(abs(planes[p].normal), extent);
+        float s = dot(planes[p].normal, center) - planes[p].distance;
+
+        if (s + r < 0.0f) return false;
+    }
+    return true;
+}
+//---------------------------------------------------Camera------------------------------------------------------
+void ExtractFrustumPlanes(float4x4 cameraVP, out FrustumPlane planes[6]) {
+    float4 row0 = { cameraVP[0][0], cameraVP[1][0], cameraVP[2][0], cameraVP[3][0] };
+    float4 row1 = { cameraVP[0][1], cameraVP[1][1], cameraVP[2][1], cameraVP[3][1] };
+    float4 row2 = { cameraVP[0][2], cameraVP[1][2], cameraVP[2][2], cameraVP[3][2] };
+    float4 row3 = { cameraVP[0][3], cameraVP[1][3], cameraVP[2][3], cameraVP[3][3] };
+
+    float4 p[6];
+    p[0] = row3 + row0; // Left
+    p[1] = row3 - row0; // Right
+    p[2] = row3 + row1; // Bottom
+    p[3] = row3 - row1; // Top
+    p[4] = row2;        // Near (Vulkan/D3D)
+    p[5] = row3 - row2; // Far
+
+    for (int i = 0; i < 6; ++i) {
+        float invLen = 1.0f / length(p[i].xyz);
+        planes[i].normal = p[i].xyz * invLen;
+        planes[i].distance = -p[i].w * invLen;
+    }
+}
 //------------------------------------------------SphericalFibonacci---------------------------------------------
 #define M_PHI 1.618033988749895
 //y axis is up, get worldPos
