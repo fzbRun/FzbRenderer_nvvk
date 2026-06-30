@@ -25,6 +25,24 @@ void ShadowMap::init(ShadowMapCreateInfo createInfo) {
 #endif
 	createPipeline();
 	compileAndCreateShaders();
+
+	{
+		sceneAABB.minimum = { FLT_MAX, FLT_MAX, FLT_MAX };
+		sceneAABB.maximum = -sceneAABB.minimum;
+		FzbRenderer::Scene& sceneResource = Application::sceneResource;
+		for (int i = 0; i < sceneResource.instances.size(); ++i) {
+			uint32_t meshIndex = sceneResource.instances[i].meshIndex;
+			MeshInfo meshInfo = sceneResource.getMeshInfo(meshIndex);
+			shaderio::AABB meshAABB = meshInfo.getAABB(sceneResource.instances[i].transform);	//对于动态物体，这里需要修改
+
+			sceneAABB.minimum.x = std::min(meshAABB.minimum.x, sceneAABB.minimum.x);
+			sceneAABB.minimum.y = std::min(meshAABB.minimum.y, sceneAABB.minimum.y);
+			sceneAABB.minimum.z = std::min(meshAABB.minimum.z, sceneAABB.minimum.z);
+			sceneAABB.maximum.x = std::max(meshAABB.maximum.x, sceneAABB.maximum.x);
+			sceneAABB.maximum.y = std::max(meshAABB.maximum.y, sceneAABB.maximum.y);
+			sceneAABB.maximum.z = std::max(meshAABB.maximum.z, sceneAABB.maximum.z);
+		}
+	}
 }
 void ShadowMap::clean() {
 	Feature::clean();
@@ -152,9 +170,56 @@ void ShadowMap::render(VkCommandBuffer cmd) {
 		shaderio::Light& light = Application::sceneResource.sceneInfo.lights[lightIndices[i]];
 		VkShaderEXT vertexShader{}, fragmentShader{};
 		if (light.type == shaderio::LightType::Direction) {
-			shaderio::float4x4 viewMatrix = glm::lookAt(light.pos, light.pos + light.direction, glm::vec3(0.0f, 1.0f, 0.0f));
-			float near_plane = 0.1f, far_plane = 20.0f;
-			glm::mat4 orthoMatrix = glm::orthoRH_ZO(-10.0f, 10.0f, -10.0f, 10.0f, near_plane, far_plane);
+			//shaderio::float4x4 viewMatrix = glm::lookAt(light.pos, light.pos + light.direction, glm::vec3(0.0f, 1.0f, 0.0f));
+			//float near_plane = 0.1f, far_plane = 20.0f;
+			//glm::mat4 orthoMatrix = glm::orthoRH_ZO(-10.0f, 10.0f, -10.0f, 10.0f, near_plane, far_plane);
+			//orthoMatrix[1][1] *= -1;
+			//pushConstant.lightVP = orthoMatrix * viewMatrix;
+
+			shaderio::float3 sceneSize = sceneAABB.maximum - sceneAABB.minimum;
+			shaderio::float3 sceneStartPos = sceneAABB.minimum;
+
+			glm::vec3 distance = sceneSize * 1.1f;
+			glm::vec3 center = (sceneAABB.maximum + sceneAABB.minimum) * 0.5f;
+			glm::vec3 minimum = center - distance * 0.5f;
+			glm::vec3 maximum = center + distance * 0.5f;
+			float sceneLength = glm::length(distance);
+			shaderio::float3 lightPos = center - light.direction * sceneLength;
+
+			glm::vec3 up = fabs(light.direction.y) > 0.99f ? glm::vec3(0, 0, 1) : glm::vec3(0, 1, 0);
+			glm::mat4 viewMatrix = glm::lookAt(lightPos, lightPos + light.direction, up);
+
+			std::vector<glm::vec3> corners = {
+				glm::vec3(minimum.x, minimum.y, minimum.z),
+				glm::vec3(maximum.x, minimum.y, minimum.z),
+				glm::vec3(minimum.x, maximum.y, minimum.z),
+				glm::vec3(minimum.x, minimum.y, maximum.z),
+				glm::vec3(maximum.x, maximum.y, minimum.z),
+				glm::vec3(maximum.x, minimum.y, maximum.z),
+				glm::vec3(minimum.x, maximum.y, maximum.z),
+				glm::vec3(maximum.x, maximum.y, maximum.z)
+			};
+
+			glm::vec3 minView(FLT_MAX);
+			glm::vec3 maxView(-FLT_MAX);
+			for (auto& v : corners) {
+				glm::vec4 p = viewMatrix * glm::vec4(v, 1.0f);
+				glm::vec3 p3 = glm::vec3(p) / p.w;
+				minView = glm::min(minView, p3);
+				maxView = glm::max(maxView, p3);
+			}
+			{
+				float texelSizeX = (maxView.x - minView.x) / setting.resolution.width;
+				float texelSizeY = (maxView.y - minView.y) / setting.resolution.height;
+
+				minView.x = floor(minView.x / texelSizeX) * texelSizeX;
+				maxView.x = floor(maxView.x / texelSizeX) * texelSizeX;
+
+				minView.y = floor(minView.y / texelSizeY) * texelSizeY;
+				maxView.y = floor(maxView.y / texelSizeY) * texelSizeY;
+			}
+
+			glm::mat4 orthoMatrix = glm::orthoRH_ZO(minView.x, maxView.x, minView.y, maxView.y, -maxView.z, -minView.z);
 			orthoMatrix[1][1] *= -1;
 			pushConstant.lightVP = orthoMatrix * viewMatrix;
 

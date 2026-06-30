@@ -33,6 +33,7 @@ public:
 	void render(VkCommandBuffer* cmd) override;
 
 private:
+	void createVolumetricFogImage(FzbRenderer::Image& image, shaderio::uint3 size);
 	void createVolumetricFogData();
 
 	void createDescriptorSetLayout() override;
@@ -58,8 +59,19 @@ private:
 	VkShaderEXT computeShader_deferredRenderring{};
 
 	shaderio::VolumetricFogPushConstant pushConstant;
+
+	FzbRenderer::Buffer GlobalInfoBuffer;
+
 	FzbRenderer::Image volumetricFogImage = {};
 	FzbRenderer::Buffer lightAttenuationEstimatorBuffer;
+
+	uint32_t localVolumetricFogCount= 0;
+	std::vector<FzbRenderer::Image> localVolumetricFogImages;
+	std::vector<shaderio::VolumetricFogInfo> localVolumetricFogInfos;
+	FzbRenderer::Buffer localVolumetricFogInfosBuffer;
+	std::vector<int> localVolumetricFogInfoModified;
+
+	FzbRenderer::Buffer adjacentLocalVolumetricFogIndexBuffer;
 
 	ShadowMap shadowMap;
 
@@ -70,6 +82,7 @@ private:
 	VkShaderEXT fragmentShader_renderVoxelGrid{};
 
 	bool showVolumetricFogVoxelGrid = false;
+	std::vector<int> showLocalVolumetricFogVoxelGrids;
 #endif
 };
 }

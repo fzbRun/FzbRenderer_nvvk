@@ -3,8 +3,8 @@
 		<fov value="60"/>
 		<transform type = "lookAt">
 			<matrix value="-1 0 0 0 0 1 0 1 0 0 -1 4 0 0 0 1"/>
-			<eye value = "5074.868, -64.86, -4457.854" />
-			<center value = "5075.865, -64.868, -4457.814" />
+			<eye value = "5123.529, -68.711, -4444.198" />
+			<center value = "5123.328, -68.408, -4443.267" />
 			<up value = "0.00000, 1.00000, 0.00000" />
 		</transform>
 	</sensor>
@@ -18,11 +18,28 @@
 		<mesh type="obj" id="yanYun">
 			<filename value="models/jb_demo.obj" />
 		</mesh>
+		<mesh type="obj" id="dragon">
+			<filename value="models/dragon.obj" />
+		</mesh>
 	</meshes>
 
 	<instances>
 		<instance>
 			<meshRef id = "yanYun"/>
+		</instance>
+		
+		<instance type="periodMotion">
+			<meshRef id = "dragon"/>
+			
+			<transform name="to_world">
+				<translate value ="5111.0f, -71.0f, -4453.0f" />
+				<rotate value = "0, 0, 0" />
+				<scale value = "0.4, 0.4, 0.4" />
+				<period time="100">
+					<translate value = "1, 0, 0" />
+				</period>
+			</transform>
+			
 		</instance>
 	</instances>
 </scene>

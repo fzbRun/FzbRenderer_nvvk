@@ -48,6 +48,8 @@ private:
 	VkShaderEXT vertexShader_pointLight{};
 	VkShaderEXT fragmentShader_pointLight{};
 
+	shaderio::AABB sceneAABB;
+
 #ifndef NDEBUG
 	void debug_prepare();
 	void debug_Visualization(VkCommandBuffer cmd);

@@ -132,7 +132,7 @@ void getVolumetricFogScatter(float3 startPos, float3 endPos, uint randomSeed, ou
                 if (lightIndex == 1) lightDt = max(lightDt - 0.1f, 0.0f);
 
                 float3 activeSunColor = lightColor * lerp(1.0f, lightAttenuationEstimator, lightDt / gridLength) * pushConst.lightAttenuationStrength;
-                if (lightIndex == 0) activeSunColor *= getShadow(float4(samplePoint, 1.0f));
+                if (lightIndex == 0) activeSunColor *= getShadow(float4(samplePoint, 1.0f)) ;
 
                 L += activeSunColor * fp * pushConst.scattering * E / extinctionCoeff * (1.0f - exp(-extinctionCoeff * dt));
             }

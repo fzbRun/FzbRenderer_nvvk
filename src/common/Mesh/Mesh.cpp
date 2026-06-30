@@ -4,6 +4,8 @@
 #include <common/Application/Application.h>
 #include <glm/gtc/type_ptr.hpp>
 #include <memory>
+#include <future>
+#include <vector>
 #include "./Mesh.h"
 #include <common/Material/Material.h>
 
@@ -33,7 +35,7 @@ shaderio::AABB FzbRenderer::MeshInfo::getAABB(glm::mat4 transformMatrix) {
 	return aabb;
 }
 //-----------------------------------------------------MeshSet---------------------------------------------------
-//ËùÓÐµÄÊý¾Ý¶¼²»ÊÇ½»´íµÄ£¬¼´posÈ«·ÅÔÚÒ»Æð£¬normalÈ«·ÅÔÚÒ»Æð¡­¡­¡£ÕâÒ²Ó°ÏìÕâÆäËûËùÓÐ¶ÁÈ¡Êý¾ÝµÄµØ·½£¬ÐèÒª×¢Òâ!!!!!
+//ï¿½ï¿½ï¿½Ðµï¿½ï¿½ï¿½ï¿½Ý¶ï¿½ï¿½ï¿½ï¿½Ç½ï¿½ï¿½ï¿½ï¿½Ä£ï¿½ï¿½ï¿½posÈ«ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½normalÈ«ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ð¡­¡ï¿½ï¿½ï¿½ï¿½ï¿½Ò²Ó°ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð¶ï¿½È¡ï¿½ï¿½ï¿½ÝµÄµØ·ï¿½ï¿½ï¿½ï¿½ï¿½Òª×¢ï¿½ï¿½!!!!!
 FzbRenderer::MeshSet::MeshSet(std::string meshID, std::string meshType, std::filesystem::path meshPath)
 {
 	this->meshID = meshID;
@@ -60,10 +62,10 @@ FzbRenderer::MeshSet::MeshSet(std::string meshID, std::string meshType, std::fil
 }
 
 /*
-gltfµÄmaterial²ÉÓÃ½ðÊô-´Ö²Ú¶ÈÄ£ÐÍ£¬Òò´ËºÜÄÑÖªµÀÊÇ²»ÊÇdiffuseµÄ£¬»¹ÊÇ±ðµÄÊ²Ã´²ÄÖÊµÄ
-ËùÒÔ£¬ÎÒÃÇ°´ÕÕ£¬Èç¹û´Ö²Ú¶ÈÎªÎª0£¬ÔòÊÇ¹â»¬µÄ£»·´Ö®Îª´Ö²Ú¶È
-Èç¹ûalphaModeÎªOPAQUE,ÔòÊÇµ¼Ìå£»·´Ö®Îªµç½éÖÊ
-Èç¹ûÎªµç½éÖÊ£¬ÄÇÃ´eta¾ÍÎªÍ¸Ã÷¶È
+gltfï¿½ï¿½materialï¿½ï¿½ï¿½Ã½ï¿½ï¿½ï¿½-ï¿½Ö²Ú¶ï¿½Ä£ï¿½Í£ï¿½ï¿½ï¿½Ëºï¿½ï¿½ï¿½Öªï¿½ï¿½ï¿½Ç²ï¿½ï¿½ï¿½diffuseï¿½Ä£ï¿½ï¿½ï¿½ï¿½Ç±ï¿½ï¿½Ê²Ã´ï¿½ï¿½ï¿½Êµï¿½
+ï¿½ï¿½ï¿½Ô£ï¿½ï¿½ï¿½ï¿½Ç°ï¿½ï¿½Õ£ï¿½ï¿½ï¿½ï¿½ï¿½Ö²Ú¶ï¿½ÎªÎª0ï¿½ï¿½ï¿½ï¿½ï¿½Ç¹â»¬ï¿½Ä£ï¿½ï¿½ï¿½Ö®Îªï¿½Ö²Ú¶ï¿½
+ï¿½ï¿½ï¿½alphaModeÎªOPAQUE,ï¿½ï¿½ï¿½Çµï¿½ï¿½å£»ï¿½ï¿½Ö®Îªï¿½ï¿½ï¿½ï¿½ï¿½
+ï¿½ï¿½ï¿½Îªï¿½ï¿½ï¿½ï¿½Ê£ï¿½ï¿½ï¿½Ã´etaï¿½ï¿½ÎªÍ¸ï¿½ï¿½ï¿½ï¿½
 */
 shaderio::BSDFMaterial loadGltfMaterial(const tinygltf::Material& gltfMaterial) {
 	glm::vec3 albedo = glm::make_vec3(gltfMaterial.pbrMetallicRoughness.baseColorFactor.data());
@@ -78,13 +80,13 @@ shaderio::BSDFMaterial loadGltfMaterial(const tinygltf::Material& gltfMaterial) 
 void FzbRenderer::MeshSet::loadGltfData(const tinygltf::Model& model, bool importInstance) {
 	SCOPED_TIMER(__FUNCTION__);
 
-	auto getElementByteSize = [](int type) -> uint32_t {	//×îÐ¡Êý¾Ýµ¥ÔªµÄ´óÐ¡
+	auto getElementByteSize = [](int type) -> uint32_t {	//ï¿½ï¿½Ð¡ï¿½ï¿½ï¿½Ýµï¿½Ôªï¿½Ä´ï¿½Ð¡
 		return  type == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT ? 2U :
 			type == TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT ? 4U :
 			type == TINYGLTF_COMPONENT_TYPE_FLOAT ? 4U :
 			0U;
 		};
-	auto getTypeSize = [](int type) -> uint32_t {			//¶¥µãÊôÐÔÒ»¸ö·ÖÁ¿µÄÊý¾Ýµ¥ÔªÊýÁ¿
+	auto getTypeSize = [](int type) -> uint32_t {			//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ýµï¿½Ôªï¿½ï¿½ï¿½ï¿½
 		return  type == TINYGLTF_TYPE_VEC2 ? 2U :
 			type == TINYGLTF_TYPE_VEC3 ? 3U :
 			type == TINYGLTF_TYPE_VEC4 ? 4U :
@@ -98,11 +100,11 @@ void FzbRenderer::MeshSet::loadGltfData(const tinygltf::Model& model, bool impor
 			attr.offset = -1;
 			return;
 		}
-		const tinygltf::Accessor& acc = model.accessors[primitive.attributes.at(name)];	//AccessorÖªµÀÈçºÎ½â¶ÁÒ»¸öbufferView
-		const tinygltf::BufferView& bv = model.bufferViews[acc.bufferView];				//bufferViewÖªµÀbufferµÄÄ³Ò»¶ÎµÄÐÅÏ¢
+		const tinygltf::Accessor& acc = model.accessors[primitive.attributes.at(name)];	//AccessorÖªï¿½ï¿½ï¿½ï¿½Î½ï¿½ï¿½Ò»ï¿½ï¿½bufferView
+		const tinygltf::BufferView& bv = model.bufferViews[acc.bufferView];				//bufferViewÖªï¿½ï¿½bufferï¿½ï¿½Ä³Ò»ï¿½Îµï¿½ï¿½ï¿½Ï¢
 		assert((acc.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT) && "Should be floats");
 		attr = {
-			//bv.byteOffsetÏàµ±ÓÚÔÚbufferÖÐµÄÆðµã;acc.byteOffset±íÃæ¶¥µãÄ³¸öÊôÐÔÔÚ¶¥µãÊý¾ÝÖÐµÄÆ«ÒÆ£¬±È·½ËµnormalµÄoffsetÎª3*4=12
+			//bv.byteOffsetï¿½àµ±ï¿½ï¿½ï¿½ï¿½bufferï¿½Ðµï¿½ï¿½ï¿½ï¿½;acc.byteOffsetï¿½ï¿½ï¿½æ¶¥ï¿½ï¿½Ä³ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ú¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ðµï¿½Æ«ï¿½Æ£ï¿½ï¿½È·ï¿½Ëµnormalï¿½ï¿½offsetÎª3*4=12
 			.offset = uint32_t(bv.byteOffset + acc.byteOffset),
 			.count = uint32_t(acc.count),
 			.byteStride = uint32_t(bv.byteStride ? uint32_t(bv.byteStride) : getTypeSize(acc.type) * getElementByteSize(acc.componentType)),
@@ -153,7 +155,7 @@ void FzbRenderer::MeshSet::loadGltfData(const tinygltf::Model& model, bool impor
 	/*
 	if (importInstance) {
 		std::function<void(const tinygltf::Node&, const glm::mat4&)> processNode = [&](const tinygltf::Node& node, const glm::mat4& parentTransform) {
-			glm::mat4 nodeTransform = parentTransform;	//µ±Ç°nodeµÄ±ä»»¾ØÕóÓë¸¸nodeµÄ±ä»»ÒÀÀµ
+			glm::mat4 nodeTransform = parentTransform;	//ï¿½ï¿½Ç°nodeï¿½Ä±ä»»ï¿½ï¿½ï¿½ï¿½ï¿½ë¸¸nodeï¿½Ä±ä»»ï¿½ï¿½ï¿½ï¿½
 			if (!node.matrix.empty()) {
 				glm::mat4 matrix = glm::make_mat4(node.matrix.data());
 				nodeTransform = parentTransform * matrix;
@@ -248,6 +250,165 @@ shaderio::BSDFMaterial loadMtlMaterial(aiMaterial* mtlMaterial) {
 
 	return material;
 }
+
+// ---------------------------------------------------------------
+// Parallel OBJ loading helpers
+// ---------------------------------------------------------------
+namespace {
+
+	// Holds all processed data for a single mesh â€” built in parallel, merged sequentially.
+	struct ProcessedMeshData {
+		std::vector<uint8_t> indexByteData;
+		VkIndexType           indexType = VK_INDEX_TYPE_UINT32;
+		uint32_t              indexCount = 0;
+
+		std::vector<uint8_t> posByteData;
+		std::vector<uint8_t> normalByteData;
+		std::vector<uint8_t> texCoordByteData;
+		std::vector<uint8_t> tangentByteData;
+
+		uint32_t vertexNum = 0;
+
+		std::string              materialID = "defaultMaterial";
+		shaderio::BSDFMaterial   material;
+		std::string              meshName;
+	};
+
+	// Flat work item: (index into aiScene::mMeshes, owning node name)
+	struct MeshWorkItem {
+		uint32_t    meshIndex;
+		std::string nodeName;
+	};
+
+	// Depth-first collection of all mesh indices from the Assimp node tree.
+	void collectMeshIndices(aiNode* node, std::vector<MeshWorkItem>& outItems) {
+		for (uint32_t i = 0; i < node->mNumMeshes; i++) {
+			outItems.push_back({ node->mMeshes[i], std::string(node->mName.C_Str()) });
+		}
+		for (uint32_t i = 0; i < node->mNumChildren; i++) {
+			collectMeshIndices(node->mChildren[i], outItems);
+		}
+	}
+
+	// Process one aiMesh entirely into a local ProcessedMeshData â€” no shared state.
+	// This is the function that runs in parallel for every mesh.
+	ProcessedMeshData processMeshLocal(const aiMesh* meshData, const aiScene* sceneData)
+	{
+		ProcessedMeshData out;
+
+		uint32_t faceNum = meshData->mNumFaces;
+		uint32_t indexNum = 0;
+		for (uint32_t i = 0; i < faceNum; ++i)
+			indexNum += meshData->mFaces[i].mNumIndices;
+
+		uint32_t maxIndex = 0;
+		for (uint32_t i = 0; i < faceNum; i++) {
+			const aiFace& face = meshData->mFaces[i];
+			for (uint32_t j = 0; j < face.mNumIndices; j++) {
+				if (face.mIndices[j] > maxIndex)
+					maxIndex = face.mIndices[j];
+			}
+		}
+
+		// ---- indices ----
+		if (maxIndex <= 0xFFFF) {
+			out.indexType = VK_INDEX_TYPE_UINT16;
+			std::vector<uint16_t> indexData;
+			indexData.resize(indexNum);
+			uint32_t offset = 0;
+			for (uint32_t i = 0; i < faceNum; i++) {
+				const aiFace& face = meshData->mFaces[i];
+				for (uint32_t j = 0; j < face.mNumIndices; j++) {
+					indexData[offset + j] = static_cast<uint16_t>(face.mIndices[j]);
+				}
+				offset += face.mNumIndices;
+			}
+			out.indexByteData.resize(indexNum * sizeof(uint16_t));
+			std::memcpy(out.indexByteData.data(), indexData.data(), sizeof(uint16_t) * indexNum);
+		}
+		else {
+			out.indexType = VK_INDEX_TYPE_UINT32;
+			out.indexByteData.resize(indexNum * sizeof(uint32_t));
+			uint32_t offset = 0;
+			for (uint32_t i = 0; i < faceNum; i++) {
+				const aiFace& face = meshData->mFaces[i];
+				std::memcpy(
+					out.indexByteData.data() + offset * sizeof(uint32_t),
+					face.mIndices,
+					sizeof(uint32_t) * face.mNumIndices
+				);
+				offset += face.mNumIndices;
+			}
+		}
+		out.indexCount = indexNum;
+
+		// ---- positions ----
+		uint32_t vertexNum = meshData->mNumVertices;
+		out.vertexNum = vertexNum;
+		if (meshData->HasPositions()) {
+			out.posByteData.resize(vertexNum * sizeof(glm::vec3));
+			float* dst = reinterpret_cast<float*>(out.posByteData.data());
+			for (uint32_t i = 0; i < vertexNum; i++) {
+				dst[i * 3 + 0] = meshData->mVertices[i].x;
+				dst[i * 3 + 1] = meshData->mVertices[i].y;
+				dst[i * 3 + 2] = meshData->mVertices[i].z;
+			}
+		}
+
+		// ---- normals ----
+		if (meshData->HasNormals()) {
+			out.normalByteData.resize(vertexNum * sizeof(glm::vec3));
+			float* dst = reinterpret_cast<float*>(out.normalByteData.data());
+			for (uint32_t i = 0; i < vertexNum; i++) {
+				dst[i * 3 + 0] = meshData->mNormals[i].x;
+				dst[i * 3 + 1] = meshData->mNormals[i].y;
+				dst[i * 3 + 2] = meshData->mNormals[i].z;
+			}
+		}
+
+		// ---- texCoords ----
+		if (meshData->mTextureCoords[0]) {
+			out.texCoordByteData.resize(vertexNum * sizeof(glm::vec2));
+			float* dst = reinterpret_cast<float*>(out.texCoordByteData.data());
+			for (uint32_t i = 0; i < vertexNum; i++) {
+				dst[i * 2 + 0] = meshData->mTextureCoords[0][i].x;
+				dst[i * 2 + 1] = meshData->mTextureCoords[0][i].y;
+			}
+		}
+
+		// ---- tangents ----
+		if (meshData->HasTangentsAndBitangents()) {
+			out.tangentByteData.resize(vertexNum * sizeof(glm::vec4));
+			float* dst = reinterpret_cast<float*>(out.tangentByteData.data());
+			for (uint32_t i = 0; i < vertexNum; i++) {
+				glm::vec3 T(meshData->mTangents[i].x, meshData->mTangents[i].y, meshData->mTangents[i].z);
+				glm::vec3 B(meshData->mBitangents[i].x, meshData->mBitangents[i].y, meshData->mBitangents[i].z);
+				glm::vec3 N(meshData->mNormals[i].x, meshData->mNormals[i].y, meshData->mNormals[i].z);
+				T = glm::normalize(T);
+				N = glm::normalize(N);
+				float handed = (glm::dot(glm::cross(N, T), B) < 0.0f) ? -1.0f : 1.0f;
+				dst[i * 4 + 0] = meshData->mTangents[i].x;
+				dst[i * 4 + 1] = meshData->mTangents[i].y;
+				dst[i * 4 + 2] = meshData->mTangents[i].z;
+				dst[i * 4 + 3] = handed;
+			}
+		}
+
+		// ---- material ----
+		out.meshName = std::string(meshData->mName.C_Str());
+		out.material = FzbRenderer::defaultMaterial;
+		out.materialID = "defaultMaterial";
+#ifndef USE_DEFAULT_MATERIAL
+		if (sceneData->mNumMaterials > 1) {
+			aiMaterial* mtlMaterial = sceneData->mMaterials[meshData->mMaterialIndex];
+			out.materialID = std::string(mtlMaterial->GetName().data);
+			out.material = loadMtlMaterial(mtlMaterial);
+		}
+#endif
+		return out;
+	}
+
+} // anonymous namespace
 void FzbRenderer::MeshSet::processMesh(aiMesh* meshData, const aiScene* sceneData) {
 	shaderio::Mesh mesh{};
 
@@ -395,7 +556,7 @@ void FzbRenderer::MeshSet::processMesh(aiMesh* meshData, const aiScene* sceneDat
 	std::string materialID = "defaultMaterial";
 	shaderio::BSDFMaterial material = FzbRenderer::defaultMaterial;
 	#ifndef USE_DEFAULT_MATERIAL
-	if (sceneData->mNumMaterials > 1) {		//ÓÐÒ»¸öÄ¬ÈÏ²ÄÖÊ
+	if (sceneData->mNumMaterials > 1) {		//ï¿½ï¿½Ò»ï¿½ï¿½Ä¬ï¿½Ï²ï¿½ï¿½ï¿½
 		aiMaterial* mtlMaterial = sceneData->mMaterials[meshData->mMaterialIndex];
 		materialID = std::string(mtlMaterial->GetName().data);
 		material = loadMtlMaterial(mtlMaterial);
@@ -420,17 +581,129 @@ void FzbRenderer::MeshSet::processNode(aiNode* node, const aiScene* sceneData) {
 	for (uint32_t i = 0; i < node->mNumChildren; i++) processNode(node->mChildren[i], sceneData);
 }
 void FzbRenderer::MeshSet::loadObjData(std::filesystem::path meshPath) {
+	SCOPED_TIMER(__FUNCTION__);
+
 	Assimp::Importer import;
-	uint32_t needs = aiProcess_Triangulate | aiProcess_GenSmoothNormals;// |
-		//(vertexFormat.useTexCoord ? aiProcess_FlipUVs : aiPostProcessSteps(0u)) |
-		//(vertexFormat.useNormal ? aiProcess_GenSmoothNormals : aiPostProcessSteps(0u)) |
-		//(vertexFormat.useTangent ? aiProcess_CalcTangentSpace : aiPostProcessSteps(0u));
+	uint32_t needs = aiProcess_Triangulate | aiProcess_GenSmoothNormals;
 	const aiScene* sceneData = import.ReadFile(meshPath.string(), needs);
 
-	if (!sceneData || sceneData->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !sceneData->mRootNode) 
+	if (!sceneData || sceneData->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !sceneData->mRootNode) {
 		LOGW(import.GetErrorString());
+		return;
+	}
 
-	processNode(sceneData->mRootNode, sceneData);
+	// --- Phase 1: collect all mesh indices (preserves depth-first order) ---
+	std::vector<MeshWorkItem> workItems;
+	collectMeshIndices(sceneData->mRootNode, workItems);
+
+	if (workItems.empty()) return;
+
+	// Pre-reserve meshByteData: sum up all per-mesh buffer sizes plus alignment slop.
+	{
+		size_t totalBytes = 0;
+		for (const auto& item : workItems) {
+			const aiMesh* md = sceneData->mMeshes[item.meshIndex];
+			// Rough estimate â€” accurate enough for reserve
+			totalBytes += md->mNumFaces * 3 * sizeof(uint32_t);   // indices (worst case)
+			totalBytes += md->mNumVertices * sizeof(glm::vec3);   // positions
+			if (md->HasNormals())         totalBytes += md->mNumVertices * sizeof(glm::vec3);
+			if (md->mTextureCoords[0])    totalBytes += md->mNumVertices * sizeof(glm::vec2);
+			if (md->HasTangentsAndBitangents()) totalBytes += md->mNumVertices * sizeof(glm::vec4);
+			totalBytes += 16;  // padding ceiling per buffer (worst case per attribute)
+		}
+		meshByteData.reserve(totalBytes);
+	}
+
+	// Launch parallel work
+	std::vector<std::future<ProcessedMeshData>> futures;
+	futures.reserve(workItems.size());
+	for (const auto& item : workItems) {
+		const aiMesh* meshData = sceneData->mMeshes[item.meshIndex];
+		futures.push_back(std::async(
+			std::launch::async,
+			processMeshLocal,
+			meshData,
+			sceneData
+		));
+	}
+
+	// --- Phase 3: sequential merge (preserves ordering, no locks needed) ---
+	for (size_t i = 0; i < workItems.size(); ++i) {
+		ProcessedMeshData result = futures[i].get();
+		uint32_t padding = 0;
+
+		shaderio::Mesh mesh{};
+
+		// Indices
+		if (!result.indexByteData.empty()) {
+			mesh.triMesh.indices.offset = uint32_t(meshByteData.size());
+			mesh.triMesh.indices.count = result.indexCount;
+			mesh.triMesh.indices.byteStride = (result.indexType == VK_INDEX_TYPE_UINT16) ? 2u : 4u;
+			mesh.indexType = result.indexType;
+
+			uint32_t alignment = (result.indexType == VK_INDEX_TYPE_UINT16) ? 2u : 4u;
+			uint32_t pad = (alignment - meshByteData.size() % alignment) % alignment;
+			if (pad > 0) meshByteData.insert(meshByteData.end(), pad, 0);
+			mesh.triMesh.indices.offset += pad;
+			meshByteData.insert(meshByteData.end(), result.indexByteData.begin(), result.indexByteData.end());
+		}
+
+		// Positions
+		if (!result.posByteData.empty()) {
+			mesh.triMesh.positions.offset = uint32_t(meshByteData.size());
+			mesh.triMesh.positions.count = result.vertexNum;
+			mesh.triMesh.positions.byteStride = sizeof(glm::vec3);
+
+			uint32_t pad = (sizeof(glm::vec3) - meshByteData.size() % sizeof(glm::vec3)) % sizeof(glm::vec3);
+			if (pad > 0) meshByteData.insert(meshByteData.end(), pad, 0);
+			mesh.triMesh.positions.offset += pad;
+			meshByteData.insert(meshByteData.end(), result.posByteData.begin(), result.posByteData.end());
+		}
+
+		// Normals
+		if (!result.normalByteData.empty()) {
+			mesh.triMesh.normals.offset = uint32_t(meshByteData.size());
+			mesh.triMesh.normals.count = result.vertexNum;
+			mesh.triMesh.normals.byteStride = sizeof(glm::vec3);
+
+			uint32_t pad = (sizeof(glm::vec3) - meshByteData.size() % sizeof(glm::vec3)) % sizeof(glm::vec3);
+			if (pad > 0) meshByteData.insert(meshByteData.end(), pad, 0);
+			mesh.triMesh.normals.offset += pad;
+			meshByteData.insert(meshByteData.end(), result.normalByteData.begin(), result.normalByteData.end());
+		}
+
+		// TexCoords
+		if (!result.texCoordByteData.empty()) {
+			mesh.triMesh.texCoords.offset = uint32_t(meshByteData.size());
+			mesh.triMesh.texCoords.count = result.vertexNum;
+			mesh.triMesh.texCoords.byteStride = sizeof(glm::vec2);
+
+			uint32_t pad = (sizeof(glm::vec2) - meshByteData.size() % sizeof(glm::vec2)) % sizeof(glm::vec2);
+			if (pad > 0) meshByteData.insert(meshByteData.end(), pad, 0);
+			mesh.triMesh.texCoords.offset += pad;
+			meshByteData.insert(meshByteData.end(), result.texCoordByteData.begin(), result.texCoordByteData.end());
+		}
+
+		// Tangents
+		if (!result.tangentByteData.empty()) {
+			mesh.triMesh.tangents.offset = uint32_t(meshByteData.size());
+			mesh.triMesh.tangents.count = result.vertexNum;
+			mesh.triMesh.tangents.byteStride = sizeof(glm::vec4);
+
+			uint32_t pad = (sizeof(glm::vec4) - meshByteData.size() % sizeof(glm::vec4)) % sizeof(glm::vec4);
+			if (pad > 0) meshByteData.insert(meshByteData.end(), pad, 0);
+			mesh.triMesh.tangents.offset += pad;
+			meshByteData.insert(meshByteData.end(), result.tangentByteData.begin(), result.tangentByteData.end());
+		}
+
+		MeshInfo childMeshInfo = {
+			.meshID = meshID + result.meshName,
+			.mesh = mesh,
+			.materialID = result.materialID,
+			.material = result.material
+		};
+		childMeshInfos.emplace_back(childMeshInfo);
+	}
 }
 
 void FzbRenderer::MeshSet::createCustomMeshSet(std::string meshID, nvutils::PrimitiveMesh primitiveMesh) {
@@ -535,7 +808,7 @@ shaderio::AABB FzbRenderer::MeshSet::getAABB(glm::mat4 transformMatrix) {
 
 	return aabb;
 }
-//-----------------------------------------------------Éú³ÉÍ¼Ôª----------------------------------------------------
+//-----------------------------------------------------ï¿½ï¿½ï¿½ï¿½Í¼Ôª----------------------------------------------------
 static uint32_t addPos(nvutils::PrimitiveMesh& mesh, glm::vec3 p)
 {
 	nvutils::PrimitiveVertex v{};
@@ -558,7 +831,7 @@ nvutils::PrimitiveMesh FzbRenderer::MeshSet::createPlane(int steps, float width,
 
 	const float invSteps = 1.0f / static_cast<float>(steps);
 
-	// Éú³É¶¥µã£º´Ó (0,0,0) ¿ªÊ¼£¬ºáÏòÎª X(0..width)£¬×ÝÏòÎª Y(0..depth)£¬Z = 0
+	// ï¿½ï¿½ï¿½É¶ï¿½ï¿½ã£ºï¿½ï¿½ (0,0,0) ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Îª X(0..width)ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Îª Y(0..depth)ï¿½ï¿½Z = 0
 	for (int sy = 0; sy <= steps; ++sy)
 	{
 		for (int sx = 0; sx <= steps; ++sx)
@@ -568,15 +841,15 @@ nvutils::PrimitiveMesh FzbRenderer::MeshSet::createPlane(int steps, float width,
 			float u = static_cast<float>(sx) * invSteps; // 0..1
 			float v_t = static_cast<float>(sy) * invSteps; // 0..1
 
-			v.pos = glm::vec3(u * width, v_t * height, 0.0f); // XY Æ½Ãæ£¬Æðµã (0,0,0)
-			v.nrm = glm::vec3(0.0f, 0.0f, 1.0f);               // Ö¸Ïò +Z
+			v.pos = glm::vec3(u * width, v_t * height, 0.0f); // XY Æ½ï¿½æ£¬ï¿½ï¿½ï¿½ (0,0,0)
+			v.nrm = glm::vec3(0.0f, 0.0f, 1.0f);               // Ö¸ï¿½ï¿½ +Z
 			v.tex = glm::vec2(u, v_t);                        // (0,0) -> (1,1)
 
 			mesh.vertices.emplace_back(v);
 		}
 	}
 
-	// Éú³ÉË÷Òý£¨Èý½ÇÐÎ£©£¬È·±£¶¥µãË³ÐòÔÚ XY Æ½ÃæÉÏÎª CCW£¨Ãæ³¯ +Z£©
+	// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Î£ï¿½ï¿½ï¿½È·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ë³ï¿½ï¿½ï¿½ï¿½ XY Æ½ï¿½ï¿½ï¿½ï¿½Îª CCWï¿½ï¿½ï¿½æ³¯ +Zï¿½ï¿½
 	const int rowStride = steps + 1;
 	for (int sy = 0; sy < steps; ++sy)
 	{
@@ -587,7 +860,7 @@ nvutils::PrimitiveMesh FzbRenderer::MeshSet::createPlane(int steps, float width,
 			int b = (sx + 1) + (sy + 1) * rowStride;     // (sx+1, sy+1)
 			int d = sx + (sy + 1) * rowStride;           // (sx, sy+1)
 
-			// Á½¸öÈý½ÇÐÎ£º (a, c, b) ºÍ (a, b, d) -> ±£Ö¤³¯Ïò +Z£¨CCW£©
+			// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Î£ï¿½ (a, c, b) ï¿½ï¿½ (a, b, d) -> ï¿½ï¿½Ö¤ï¿½ï¿½ï¿½ï¿½ +Zï¿½ï¿½CCWï¿½ï¿½
 			addTriangle(mesh, a, c, b);
 			addTriangle(mesh, a, b, d);
 		}
@@ -614,14 +887,14 @@ nvutils::PrimitiveMesh FzbRenderer::MeshSet::createCube(bool normal, bool texCoo
 		};
 	}
 	else {
-		// Ã¿¸öÃæÓÉËÄ¸öÔ­Ê¼¶¥µãË÷Òý×é³É£¨°´ÄãÔ­À´µÄÃæË³Ðò£©
+		// Ã¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä¸ï¿½Ô­Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½É£ï¿½ï¿½ï¿½ï¿½ï¿½Ô­ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ë³ï¿½ï¿½
 		const uint32_t faces[6][4] = {
-			{1, 0, 3, 2}, // z = 0 Ãæ£¨back£©
-			{4, 5, 6, 7}, // z = 1 Ãæ£¨front£©
-			{5, 1, 2, 6}, // x = 1 Ãæ£¨right£©
-			{0, 4, 7, 3}, // x = 0 Ãæ£¨left£©
-			{7, 6, 2, 3}, // y = 1 Ãæ£¨top£©
-			{0, 1, 5, 4}  // y = 0 Ãæ£¨bottom£©
+			{1, 0, 3, 2}, // z = 0 ï¿½æ£¨backï¿½ï¿½
+			{4, 5, 6, 7}, // z = 1 ï¿½æ£¨frontï¿½ï¿½
+			{5, 1, 2, 6}, // x = 1 ï¿½æ£¨rightï¿½ï¿½
+			{0, 4, 7, 3}, // x = 0 ï¿½æ£¨leftï¿½ï¿½
+			{7, 6, 2, 3}, // y = 1 ï¿½æ£¨topï¿½ï¿½
+			{0, 1, 5, 4}  // y = 0 ï¿½æ£¨bottomï¿½ï¿½
 		};
 		const glm::vec3 pos[8] = {
 				{0.0f, 0.0f, 0.0f}, // 0
@@ -633,7 +906,7 @@ nvutils::PrimitiveMesh FzbRenderer::MeshSet::createCube(bool normal, bool texCoo
 				{1.0f, 1.0f, 1.0f}, // 6
 				{0.0f, 1.0f, 1.0f}  // 7
 		};
-		// ¶ÔÓ¦Ã¿¸öÃæµÄ·¨Ïß£¨ÓëÉÏÃæ faces Ë³ÐòÒ»Ò»¶ÔÓ¦£©
+		// ï¿½ï¿½Ó¦Ã¿ï¿½ï¿½ï¿½ï¿½Ä·ï¿½ï¿½ß£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ faces Ë³ï¿½ï¿½Ò»Ò»ï¿½ï¿½Ó¦ï¿½ï¿½
 		const glm::vec3 normals[6] = {
 			{ 0.0f,  0.0f, -1.0f}, // back
 			{ 0.0f,  0.0f,  1.0f}, // front
@@ -651,7 +924,7 @@ nvutils::PrimitiveMesh FzbRenderer::MeshSet::createCube(bool normal, bool texCoo
 		mesh.vertices.clear();
 		mesh.triangles.clear();
 
-		// ÎªÃ¿¸öÃæ push 4 ¸ö¶¥µã
+		// ÎªÃ¿ï¿½ï¿½ï¿½ï¿½ push 4 ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 		for (int f = 0; f < 6; ++f) {
 			for (int v = 0; v < 4; ++v) {
 				uint32_t pi = faces[f][v];
@@ -686,41 +959,41 @@ nvutils::PrimitiveMesh FzbRenderer::MeshSet::createWireframe(float width, float 
 	return mesh;
 }
 nvutils::PrimitiveMesh FzbRenderer::MeshSet::createSphere(bool normal, bool texCoords, uint32_t sectorCount, uint32_t stackCount){
-	// ±£Ö¤ÖÁÉÙÄÜ¹¹³ÉÒ»¸öÇòÌå
+	// ï¿½ï¿½Ö¤ï¿½ï¿½ï¿½ï¿½ï¿½Ü¹ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 	assert(sectorCount >= 3 && stackCount >= 2);
 
 	nvutils::PrimitiveMesh mesh;
 	const float radius = 1.0f;
 
-	// Ô¤¼ÆËãËùÓÐ¶¥µãµÄÎ»ÖÃ¡¢·¨Ïß¡¢ÎÆÀí×ø±ê£¨µ¥Î»Çò£©
+	// Ô¤ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð¶ï¿½ï¿½ï¿½ï¿½Î»ï¿½Ã¡ï¿½ï¿½ï¿½ï¿½ß¡ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ê£¨ï¿½ï¿½Î»ï¿½ï¿½
 	std::vector<glm::vec3> posArray;
 	std::vector<glm::vec3> nrmArray;
 	std::vector<glm::vec2> texArray;
 
 	for (uint32_t i = 0; i <= stackCount; ++i)
 	{
-		float theta = (float)i * glm::pi<float>() / stackCount; // 0 µ½ PI
+		float theta = (float)i * glm::pi<float>() / stackCount; // 0 ï¿½ï¿½ PI
 		float sinTheta = sin(theta);
 		float cosTheta = cos(theta);
 
 		for (uint32_t j = 0; j <= sectorCount; ++j)
 		{
-			float phi = (float)j * 2.0f * glm::pi<float>() / sectorCount; // 0 µ½ 2*PI
+			float phi = (float)j * 2.0f * glm::pi<float>() / sectorCount; // 0 ï¿½ï¿½ 2*PI
 			float sinPhi = sin(phi);
 			float cosPhi = cos(phi);
 
-			// ÇòÃæÎ»ÖÃ
+			// ï¿½ï¿½ï¿½ï¿½Î»ï¿½ï¿½
 			glm::vec3 pos = glm::vec3(
 				radius * sinTheta * cosPhi,
 				radius * cosTheta,
 				radius * sinTheta * sinPhi);
 			posArray.push_back(pos);
-			nrmArray.push_back(glm::normalize(pos));   // µ¥Î»Çò·¨Ïß¼´Î»ÖÃ
+			nrmArray.push_back(glm::normalize(pos));   // ï¿½ï¿½Î»ï¿½ï¿½ï¿½ß¼ï¿½Î»ï¿½ï¿½
 			texArray.push_back(glm::vec2((float)j / sectorCount, (float)i / stackCount));
 		}
 	}
 
-	// Ìî³ä¶¥µãÊý¾Ý£¨ÓëÔ­ÓÐÂß¼­Ò»ÖÂ£¬µ«Ö±½ÓÊ¹ÓÃ posArray µÈ£©
+	// ï¿½ï¿½ä¶¥ï¿½ï¿½ï¿½ï¿½ï¿½Ý£ï¿½ï¿½ï¿½Ô­ï¿½ï¿½ï¿½ß¼ï¿½Ò»ï¿½Â£ï¿½ï¿½ï¿½Ö±ï¿½ï¿½Ê¹ï¿½ï¿½ posArray ï¿½È£ï¿½
 	mesh.vertices.clear();
 	mesh.vertices.reserve(posArray.size());
 	for (size_t i = 0; i < posArray.size(); ++i)
@@ -732,15 +1005,15 @@ nvutils::PrimitiveMesh FzbRenderer::MeshSet::createSphere(bool normal, bool texC
 		mesh.vertices.push_back(v);
 	}
 
-	// Ë÷ÒýÉú³É£º¶¥²¿/µ×²¿ÉÈÐÎ + ÖÐ¼äËÄ±ßÐÎÌõ´ø£¨ÐÞÕýÈÆÐò£¬Ïû³ýÍË»¯Èý½ÇÐÎ£©
+	// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½É£ï¿½ï¿½ï¿½ï¿½ï¿½/ï¿½×²ï¿½ï¿½ï¿½ï¿½ï¿½ + ï¿½Ð¼ï¿½ï¿½Ä±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ë»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Î£ï¿½
 	mesh.triangles.clear();
-	mesh.triangles.reserve(sectorCount * stackCount * 2); // Ô¤¹À
+	mesh.triangles.reserve(sectorCount * stackCount * 2); // Ô¤ï¿½ï¿½
 
-	const uint32_t stride = sectorCount + 1;          // Ã¿ÐÐ¶¥µãÊý
-	const uint32_t northPoleIdx = 0;                  // ±±¼«µã£¨Ê¹ÓÃµÚÒ»¸ö¶¥µã£©
-	const uint32_t southPoleIdx = stackCount * stride; // ÄÏ¼«µã£¨Ê¹ÓÃ×îºóÒ»ÐÐµÄµÚÒ»¸ö¶¥µã£©
+	const uint32_t stride = sectorCount + 1;          // Ã¿ï¿½Ð¶ï¿½ï¿½ï¿½ï¿½ï¿½
+	const uint32_t northPoleIdx = 0;                  // ï¿½ï¿½ï¿½ï¿½ï¿½ã£¨Ê¹ï¿½Ãµï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ã£©
+	const uint32_t southPoleIdx = stackCount * stride; // ï¿½Ï¼ï¿½ï¿½ã£¨Ê¹ï¿½ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ÐµÄµï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ã£©
 
-	// ¶¥²¿ÉÈÐÎ£¨i = 0 ~ 1£©
+	// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Î£ï¿½i = 0 ~ 1ï¿½ï¿½
 	for (uint32_t j = 0; j < sectorCount; ++j)
 	{
 		uint32_t nextRowCur = stride + j;
@@ -748,7 +1021,7 @@ nvutils::PrimitiveMesh FzbRenderer::MeshSet::createSphere(bool normal, bool texC
 		mesh.triangles.push_back({ { northPoleIdx, nextRowCur, nextRowNext } });
 	}
 
-	// ÖÐ¼äËÄ±ßÐÎ»·£¨i = 1 ~ stackCount-1£©
+	// ï¿½Ð¼ï¿½ï¿½Ä±ï¿½ï¿½Î»ï¿½ï¿½ï¿½i = 1 ~ stackCount-1ï¿½ï¿½
 	for (uint32_t i = 1; i < stackCount - 1; ++i)
 	{
 		uint32_t curRow = i * stride;
@@ -760,13 +1033,13 @@ nvutils::PrimitiveMesh FzbRenderer::MeshSet::createSphere(bool normal, bool texC
 			uint32_t curUp = nextRow + j;
 			uint32_t nextUp = nextRow + j + 1;
 
-			// Á½¸öÈý½ÇÐÎ£¬±£³ÖÄæÊ±ÕëÈÆÐò£¨Íâ±íÃæ¿É¼û£©
+			// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Î£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½É¼ï¿½ï¿½ï¿½
 			mesh.triangles.push_back({ { cur, next, curUp } });
 			mesh.triangles.push_back({ { next, nextUp, curUp } });
 		}
 	}
 
-	// µ×²¿ÉÈÐÎ£¨i = stackCount-1 ~ stackCount£©
+	// ï¿½×²ï¿½ï¿½ï¿½ï¿½Î£ï¿½i = stackCount-1 ~ stackCountï¿½ï¿½
 	{
 		uint32_t lastRow = (stackCount - 1) * stride;
 		for (uint32_t j = 0; j < sectorCount; ++j)

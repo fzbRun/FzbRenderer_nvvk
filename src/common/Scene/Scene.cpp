@@ -184,7 +184,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 				shaderio::Light& light = lightInstances[lightInstances.size() - 1].light;
 				light.type = shaderio::Direction;
 				light.direction = glm::normalize(-sceneInfo.skySimpleParam.sunDirection);
-				light.pos = shaderio::float3(0.0f) - 10.0f * light.direction;
+				light.pos = shaderio::float3(0.0f) - 10000.0f * light.direction;
 				light.color = sceneInfo.skySimpleParam.sunColor;
 				light.intensity = sceneInfo.skySimpleParam.sunIntensity;
 

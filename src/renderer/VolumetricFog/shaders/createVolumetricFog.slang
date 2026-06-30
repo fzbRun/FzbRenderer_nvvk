@@ -5,9 +5,59 @@
 #include "common/Shader/Slang/commonFunction.slang"
 
 [[vk::push_constant]] ConstantBuffer<VolumetricFogPushConstant> pushConst;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eGlobalInfoBuffer)]] RWStructuredBuffer<GlobalInfo_VolumetricFog> globalInfoBuffer;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogImage)]] RWTexture3D<float4> volumetricFogImage;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogImage_sampler)]] Sampler3D<float4> volumetricFogImage_sample;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eLightAttenuationEstimatorBuffer)]] RWStructuredBuffer<float3> lightAttenuationEstimatorBuffer;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eLocalVolumetricFogInfosBuffer)]] RWStructuredBuffer<VolumetricFogInfo, ScalarDataLayout> localVolumetricFogInfosBuffer;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eLocalVolumetricFogImage)]] RWTexture3D<float4> localVolumetricFogImages[];
+[[vk::binding(StaticBindingPoints_VolumetricFog::eAdjacentLocalVolumetricFogIndexBuffer)]] RWStructuredBuffer<uint> adjacentLocalVolumetricFogIndexBuffer;
+
+// localVolumetricFogCount <= 1024, so one threadGroup can deal with
+groupshared uint groupVisibleFogCount;
+[numthreads(1024, 1, 1)]
+[shader("compute")]
+void computeMain_getAdjacentLocalVolumetricFog(uint threadIndex: SV_DispatchThreadID) {
+    if (threadIndex == 0) groupVisibleFogCount = 0;
+    GroupMemoryBarrierWithGroupSync();
+    if (threadIndex >= pushConst.localVolumetricFogCount) return;
+
+    VolumetricFogInfo info = localVolumetricFogInfosBuffer[threadIndex];
+    float4x4 cameraPV = pushConst.sceneInfoAddress[0].viewProjMatrix;
+
+    bool inCameraFrustum = false;
+    float3 fogSize = info.fogVoxelGridSize * info.fogVoxelSize;
+    for (int i = 0; i < 8; ++i) {
+        float3 worldPos;
+        worldPos.x = ((i & 3) * 2) % 6 == 0 ? 0.0f : fogSize.x;
+        worldPos.y = (i & 3) <= 1 ? 0.0f : fogSize.y;
+        worldPos.z = i / 4 == 0 ? 0.0f : fogSize.z;
+        worldPos += info.fogStartPos;
+
+        float4 clipPos = mul(float4(worldPos, 1.0f), cameraPV);
+        float3 ndcPos = clipPos.xyz / clipPos.w;
+        ndcPos.z = ndcPos.z * 2.0f - 1.0f;
+        if (all(abs(ndcPos) <= 1.0f) && clipPos.w > 0.0f) {
+            inCameraFrustum = true;
+            break;
+        }
+    }
+
+    uint warpIndex = threadIndex / 32;
+    uint warpLane = threadIndex & 31;
+    uint warpVisibleFogCount = WaveActiveSum(inCameraFrustum);
+
+    uint visibleFogOffset;
+    if (warpLane == 0)
+        InterlockedAdd(groupVisibleFogCount, warpVisibleFogCount, visibleFogOffset);
+    visibleFogOffset = WaveReadLaneAt(visibleFogOffset, 0);
+    GroupMemoryBarrierWithGroupSync();
+
+    visibleFogOffset += WavePrefixCountBits(inCameraFrustum);
+    adjacentLocalVolumetricFogIndexBuffer[visibleFogOffset] = threadIndex;
+
+    if (threadIndex == 0) globalInfoBuffer[0].adjacentLocalVolumetricFogCount = groupVisibleFogCount;
+}
 
 [numthreads(4, 4, 4)]
 [shader("compute")]
@@ -21,20 +71,16 @@ void computeMain_createVolumetricFog(uint3 threadIndex: SV_DispatchThreadID, uin
     float3 volumetricFogCenter = pushConst.fogStartPos + pushConst.fogVoxelSize * pushConst.fogVoxelGridSize * 0.5f;
     float3 voxelCenter = (voxelAABB.minimum + voxelAABB.maximum) * 0.5f;
 
-    // float scale = distance(voxelCenter, volumetricFogCenter) / length(pushConst.fogVoxelSize * pushConst.fogVoxelGridSize * 0.5f);
     float scale = (voxelCenter.y - pushConst.fogStartPos.y) / (pushConst.fogVoxelGridSize.y * pushConst.fogVoxelSize.y);
-    float absorption = lerp(pushConst.absorption.y, pushConst.absorption.x, scale);
+    float absorption = pushConst.absorption.y - (pushConst.absorption.y - pushConst.absorption.x) * pow(scale, 2);
 
     //uint threadIndexU = threadIndex.z * (pushConst.fogVoxelGridSize.x * pushConst.fogVoxelGridSize.y) + threadIndex.y * pushConst.fogVoxelGridSize.x + threadIndex.x;
     //uint randomSeed = xxhash32(uint3(threadIndexU, pushConst.frameIndex, 1));
 
-    // float angle = (float(pushConst.frameIndex % 1000) / 999 * 2.0f - 1.0f) * M_PI_2;
-    // float randomNumber = 1.0f - rand(randomSeed) * scale * scale * 0.2 * cos(angle);
-    //float randomNumber = rand(randomSeed);
-    //extinctionCoefficient *= randomNumber;
-
     float extinctionCoefficient = absorption + pushConst.scattering;
     volumetricFogImage[threadIndex] = extinctionCoefficient;
+
+    for (int i = 0; i < )
 }
 
 [numthreads(1, 1, 1)]
