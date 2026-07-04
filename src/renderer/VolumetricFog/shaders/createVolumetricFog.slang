@@ -7,9 +7,7 @@
 [[vk::push_constant]] ConstantBuffer<VolumetricFogPushConstant> pushConst;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eGlobalInfoBuffer)]] RWStructuredBuffer<GlobalInfo_VolumetricFog> globalInfoBuffer;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogInfosBuffer)]] RWStructuredBuffer<VolumetricFogInfo, ScalarDataLayout> volumetricFogInfosBuffer;
-[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogImages)]] RWTexture3D<float4> volumetricFogImages[];
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVisibleVolumetricFogIndexBuffer)]] RWStructuredBuffer<uint> visibleVolumetricFogIndexBuffer;
-[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogImages_sampler)]] Sampler3D<float4> volumetricFogImages_sample[];
 
 // localVolumetricFogCount <= 1024, so one threadGroup can deal with
 groupshared uint groupVisibleFogCount;
@@ -47,6 +45,8 @@ void computeMain_getVisibleVolumetricFog(uint threadIndex: SV_DispatchThreadID) 
 
     if (threadIndex == 0) globalInfoBuffer[0].visibleVolumetricFogCount = groupVisibleFogCount;
 }
+//---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogImages)]] RWTexture3D<float4> volumetricFogImages[];
 
 [numthreads(4, 4, 4)]
 [shader("compute")]
@@ -57,8 +57,6 @@ void computeMain_createVolumetricFog(uint3 threadIndex: SV_DispatchThreadID, uin
     AABB voxelAABB;
     voxelAABB.minimum = fogInfo.fogStartPos + fogInfo.fogVoxelSize * threadIndex;
     voxelAABB.maximum = voxelAABB.minimum + fogInfo.fogVoxelSize;
-
-    float3 volumetricFogCenter = fogInfo.fogStartPos + fogInfo.fogVoxelSize * fogInfo.fogVoxelGridSize * 0.5f;
     float3 voxelCenter = (voxelAABB.minimum + voxelAABB.maximum) * 0.5f;
 
     float scale = (voxelCenter.y - fogInfo.fogStartPos.y) / (fogInfo.fogVoxelGridSize.y * fogInfo.fogVoxelSize.y);
@@ -70,7 +68,179 @@ void computeMain_createVolumetricFog(uint3 threadIndex: SV_DispatchThreadID, uin
     float extinctionCoefficient = absorption + fogInfo.scattering;
     volumetricFogImages[pushConst.instanceIndex][threadIndex] = extinctionCoefficient;
 }
+//---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogVoxelInfo1Image)]] RWTexture3D<float4> volumetricFogVoxelInfo1Image[]; // xyz: velocity; w: 
+[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogVoxelInfo2Image)]] RWTexture3D<float4> volumetricFogVoxelInfo2Image[]; // xyz: dirtyVelocity1; w: pressure1
+[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogVoxelInfo3Image)]] RWTexture3D<float4> volumetricFogVoxelInfo3Image[]; // xyz: dirtyVelocity2; w: pressure2
 
+[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogVoxelInfo1Image_sample)]] Sampler3D<float4> volumetricFogVoxelInfo1Image_sample[];
+[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogImages_sampler)]] Sampler3D<float4> volumetricFogImages_sample[];
+
+[numthreads(4, 4, 4)]
+[shader("compute")]
+void computeMain_createVolumetricFog_Fluid_A(uint3 voxelIndex: SV_DispatchThreadID) {
+    VolumetricFogInfo fogInfo = volumetricFogInfosBuffer[pushConst.instanceIndex];
+    if (voxelIndex.x >= fogInfo.fogVoxelGridSize.x || voxelIndex.y >= fogInfo.fogVoxelGridSize.y || voxelIndex.z >= fogInfo.fogVoxelGridSize.z) return;
+
+    AABB voxelAABB;
+    voxelAABB.minimum = fogInfo.fogStartPos + fogInfo.fogVoxelSize * voxelIndex;
+    voxelAABB.maximum = voxelAABB.minimum + fogInfo.fogVoxelSize;
+    float3 voxelCenter = (voxelAABB.minimum + voxelAABB.maximum) * 0.5f;
+
+    float3 uvw = (voxelCenter - fogInfo.fogStartPos) / (fogInfo.fogVoxelGridSize * fogInfo.fogVoxelSize);
+    float3 velocity = volumetricFogVoxelInfo1Image_sample[pushConst.volumetricFogFluidIndex].SampleLevel(uvw, 0).xyz;
+
+    float3 worldPos_lastTime = voxelCenter - pushConst.dt * velocity;
+    float3 uvw_lastTime = (worldPos_lastTime - fogInfo.fogStartPos) / (fogInfo.fogVoxelGridSize * fogInfo.fogVoxelSize);
+    float3 velocity_lastTime = volumetricFogVoxelInfo1Image_sample[pushConst.volumetricFogFluidIndex].SampleLevel(uvw_lastTime, 0).xyz;
+
+    volumetricFogVoxelInfo1Image[pushConst.volumetricFogFluidIndex][voxelIndex].xyz = velocity_lastTime;
+    volumetricFogVoxelInfo2Image[pushConst.volumetricFogFluidIndex][voxelIndex].xyz = velocity_lastTime;
+
+    float3 absorption = volumetricFogImages_sample[pushConst.volumetricFogFluidIndex] .SampleLevel((worldPos_lastTime - fogInfo.fogStartPos) / (fogInfo.fogVoxelGridSize * fogInfo.fogVoxelSize), 0) .xyz;
+    volumetricFogImages[pushConst.volumetricFogFluidIndex][voxelIndex] = float4(absorption, 1.0f);
+}
+
+[numthreads(4, 4, 4)]
+[shader("compute")]
+void computeMain_createVolumetricFog_Fluid_D(uint3 voxelIndex: SV_DispatchThreadID) {
+    VolumetricFogInfo fogInfo = volumetricFogInfosBuffer[pushConst.instanceIndex];
+    if (voxelIndex.x >= fogInfo.fogVoxelGridSize.x ||
+        voxelIndex.y >= fogInfo.fogVoxelGridSize.y ||
+        voxelIndex.z >= fogInfo.fogVoxelGridSize.z) return;
+
+    RWTexture3D<float4> currentTex = ((pushConst.iteration & 1) == 0) ? volumetricFogVoxelInfo2Image[pushConst.volumetricFogFluidIndex] : volumetricFogVoxelInfo3Image[pushConst.volumetricFogFluidIndex];
+    RWTexture3D<float4> nextTex = ((pushConst.iteration & 1) == 0) ? volumetricFogVoxelInfo3Image[pushConst.volumetricFogFluidIndex] : volumetricFogVoxelInfo2Image[pushConst.volumetricFogFluidIndex];
+
+    float3 x_neighbor = 0.0f;
+
+    if (voxelIndex.x > 0) x_neighbor += currentTex[uint3(voxelIndex.x - 1, voxelIndex.y, voxelIndex.z)].xyz;
+    if (voxelIndex.x < fogInfo.fogVoxelGridSize.x - 1) x_neighbor += currentTex[uint3(voxelIndex.x + 1, voxelIndex.y, voxelIndex.z)].xyz;
+
+    if (voxelIndex.y > 0) x_neighbor += currentTex[uint3(voxelIndex.x, voxelIndex.y - 1, voxelIndex.z)].xyz;
+    if (voxelIndex.y < fogInfo.fogVoxelGridSize.y - 1) x_neighbor += currentTex[uint3(voxelIndex.x, voxelIndex.y + 1, voxelIndex.z)].xyz;
+
+    if (voxelIndex.z > 0) x_neighbor += currentTex[uint3(voxelIndex.x, voxelIndex.y, voxelIndex.z - 1)].xyz;
+    if (voxelIndex.z < fogInfo.fogVoxelGridSize.z - 1) x_neighbor += currentTex[uint3(voxelIndex.x, voxelIndex.y, voxelIndex.z + 1)].xyz;
+
+    float3 b = currentTex[voxelIndex].xyz;
+
+    float alpha = (fogInfo.fogVoxelSize.x * fogInfo.fogVoxelSize.x) / max(fogInfo.viscosity * pushConst.dt, 1e-30f);
+    nextTex[voxelIndex].xyz = (x_neighbor + alpha * b) / (6.0f + alpha);
+}
+
+[numthreads(4, 4, 4)]
+[shader("compute")]
+void computeMain_createVolumetricFog_Fluid_F( uint3 voxelIndex: SV_DispatchThreadID){}
+
+[numthreads(4, 4, 4)]
+[shader("compute")]
+void computeMain_createVolumetricFog_Fluid_P(uint3 voxelIndex: SV_DispatchThreadID) {
+    VolumetricFogInfo fogInfo = volumetricFogInfosBuffer[pushConst.instanceIndex];
+    if (voxelIndex.x >= fogInfo.fogVoxelGridSize.x ||
+        voxelIndex.y >= fogInfo.fogVoxelGridSize.y ||
+        voxelIndex.z >= fogInfo.fogVoxelGridSize.z) return;
+
+    RWTexture3D<float4> curTex = (pushConst.iteration & 1) == 0 ? volumetricFogVoxelInfo2Image[pushConst.volumetricFogFluidIndex] : volumetricFogVoxelInfo3Image[pushConst.volumetricFogFluidIndex];
+    RWTexture3D<float4> nextTex = (pushConst.iteration & 1) == 0 ? volumetricFogVoxelInfo3Image[pushConst.volumetricFogFluidIndex] : volumetricFogVoxelInfo2Image[pushConst.volumetricFogFluidIndex];
+
+    uint3 dims = fogInfo.fogVoxelGridSize;
+    float3 cellSize = fogInfo.fogVoxelSize;
+    float halfDx = 2.0f * cellSize.x;
+    float halfDy = 2.0f * cellSize.y;
+    float halfDz = 2.0f * cellSize.z;
+
+    float4 self = curTex[voxelIndex];
+    float p_self = self.w;
+
+    float3 velL = 0.0f, velR = 0.0f, velB = 0.0f, velT = 0.0f, velD = 0.0f, velU = 0.0f;
+    float pL = p_self, pR = p_self, pB = p_self, pT = p_self, pD = p_self, pU = p_self;
+
+    if (voxelIndex.x > 0) {
+        float4 n = curTex[uint3(voxelIndex.x - 1, voxelIndex.y, voxelIndex.z)];
+        pL = n.w; velL = n.xyz;
+    }
+
+    if (voxelIndex.x < dims.x - 1) {
+        float4 n = curTex[uint3(voxelIndex.x + 1, voxelIndex.y, voxelIndex.z)];
+        pR = n.w; velR = n.xyz;
+    } 
+
+    if (voxelIndex.y > 0) {
+        float4 n = curTex[uint3(voxelIndex.x, voxelIndex.y - 1, voxelIndex.z)];
+        pB = n.w; velB = n.xyz;
+    } 
+
+    if (voxelIndex.y < dims.y - 1) {
+        float4 n = curTex[uint3(voxelIndex.x, voxelIndex.y + 1, voxelIndex.z)];
+        pT = n.w; velT = n.xyz;
+    }
+
+    if (voxelIndex.z > 0) {
+        float4 n = curTex[uint3(voxelIndex.x, voxelIndex.y, voxelIndex.z - 1)];
+        pD = n.w; velD = n.xyz;
+    }
+
+    if (voxelIndex.z < dims.z - 1) {
+        float4 n = curTex[uint3(voxelIndex.x, voxelIndex.y, voxelIndex.z + 1)];
+        pU = n.w; velU = n.xyz;
+    } 
+
+    float div = (velR.x - velL.x) / halfDx + (velT.y - velB.y) / halfDy + (velU.z - velD.z) / halfDz;
+
+    float alpha = cellSize.x * cellSize.x;
+    float sumPressure = pL + pR + pB + pT + pD + pU;
+    float nextPressure = (sumPressure - alpha * div) / 6.0f;
+
+    nextTex[voxelIndex].w = nextPressure;
+}
+
+[numthreads(4, 4, 4)]
+[shader("compute")]
+void computeMain_createVolumetricFog_Fluid_S(uint3 voxelIndex: SV_DispatchThreadID) {
+    VolumetricFogInfo fogInfo = volumetricFogInfosBuffer[pushConst.instanceIndex];
+    if (voxelIndex.x >= fogInfo.fogVoxelGridSize.x ||
+        voxelIndex.y >= fogInfo.fogVoxelGridSize.y ||
+        voxelIndex.z >= fogInfo.fogVoxelGridSize.z) return;
+
+    RWTexture3D<float4> pressureTex = (pushConst.iteration & 1) == 0 ? volumetricFogVoxelInfo2Image[pushConst.volumetricFogFluidIndex] : volumetricFogVoxelInfo3Image[pushConst.volumetricFogFluidIndex];
+
+    float4 cur = pressureTex[voxelIndex];
+    float3 vel_dirty = cur.xyz;
+    float p_self = cur.w;
+
+    uint3 dims = fogInfo.fogVoxelGridSize;
+    float3 cellSize = fogInfo.fogVoxelSize;
+    float halfDx = 2.0f * cellSize.x;
+    float halfDy = 2.0f * cellSize.y;
+    float halfDz = 2.0f * cellSize.z;
+
+    float pL, pR, pB, pT, pD, pU;
+
+    if (voxelIndex.x > 0) pL = pressureTex[uint3(voxelIndex.x - 1, voxelIndex.y, voxelIndex.z)].w;
+    else pL = p_self;
+
+    if (voxelIndex.x < dims.x - 1) pR = pressureTex[uint3(voxelIndex.x + 1, voxelIndex.y, voxelIndex.z)].w;
+    else pR = p_self;
+
+    if (voxelIndex.y > 0) pB = pressureTex[uint3(voxelIndex.x, voxelIndex.y - 1, voxelIndex.z)].w;
+    else pB = p_self;
+
+    if (voxelIndex.y < dims.y - 1) pT = pressureTex[uint3(voxelIndex.x, voxelIndex.y + 1, voxelIndex.z)].w;
+    else pT = p_self;
+
+    if (voxelIndex.z > 0) pD = pressureTex[uint3(voxelIndex.x, voxelIndex.y, voxelIndex.z - 1)].w;
+    else pD = p_self;
+
+    if (voxelIndex.z < dims.z - 1) pU = pressureTex[uint3(voxelIndex.x, voxelIndex.y, voxelIndex.z + 1)].w;
+    else pU = p_self;
+
+    float3 pressure_gradient = float3((pR - pL) / halfDx, (pT - pB) / halfDy, (pU - pD) / halfDz);
+
+    float3 newVelocity = vel_dirty - pressure_gradient;
+    volumetricFogVoxelInfo1Image[pushConst.volumetricFogFluidIndex][voxelIndex].xyz = newVelocity;
+}
+//---------------------------------------------------------------------------------------------------------------------------------------------------------------------
 [numthreads(1, 1, 1)]
 [shader("compute")]
 void computeMain_createLightAttenuationEstimator(uint threadIndex: SV_DispatchThreadID) {
@@ -120,12 +290,12 @@ void computeMain_createLightAttenuationEstimator(uint threadIndex: SV_DispatchTh
         voxelBorder.y = (step.y > 0) ? (fogStartPos.y + (voxel.y + 1) * voxelSize.y) : (fogStartPos.y + voxel.y * voxelSize.y);
         voxelBorder.z = (step.z > 0) ? (fogStartPos.z + (voxel.z + 1) * voxelSize.z) : (fogStartPos.z + voxel.z * voxelSize.z);
 
-        // ÐÞÕý£º»ùÓÚ worldPos ¼ÆËãÈ«¾Ö tMax
+        // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ worldPos ï¿½ï¿½ï¿½ï¿½È«ï¿½ï¿½ tMax
         tMax.x = (step.x != 0) ? (voxelBorder.x - startPos.x) * invDir.x : 1e30;
         tMax.y = (step.y != 0) ? (voxelBorder.y - startPos.y) * invDir.y : 1e30;
         tMax.z = (step.z != 0) ? (voxelBorder.z - startPos.z) * invDir.z : 1e30;
 
-        // ¼«Î¢Ð¡ÐÞÕý£ºÈôÒò eps ÍÆ½øµ¼ÖÂ tMax ÂÔÐ¡ÓÚ tCurrent£¬²¹Ò»Õû¸öÌåËØ
+        // ï¿½ï¿½Î¢Ð¡ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ eps ï¿½Æ½ï¿½ï¿½ï¿½ï¿½ï¿½ tMax ï¿½ï¿½Ð¡ï¿½ï¿½ tCurrentï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
         if (step.x != 0 && tMax.x < tCurrent) tMax.x += tDelta.x;
         if (step.y != 0 && tMax.y < tCurrent) tMax.y += tDelta.y;
         if (step.z != 0 && tMax.z < tCurrent) tMax.z += tDelta.z;
@@ -145,7 +315,7 @@ void computeMain_createLightAttenuationEstimator(uint threadIndex: SV_DispatchTh
             float tSample = tCurrent + dt * rand(randomSeed);
             float3 samplePoint = startPos + dir * tSample;
 
-            float3 uvw = (samplePoint - fogStartPos) / (fogInfo.fogVoxelGridSize * gridSize);
+            float3 uvw = (samplePoint - fogStartPos) / (fogInfo.fogVoxelGridSize * fogInfo.fogVoxelSize);
             float extinctionCoeff = volumetricFogImages_sample[pushConst.instanceIndex].SampleLevel(uvw, 0).x;
 
             attenuation *= exp(-extinctionCoeff * dt);
@@ -158,8 +328,7 @@ void computeMain_createLightAttenuationEstimator(uint threadIndex: SV_DispatchTh
         if (tMax.x < tMax.y) {
             if (tMax.x < tMax.z) { voxel.x += step.x; tMax.x += tDelta.x; }
             else { voxel.z += step.z; tMax.z += tDelta.z; }
-        }
-        else {
+        }else {
             if (tMax.y < tMax.z) { voxel.y += step.y; tMax.y += tDelta.y; }
             else { voxel.z += step.z; tMax.z += tDelta.z; }
         }

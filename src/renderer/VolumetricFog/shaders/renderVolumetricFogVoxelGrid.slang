@@ -10,7 +10,7 @@
 
 struct VSout {
     float4 sv_position : SV_Position;
-}
+};
 
 [shader("vertex")]
 VSout vertexMain(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID)

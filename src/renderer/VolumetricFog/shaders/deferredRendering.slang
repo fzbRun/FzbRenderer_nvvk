@@ -33,7 +33,7 @@ float getShadow(float4 worldPos) {
     return shadow;
 }
 
-void getVolumetricFogScatter(float3 startPos, float3 endPos, uint randomSeed, uint fogIndex, inout float3 L, inout float3 attenuation, inout float3 attenuation2) {
+void getVolumetricFogScatter(float3 startPos, float3 endPos, inout uint randomSeed, uint fogIndex, inout float3 L, inout float3 attenuation, inout float3 attenuation2) {
     VolumetricFogInfo fogInfo = volumetricFogInfosBuffer[fogIndex];
 
     float3 fogStartPos = fogInfo.fogStartPos;
@@ -107,6 +107,7 @@ void getVolumetricFogScatter(float3 startPos, float3 endPos, uint randomSeed, ui
 
             float3 uvw = (samplePoint - fogInfo.fogStartPos) / (fogInfo.fogVoxelGridSize * fogInfo.fogVoxelSize);
             float extinctionCoeff = volumetricFogImages_sample[fogIndex].SampleLevel(uvw, 0).x;
+            extinctionCoeff = max(extinctionCoeff, 1e-30f);
 
             for (int lightIndex = 0; lightIndex < sceneInfo.numLights; ++lightIndex) {
                 Light light = sceneInfo.lights[lightIndex];
@@ -128,7 +129,6 @@ void getVolumetricFogScatter(float3 startPos, float3 endPos, uint randomSeed, ui
                 float tLightEnter, tLightExit;
                 isHit(lightPos, samplePoint, gridMin, gridMax, tLightEnter, tLightExit);
                 float lightDt = tLightExit - tLightEnter;
-                if (lightIndex == 1) lightDt = max(lightDt - 0.1f, 0.0f);
 
                 float3 activeSunColor = lightColor * lerp(1.0f, fogInfo.lightAttenuationEstimator, lightDt / gridLength) * pushConst.lightAttenuationStrength;
                 if (lightIndex == 0) activeSunColor *= getShadow(float4(samplePoint, 1.0f)) ;
@@ -146,8 +146,7 @@ void getVolumetricFogScatter(float3 startPos, float3 endPos, uint randomSeed, ui
         if (tMax.x < tMax.y) {
             if (tMax.x < tMax.z) { voxel.x += step.x; tMax.x += tDelta.x; }
             else { voxel.z += step.z; tMax.z += tDelta.z; }
-        }
-        else {
+        }else {
             if (tMax.y < tMax.z) { voxel.y += step.y; tMax.y += tDelta.y; }
             else { voxel.z += step.z; tMax.z += tDelta.z; }
         }
@@ -156,9 +155,10 @@ void getVolumetricFogScatter(float3 startPos, float3 endPos, uint randomSeed, ui
     attenuation *= E;
 
     float tLightEnter, tLightExit;
-    isHit(endPos - sceneInfo.lights[0].direction * 10.0f, endPos, gridMin, gridMax, tLightEnter, tLightExit);
-    float mainLightDt = tLightExit - tLightEnter;
-    attenuation2 *= lerp(1.0f, fogInfo.lightAttenuationEstimator, mainLightDt / gridLength) * pushConst.lightAttenuationStrength;
+    if (isHit(endPos - sceneInfo.lights[0].direction * 10.0f, endPos, gridMin, gridMax, tLightEnter, tLightExit)) {
+        float mainLightDt = tLightExit - tLightEnter;
+        attenuation2 *= lerp(1.0f, fogInfo.lightAttenuationEstimator, mainLightDt / gridLength) * pushConst.lightAttenuationStrength;
+    }
 }
 
 groupshared GlobalInfo_VolumetricFog groupGlobalInfo;

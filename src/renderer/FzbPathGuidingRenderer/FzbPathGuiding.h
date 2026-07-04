@@ -11,6 +11,16 @@
 #define FZBRENDERER_FZB_PATHGUIDING_H
 
 namespace FzbRenderer {
+enum class ImageType_FzbPG{
+	eImgRendered,
+#ifndef NDEBUG
+	eImgPGValue,
+	eImgPGValue2,
+	eImgPGVariance,
+#endif
+	eImgTonemapped,
+};
+
 class FzbPathGuidingRenderer : public PathTracingRenderer {
 public:
 	FzbPathGuidingRenderer() = default;
@@ -44,6 +54,10 @@ private:
 
 	shaderio::FzbPathGuidingPushConstant pushConstant{};
 	VkShaderEXT computeShader_FzbPathGuiding{};
+
+#ifndef NDEBUG
+	std::map<uint32_t, bool> showDebugImages;
+#endif
 };
 }
 

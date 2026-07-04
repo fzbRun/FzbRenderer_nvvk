@@ -905,4 +905,87 @@ float3 sphericalRectangleSample(Quadrilateral_initialization quadrangle, float u
 
     return xu * quadrangle.x + yv * quadrangle.y + quadrangle.z0 * quadrangle.z; // Œ¥πÈ“ªªØ
 }
+//------------------------------------------------noise---------------------------------------------
+float hash(float3 p) {
+    p = fract(p * 0.3183099 + 0.1);
+    p *= 17.0;
+    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+float3 randomGradient(float3 p) {
+    float h = hash(p);
+    float theta = h * 6.283185;
+    float phi = (hash(p + 0.1) - 0.5) * 3.14159;
+    return float3(cos(theta) * cos(phi), sin(theta) * cos(phi), sin(phi));
+}
+float perlinNoise(float3 p) {
+    float3 i = floor(p);
+    float3 f = fract(p);
+    float3 u = f * f * (3.0 - 2.0 * f);
+
+    return lerp(
+        lerp(
+            lerp(dot(randomGradient(i + float3(0, 0, 0)), f - float3(0, 0, 0)),
+                          dot(randomGradient(i + float3(1, 0, 0)), f - float3(1, 0, 0)), u.x),
+                     lerp(dot(randomGradient(i + float3(0, 1, 0)), f - float3(0, 1, 0)),
+                          dot(randomGradient(i + float3(1, 1, 0)), f - float3(1, 1, 0)), u.x), u.y),
+                lerp(
+            lerp(dot(randomGradient(i + float3(0, 0, 1)), f - float3(0, 0, 1)),
+                          dot(randomGradient(i + float3(1, 0, 1)), f - float3(1, 0, 1)), u.x),
+                     lerp(dot(randomGradient(i + float3(0, 1, 1)), f - float3(0, 1, 1)),
+                       dot(randomGradient(i + float3(1, 1, 1)), f - float3(1, 1, 1)), u.x), u.y), u.z);
+}
+float fbm(float3 p) {
+    float value = 0.0;
+    float amplitude = 0.5;
+    float frequency = 1.0;
+    float persistence = 0.5;
+
+    for (int i = 0; i < 6; i++) {
+        value += amplitude * perlinNoise(p * frequency);
+        frequency *= 2.0;
+        amplitude *= persistence;
+    }
+    return value;
+}
+float worleyNoise(float3 p) {
+    float3 i = floor(p);
+    float3 f = fract(p);
+    float minDist = 1.0;
+
+    for (int x = -1; x <= 1; x++) {
+        for (int y = -1; y <= 1; y++) {
+            for (int z = -1; z <= 1; z++) {
+                float3 neighbor = float3(float(x), float(y), float(z));
+                float3 point = float3(
+                    hash(i + neighbor),
+                    hash(i + neighbor + 10.0),
+                    hash(i + neighbor + 20.0)
+                );
+                float3 diff = neighbor + point - f;
+                float d = dot(diff, diff);
+                minDist = min(minDist, d);
+            }
+        }
+    }
+    return sqrt(minDist);
+}
+float turbulenceAbs(float3 p) {
+    float value = 0.0;
+    float amplitude = 0.5;
+    float frequency = 1.0;
+    for (int i = 0; i < 6; i++) {
+        value += amplitude * abs(perlinNoise(p * frequency));
+        frequency *= 2.0;
+        amplitude *= 0.5;
+    }
+    return value;
+}
+float turbulenceWarp(float3 p) {
+    float offsetX = fbm(p);
+    float offsetY = fbm(p + float3(1.3, 5.2, 3.1));
+    float offsetZ = fbm(p + float3(3.1, 1.7, 4.3));
+
+    float3 warped = p + float3(offsetX, offsetY, offsetZ) * 2.0; // can be change strength
+    return fbm(warped);
+}
 #endif

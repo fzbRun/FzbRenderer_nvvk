@@ -6,27 +6,46 @@
 #define FZBRENDERER_VOLUMETRIC_FOG_SHADER_IO_H
 NAMESPACE_SHADERIO_BEGIN()
 
+#define Jacobi_Iteration_Count 60u
+
 struct VolumetricFogPushConstant
 {
 	float3x3 normalMatrix;
 	int frameIndex;
 
+	float dt;
+	uint iteration = 0;
+
 	float lightAttenuationStrength = 1.0f;
 	uint volumetricFogCount;
 	int instanceIndex;
+	int volumetricFogFluidIndex;
 
 	SceneInfo* sceneInfoAddress;
 	float4x4 lightVP;
 };
 
+enum class VolumetricFogType {
+	Height,
+	Noise,
+};
 struct VolumetricFogInfo {
 	float3 fogStartPos;
-	uint3 fogVoxelGridSize;
+	uint3 fogVoxelGridSize;		//不要设置为1x1x1，否则有bug
 	float3 fogVoxelSize;
 	float2 absorption;
 	float scattering;
 	float phase;
 	float lightAttenuationEstimator;
+	float viscosity;
+	VolumetricFogType type;
+};
+struct VolumetricFogVoxelInfo {
+	float3 velocity;
+	float3 dirtyVelocity[2];
+	float pressure[2];
+	float viscosity;
+	//float3 temperature;
 };
 
 struct GlobalInfo_VolumetricFog {
@@ -43,10 +62,16 @@ enum class StaticBindingPoints_VolumetricFog {
 	eGlobalInfoBuffer,
 
 	eVolumetricFogInfosBuffer,
+	//eVolumetricFogVoxelInfoBuffer,
+	eVolumetricFogVoxelInfo1Image,
+	eVolumetricFogVoxelInfo2Image,
+	eVolumetricFogVoxelInfo3Image,
+	eVolumetricFogVoxelInfo1Image_sample,
+
 	eVolumetricFogImages,
+	eVolumetricFogImages_sampler,
 
 	eVisibleVolumetricFogIndexBuffer,
-	eVolumetricFogImages_sampler,
 
 	eShadowMap,
 	eRenderedImage,

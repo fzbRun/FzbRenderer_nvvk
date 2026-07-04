@@ -54,24 +54,40 @@ private:
 	VkShaderEXT fragmentShader_createGBuffer{};
 
 	VkShaderEXT computeShader_getVisibleVolumetricFog{};
+
 	VkShaderEXT computeShader_createVolumetricFog{};
+
+	VkShaderEXT computeShader_createVolumetricFog_Fluid_A{};
+	VkShaderEXT computeShader_createVolumetricFog_Fluid_D{};
+	VkShaderEXT computeShader_createVolumetricFog_Fluid_F{};
+	VkShaderEXT computeShader_createVolumetricFog_Fluid_P{};
+	VkShaderEXT computeShader_createVolumetricFog_Fluid_S{};
+
 	VkShaderEXT computeShader_createLightAttenuationEstimator{};
 
 	VkShaderEXT computeShader_deferredRenderring{};
 
 	shaderio::VolumetricFogPushConstant pushConstant;
 
+	ShadowMap shadowMap;
+
 	FzbRenderer::Buffer GlobalInfoBuffer;
 
 	uint32_t volumetricFogCount = 1;
-	std::vector<FzbRenderer::Image> volumetricFogImages;
 	std::vector<shaderio::VolumetricFogInfo> volumetricFogInfos;
 	FzbRenderer::Buffer volumetricFogInfosBuffer;
+	std::vector<FzbRenderer::Image> volumetricFogImages;
 	std::vector<int> volumetricFogInfoModified;
-
 	FzbRenderer::Buffer visibleVolumetricFogIndexBuffer;
 
-	ShadowMap shadowMap;
+	uint32_t volumetricFogNoFluidCount = 1;
+	std::map<int, int> volumetricFogNoFuildIndexMap;
+
+	uint32_t volumetricFogFluidCount = 0;
+	std::map<int, int> volumetricFogFuildIndexMap;
+	std::vector<FzbRenderer::Image> volumetricFogVoxelInfo1Images;		//xyz: velocity; w: 
+	std::vector<FzbRenderer::Image> volumetricFogVoxelInfo2Images;		//xyz: dirtyVelocity1; w: pressure1
+	std::vector<FzbRenderer::Image> volumetricFogVoxelInfo3Images;		//xyz: dirtyVelocity2; w: pressure2
 
 #ifndef NDEBUG
 	void renderVolumetricFogVoxelGrid(VkCommandBuffer cmd);

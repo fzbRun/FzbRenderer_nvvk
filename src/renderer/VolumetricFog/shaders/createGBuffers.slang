@@ -21,7 +21,7 @@ __generic<T : IFloat> T getAttribute(uint8_t *dataBufferAddress, BufferView buff
 struct VSin
 {
     float3 position : POSITION;
-    float3 normal : NORMAl;
+    float3 normal : NORMAL;
 };
 
 struct VSout
