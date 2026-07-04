@@ -57,6 +57,7 @@ private:
 
 	VkShaderEXT computeShader_createVolumetricFog{};
 
+	VkShaderEXT computeShader_initVolumetricFogFluid{};
 	VkShaderEXT computeShader_createVolumetricFog_Fluid_A{};
 	VkShaderEXT computeShader_createVolumetricFog_Fluid_D{};
 	VkShaderEXT computeShader_createVolumetricFog_Fluid_F{};
