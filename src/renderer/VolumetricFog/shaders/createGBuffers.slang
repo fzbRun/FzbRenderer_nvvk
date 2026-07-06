@@ -6,6 +6,8 @@
 
 [[vk::push_constant]] ConstantBuffer<VolumetricFogPushConstant> pushConst;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eTextures)]] Sampler2D textures[];
+[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogInfosBuffer)]] RWStructuredBuffer<VolumetricFogInfo, ScalarDataLayout> volumetricFogInfosBuffer;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogVoxelInfoBuffer)]] RWStructuredBuffer<VolumetricFogVoxelInfo, ScalarDataLayout> volumetricFogVoxelInfosBuffer[];
 
 __generic<T : IFloat> T getAttribute(uint8_t *dataBufferAddress, BufferView bufferView, uint attributeIndex)
 {
@@ -71,6 +73,17 @@ PSout fragmentMain(VSout input)
     SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
     Instance instance = sceneInfo.instances[pushConst.instanceIndex];
     BSDFMaterial material = sceneInfo.materials[instance.materialIndex];
+
+    for (int i = 0; i < pushConst.volumetricFogCount; ++i) {
+        VolumetricFogInfo fogInfo = volumetricFogInfosBuffer[i];
+        if (fogInfo.type != VolumetricFogType::Noise) continue;
+        AABB fogAABB = { fogInfo.fogStartPos, fogInfo.fogStartPos + fogInfo.fogVoxelGridSize * fogInfo.fogVoxelSize };
+        if (!checkPointInAABB(input.worldPos, fogAABB)) continue;
+
+        uint3 voxelIndex = min(uint3((input.worldPos - fogInfo.fogStartPos) / fogInfo.fogVoxelSize), fogInfo.fogVoxelGridSize - 1);
+        uint voxelIndexU = voxelIndex.z * fogInfo.fogVoxelGridSize.x * fogInfo.fogVoxelGridSize.y + voxelIndex.y * fogInfo.fogVoxelGridSize.x + voxelIndex.x;
+        volumetricFogVoxelInfosBuffer[fogInfo.fluidIndex][voxelIndexU].isBoundary = true;
+    }
 
     return { float4(material.albedo, 1.0f), float4(normalize(input.worldNormal), 1.0f), float4(material.emissive, 1.0f) };
     //return { float4(material.albedo, 1.0f), float4(normalize(input.worldNormal), 1.0f), float4(0.0f, 0.0f, 0.0f, 1.0f) };

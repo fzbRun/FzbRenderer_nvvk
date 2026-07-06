@@ -16,6 +16,8 @@ struct VolumetricFogPushConstant
 	float dt;
 	uint iteration = 0;
 
+	float ambientFogDensity = 0.0f;
+
 	float lightAttenuationStrength = 1.0f;
 	uint volumetricFogCount;
 	int instanceIndex;
@@ -37,14 +39,15 @@ struct VolumetricFogInfo {
 	float scattering;
 	float phase;
 	float lightAttenuationEstimator;
-	float viscosity;
+
 	VolumetricFogType type;
+	float viscosity;
+	uint fluidIndex;
+	float gravitationalIntensity;
 };
 struct VolumetricFogVoxelInfo {
-	float3 velocity;
-	float3 dirtyVelocity[2];
-	float pressure[2];
-	float viscosity;
+	float4 dirtyVelocity_pressure[2];
+	bool isBoundary;
 	//float3 temperature;
 };
 
@@ -62,10 +65,8 @@ enum class StaticBindingPoints_VolumetricFog {
 	eGlobalInfoBuffer,
 
 	eVolumetricFogInfosBuffer,
-	//eVolumetricFogVoxelInfoBuffer,
+	eVolumetricFogVoxelInfoBuffer,
 	eVolumetricFogVoxelInfo1Image,
-	eVolumetricFogVoxelInfo2Image,
-	eVolumetricFogVoxelInfo3Image,
 	eVolumetricFogVoxelInfo1Image_sample,
 
 	eVolumetricFogImages,

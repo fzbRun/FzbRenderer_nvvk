@@ -1,13 +1,13 @@
 #pragma once
 
+#ifndef FZBRENDERER_VOLUMETRIC_FOG_H
+#define FZBRENDERER_VOLUMETRIC_FOG_H
+
 #include "renderer/Renderer.h"
 #include <common/Image/Image.h>
 #include "./VolumetricFogShaderio.h"
 #include <feature/ShadowMap/ShadowMap.h>
 #include <common/Buffer/Buffer.h>
-
-#ifndef FZBRENDERER_VOLUMETRIC_FOG_H
-#define FZBRENDERER_VOLUMETRIC_FOG_H
 
 namespace FzbRenderer {
 enum class GBuffers_VolumetricFog{
@@ -82,13 +82,15 @@ private:
 	FzbRenderer::Buffer visibleVolumetricFogIndexBuffer;
 
 	uint32_t volumetricFogNoFluidCount = 1;
-	std::map<int, int> volumetricFogNoFuildIndexMap;
+	std::map<int, int> volumetricFogNoFluidIndexMap;
 
 	uint32_t volumetricFogFluidCount = 0;
-	std::map<int, int> volumetricFogFuildIndexMap;
+	std::map<int, int> volumetricFogFluidIndexMap;
+	std::vector<FzbRenderer::Buffer> volumetricFogVoxelInfoBuffers;		
 	std::vector<FzbRenderer::Image> volumetricFogVoxelInfo1Images;		//xyz: velocity; w: 
-	std::vector<FzbRenderer::Image> volumetricFogVoxelInfo2Images;		//xyz: dirtyVelocity1; w: pressure1
-	std::vector<FzbRenderer::Image> volumetricFogVoxelInfo3Images;		//xyz: dirtyVelocity2; w: pressure2
+	//std::vector<FzbRenderer::Image> volumetricFogVoxelInfo2Images;		//xyz: dirtyVelocity1; w: pressure1
+	//std::vector<FzbRenderer::Image> volumetricFogVoxelInfo3Images;		//xyz: dirtyVelocity2; w: pressure2
+	std::vector<bool> fluidHasInit;
 
 #ifndef NDEBUG
 	void renderVolumetricFogVoxelGrid(VkCommandBuffer cmd);
