@@ -11,20 +11,23 @@ NAMESPACE_SHADERIO_BEGIN()
 struct VolumetricFogPushConstant
 {
 	float3x3 normalMatrix;
-	int frameIndex;
+	float3 instanceVelocity;
 
 	float dt;
 	uint iteration = 0;
 
-	float ambientFogDensity = 0.0f;
-
 	float lightAttenuationStrength = 1.0f;
 	uint volumetricFogCount;
+
 	int instanceIndex;
 	int volumetricFogFluidIndex;
+	float ambientFogDensity = 0.0f;
 
+	int frameIndex;
 	SceneInfo* sceneInfoAddress;
 	float4x4 lightVP;
+
+	int blow = 0;
 };
 
 enum class VolumetricFogType {
@@ -43,11 +46,12 @@ struct VolumetricFogInfo {
 	VolumetricFogType type;
 	float viscosity;
 	uint fluidIndex;
-	float gravitationalIntensity;
+	float FIntensity;
 };
 struct VolumetricFogVoxelInfo {
 	float4 dirtyVelocity_pressure[2];
 	bool isBoundary;
+	float3 density;
 	//float3 temperature;
 };
 

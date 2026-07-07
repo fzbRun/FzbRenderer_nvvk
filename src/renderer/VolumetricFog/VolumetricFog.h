@@ -42,6 +42,7 @@ private:
 	void compileAndCreateShaders() override;
 	void updateDataPerFrame(VkCommandBuffer cmd) override;
 
+	void initVolumetricFogFluid(VkCommandBuffer cmd);
 	void createGBuffers(VkCommandBuffer cmd);
 	void createVolumetricFog(VkCommandBuffer cmd);
 	void deferredRenderring(VkCommandBuffer cmd);
@@ -57,7 +58,9 @@ private:
 
 	VkShaderEXT computeShader_createVolumetricFog{};
 
+	VkShaderEXT computeShader_createVolumetricFogFluid{};
 	VkShaderEXT computeShader_initVolumetricFogFluid{};
+	VkShaderEXT computeShader_initVolumetricFogFluid2{};
 	VkShaderEXT computeShader_createVolumetricFog_Fluid_A{};
 	VkShaderEXT computeShader_createVolumetricFog_Fluid_D{};
 	VkShaderEXT computeShader_createVolumetricFog_Fluid_F{};
@@ -88,9 +91,7 @@ private:
 	std::map<int, int> volumetricFogFluidIndexMap;
 	std::vector<FzbRenderer::Buffer> volumetricFogVoxelInfoBuffers;		
 	std::vector<FzbRenderer::Image> volumetricFogVoxelInfo1Images;		//xyz: velocity; w: 
-	//std::vector<FzbRenderer::Image> volumetricFogVoxelInfo2Images;		//xyz: dirtyVelocity1; w: pressure1
-	//std::vector<FzbRenderer::Image> volumetricFogVoxelInfo3Images;		//xyz: dirtyVelocity2; w: pressure2
-	std::vector<bool> fluidHasInit;
+	bool firstFrame = true;
 
 #ifndef NDEBUG
 	void renderVolumetricFogVoxelGrid(VkCommandBuffer cmd);

@@ -8,6 +8,7 @@
 [[vk::binding(StaticBindingPoints_VolumetricFog::eTextures)]] Sampler2D textures[];
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogInfosBuffer)]] RWStructuredBuffer<VolumetricFogInfo, ScalarDataLayout> volumetricFogInfosBuffer;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogVoxelInfoBuffer)]] RWStructuredBuffer<VolumetricFogVoxelInfo, ScalarDataLayout> volumetricFogVoxelInfosBuffer[];
+[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogVoxelInfo1Image)]] RWTexture3D<float4> volumetricFogVoxelInfo1Image[]; // xyz: velocity; w:
 
 __generic<T : IFloat> T getAttribute(uint8_t *dataBufferAddress, BufferView bufferView, uint attributeIndex)
 {
@@ -78,11 +79,12 @@ PSout fragmentMain(VSout input)
         VolumetricFogInfo fogInfo = volumetricFogInfosBuffer[i];
         if (fogInfo.type != VolumetricFogType::Noise) continue;
         AABB fogAABB = { fogInfo.fogStartPos, fogInfo.fogStartPos + fogInfo.fogVoxelGridSize * fogInfo.fogVoxelSize };
-        if (!checkPointInAABB(input.worldPos, fogAABB)) continue;
+        if (!checkPointInAABB(input.worldPos.xyz, fogAABB)) continue;
 
-        uint3 voxelIndex = min(uint3((input.worldPos - fogInfo.fogStartPos) / fogInfo.fogVoxelSize), fogInfo.fogVoxelGridSize - 1);
+        uint3 voxelIndex = min(uint3((input.worldPos.xyz - fogInfo.fogStartPos) / fogInfo.fogVoxelSize), fogInfo.fogVoxelGridSize - 1);
         uint voxelIndexU = voxelIndex.z * fogInfo.fogVoxelGridSize.x * fogInfo.fogVoxelGridSize.y + voxelIndex.y * fogInfo.fogVoxelGridSize.x + voxelIndex.x;
         volumetricFogVoxelInfosBuffer[fogInfo.fluidIndex][voxelIndexU].isBoundary = true;
+        volumetricFogVoxelInfo1Image[fogInfo.fluidIndex][voxelIndex].xyz = pushConst.instanceVelocity;
     }
 
     return { float4(material.albedo, 1.0f), float4(normalize(input.worldNormal), 1.0f), float4(material.emissive, 1.0f) };

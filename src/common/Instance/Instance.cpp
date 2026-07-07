@@ -78,6 +78,9 @@ void InstanceSet::getTransformMatrixFromXML(pugi::xml_node& transformNode){
 			scaleMatrix = glm::scale(scaleMatrix, scaleValue);
 		}
 	}
+
+	transform = baseMatrix;
+	transform_lastTime = transform;
 }
 InstanceSet::InstanceSet(pugi::xml_node& instanceNode) {
 	static int customMeshSetCount = 0;
@@ -132,13 +135,15 @@ void InstanceSet::getInstance(std::vector<shaderio::Instance>& instances, int of
 		return;
 	}
 
+	transform_lastTime = transform;
+	transform = ((1.0f - time) * glm::mat4(1.0f) + time * translateMatrix) *
+		((1.0f - time) * glm::mat4(1.0f) + time * rotateMatrix) *
+		((1.0f - time) * glm::mat4(1.0f) + time * scaleMatrix) * baseMatrix;	//interpolateTransforms(startMatrix, endMatrix, time);
 	for (int i = 0; i < childInstances.size(); ++i) {
 		shaderio::Instance instance;
 		instance.meshIndex = childInstances[i].meshIndex;
 		instance.materialIndex = childInstances[i].materialIndex;
-		instance.transform = ((1.0f - time) * glm::mat4(1.0f) + time * translateMatrix) * 
-			((1.0f - time) * glm::mat4(1.0f) + time * rotateMatrix) * 
-			((1.0f - time) * glm::mat4(1.0f) + time * scaleMatrix) *  baseMatrix;	//interpolateTransforms(startMatrix, endMatrix, time);
+		instance.transform = transform;
 		instances[offset + i] = instance;
 	}
 }

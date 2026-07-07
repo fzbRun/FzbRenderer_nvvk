@@ -27,19 +27,20 @@
 		<instance>
 			<meshRef id = "yanYun"/>
 		</instance>
-		
+
 		<instance type="periodMotion">
 			<meshRef id = "dragon"/>
 			
 			<transform name="to_world">
-				<translate value ="5111.0f, -71.0f, -4453.0f" />
+				<translate value ="5116.0f, -69.8f, -4451.0f" />
 				<rotate value = "0, 0, 0" />
 				<scale value = "0.4, 0.4, 0.4" />
 				<period time="100">
-					<translate value = "1, 0, 0" />
+					<translate value = "-150, 0, 0" />
 				</period>
 			</transform>
 			
 		</instance>
+
 	</instances>
 </scene>
