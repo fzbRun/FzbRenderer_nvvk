@@ -120,7 +120,6 @@ void VolumetricFog::clean() {
 
 	vkDestroyShaderEXT(device, computeShader_createVolumetricFogFluid, nullptr);
 	vkDestroyShaderEXT(device, computeShader_initVolumetricFogFluid, nullptr);
-	vkDestroyShaderEXT(device, computeShader_initVolumetricFogFluid2, nullptr);
 	vkDestroyShaderEXT(device, computeShader_createVolumetricFog_Fluid_A, nullptr);
 	vkDestroyShaderEXT(device, computeShader_createVolumetricFog_Fluid_D, nullptr);
 	vkDestroyShaderEXT(device, computeShader_createVolumetricFog_Fluid_F, nullptr);
@@ -652,16 +651,6 @@ void VolumetricFog::compileAndCreateShaders() {
 		shaderInfo.pCode = shaderCode.pCode;
 		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_initVolumetricFogFluid);
 		NVVK_DBG_NAME(computeShader_initVolumetricFogFluid);
-
-		vkDestroyShaderEXT(device, computeShader_initVolumetricFogFluid2, nullptr);
-
-		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-		shaderInfo.nextStage = 0;
-		shaderInfo.pName = "computeMain_initVolumetricFogFluid2";
-		shaderInfo.codeSize = shaderCode.codeSize;
-		shaderInfo.pCode = shaderCode.pCode;
-		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_initVolumetricFogFluid2);
-		NVVK_DBG_NAME(computeShader_initVolumetricFogFluid2);
 
 		vkDestroyShaderEXT(device, computeShader_createVolumetricFog_Fluid_A, nullptr);
 
