@@ -50,23 +50,48 @@ void computeMain_getVisibleVolumetricFog(uint threadIndex: SV_DispatchThreadID) 
 
 [numthreads(4, 4, 4)]
 [shader("compute")]
-void computeMain_createVolumetricFog(uint3 threadIndex: SV_DispatchThreadID, uint3 groupThreadIndex: SV_GroupThreadID) {
+void computeMain_createVolumetricFog(uint3 voxelIndex: SV_DispatchThreadID, uint3 groupThreadIndex: SV_GroupThreadID) {
     VolumetricFogInfo fogInfo = volumetricFogInfosBuffer[pushConst.instanceIndex];
-    if (threadIndex.x >= fogInfo.fogVoxelGridSize.x || threadIndex.y >= fogInfo.fogVoxelGridSize.y || threadIndex.z >= fogInfo.fogVoxelGridSize.z) return;
+    if (any(voxelIndex >= fogInfo.fogVoxelGridSize)) return;
 
-    AABB voxelAABB;
-    voxelAABB.minimum = fogInfo.fogStartPos + fogInfo.fogVoxelSize * threadIndex;
-    voxelAABB.maximum = voxelAABB.minimum + fogInfo.fogVoxelSize;
-    float3 voxelCenter = (voxelAABB.minimum + voxelAABB.maximum) * 0.5f;
+    float3 voxelCenter = fogInfo.fogStartPos + (float3(voxelIndex) + 0.5f) * fogInfo.fogVoxelSize;
+    float fogHeight = fogInfo.fogStartPos.y + fogInfo.fogVoxelGridSize.y * fogInfo.fogVoxelSize.y;
+    float t = saturate((voxelCenter.y - fogInfo.fogStartPos.y) / (fogHeight - fogInfo.fogStartPos.y));
 
-    float scale = (voxelCenter.y - fogInfo.fogStartPos.y) / (fogInfo.fogVoxelGridSize.y * fogInfo.fogVoxelSize.y);
-    float absorption = fogInfo.absorption.y - (fogInfo.absorption.y - fogInfo.absorption.x) * pow(scale, 2);
+    float3 normalizedPos = (float3(voxelIndex) + 0.5f) / float3(fogInfo.fogVoxelGridSize);
+    float3 cloudPos = float3(voxelCenter.x * 0.09f, voxelCenter.y * 0.24f, voxelCenter.z * 0.09f);
 
-    //uint threadIndexU = threadIndex.z * (pushConst.fogVoxelGridSize.x * pushConst.fogVoxelGridSize.y) + threadIndex.y * pushConst.fogVoxelGridSize.x + threadIndex.x;
-    //uint randomSeed = xxhash32(uint3(threadIndexU, pushConst.frameIndex, 1));
+    float3 warp = float3(
+        fbm(cloudPos * 0.65f + float3(13.1f, 4.7f, 9.2f)),
+        fbm(cloudPos * 0.65f + float3(2.6f, 15.4f, 7.8f)),
+        fbm(cloudPos * 0.65f + float3(6.9f, 1.8f, 21.3f))) * 2.0f - 1.0f;
+    cloudPos.xz += warp.xz * 4.0f;
+    cloudPos.y += warp.y * 0.85f;
 
-    float extinctionCoefficient = absorption + fogInfo.scattering;
-    volumetricFogExtinctionImages[pushConst.instanceIndex][threadIndex] = extinctionCoefficient;
+    float broadCloud = fbm(cloudPos * 1.45f + 19.0f) * 0.5f + 0.5f;
+    float rollingCloud = fbm(cloudPos * 3.2f + 53.0f) * 0.5f + 0.5f;
+    float silkDetail = fbm(cloudPos * 8.0f + 97.0f) * 0.5f + 0.5f;
+
+    float cloudBody = smoothstep(0.30f, 0.72f, broadCloud);
+    cloudBody = lerp(0.38f, 1.0f, cloudBody);
+    cloudBody *= lerp(0.70f, 1.35f, rollingCloud);
+    cloudBody *= lerp(0.82f, 1.12f, silkDetail);
+
+    float bottomFeather = smoothstep(0.0f, 0.08f, t);
+    float halfBodyFalloff = 1.0f - smoothstep(0.58f, 1.0f, t + warp.y * 0.10f);
+    float middleLift = smoothstep(0.08f, 0.34f, t) * (1.0f - smoothstep(0.66f, 0.94f, t));
+
+    float edgeBreakup = smoothstep(0.03f, 0.14f, normalizedPos.x)
+        * (1.0f - smoothstep(0.86f, 0.97f, normalizedPos.x))
+        * smoothstep(0.03f, 0.14f, normalizedPos.z)
+        * (1.0f - smoothstep(0.86f, 0.97f, normalizedPos.z));
+
+    float densityMask = saturate(cloudBody * bottomFeather * halfBodyFalloff * edgeBreakup);
+    densityMask = saturate(densityMask + middleLift * rollingCloud * 0.25f);
+
+    float extinction = (fogInfo.absorption.y + fogInfo.scattering) * 1.65f * densityMask;
+
+    volumetricFogExtinctionImages[pushConst.instanceIndex][voxelIndex] = extinction;
 }
 //--------------------------------------------------------------------------------Fluid-------------------------------------------------------------------------------------
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogVoxelVelocityImage)]] RWTexture3D<float4> volumetricFogVoxelVelocityImage[]; // xyz: velocity; w:

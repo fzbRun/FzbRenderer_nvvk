@@ -35,13 +35,14 @@ VolumetricFog::VolumetricFog(pugi::xml_node& rendererNode) {
 	volumetricFogVoxelVelocityImages.resize(volumetricFogFluidCount);
 
 	volumetricFogInfos[0] = {
-		.fogStartPos = {5084.0f, -77.0f, -4486.0f},
+		.fogStartPos = {5084.0f, -69.5f, -4486.0f},
 		.fogVoxelGridSize = {16, 16, 16},
-		.fogVoxelSize = {7.0f, 2.0f, 5.0f},
-		.absorption = { 0.0, 0.01 },
-		.scattering = 0.03f,
+		.fogVoxelSize = {7.0f, 0.1f, 5.0f},
+		.absorption = { 0.0, 1.5 },
+		.scattering = 0.3f,
 		.phase = -0.7,
-		.type = shaderio::VolumetricFogType::Height
+		.type = shaderio::VolumetricFogType::Height,
+		.viscosity = 10.0f,		//高度雾衰减
 	};
 	volumetricFogNoFluidIndexMap.insert({ 0, 0 });
 
@@ -182,7 +183,12 @@ void VolumetricFog::uiRender() {
 				ImGui::BeginDisabled(true);
 				volumetricFogInfoModified[i] |= ImGui::Combo(std::string("Type " + std::to_string(i)).c_str(), (int*)&volumetricFogInfos[i].type, fogTypeItems, IM_ARRAYSIZE(fogTypeItems));
 				ImGui::EndDisabled();
-				if (volumetricFogInfos[i].type == shaderio::VolumetricFogType::Fluid) {
+				if (volumetricFogInfos[i].type == shaderio::VolumetricFogType::Height) {
+					if (ImGui::CollapsingHeader(std::string("Height Properties " + std::to_string(i)).c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
+						volumetricFogInfoModified[i] |= ImGui::DragFloat(std::string("Height Attenuation " + std::to_string(i)).c_str(), (float*)&volumetricFogInfos[i].viscosity, 1.0f, 0.0f, 1000.0f);
+					}
+				}
+				else if(volumetricFogInfos[i].type == shaderio::VolumetricFogType::Fluid) {
 					if (ImGui::CollapsingHeader(std::string("Fluid Properties " + std::to_string(i)).c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
 						volumetricFogInfoModified[i] |= ImGui::DragFloat(std::string("Viscosity " + std::to_string(i)).c_str(), (float*)&volumetricFogInfos[i].viscosity, 0.1f, 0.0f, 1.0f);
 						volumetricFogInfoModified[i] |= ImGui::DragFloat(std::string("F Intensity " + std::to_string(i)).c_str(), (float*)&volumetricFogInfos[i].FIntensity, 1.0f, 0.0f, 100.0f);

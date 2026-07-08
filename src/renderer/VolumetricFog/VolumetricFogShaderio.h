@@ -18,7 +18,7 @@ struct VolumetricFogPushConstant
 
 	float dt;
 	uint iteration = 0;
-
+	
 	float lightAttenuationStrength = 1.0f;
 	uint volumetricFogCount;
 
