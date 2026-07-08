@@ -24,7 +24,7 @@ struct MeshInfo {
 
 	uint32_t meshIndex;
 
-	shaderio::AABB getAABB(glm::mat4 transformMatrix = glm::mat4(1.0f));
+	shaderio::AABB getAABB(glm::mat4 transformMatrix = glm::mat4(1.0f), bool isStatic = false);
 };
 
 class MeshSet{

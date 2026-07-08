@@ -45,8 +45,8 @@ void computeMain_getVisibleVolumetricFog(uint threadIndex: SV_DispatchThreadID) 
 
     if (threadIndex == 0) globalInfoBuffer[0].visibleVolumetricFogCount = groupVisibleFogCount;
 }
-//---------------------------------------------------------------------------------------------------------------------------------------------------------------------
-[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogImages)]] RWTexture3D<float4> volumetricFogImages[];
+//-----------------------------------------------------------------------------Height----------------------------------------------------------------------------------------
+[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogExtinctionImages)]] RWTexture3D<float4> volumetricFogExtinctionImages[];
 
 [numthreads(4, 4, 4)]
 [shader("compute")]
@@ -66,39 +66,47 @@ void computeMain_createVolumetricFog(uint3 threadIndex: SV_DispatchThreadID, uin
     //uint randomSeed = xxhash32(uint3(threadIndexU, pushConst.frameIndex, 1));
 
     float extinctionCoefficient = absorption + fogInfo.scattering;
-    volumetricFogImages[pushConst.instanceIndex][threadIndex] = extinctionCoefficient;
+    volumetricFogExtinctionImages[pushConst.instanceIndex][threadIndex] = extinctionCoefficient;
 }
-//---------------------------------------------------------------------------------------------------------------------------------------------------------------------
-[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogVoxelInfo1Image)]] RWTexture3D<float4> volumetricFogVoxelInfo1Image[]; // xyz: velocity; w:
+//--------------------------------------------------------------------------------Fluid-------------------------------------------------------------------------------------
+[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogVoxelVelocityImage)]] RWTexture3D<float4> volumetricFogVoxelVelocityImage[]; // xyz: velocity; w:
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogVoxelInfoBuffer)]] RWStructuredBuffer<VolumetricFogVoxelInfo, ScalarDataLayout> volumetricFogVoxelInfoBuffer[];
 
-[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogVoxelInfo1Image_sample)]] Sampler3D<float4> volumetricFogVoxelInfo1Image_sample[];
-[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogImages_sampler)]] Sampler3D<float4> volumetricFogImages_sample[];
+[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogVoxelVelocityImage_sample)]] Sampler3D<float4> volumetricFogVoxelVelocityImage_sample[];
+[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogExtinctionImages_sampler)]] Sampler3D<float4> volumetricFogExtinctionImages_sample[];
 
 groupshared VolumetricFogInfo groupFogInfo;
+
+float getRestSmokeDensity(uint3 voxelIndex, VolumetricFogInfo fogInfo) {
+    float3 gridSize = float3(fogInfo.fogVoxelGridSize);
+    float3 normalizedPos = (float3(voxelIndex) + 0.5f) / gridSize;
+    float3 sphereCenter = float3(0.5f, 0.5f, 0.5f);
+    float3 spherePos = (normalizedPos - sphereCenter) * 2.0f;
+
+    float radius = 0.72f;
+    float dist = length(spherePos);
+    float sphereMask = 1.0f - smoothstep(radius * 0.72f, radius, dist);
+
+    float lowFreqNoise = fbm(normalizedPos * 4.0f + 17.0f) * 0.5f + 0.5f;
+    float highFreqNoise = fbm(normalizedPos * 12.0f + 31.0f) * 0.5f + 0.5f;
+    float noise = saturate(lerp(lowFreqNoise, highFreqNoise, 0.35f));
+    float noisyMask = saturate(sphereMask * lerp(0.45f, 1.25f, noise));
+
+    return (fogInfo.absorption.y + fogInfo.scattering) * noisyMask;
+}
 
 [numthreads(4, 4, 4)]
 [shader("compute")]
 void computeMain_createVolumetricFogFluid(uint3 voxelIndex: SV_DispatchThreadID, uint3 groupThreadIndex: SV_GroupThreadID) {
-    if (groupThreadIndex.x == 0 && groupThreadIndex.y == 0 && groupThreadIndex.z == 0) groupFogInfo = volumetricFogInfosBuffer[pushConst.instanceIndex];
+    if (all(groupThreadIndex == 0)) groupFogInfo = volumetricFogInfosBuffer[pushConst.instanceIndex];
     GroupMemoryBarrierWithGroupSync();
 
     VolumetricFogInfo fogInfo = groupFogInfo;
-    if (voxelIndex.x >= fogInfo.fogVoxelGridSize.x || voxelIndex.y >= fogInfo.fogVoxelGridSize.y || voxelIndex.z >= fogInfo.fogVoxelGridSize.z) return;
+    if (any(voxelIndex >= fogInfo.fogVoxelGridSize)) return;
 
-    uint threadIndexU = voxelIndex.z * (fogInfo.fogVoxelGridSize.x * fogInfo.fogVoxelGridSize.y) + voxelIndex.y * fogInfo.fogVoxelGridSize.x + voxelIndex.x;
-    uint randomSeed = xxhash32(voxelIndex);
-    float noise = rand(randomSeed) * 0.05f;
+    volumetricFogExtinctionImages[pushConst.instanceIndex][voxelIndex] = getRestSmokeDensity(voxelIndex, fogInfo);
 
-    float absorption = fogInfo.absorption.x;
-    if (voxelIndex.y < fogInfo.fogVoxelGridSize.y / 2) absorption = fogInfo.absorption.y;
-
-    if (any(voxelIndex == 0) || any(voxelIndex == fogInfo.fogVoxelGridSize - 1)) {
-        absorption = 0.0f; noise = 0.0f;
-    }
-    volumetricFogImages[pushConst.instanceIndex][voxelIndex] = absorption + fogInfo.scattering;
-
-    volumetricFogVoxelInfo1Image[pushConst.volumetricFogFluidIndex][voxelIndex] = 0.0f;
+    volumetricFogVoxelVelocityImage[pushConst.volumetricFogFluidIndex][voxelIndex] = 0.0f;
     uint voxelIndexU = voxelIndex.z * fogInfo.fogVoxelGridSize.x * fogInfo.fogVoxelGridSize.y + voxelIndex.y * fogInfo.fogVoxelGridSize.x + voxelIndex.x;
     volumetricFogVoxelInfoBuffer[pushConst.volumetricFogFluidIndex][voxelIndexU].dirtyVelocity_pressure = { float4(0.0f), float4(0.0f) };
     volumetricFogVoxelInfoBuffer[pushConst.volumetricFogFluidIndex][voxelIndexU].isBoundary = false;
@@ -107,11 +115,11 @@ void computeMain_createVolumetricFogFluid(uint3 voxelIndex: SV_DispatchThreadID,
 [numthreads(4, 4, 4)]
 [shader("compute")]
 void computeMain_initVolumetricFogFluid(uint3 voxelIndex: SV_DispatchThreadID, uint3 groupThreadIndex: SV_GroupThreadID) {
-    if (groupThreadIndex.x == 0 && groupThreadIndex.y == 0 && groupThreadIndex.z == 0) groupFogInfo = volumetricFogInfosBuffer[pushConst.instanceIndex];
+    if (all(groupThreadIndex == 0)) groupFogInfo = volumetricFogInfosBuffer[pushConst.instanceIndex];
     GroupMemoryBarrierWithGroupSync();
 
     VolumetricFogInfo fogInfo = groupFogInfo;
-    if (voxelIndex.x >= fogInfo.fogVoxelGridSize.x || voxelIndex.y >= fogInfo.fogVoxelGridSize.y || voxelIndex.z >= fogInfo.fogVoxelGridSize.z) return;
+    if (any(voxelIndex >= fogInfo.fogVoxelGridSize)) return;
 
     uint voxelIndexU = voxelIndex.z * fogInfo.fogVoxelGridSize.x * fogInfo.fogVoxelGridSize.y + voxelIndex.y * fogInfo.fogVoxelGridSize.x + voxelIndex.x;
     //if (any(voxelIndex == 0) || any(voxelIndex == fogInfo.fogVoxelGridSize - 1)) isBoundary = true;
@@ -232,18 +240,18 @@ void computeMain_initVolumetricFogFluid2(uint3 voxelIndex: SV_DispatchThreadID, 
         float3 forwardF = groupF[localVoxelIndex.z + 1][localVoxelIndex.y][localVoxelIndex.x];
         if (forwardF.z < 0.0f) velocity.z += forwardF.z;
     }
-    volumetricFogVoxelInfo1Image[pushConst.volumetricFogFluidIndex][voxelIndex].xyz += velocity;
+    volumetricFogVoxelVelocityImage[pushConst.volumetricFogFluidIndex][voxelIndex].xyz += velocity;
     */
 }
 
 [numthreads(4, 4, 4)]
 [shader("compute")]
 void computeMain_createVolumetricFog_Fluid_A(uint3 voxelIndex: SV_DispatchThreadID, uint3 groupThreadIndex: SV_GroupThreadID) {
-    if (groupThreadIndex.x == 0 && groupThreadIndex.y == 0 && groupThreadIndex.z == 0) groupFogInfo = volumetricFogInfosBuffer[pushConst.instanceIndex];
+    if (all(groupThreadIndex == 0)) groupFogInfo = volumetricFogInfosBuffer[pushConst.instanceIndex];
     GroupMemoryBarrierWithGroupSync();
 
     VolumetricFogInfo fogInfo = groupFogInfo;
-    if (voxelIndex.x >= fogInfo.fogVoxelGridSize.x || voxelIndex.y >= fogInfo.fogVoxelGridSize.y || voxelIndex.z >= fogInfo.fogVoxelGridSize.z) return;
+    if (any(voxelIndex >= fogInfo.fogVoxelGridSize)) return;
 
     uint voxelIndexU = voxelIndex.z * fogInfo.fogVoxelGridSize.x * fogInfo.fogVoxelGridSize.y + voxelIndex.y * fogInfo.fogVoxelGridSize.x + voxelIndex.x;
     VolumetricFogVoxelInfo voxelInfo = volumetricFogVoxelInfoBuffer[pushConst.volumetricFogFluidIndex][voxelIndexU];
@@ -253,7 +261,9 @@ void computeMain_createVolumetricFog_Fluid_A(uint3 voxelIndex: SV_DispatchThread
     voxelAABB.maximum = voxelAABB.minimum + fogInfo.fogVoxelSize;
     float3 voxelCenter = (voxelAABB.minimum + voxelAABB.maximum) * 0.5f;
 
-    float3 velocity = volumetricFogVoxelInfo1Image[pushConst.volumetricFogFluidIndex][voxelIndex].xyz;
+    // float3 velocity = volumetricFogVoxelVelocityImage[pushConst.volumetricFogFluidIndex][voxelIndex].xyz;
+    float3 uvw = (voxelCenter - fogInfo.fogStartPos) / (fogInfo.fogVoxelGridSize * fogInfo.fogVoxelSize);
+    float3 velocity = volumetricFogVoxelVelocityImage_sample[pushConst.volumetricFogFluidIndex].SampleLevel(uvw, 0).xyz;
 
     float3 velocity_lastTime = velocity;
     if (!voxelInfo.isBoundary) {
@@ -263,8 +273,8 @@ void computeMain_createVolumetricFog_Fluid_A(uint3 voxelIndex: SV_DispatchThread
         neighborVoxelIndex = clamp(neighborVoxelIndex, 0, fogInfo.fogVoxelGridSize - 1);
 
         bool isInsideSolid = false;
-        uint idxU = neighborVoxelIndex.z * fogInfo.fogVoxelGridSize.x * fogInfo.fogVoxelGridSize.y + neighborVoxelIndex.y * fogInfo.fogVoxelGridSize.x + neighborVoxelIndex.x;
-        VolumetricFogVoxelInfo neighborInfo = volumetricFogVoxelInfoBuffer[pushConst.volumetricFogFluidIndex][idxU];
+        uint neighborVoxelIndexU = neighborVoxelIndex.z * fogInfo.fogVoxelGridSize.x * fogInfo.fogVoxelGridSize.y + neighborVoxelIndex.y * fogInfo.fogVoxelGridSize.x + neighborVoxelIndex.x;
+        VolumetricFogVoxelInfo neighborInfo = volumetricFogVoxelInfoBuffer[pushConst.volumetricFogFluidIndex][neighborVoxelIndexU];
         if (neighborInfo.isBoundary) isInsideSolid = true;
 
         if (isInsideSolid) {
@@ -274,12 +284,12 @@ void computeMain_createVolumetricFog_Fluid_A(uint3 voxelIndex: SV_DispatchThread
         else {
             float3 uvw_lastTime = (worldPos_lastTime - fogInfo.fogStartPos) / (fogInfo.fogVoxelGridSize * fogInfo.fogVoxelSize);
             uvw_lastTime = clamp(uvw_lastTime, 0.0f, 1.0f);
-            velocity_lastTime = volumetricFogVoxelInfo1Image_sample[pushConst.volumetricFogFluidIndex].SampleLevel(uvw_lastTime, 0).xyz;
+            velocity_lastTime = volumetricFogVoxelVelocityImage_sample[pushConst.volumetricFogFluidIndex].SampleLevel(uvw_lastTime, 0).xyz;
 
-            voxelInfo.density = volumetricFogImages_sample[pushConst.instanceIndex].SampleLevel(uvw_lastTime, 0).xyz;
-            // uint3 voxelIndex_lastTime = uint3((worldPos_lastTime - fogInfo.fogStartPos) / fogInfo.fogVoxelSize);
-            // voxelIndex_lastTime = clamp(voxelIndex_lastTime, 1, fogInfo.fogVoxelGridSize - 2);
-            // voxelInfo.density = volumetricFogImages[pushConst.instanceIndex][voxelIndex_lastTime].xyz;
+            voxelInfo.density = volumetricFogExtinctionImages_sample[pushConst.instanceIndex].SampleLevel(uvw_lastTime, 0).xyz;
+            //uint3 voxelIndex_lastTime = uint3((worldPos_lastTime - fogInfo.fogStartPos) / fogInfo.fogVoxelSize);
+            //voxelIndex_lastTime = clamp(voxelIndex_lastTime, 1, fogInfo.fogVoxelGridSize - 2);
+            //voxelInfo.density = volumetricFogImages[pushConst.instanceIndex][voxelIndex_lastTime].xyz;
         }
     }
 
@@ -448,9 +458,7 @@ void computeMain_createVolumetricFog_Fluid_F(uint3 voxelIndex: SV_DispatchThread
 
     uint voxelIndexU = voxelIndex.z * fogInfo.fogVoxelGridSize.x * fogInfo.fogVoxelGridSize.y + voxelIndex.y * fogInfo.fogVoxelGridSize.x + voxelIndex.x;
 
-    // for boundary, the density is 0.0, velocity is selfVelocity
     VolumetricFogVoxelInfo voxelInfo = volumetricFogVoxelInfoBuffer[pushConst.volumetricFogFluidIndex][voxelIndexU];
-    volumetricFogImages[pushConst.instanceIndex][voxelIndex] = float4(voxelInfo.density, 0.0f);
 
     if (volumetricFogVoxelInfoBuffer[pushConst.volumetricFogFluidIndex][voxelIndexU].isBoundary) return;
 
@@ -460,7 +468,16 @@ void computeMain_createVolumetricFog_Fluid_F(uint3 voxelIndex: SV_DispatchThread
     float3 worldPos = fogInfo.fogStartPos + fogInfo.fogVoxelSize * (float3(voxelIndex) + 0.5f);
 
     float3 vel = voxelInfo.dirtyVelocity_pressure[iteration].xyz;
-    vel.y += (pushConst.ambientFogDensity - voxelInfo.density.x) * 9.8f * pushConst.dt * fogInfo.FIntensity;
+    //vel.y += (pushConst.ambientFogDensity - voxelInfo.density.x) * 9.8f * pushConst.dt * fogInfo.FIntensity;
+
+    float restDensity = getRestSmokeDensity(voxelIndex, fogInfo);
+    float restoreRate = 0.35f;
+    float speedDamping = 1.0f - saturate(length(vel) * 2.0f);
+    float restoreWeight = saturate(restoreRate * pushConst.dt) * speedDamping * 20.0f;
+    voxelInfo.density = lerp(voxelInfo.density, float3(restDensity), restoreWeight);
+
+    volumetricFogExtinctionImages[pushConst.instanceIndex][voxelIndex] = float4(voxelInfo.density, 0.0f);
+    volumetricFogVoxelInfoBuffer[pushConst.volumetricFogFluidIndex][voxelIndexU].density = voxelInfo.density;
 
     volumetricFogVoxelInfoBuffer[pushConst.volumetricFogFluidIndex][voxelIndexU].dirtyVelocity_pressure[0].xyz = vel;
     volumetricFogVoxelInfoBuffer[pushConst.volumetricFogFluidIndex][voxelIndexU].dirtyVelocity_pressure[1].xyz = vel;
@@ -535,7 +552,7 @@ void computeMain_createVolumetricFog_Fluid_S(uint3 voxelIndex: SV_DispatchThread
 
     uint3 lIdx = voxelIndex - threadGroupIndex * 4 + 1;
     if (groupVoxelBoundary[lIdx.z][lIdx.y][lIdx.x]) {
-        volumetricFogVoxelInfo1Image[pushConst.volumetricFogFluidIndex][voxelIndex].xyz = 0.0f;
+        volumetricFogVoxelVelocityImage[pushConst.volumetricFogFluidIndex][voxelIndex].xyz = 0.0f;
         return;
     }
 
@@ -585,7 +602,11 @@ void computeMain_createVolumetricFog_Fluid_S(uint3 voxelIndex: SV_DispatchThread
     float3 velocity = vel_dirty - pg;
     velocity = (velocity * vMask) + obstV;
 
-    volumetricFogVoxelInfo1Image[pushConst.volumetricFogFluidIndex][voxelIndex].xyz = velocity;
+    volumetricFogVoxelVelocityImage[pushConst.volumetricFogFluidIndex][voxelIndex].xyz = velocity;
+
+    //if (voxelIndex.y > (float)fogInfo.fogVoxelGridSize.y * 0.75 && pushConst.frameIndex == 0) {
+    //    printf("voxel X Y Z: %d %d %d, vel: %f %f %f\n", voxelIndex.x, voxelIndex.y, voxelIndex.z, velocity.x, velocity.y, velocity.z);
+    //}
 }
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------------
 [numthreads(1, 1, 1)]
@@ -661,7 +682,7 @@ void computeMain_createLightAttenuationEstimator(uint threadIndex: SV_DispatchTh
             float3 samplePoint = startPos + dir * tSample;
 
             float3 uvw = (samplePoint - fogStartPos) / (fogInfo.fogVoxelGridSize * fogInfo.fogVoxelSize);
-            float extinctionCoeff = volumetricFogImages_sample[pushConst.instanceIndex].SampleLevel(uvw, 0).x;
+            float extinctionCoeff = volumetricFogExtinctionImages_sample[pushConst.instanceIndex].SampleLevel(uvw, 0).x;
 
             attenuation *= exp(-extinctionCoeff * dt);
             if (all(attenuation <= 0.0f)) break;

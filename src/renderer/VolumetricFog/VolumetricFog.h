@@ -80,7 +80,7 @@ private:
 	uint32_t volumetricFogCount = 1;
 	std::vector<shaderio::VolumetricFogInfo> volumetricFogInfos;
 	FzbRenderer::Buffer volumetricFogInfosBuffer;
-	std::vector<FzbRenderer::Image> volumetricFogImages;
+	std::vector<FzbRenderer::Image> volumetricFogExtinctionImages;
 	std::vector<int> volumetricFogInfoModified;
 	FzbRenderer::Buffer visibleVolumetricFogIndexBuffer;
 
@@ -90,7 +90,7 @@ private:
 	uint32_t volumetricFogFluidCount = 0;
 	std::map<int, int> volumetricFogFluidIndexMap;
 	std::vector<FzbRenderer::Buffer> volumetricFogVoxelInfoBuffers;		
-	std::vector<FzbRenderer::Image> volumetricFogVoxelInfo1Images;		//xyz: velocity; w: 
+	std::vector<FzbRenderer::Image> volumetricFogVoxelVelocityImages;		//xyz: velocity; w: 
 	bool firstFrame = true;
 
 #ifndef NDEBUG

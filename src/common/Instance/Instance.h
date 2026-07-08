@@ -35,6 +35,8 @@ public:
 
 	std::vector<shaderio::Instance> childInstances;
 
+	shaderio::AABB aabb;
+
 	InstanceSet() = default;
 	InstanceSet(pugi::xml_node& instanceNode);
 

@@ -3,39 +3,83 @@
 #include <nvvk/resource_allocator.hpp>
 #include <common/Application/Application.h>
 #include <glm/gtc/type_ptr.hpp>
+#include <algorithm>
 #include <memory>
 #include <future>
+#include <thread>
 #include <vector>
 #include "./Mesh.h"
 #include <common/Material/Material.h>
 
 //#define USE_DEFAULT_MATERIAL
 
-shaderio::AABB FzbRenderer::MeshInfo::getAABB(glm::mat4 transformMatrix) {
-	//glm::vec3 maximum = { FLT_MAX, FLT_MAX, FLT_MAX };
-	//if (aabb.minimum != maximum && aabb.maximum != -maximum) return aabb;
-	shaderio::AABB aabb = { { FLT_MAX, FLT_MAX, FLT_MAX }, { -FLT_MAX, -FLT_MAX, -FLT_MAX } };
+shaderio::AABB FzbRenderer::MeshInfo::getAABB(glm::mat4 transformMatrix, bool isStatic) {
+	if (isStatic) {
+		glm::vec3 maximum = { FLT_MAX, FLT_MAX, FLT_MAX };
+		if (aabb.minimum != maximum && aabb.maximum != -maximum) return aabb;
+	}
 
 	Scene& sceneRsource = Application::sceneResource;
 	std::vector<uint8_t>& meshByteData = sceneRsource.meshSets[sceneRsource.getMeshSetIndex(meshIndex)].meshByteData;
 	const auto& positions = mesh.triMesh.positions;
 	const glm::vec3* vertexData = reinterpret_cast<const glm::vec3*>(meshByteData.data() + positions.offset);
+	const uint32_t vertexCount = positions.count;
 
-	for (uint32_t i = 0; i < positions.count; ++i) {
-		const glm::vec3& pos = vertexData[i];
-		glm::vec3 pos_transform = transformMatrix * glm::vec4(pos, 1.0f);
-		aabb.minimum.x = std::min(pos_transform.x, aabb.minimum.x);
-		aabb.minimum.y = std::min(pos_transform.y, aabb.minimum.y);
-		aabb.minimum.z = std::min(pos_transform.z, aabb.minimum.z);
-		aabb.maximum.x = std::max(pos_transform.x, aabb.maximum.x);
-		aabb.maximum.y = std::max(pos_transform.y, aabb.maximum.y);
-		aabb.maximum.z = std::max(pos_transform.z, aabb.maximum.z);
+	aabb = { { FLT_MAX, FLT_MAX, FLT_MAX }, { -FLT_MAX, -FLT_MAX, -FLT_MAX } };
+	if (vertexCount == 0) return aabb;
+
+	auto mergeAABB = [](shaderio::AABB& dst, const shaderio::AABB& src) {
+		dst.minimum.x = std::min(src.minimum.x, dst.minimum.x);
+		dst.minimum.y = std::min(src.minimum.y, dst.minimum.y);
+		dst.minimum.z = std::min(src.minimum.z, dst.minimum.z);
+		dst.maximum.x = std::max(src.maximum.x, dst.maximum.x);
+		dst.maximum.y = std::max(src.maximum.y, dst.maximum.y);
+		dst.maximum.z = std::max(src.maximum.z, dst.maximum.z);
+	};
+
+	auto computeRangeAABB = [vertexData, transformMatrix](uint32_t begin, uint32_t end) {
+		shaderio::AABB localAABB = { { FLT_MAX, FLT_MAX, FLT_MAX }, { -FLT_MAX, -FLT_MAX, -FLT_MAX } };
+		for (uint32_t i = begin; i < end; ++i) {
+			const glm::vec3& pos = vertexData[i];
+			glm::vec3 pos_transform = transformMatrix * glm::vec4(pos, 1.0f);
+			localAABB.minimum.x = std::min(pos_transform.x, localAABB.minimum.x);
+			localAABB.minimum.y = std::min(pos_transform.y, localAABB.minimum.y);
+			localAABB.minimum.z = std::min(pos_transform.z, localAABB.minimum.z);
+			localAABB.maximum.x = std::max(pos_transform.x, localAABB.maximum.x);
+			localAABB.maximum.y = std::max(pos_transform.y, localAABB.maximum.y);
+			localAABB.maximum.z = std::max(pos_transform.z, localAABB.maximum.z);
+		}
+		return localAABB;
+	};
+
+	constexpr uint32_t minVerticesPerTask = 4096;
+	uint32_t taskCount = std::thread::hardware_concurrency();
+	if (taskCount == 0) taskCount = 4;
+	taskCount = std::min(taskCount, (vertexCount + minVerticesPerTask - 1) / minVerticesPerTask);
+	taskCount = std::max(taskCount, 1u);
+
+	if (taskCount == 1) {
+		aabb = computeRangeAABB(0, vertexCount);
+		return aabb;
+	}
+
+	std::vector<std::future<shaderio::AABB>> futures;
+	futures.reserve(taskCount);
+	const uint32_t chunkSize = (vertexCount + taskCount - 1) / taskCount;
+	for (uint32_t taskIndex = 0; taskIndex < taskCount; ++taskIndex) {
+		const uint32_t begin = taskIndex * chunkSize;
+		const uint32_t end = std::min(begin + chunkSize, vertexCount);
+		if (begin >= end) break;
+		futures.push_back(std::async(std::launch::async, computeRangeAABB, begin, end));
+	}
+
+	for (auto& future : futures) {
+		mergeAABB(aabb, future.get());
 	}
 
 	return aabb;
 }
 //-----------------------------------------------------MeshSet---------------------------------------------------
-//���е����ݶ����ǽ����ģ���posȫ����һ��normalȫ����һ�𡭡�����ҲӰ�����������ж�ȡ���ݵĵط�����Ҫע��!!!!!
 FzbRenderer::MeshSet::MeshSet(std::string meshID, std::string meshType, std::filesystem::path meshPath)
 {
 	this->meshID = meshID;

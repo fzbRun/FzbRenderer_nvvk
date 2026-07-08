@@ -84,7 +84,7 @@ public:
 	uint32_t getInstanceSetSize(InstanceType type);
 	void addInstanceSet(InstanceSet& instanceSet);
 
-	MeshInfo getMeshInfo(uint32_t meshIndex);
+	MeshInfo& getMeshInfo(uint32_t meshIndex);
 
 	//”≥…‰
 	std::unordered_map<std::string, uint32_t> uniqueMaterialIDToIndex;
@@ -94,6 +94,7 @@ public:
 	std::vector<uint32_t> meshIndexToMeshSetIndex;
 	std::map<std::string, std::pair<uint32_t, uint32_t>> instanceIDToInstance;
 	std::map<std::string, std::pair<uint32_t, uint32_t>> instanceIDToInstanceSet;
+	std::map<uint32_t, uint32_t> staticInstanceIndexToInstanceSetIndex;
 	std::map<uint32_t, uint32_t> periodInstanceIndexToInstanceSetIndex;
 };
 

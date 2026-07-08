@@ -13,26 +13,25 @@ struct VolumetricFogPushConstant
 	float3x3 normalMatrix;
 	float3 instanceVelocity;
 
+	int instanceIndex;
+	int volumetricFogFluidIndex;
+
 	float dt;
 	uint iteration = 0;
 
 	float lightAttenuationStrength = 1.0f;
 	uint volumetricFogCount;
 
-	int instanceIndex;
-	int volumetricFogFluidIndex;
 	float ambientFogDensity = 0.0f;
 
 	int frameIndex;
 	SceneInfo* sceneInfoAddress;
 	float4x4 lightVP;
-
-	int blow = 0;
 };
 
 enum class VolumetricFogType {
 	Height,
-	Noise,
+	Fluid,
 };
 struct VolumetricFogInfo {
 	float3 fogStartPos;
@@ -70,11 +69,11 @@ enum class StaticBindingPoints_VolumetricFog {
 
 	eVolumetricFogInfosBuffer,
 	eVolumetricFogVoxelInfoBuffer,
-	eVolumetricFogVoxelInfo1Image,
-	eVolumetricFogVoxelInfo1Image_sample,
+	eVolumetricFogVoxelVelocityImage,
+	eVolumetricFogVoxelVelocityImage_sample,
 
-	eVolumetricFogImages,
-	eVolumetricFogImages_sampler,
+	eVolumetricFogExtinctionImages,
+	eVolumetricFogExtinctionImages_sampler,
 
 	eVisibleVolumetricFogIndexBuffer,
 

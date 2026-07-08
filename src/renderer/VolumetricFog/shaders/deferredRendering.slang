@@ -13,7 +13,7 @@
 [[vk::binding(StaticBindingPoints_VolumetricFog::eGlobalInfoBuffer)]] RWStructuredBuffer<GlobalInfo_VolumetricFog> globalInfoBuffer;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogInfosBuffer)]] RWStructuredBuffer<VolumetricFogInfo, ScalarDataLayout> volumetricFogInfosBuffer;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVisibleVolumetricFogIndexBuffer)]] RWStructuredBuffer<uint> visibleVolumetricFogIndexBuffer;
-[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogImages_sampler)]] Sampler3D<float4> volumetricFogImages_sample[];
+[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogExtinctionImages_sampler)]] Sampler3D<float4> volumetricFogExtinctionImages_sample[];
 
 [[vk::binding(StaticBindingPoints_VolumetricFog::eShadowMap)]] Sampler2DShadow shadowMap;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eRenderedImage)]] RWTexture2D<float4> renderedImage;
@@ -106,7 +106,7 @@ void getVolumetricFogScatter(float3 startPos, float3 endPos, inout uint randomSe
             float3 samplePoint = startPos + dir * tSample;
 
             float3 uvw = (samplePoint - fogInfo.fogStartPos) / (fogInfo.fogVoxelGridSize * fogInfo.fogVoxelSize);
-            float extinctionCoeff = volumetricFogImages_sample[fogIndex].SampleLevel(uvw, 0).x;
+            float extinctionCoeff = volumetricFogExtinctionImages_sample[fogIndex].SampleLevel(uvw, 0).x;
             extinctionCoeff = max(extinctionCoeff, 1e-30f);
 
             for (int lightIndex = 0; lightIndex < sceneInfo.numLights; ++lightIndex) {

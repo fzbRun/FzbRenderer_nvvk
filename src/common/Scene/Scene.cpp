@@ -153,6 +153,10 @@ void FzbRenderer::Scene::createSceneFromXML() {
 	instances.resize(staticInstanceCount + periodInstanceCount + randomInstanceCount);
 	for (int i = 0; i < staticInstanceSets.size(); ++i) {
 		staticInstanceSets[i].getInstance(instances, offset, 0);
+
+		for (int j = 0; j < staticInstanceSets[i].childInstances.size(); ++j)
+			staticInstanceIndexToInstanceSetIndex.insert({ offset, i });
+
 		offset += staticInstanceSets[i].childInstances.size();
 	}
 	for (int i = 0; i < periodInstanceSets.size(); ++i) {
@@ -421,7 +425,7 @@ void FzbRenderer::Scene::updateDataPerFrame(VkCommandBuffer cmd) {
 	}
 }
 
-FzbRenderer::MeshInfo FzbRenderer::Scene::getMeshInfo(uint32_t meshIndex) {
+FzbRenderer::MeshInfo& FzbRenderer::Scene::getMeshInfo(uint32_t meshIndex) {
 	uint32_t meshSetIndex = getMeshSetIndex(meshIndex);
 	MeshSet& meshSet = meshSets[meshSetIndex];
 	return meshSet.childMeshInfos[meshIndex - meshSet.meshOffset];

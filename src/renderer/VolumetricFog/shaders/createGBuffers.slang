@@ -8,7 +8,7 @@
 [[vk::binding(StaticBindingPoints_VolumetricFog::eTextures)]] Sampler2D textures[];
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogInfosBuffer)]] RWStructuredBuffer<VolumetricFogInfo, ScalarDataLayout> volumetricFogInfosBuffer;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogVoxelInfoBuffer)]] RWStructuredBuffer<VolumetricFogVoxelInfo, ScalarDataLayout> volumetricFogVoxelInfosBuffer[];
-[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogVoxelInfo1Image)]] RWTexture3D<float4> volumetricFogVoxelInfo1Image[]; // xyz: velocity; w:
+[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogVoxelVelocityImage)]] RWTexture3D<float4> volumetricFogVoxelVelocityImage[]; // xyz: velocity; w:
 
 __generic<T : IFloat> T getAttribute(uint8_t *dataBufferAddress, BufferView bufferView, uint attributeIndex)
 {
@@ -69,23 +69,24 @@ struct PSout
 };
 
 [shader("pixel")]
-PSout fragmentMain(VSout input)
-{
+PSout fragmentMain(VSout input){
     SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
     Instance instance = sceneInfo.instances[pushConst.instanceIndex];
     BSDFMaterial material = sceneInfo.materials[instance.materialIndex];
 
-    for (int i = 0; i < pushConst.volumetricFogCount; ++i) {
-        VolumetricFogInfo fogInfo = volumetricFogInfosBuffer[i];
-        if (fogInfo.type != VolumetricFogType::Noise) continue;
-        AABB fogAABB = { fogInfo.fogStartPos, fogInfo.fogStartPos + fogInfo.fogVoxelGridSize * fogInfo.fogVoxelSize };
-        if (!checkPointInAABB(input.worldPos.xyz, fogAABB)) continue;
+    //if (pushConst.volumetricFogFluidIndex >= 0) {
+        for (int i = 0; i < pushConst.volumetricFogCount; ++i) {
+            VolumetricFogInfo fogInfo = volumetricFogInfosBuffer[i];
+            if (fogInfo.type != VolumetricFogType::Fluid) continue;
+            AABB fogAABB = { fogInfo.fogStartPos, fogInfo.fogStartPos + fogInfo.fogVoxelGridSize * fogInfo.fogVoxelSize };
+            if (!checkPointInAABB(input.worldPos.xyz, fogAABB)) continue;
 
-        uint3 voxelIndex = min(uint3((input.worldPos.xyz - fogInfo.fogStartPos) / fogInfo.fogVoxelSize), fogInfo.fogVoxelGridSize - 1);
-        uint voxelIndexU = voxelIndex.z * fogInfo.fogVoxelGridSize.x * fogInfo.fogVoxelGridSize.y + voxelIndex.y * fogInfo.fogVoxelGridSize.x + voxelIndex.x;
-        volumetricFogVoxelInfosBuffer[fogInfo.fluidIndex][voxelIndexU].isBoundary = true;
-        volumetricFogVoxelInfo1Image[fogInfo.fluidIndex][voxelIndex].xyz = pushConst.instanceVelocity;
-    }
+            uint3 voxelIndex = min(uint3((input.worldPos.xyz - fogInfo.fogStartPos) / fogInfo.fogVoxelSize), fogInfo.fogVoxelGridSize - 1);
+            uint voxelIndexU = voxelIndex.z * fogInfo.fogVoxelGridSize.x * fogInfo.fogVoxelGridSize.y + voxelIndex.y * fogInfo.fogVoxelGridSize.x + voxelIndex.x;
+            volumetricFogVoxelInfosBuffer[fogInfo.fluidIndex][voxelIndexU].isBoundary = true;
+            volumetricFogVoxelVelocityImage[fogInfo.fluidIndex][voxelIndex].xyz = pushConst.instanceVelocity;
+        }
+    //}
 
     return { float4(material.albedo, 1.0f), float4(normalize(input.worldNormal), 1.0f), float4(material.emissive, 1.0f) };
     //return { float4(material.albedo, 1.0f), float4(normalize(input.worldNormal), 1.0f), float4(0.0f, 0.0f, 0.0f, 1.0f) };
