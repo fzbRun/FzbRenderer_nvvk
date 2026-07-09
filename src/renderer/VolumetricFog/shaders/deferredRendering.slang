@@ -33,6 +33,7 @@ float getShadow(float4 worldPos) {
     return shadow;
 }
 
+/*
 float Exx1(float x) {
     const float A[5] = { -2.3347335, -0.2506219, 0.0200852, -0.0007219, 0.0000105 };
     const float B[6] = { 3.3306574, 1.9812792, 0.5523182, 0.1080712, 0.0124142, 0.0006312 };
@@ -41,23 +42,103 @@ float Exx1(float x) {
     return exp(-x) * num / den / x;
 }
 float ExpIntegralEi(float x) {
-    if (x < 0.0) {
-        return -Exx1(-x);
-    } else if (x > 0.0) {
-        const float EULER = 0.5772156649;
-        float sum = 0.0;
-        float term = 1.0;
-        float nfact = 1.0;
-        for (int n = 1; n <= 100; n++) {
-            term *= x / float(n);
-            float old = sum;
-            sum += term / float(n);
-            if (sum == old) break;
+    if (x < 0.0f) {
+        if (x < -1.0f) return -Exx1(-x);
+        const float gamma = 0.5772156649f;
+        float sum = gamma + log(-x) + x;
+        float xn = x;
+        for (int n = 2; n <= 10; n++) {
+            xn *= x;
+            float term = xn / (float(n) * float(n));
+            sum += term;
+            if (abs(term) < 1e-8f) break;
         }
-        return EULER + log(abs(x)) + sum;
+        return sum;
+    } else if (x > 0.0f) {
+        if (x < 1.0f) {
+            const float gamma = 0.5772156649f;
+            float sum = gamma + log(x) + x;
+            float xn = x;
+            for (int n = 2; n <= 10; n++) {
+                xn *= x;
+                float term = xn / (float(n) * float(n));
+                sum += term;
+                if (abs(term) < 1e-8f) break;
+            }
+            return sum;
+        }
+        const float a[4] = { 8.5733287401f, 18.0590169730f, 8.6347608925f, 0.2677737343f };
+        const float b[4] = { 9.5733223454f, 25.6329561486f, 21.0996530827f, 3.9584969228f };
+        float num = x * x * x + a[0] * x * x + a[1] * x + a[2];
+        float den = x * x * x + b[0] * x * x + b[1] * x + b[2];
+        return (num / den) * exp(x) / x;
     }
-    return -1.0e10;
+    return -1e10f; // x == 0
 }
+void getHeightFogScatter(float3 startPos, float3 endPos, inout float3 L, inout float3 attenuation, inout float3 attenuation2) {
+    float fogStartY = -69.5f;
+    float fogHeight = 32.0f + fogStartY;
+    float heightScale = 1.0f;
+    float absorption = 0.01f;
+    float scattering = 0.03f;
+    float phase = -0.7f;
+    float phase2 = phase * phase;
+
+    SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+    Light mainLight = sceneInfo.lights[0];
+    float3 mainLightDir = mainLight.direction;
+
+    float3 rayDir = endPos - startPos;
+    float maxDist = length(rayDir);
+    if (maxDist < 1e-8) return;
+    float3 viewDir = rayDir / maxDist;
+
+    if (startPos.y > fogHeight && viewDir.y >= -1e-6f) return;
+    if (endPos.y > fogHeight && viewDir.y <= 1e-6f) return;
+
+    float3 gridMin = float3(-1e30f, fogStartY, -1e30f);
+    float3 gridMax = float3(1e30f, fogHeight, 1e30f);
+
+    float tEnter = 0.0f;
+    float tExit = maxDist;
+    if (!isHit(startPos, endPos, gridMin, gridMax, tEnter, tExit)) return;
+
+    float3 fogRayStart = startPos + viewDir * tEnter;
+    float3 fogRayEnd = startPos + viewDir * tExit;
+    float S = distance(fogRayStart, fogRayEnd);
+    if (S < 1e-8) return;
+
+    float cosTheta = dot(-viewDir, -mainLightDir);
+    float phaseFunction = 0.25f * M_1_OVER_PI * (1.0f - phase2) / pow(1.0f + phase2 - 2.0f * phase * cosTheta, 1.5f);
+    float extinctionCoeff0 = absorption + scattering;
+    float cameraY = fogRayStart.y;
+
+    float viewDirY = viewDir.y;
+    float lightDirY = mainLightDir.y;
+    float3 lightColor = mainLight.color * mainLight.intensity;
+
+    if (lightDirY < -1e-6f) {
+        if (abs(viewDirY) < 1e-30f)
+            L += phaseFunction * scattering * lightColor * S * exp(-extinctionCoeff0 * exp(-heightScale * (cameraY - fogStartY)) * S);
+        else {
+            float A = extinctionCoeff0 * (exp(-heightScale * (cameraY - fogStartY)) / (heightScale * viewDirY) + exp(-heightScale * (fogHeight - fogStartY)) / (heightScale * lightDirY));
+            float B = extinctionCoeff0 * exp(-heightScale * (cameraY - fogStartY)) / heightScale * (1.0f / viewDirY + 1.0f / lightDirY);
+            float scatterIntegral = exp(-A) * (ExpIntegralEi(B) - ExpIntegralEi(B * exp(-heightScale * viewDirY * S))) / (heightScale * viewDirY);
+            L += phaseFunction * scattering * lightColor * scatterIntegral;
+        }
+    }
+
+    float viewY = fogRayEnd.y - fogRayStart.y;
+    float E = extinctionCoeff0 * S * exp(-heightScale * (fogRayStart.y - fogStartY));
+    E *= abs(viewY) < 1e-6f ? 1.0f : (1.0f - exp(-heightScale * viewY)) / (heightScale * viewY);
+    attenuation *= exp(-E);
+
+    float height = fogHeight - fogRayEnd.y;
+    float mainLightDt = height / -lightDirY;
+    float lightAttenuation = (absorption + scattering) * mainLightDt * exp(-heightScale * (fogHeight - fogStartY));
+    attenuation2 *= abs(height) < 1e-6f ? 0.0f : exp(-lightAttenuation * (1.0f - exp(-heightScale * height)) / (heightScale * height));
+}
+*/
 void getHeightFogScatter(float3 startPos, float3 endPos, inout uint randomSeed, inout float3 L, inout float3 attenuation, inout float3 attenuation2) {
     float3 fogStartPos = { 5084.0f, -69.5f, -4486.0f };
     float3 gridMin = fogStartPos;
@@ -81,7 +162,7 @@ void getHeightFogScatter(float3 startPos, float3 endPos, inout uint randomSeed, 
     SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
     float3 E = 1.0f;
 
-    uint sampleCount = 20;
+    uint sampleCount = 10;
     float tPart = tTotal / sampleCount;
     for (int sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex) {
         float tPartStart = sampleIndex * tPart + tEnter;
@@ -143,6 +224,28 @@ void getHeightFogScatter(float3 startPos, float3 endPos, inout uint randomSeed, 
     }
 }
 
+void getNoiseFogScatter(float3 startPos, float3 endPos, inout uint randomSeed, uint fogIndex, inout float3 L, inout float3 attenuation, inout float3 attenuation2) {
+    VolumetricFogInfo fogInfo = volumetricFogInfosBuffer[fogIndex];
+
+    float3 fogStartPos = fogInfo.fogStartPos;
+    float3 voxelSize = fogInfo.fogVoxelSize;
+    int3 gridSize = fogInfo.fogVoxelGridSize;
+
+    float3 gridMin = fogStartPos;
+    float3 gridMax = fogStartPos + float3(gridSize) * voxelSize;
+
+    float3 rayDir = endPos - startPos;
+    float maxDist = length(rayDir);
+    if (maxDist < 1e-8) return;
+    float3 dir = rayDir / maxDist;
+
+    float tEnter, tExit;
+    if (!isHit(startPos, endPos, gridMin, gridMax, tEnter, tExit)) return;
+    float tTotal = tExit - tEnter;
+
+
+}
+
 void getVolumetricFogScatter(float3 startPos, float3 endPos, inout uint randomSeed, uint fogIndex, inout float3 L, inout float3 attenuation, inout float3 attenuation2) {
     VolumetricFogInfo fogInfo = volumetricFogInfosBuffer[fogIndex];
 
@@ -188,12 +291,12 @@ void getVolumetricFogScatter(float3 startPos, float3 endPos, inout uint randomSe
         voxelBorder.y = (step.y > 0) ? (fogStartPos.y + (voxel.y + 1) * voxelSize.y) : (fogStartPos.y + voxel.y * voxelSize.y);
         voxelBorder.z = (step.z > 0) ? (fogStartPos.z + (voxel.z + 1) * voxelSize.z) : (fogStartPos.z + voxel.z * voxelSize.z);
 
-        // ĞŞÕı£º»ùÓÚ worldPos ¼ÆËãÈ«¾Ö tMax
+        // æ·‡î†½î„œé”›æ°¬ç†€æµœ?worldPos ç’ï¼„ç•»éã„¥çœ¬ tMax
         tMax.x = (step.x != 0) ? (voxelBorder.x - startPos.x) * invDir.x : 1e30;
         tMax.y = (step.y != 0) ? (voxelBorder.y - startPos.y) * invDir.y : 1e30;
         tMax.z = (step.z != 0) ? (voxelBorder.z - startPos.z) * invDir.z : 1e30;
 
-        // ¼«Î¢Ğ¡ĞŞÕı£ºÈôÒò eps ÍÆ½øµ¼ÖÂ tMax ÂÔĞ¡ÓÚ tCurrent£¬²¹Ò»Õû¸öÌåËØ
+        // é‹ä½¸äº•çå¿æ…¨å§ï½ç´°é‘»ãƒ¥æ´œ eps éºã„¨ç¹˜ç€µè‰°åš§ tMax é£ãƒ¥çš¬æµœ?tCurrenté”›å²ƒË‰æ¶“â‚¬éç¿ é‡œæµ£æ’¶ç¤Œ
         if (step.x != 0 && tMax.x < tCurrent) tMax.x += tDelta.x;
         if (step.y != 0 && tMax.y < tCurrent) tMax.y += tDelta.y;
         if (step.z != 0 && tMax.z < tCurrent) tMax.z += tDelta.z;
@@ -241,9 +344,9 @@ void getVolumetricFogScatter(float3 startPos, float3 endPos, inout uint randomSe
                 float lightDt = tLightExit - tLightEnter;
 
                 float3 activeSunColor = lightColor * lerp(1.0f, fogInfo.lightAttenuationEstimator, lightDt / gridLength) * pushConst.lightAttenuationStrength;
-                if (lightIndex == 0) activeSunColor *= getShadow(float4(samplePoint, 1.0f)) ;
+                if (lightIndex == 0) activeSunColor *= getShadow(float4(samplePoint, 1.0f));
 
-                L += activeSunColor * fp * fogInfo.scattering * E / extinctionCoeff * (1.0f - exp(-extinctionCoeff * dt));
+                L += activeSunColor * fp * fogInfo.scattering * fogInfo.color * E / extinctionCoeff * (1.0f - exp(-extinctionCoeff * dt));
             }
 
             E *= exp(-extinctionCoeff * dt);
@@ -261,7 +364,7 @@ void getVolumetricFogScatter(float3 startPos, float3 endPos, inout uint randomSe
             else { voxel.z += step.z; tMax.z += tDelta.z; }
         }
     }
-
+    L += fogInfo.color * fogInfo.ambientIntensity;
     attenuation *= E;
 
     float tLightEnter, tLightExit;
@@ -270,6 +373,7 @@ void getVolumetricFogScatter(float3 startPos, float3 endPos, inout uint randomSe
         attenuation2 *= lerp(1.0f, fogInfo.lightAttenuationEstimator, mainLightDt / gridLength) * pushConst.lightAttenuationStrength;
     }
 }
+
 
 groupshared GlobalInfo_VolumetricFog groupGlobalInfo;
 

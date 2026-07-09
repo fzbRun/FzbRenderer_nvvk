@@ -32,11 +32,14 @@ struct VolumetricFogPushConstant
 enum class VolumetricFogType {
 	Height,
 	Fluid,
+	Noise,
 };
 struct VolumetricFogInfo {
 	float3 fogStartPos;
 	uint3 fogVoxelGridSize;		//不要设置为1x1x1，否则有bug
 	float3 fogVoxelSize;
+	float3 color;
+	float ambientIntensity;
 	float2 absorption;
 	float scattering;
 	float phase;

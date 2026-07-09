@@ -37,11 +37,13 @@ VolumetricFog::VolumetricFog(pugi::xml_node& rendererNode) {
 	volumetricFogInfos[0] = {
 		.fogStartPos = {5084.0f, -69.5f, -4486.0f},
 		.fogVoxelGridSize = {16, 16, 16},
-		.fogVoxelSize = {7.0f, 0.1f, 5.0f},
-		.absorption = { 0.0, 1.5 },
-		.scattering = 0.3f,
-		.phase = -0.7,
-		.type = shaderio::VolumetricFogType::Height,
+		.fogVoxelSize = {7.0f, 0.05f, 5.0f},
+		.color = {1.0f, 1.0f, 1.0f},
+		.ambientIntensity = 0.1f,
+		.absorption = { 0.0, 0.2 },
+		.scattering = 0.7f,
+		.phase = 0.5,
+		.type = shaderio::VolumetricFogType::Noise,
 		.viscosity = 10.0f,		//高度雾衰减
 	};
 	volumetricFogNoFluidIndexMap.insert({ 0, 0 });
@@ -50,6 +52,8 @@ VolumetricFog::VolumetricFog(pugi::xml_node& rendererNode) {
 		.fogStartPos = {5111.0f, -69.0f, -4453.0f},
 		.fogVoxelGridSize = {32, 32, 32},
 		.fogVoxelSize = { 0.2, 0.2, 0.2 },
+		.color = {1.0f, 1.0f, 1.0f},
+		.ambientIntensity = 0.0f,
 		.absorption = { 0.1, 0.3 },
 		.scattering = 0.7f,
 		.phase = 0.5f,
@@ -175,6 +179,9 @@ void VolumetricFog::uiRender() {
 				}
 
 				volumetricFogInfoModified[i] |= ImGui::DragFloat3(std::string("Volumetric Fog Voxel Size " + std::to_string(i)).c_str(), (float*)&volumetricFogInfos[i].fogVoxelSize);
+
+				volumetricFogInfoModified[i] |= ImGui::DragFloat3(std::string("Volumetric Fog Color " + std::to_string(i)).c_str(), (float*)&volumetricFogInfos[i].color);
+				volumetricFogInfoModified[i] |= ImGui::DragFloat(std::string("Ambient Intensity " + std::to_string(i)).c_str(), (float*)&volumetricFogInfos[i].ambientIntensity, 0.1f, 0.0f, 10.0f);
 
 				volumetricFogInfoModified[i] |= ImGui::DragFloat2(std::string("Extinction Coefficient " + std::to_string(i)).c_str(), (float*)&volumetricFogInfos[i].absorption, 0.1f, 0.0f);
 				volumetricFogInfoModified[i] |= ImGui::DragFloat(std::string("Scatter Coefficient " + std::to_string(i)).c_str(), (float*)&volumetricFogInfos[i].scattering, 0.1f, 0.0f, 1.0f);
@@ -906,6 +913,7 @@ void VolumetricFog::createVolumetricFog(VkCommandBuffer cmd) {
 		uint32_t fogIndex = volumetricFogNoFluidIndexMap[i];
 		pushConstant.instanceIndex = fogIndex;
 		shaderio::VolumetricFogInfo fogInfo = volumetricFogInfos[fogIndex];
+		if (fogInfo.type == shaderio::VolumetricFogType::Noise) continue;
 		groupSize = nvvk::getGroupCounts(VkExtent3D{ fogInfo.fogVoxelGridSize.x, fogInfo.fogVoxelGridSize.y, fogInfo.fogVoxelGridSize.z }, VkExtent3D{ 4, 4, 4 });
 
 		vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createVolumetricFog);
