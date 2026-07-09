@@ -35,14 +35,15 @@ VolumetricFog::VolumetricFog(pugi::xml_node& rendererNode) {
 	volumetricFogVoxelVelocityImages.resize(volumetricFogFluidCount);
 
 	volumetricFogInfos[0] = {
-		.fogStartPos = {5084.0f, -69.5f, -4486.0f},
+		.fogStartPos = {5098.0f, -69.5f, -4470.0f},
 		.fogVoxelGridSize = {16, 16, 16},
-		.fogVoxelSize = {7.0f, 0.05f, 5.0f},
+		.fogVoxelSize = {2.0f, 0.05f, 2.0f},
 		.color = {1.0f, 1.0f, 1.0f},
 		.ambientIntensity = 0.1f,
 		.absorption = { 0.0, 0.2 },
 		.scattering = 0.7f,
 		.phase = 0.5,
+		.lightAttenuationEstimator = 1.0f,
 		.type = shaderio::VolumetricFogType::Noise,
 		.viscosity = 10.0f,		//高度雾衰减
 	};
@@ -57,6 +58,7 @@ VolumetricFog::VolumetricFog(pugi::xml_node& rendererNode) {
 		.absorption = { 0.1, 0.3 },
 		.scattering = 0.7f,
 		.phase = 0.5f,
+		.lightAttenuationEstimator = 1.0f,
 		.type = shaderio::VolumetricFogType::Fluid,
 		.viscosity = 0.01f,
 		.fluidIndex = 0,
@@ -288,7 +290,10 @@ void VolumetricFog::render(VkCommandBuffer* cmdPtr) {
 		.pValues = &pushConstant,
 	};
 
+	static float time = 0.0f;
+	pushConstant.time = time;
 	pushConstant.dt = ImGui::GetIO().DeltaTime;
+	time += pushConstant.dt;
 
 	initVolumetricFogFluid(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
@@ -1018,6 +1023,7 @@ void VolumetricFog::createVolumetricFog(VkCommandBuffer cmd) {
 
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createLightAttenuationEstimator);
 	for (int i = 0; i < volumetricFogCount; ++i) {
+		if (volumetricFogInfos[i].type == shaderio::VolumetricFogType::Height || volumetricFogInfos[i].type == shaderio::VolumetricFogType::Noise) continue;
 		pushConstant.instanceIndex = i;
 		vkCmdPushConstants2(cmd, &pushInfo);
 		vkCmdDispatch(cmd, 1, 1, 1);

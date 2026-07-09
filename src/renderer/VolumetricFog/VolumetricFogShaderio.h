@@ -8,8 +8,7 @@ NAMESPACE_SHADERIO_BEGIN()
 
 #define Jacobi_Iteration_Count 60u
 
-struct VolumetricFogPushConstant
-{
+struct VolumetricFogPushConstant{
 	float3x3 normalMatrix;
 	float3 instanceVelocity;
 
@@ -17,6 +16,7 @@ struct VolumetricFogPushConstant
 	int volumetricFogFluidIndex;
 
 	float dt;
+	float time;
 	uint iteration = 0;
 	
 	float lightAttenuationStrength = 1.0f;
