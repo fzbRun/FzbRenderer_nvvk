@@ -49,7 +49,7 @@ public:
 	uint32_t periodInstanceSetCount = 0;
 	std::vector<InstanceSet> periodInstanceSets;
 	uint32_t frameIndex = 0;
-	uint32_t periodFrameIndex = 1000;
+	uint32_t periodFrameIndex = 100;
 	float time = 0.0f;
 
 	uint32_t randomInstanceCount = 0;

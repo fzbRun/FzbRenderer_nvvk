@@ -56,9 +56,6 @@ private:
 
 	VkShaderEXT computeShader_getVisibleVolumetricFog{};
 
-	VkShaderEXT computeShader_createVolumetricFog{};
-
-	VkShaderEXT computeShader_createVolumetricFogFluid{};
 	VkShaderEXT computeShader_initVolumetricFogFluid{};
 	VkShaderEXT computeShader_createVolumetricFog_Fluid_A{};
 	VkShaderEXT computeShader_createVolumetricFog_Fluid_D{};
@@ -99,8 +96,6 @@ private:
 	std::map<int, int> volumetricFogNoiseIndexMap;							//噪声雾索引 -> 体积雾索引
 	std::vector<shaderio::NoiseFogInfo> volumetricFogNoiseInfos;			//流体雾基础信息
 	FzbRenderer::Buffer volumetricFogNoiseInfoBuffer;						//流体雾基础信息缓冲区
-
-	bool firstFrame = true;
 
 #ifndef NDEBUG
 	void renderVolumetricFogVoxelGrid(VkCommandBuffer cmd);

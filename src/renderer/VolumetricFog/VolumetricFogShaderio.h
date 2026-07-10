@@ -50,6 +50,7 @@ struct HeightFogInfo {
 	float heightScale;
 };
 struct FluidFogInfo {
+	int startUp;
 	float viscosity;
 	float FIntensity;
 	float lightAttenuationEstimator;
