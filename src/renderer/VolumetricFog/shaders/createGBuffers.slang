@@ -7,8 +7,8 @@
 [[vk::push_constant]] ConstantBuffer<VolumetricFogPushConstant> pushConst;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eTextures)]] Sampler2D textures[];
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogInfosBuffer)]] RWStructuredBuffer<VolumetricFogInfo, ScalarDataLayout> volumetricFogInfosBuffer;
-[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogVoxelInfoBuffer)]] RWStructuredBuffer<VolumetricFogVoxelInfo, ScalarDataLayout> volumetricFogVoxelInfosBuffer[];
-[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogVoxelVelocityImage)]] RWTexture3D<float4> volumetricFogVoxelVelocityImage[]; // xyz: velocity; w:
+[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogFluidVoxelInfoBuffer)]] RWStructuredBuffer<VolumetricFogFluidVoxelInfo, ScalarDataLayout> volumetricFogVoxelInfosBuffer[];
+[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogFluidVoxelVelocityImage)]] RWTexture3D<float4> volumetricFogVoxelVelocityImage[]; // xyz: velocity; w:
 
 __generic<T : IFloat> T getAttribute(uint8_t *dataBufferAddress, BufferView bufferView, uint attributeIndex)
 {
@@ -83,8 +83,8 @@ PSout fragmentMain(VSout input){
 
             uint3 voxelIndex = min(uint3((input.worldPos.xyz - fogInfo.fogStartPos) / fogInfo.fogVoxelSize), fogInfo.fogVoxelGridSize - 1);
             uint voxelIndexU = voxelIndex.z * fogInfo.fogVoxelGridSize.x * fogInfo.fogVoxelGridSize.y + voxelIndex.y * fogInfo.fogVoxelGridSize.x + voxelIndex.x;
-            volumetricFogVoxelInfosBuffer[fogInfo.fluidIndex][voxelIndexU].isBoundary = true;
-            volumetricFogVoxelVelocityImage[fogInfo.fluidIndex][voxelIndex].xyz = pushConst.instanceVelocity;
+            volumetricFogVoxelInfosBuffer[fogInfo.volumetricFogTypeIndex][voxelIndexU].isBoundary = true;
+            volumetricFogVoxelVelocityImage[fogInfo.volumetricFogTypeIndex][voxelIndex].xyz = pushConst.instanceVelocity;
         }
     //}
 

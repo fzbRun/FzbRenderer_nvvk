@@ -75,21 +75,31 @@ private:
 	ShadowMap shadowMap;
 
 	FzbRenderer::Buffer GlobalInfoBuffer;
+	FzbRenderer::Buffer visibleVolumetricFogIndexBuffer;					//相机范围内的体积雾索引
 
-	uint32_t volumetricFogCount = 1;
-	std::vector<shaderio::VolumetricFogInfo> volumetricFogInfos;
-	FzbRenderer::Buffer volumetricFogInfosBuffer;
-	std::vector<FzbRenderer::Image> volumetricFogExtinctionImages;
-	std::vector<int> volumetricFogInfoModified;
-	FzbRenderer::Buffer visibleVolumetricFogIndexBuffer;
+	uint32_t volumetricFogCount = 1;										//体积雾数量
+	std::vector<shaderio::VolumetricFogInfo> volumetricFogInfos;			//体积雾基础信息
+	FzbRenderer::Buffer volumetricFogInfosBuffer;							//体积雾基础信息缓冲区
+	std::vector<int> volumetricFogInfoModified;								//体积雾数据是否被修改，每帧重置
 
-	uint32_t volumetricFogNoFluidCount = 1;
-	std::map<int, int> volumetricFogNoFluidIndexMap;
+	uint32_t volumetricFogHeightCount = 0;									//高度雾数量
+	std::map<int, int> volumetricFogHeightIndexMap;							//高度雾索引 -> 体积雾索引
+	std::vector<shaderio::HeightFogInfo> volumetricFogHeightInfos;			//流体雾基础信息
+	FzbRenderer::Buffer volumetricFogHeightInfoBuffer;						//流体雾基础信息缓冲区
 
-	uint32_t volumetricFogFluidCount = 0;
-	std::map<int, int> volumetricFogFluidIndexMap;
-	std::vector<FzbRenderer::Buffer> volumetricFogVoxelInfoBuffers;		
-	std::vector<FzbRenderer::Image> volumetricFogVoxelVelocityImages;		//xyz: velocity; w: 
+	uint32_t volumetricFogFluidCount = 0;									//流体雾数量
+	std::map<int, int> volumetricFogFluidIndexMap;							//流体雾索引 -> 体积雾索引
+	std::vector<shaderio::FluidFogInfo> volumetricFogFluidInfos;			//流体雾基础信息
+	FzbRenderer::Buffer volumetricFogFluidInfoBuffer;						//流体雾基础信息缓冲区
+	std::vector<FzbRenderer::Buffer> volumetricFogFluidVoxelInfoBuffers;	//流体雾voxel信息缓冲区
+	std::vector<FzbRenderer::Image> volumetricFogFluidVoxelVelocityImages;	//流体雾voxel速度3DTexture
+	std::vector<FzbRenderer::Image> volumetricFogFluidExtinctionImages;		//流体雾消光系数3DTexture
+
+	uint32_t volumetricFogNoiseCount = 0;
+	std::map<int, int> volumetricFogNoiseIndexMap;							//噪声雾索引 -> 体积雾索引
+	std::vector<shaderio::NoiseFogInfo> volumetricFogNoiseInfos;			//流体雾基础信息
+	FzbRenderer::Buffer volumetricFogNoiseInfoBuffer;						//流体雾基础信息缓冲区
+
 	bool firstFrame = true;
 
 #ifndef NDEBUG

@@ -13,7 +13,6 @@ struct VolumetricFogPushConstant{
 	float3 instanceVelocity;
 
 	int instanceIndex;
-	int volumetricFogFluidIndex;
 
 	float dt;
 	float time;
@@ -43,14 +42,27 @@ struct VolumetricFogInfo {
 	float2 absorption;
 	float scattering;
 	float phase;
-	float lightAttenuationEstimator;
 
 	VolumetricFogType type;
-	float viscosity;
-	uint fluidIndex;
-	float FIntensity;
+	int volumetricFogTypeIndex;
 };
-struct VolumetricFogVoxelInfo {
+struct HeightFogInfo {
+	float heightScale;
+};
+struct FluidFogInfo {
+	float viscosity;
+	float FIntensity;
+	float lightAttenuationEstimator;
+};
+struct NoiseFogInfo {
+	float3 cloudScale;
+	float cloudFlowSpeed;
+	float2 cloudCoverage;
+	float2 cloudTypePreference;
+	float weatherScale;
+};
+
+struct VolumetricFogFluidVoxelInfo {
 	float4 dirtyVelocity_pressure[2];
 	bool isBoundary;
 	float3 density;
@@ -61,6 +73,7 @@ struct GlobalInfo_VolumetricFog {
 	uint visibleVolumetricFogCount;
 };
 
+
 enum class StaticBindingPoints_VolumetricFog {
 	eTextures = 0,
 	eAlbedoImage,
@@ -69,16 +82,22 @@ enum class StaticBindingPoints_VolumetricFog {
 	eEmissiveImage,
 
 	eGlobalInfoBuffer,
-
-	eVolumetricFogInfosBuffer,
-	eVolumetricFogVoxelInfoBuffer,
-	eVolumetricFogVoxelVelocityImage,
-	eVolumetricFogVoxelVelocityImage_sample,
-
-	eVolumetricFogExtinctionImages,
-	eVolumetricFogExtinctionImages_sampler,
-
 	eVisibleVolumetricFogIndexBuffer,
+	eVolumetricFogInfosBuffer,
+
+	//高度
+	eVolumetricFogHeightInfoBuffer,
+
+	//流体
+	eVolumetricFogFluidInfoBuffer,
+	eVolumetricFogFluidVoxelInfoBuffer,
+	eVolumetricFogFluidVoxelVelocityImage,
+	eVolumetricFogFluidVoxelVelocityImage_sample,
+	eVolumetricFogFluidExtinctionImages,
+	eVolumetricFogFluidExtinctionImages_sampler,
+
+	//噪声
+	eVolumetricFogNoiseInfoBuffer,
 
 	eShadowMap,
 	eRenderedImage,

@@ -305,7 +305,7 @@ float3 SampleWeatherData(float2 xzFraction, float weatherScale = 0.01f) {
     // Use a scale factor to control pattern size (tune externally)
     float2 uv = xzFraction * weatherScale;
     // Generate coverage, precipitation (unused), and cloud type from layered noise
-    float r = snoise(float3(uv, 1.0)) * 0.5 + 0.8;
+    float r = snoise(float3(uv, 1.0)) * 0.5 + 0.5;      //0.8 control cloud's upper and lower height limits
     float g = snoise(float3(uv + 13.0, 4.5)) * 0.5 + 0.5;
     float b = snoise(float3(uv - 7.3, 12.1)) * 0.5 + 0.5;
     return float3(r, g, b);
@@ -326,11 +326,18 @@ float2 ComputeCurl(float3 p) {
 // weatherData: r contorl cloud solid; g: Rainwater (currently unused); b: Cloud type
 // weatherScale control cloud change speed
 // ============================================================
-float SampleCloudDensity(float3 positionWS, float3 cloudMin, float3 cloadMax, float time, float cloadFlowSpeed = 1.0f, float3 cloudScale = 1.0f) {
+struct CloudSetting {
+    float3 cloudScale = { 1.0f, 1.0f, 1.0f };
+    float cloudFlowSpeed = 1.0f;
+    float2 cloudCoverage = 0.3f;
+    float2 cloudTypePreference = 0.0f;
+    float weatherScale = 0.05f;
+}
+float SampleCloudDensity(float3 positionWS, float3 cloudMin, float3 cloadMax, float time, CloudSetting cloudSetting) {
     float heightFraction = GetHeightFractionForPoint(positionWS, float2(cloudMin.y, cloadMax.y));
     float2 xzFraction = GetXZFractionForPoint(positionWS, float4(cloudMin.xz, cloadMax.xz));
-    float3 uvw = float3(xzFraction.x, heightFraction, xzFraction.y) * cloudScale;
-    uvw += float3(time * cloadFlowSpeed);
+    float3 uvw = float3(xzFraction.x, heightFraction, xzFraction.y) * cloudSetting.cloudScale;
+    uvw += float3(time * cloudSetting.cloudFlowSpeed);
 
     // Procedural low-frequency noises (replaces _CloudNoise3DTextureA)
     float perlinWorley = perlinfbm(uvw, 4.0, 7) - (1.0 - worleyFbm(uvw, 4.0));
@@ -341,11 +348,12 @@ float SampleCloudDensity(float3 positionWS, float3 cloudMin, float3 cloadMax, fl
     float baseCloud = Remap(perlinWorley, -(1.0 - lowFrequencyFbm), 1.0, 0.0, 1.0);
 
     // Procedural weather (replaces _WeatherDataTexture)
-    float3 weatherData = SampleWeatherData(xzFraction);
+    float3 weatherData = SampleWeatherData(xzFraction, cloudSetting.weatherScale);
+    weatherData.r = weatherData.r * cloudSetting.cloudCoverage.x + cloudSetting.cloudCoverage.y;
+    weatherData.b = weatherData.b * cloudSetting.cloudTypePreference.x + cloudSetting.cloudTypePreference.y;
+
     // Apply original perturbations and clip
     heightFraction += (2.0 * weatherData.r - 1.0) * 0.03;
-    //weatherData.r += 0.25;
-    weatherData.r = weatherData.r * 0.3 + 0.2;
 
     float densityHeightGradient = GetDensityHeightGradientForPoint(positionWS, weatherData, heightFraction);
     baseCloud *= densityHeightGradient;
