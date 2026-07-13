@@ -67,7 +67,7 @@ struct NoiseFogInfo {
 struct VolumetricFogFluidVoxelInfo {
 	float4 dirtyVelocity_pressure[2];
 	bool isBoundary;
-	float3 density;
+	float4 voxelFogInfo;
 	//float3 temperature;
 };
 
@@ -97,8 +97,8 @@ enum class StaticBindingPoints_VolumetricFog {
 	eVolumetricFogFluidVoxelInfoBuffer,
 	eVolumetricFogFluidVoxelVelocityImage,
 	eVolumetricFogFluidVoxelVelocityImage_sample,
-	eVolumetricFogFluidExtinctionImages,
-	eVolumetricFogFluidExtinctionImages_sampler,
+	eVolumetricFogFluidVoxelInfoImages,
+	eVolumetricFogFluidVoxelInfoImages_sampler,
 
 	//‘Î…˘
 	eVolumetricFogNoiseInfoBuffer,

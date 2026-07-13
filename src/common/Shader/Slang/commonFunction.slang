@@ -29,6 +29,38 @@ float OrderedIntToFloat(int orderedInt)
         : ~ordered;
     return asfloat(bits);
 }
+
+float PackFloat4ToFloat(float4 unpacked){
+    uint4 u = uint4(round(saturate(unpacked) * 255.0));
+    uint packed = (u.x << 24) | (u.y << 16) | (u.z << 8) | u.w;
+    return asfloat(packed);
+}
+float4 UnpackFloatToFloat4(float packed){
+    uint u = asuint(packed);
+    float4 unpacked;
+    unpacked.x = float((u >> 24) & 0xFF) / 255.0;
+    unpacked.y = float((u >> 16) & 0xFF) / 255.0;
+    unpacked.z = float((u >> 8) & 0xFF) / 255.0;
+    unpacked.w = float(u & 0xFF) / 255.0;
+    return unpacked;
+}
+
+float PackFloat3ToFloat(float3 unpacked) {
+    uint ix = (uint)round(saturate(unpacked.x) * 1023.0);
+    uint iy = (uint)round(saturate(unpacked.y) * 2047.0);
+    uint iz = (uint)round(saturate(unpacked.z) * 2047.0);
+
+    uint packed = (ix << 22) | (iy << 11) | iz;
+    return asfloat(packed);
+}
+float3 UnpackFloatToFloat3(float packed) {
+    uint u = asuint(packed);
+    float3 unpacked;
+    unpacked.x = float((u >> 22) & 0x3FF) / 1023.0;
+    unpacked.y = float((u >> 11) & 0x7FF) / 2047.0;
+    unpacked.z = float(u & 0x7FF) / 2047.0;
+    return unpacked;
+}
 //---------------------------------------------------Matrix---------------------------------------------------
 float3x3 Inverse3x3(float3x3 m) {
 	float3 c0 = m[0];

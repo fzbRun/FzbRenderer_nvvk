@@ -90,7 +90,7 @@ private:
 	FzbRenderer::Buffer volumetricFogFluidInfoBuffer;						//流体雾基础信息缓冲区
 	std::vector<FzbRenderer::Buffer> volumetricFogFluidVoxelInfoBuffers;	//流体雾voxel信息缓冲区
 	std::vector<FzbRenderer::Image> volumetricFogFluidVoxelVelocityImages;	//流体雾voxel速度3DTexture
-	std::vector<FzbRenderer::Image> volumetricFogFluidExtinctionImages;		//流体雾消光系数3DTexture
+	std::vector<FzbRenderer::Image> volumetricFogFluidVoxelInfoImages;		//流体雾 voxel信息 3DTexture x: 吸收 y: 散射 z: phase
 
 	uint32_t volumetricFogNoiseCount = 0;
 	std::map<int, int> volumetricFogNoiseIndexMap;							//噪声雾索引 -> 体积雾索引

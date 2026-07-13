@@ -33,7 +33,7 @@ VolumetricFog::VolumetricFog(pugi::xml_node& rendererNode) {
 	volumetricFogFluidInfos.resize(volumetricFogFluidCount);
 	volumetricFogFluidVoxelInfoBuffers.resize(volumetricFogFluidCount);
 	volumetricFogFluidVoxelVelocityImages.resize(volumetricFogFluidCount);
-	volumetricFogFluidExtinctionImages.resize(volumetricFogFluidCount);
+	volumetricFogFluidVoxelInfoImages.resize(volumetricFogFluidCount);
 
 	volumetricFogNoiseCount = 1;
 	volumetricFogNoiseInfos.resize(volumetricFogNoiseCount);
@@ -44,7 +44,7 @@ VolumetricFog::VolumetricFog(pugi::xml_node& rendererNode) {
 		.fogVoxelSize = {2.0f, 0.05f, 2.0f},
 		.color = {1.0f, 1.0f, 1.0f},
 		.ambientIntensity = 0.1f,
-		.absorption = { 0.0, 3.0 },
+		.absorption = { 3.0, 3.0 },
 		.scattering = 0.7f,
 		.phase = 0.5,
 		.type = shaderio::VolumetricFogType::Noise,
@@ -60,7 +60,7 @@ VolumetricFog::VolumetricFog(pugi::xml_node& rendererNode) {
 	volumetricFogNoiseIndexMap.insert({ 0, 0 });
 
 	volumetricFogInfos[1] = {
-		.fogStartPos = {5096.0f, -70.0f, -4463.0f},
+		.fogStartPos = {5096.0f, -70.0f, -4467.0f},
 		.fogVoxelGridSize = {32, 32, 32},
 		.fogVoxelSize = { 1.0, 0.2, 1.0 },
 		.color = {1.0f, 1.0f, 1.0f},
@@ -146,7 +146,7 @@ void VolumetricFog::clean() {
 	for (int i = 0; i < volumetricFogFluidCount; ++i) {
 		volumetricFogFluidVoxelVelocityImages[i].clean();
 		volumetricFogFluidVoxelInfoBuffers[i].clean();
-		volumetricFogFluidExtinctionImages[i].clean();
+		volumetricFogFluidVoxelInfoImages[i].clean();
 	}
 
 	volumetricFogNoiseInfoBuffer.clean();
@@ -426,7 +426,7 @@ void VolumetricFog::createVolumetricFogData() {
 			.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT,
 			});
 
-		createVolumetricFogImage(volumetricFogFluidExtinctionImages[i], volumetricFogInfos[fogIndex].fogVoxelGridSize);
+		createVolumetricFogImage(volumetricFogFluidVoxelInfoImages[i], volumetricFogInfos[fogIndex].fogVoxelGridSize);
 
 		//image init的时候会全部置0
 		//vkCmdFillBuffer(cmd, volumetricFogVoxelInfoBuffers[i].buffer.buffer, 0, volumetricFogVoxelInfoBuffers[i].allocMemSize, 0);
@@ -525,12 +525,12 @@ void VolumetricFog::createDescriptorSetLayout() {
 			.stageFlags = VK_SHADER_STAGE_ALL });
 
 		bindings.addBinding({
-			.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eVolumetricFogFluidExtinctionImages,
+			.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eVolumetricFogFluidVoxelInfoImages,
 			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
 			.descriptorCount = volumetricFogFluidCount,
 			.stageFlags = VK_SHADER_STAGE_ALL });
 		bindings.addBinding({
-			.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eVolumetricFogFluidExtinctionImages_sampler,
+			.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eVolumetricFogFluidVoxelInfoImages_sampler,
 			.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 			.descriptorCount = volumetricFogFluidCount,
 			.stageFlags = VK_SHADER_STAGE_ALL });
@@ -644,12 +644,12 @@ void VolumetricFog::createDescriptorSet() {
 		write.append(volumetricFogFluidWrite, volumetricFogImagePtr);
 
 		volumetricFogFluidWrite =
-			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eVolumetricFogFluidExtinctionImages, 0, 0, volumetricFogFluidCount);
-		getNvvkImagePtr(volumetricFogFluidExtinctionImages);
+			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eVolumetricFogFluidVoxelInfoImages, 0, 0, volumetricFogFluidCount);
+		getNvvkImagePtr(volumetricFogFluidVoxelInfoImages);
 		write.append(volumetricFogFluidWrite, volumetricFogImagePtr);
 
 		volumetricFogFluidWrite =
-			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eVolumetricFogFluidExtinctionImages_sampler, 0, 0, volumetricFogFluidCount);
+			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eVolumetricFogFluidVoxelInfoImages_sampler, 0, 0, volumetricFogFluidCount);
 		write.append(volumetricFogFluidWrite, volumetricFogImagePtr);
 	}
 	//------------------------------------------------------------------噪声---------------------------------------------------------------------------
@@ -1074,7 +1074,7 @@ void VolumetricFog::createVolumetricFog(VkCommandBuffer cmd) {
 		auto barrierVolumeAll = [&](int fluidIndex) {
 			barrierImage(volumetricFogFluidVoxelVelocityImages[fluidIndex].image.image);
 			barrierBuffer(volumetricFogFluidVoxelInfoBuffers[fluidIndex]);
-			barrierImage(volumetricFogFluidExtinctionImages[fluidIndex].image.image);
+			barrierImage(volumetricFogFluidVoxelInfoImages[fluidIndex].image.image);
 		};
 
 		auto barrierVolumePingPong = [&](int idx) {
