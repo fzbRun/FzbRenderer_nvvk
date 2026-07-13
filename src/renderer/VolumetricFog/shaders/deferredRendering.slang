@@ -147,7 +147,11 @@ void getHeightFogScatter(float3 startPos, float3 endPos, inout float3 L, inout f
     attenuation2 *= abs(height) < 1e-6f ? 0.0f : exp(-lightAttenuation * (1.0f - exp(-heightScale * height)) / (heightScale * height));
 }
 */
-void getHeightFogScatter(float3 startPos, float3 endPos, inout uint randomSeed, VolumetricFogInfo fogInfo, inout float3 L, inout float3 attenuation, inout float3 attenuation2) {
+void getHeightFogScatter(
+    float3 startPos, float3 endPos, inout uint randomSeed, VolumetricFogInfo fogInfo,
+    inout float3 L, inout float3 attenuation, inout float3 attenuation2,
+    inout float3 fluidAreaL, inout float3 fluidAreaAttenuation,
+) {
     HeightFogInfo heightFogInfo = { 1.0f };
     if (fogInfo.volumetricFogTypeIndex >= 0) heightFogInfo = heightFogInfoBuffer[fogInfo.volumetricFogTypeIndex];
 
@@ -171,7 +175,7 @@ void getHeightFogScatter(float3 startPos, float3 endPos, inout uint randomSeed, 
     float tTotal = tExit - tEnter;
 
     SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
-    float3 E = 1.0f;
+    float E = 1.0f;
 
     uint sampleCount = 10;
     float tPart = tTotal / sampleCount;
@@ -185,6 +189,7 @@ void getHeightFogScatter(float3 startPos, float3 endPos, inout uint randomSeed, 
         float extinctionCoeff = (absorption + scattering) * exp(-heightScale * fogHeight);
         extinctionCoeff = max(extinctionCoeff, 1e-30f);
 
+        float3 indirectL = 0.0f;
         for (int lightIndex = 0; lightIndex < sceneInfo.numLights; ++lightIndex) {
             Light light = sceneInfo.lights[lightIndex];
             float3 lightColor = light.color * light.intensity;
@@ -212,14 +217,22 @@ void getHeightFogScatter(float3 startPos, float3 endPos, inout uint randomSeed, 
             float3 activeSunColor = lightColor * lightAttenuation * pushConst.lightAttenuationStrength;
             if (lightIndex == 0) activeSunColor *= getShadow(float4(samplePoint, 1.0f));
 
-            L += activeSunColor * fp * scattering * E / extinctionCoeff * (1.0f - exp(-extinctionCoeff * tPart));
+            indirectL += activeSunColor * fp * scattering * E / extinctionCoeff * (1.0f - exp(-extinctionCoeff * tPart));
         }
 
-        E *= exp(-extinctionCoeff * tPart);
-        if (all(E <= 1e-3f)) break;
+        float a = exp(-extinctionCoeff * tPart);
+        if (checkPointInAABB(samplePoint, groupGlobalInfo.fluidAABB) && groupGlobalInfo.fluidStartUp == 1) {
+            fluidAreaL += indirectL;
+            fluidAreaAttenuation *= a;
+        } else {
+            L += indirectL;
+            attenuation *= a;
+        }
+
+        E *= a;
+        if (all(attenuation <= 1e-3f)) break;
     }
 
-    attenuation *= E;
     float tLightEnter, tLightExit;
     float3 mainLightPos = endPos - sceneInfo.lights[0].direction * 1000.0f;
     if (isHit(mainLightPos, endPos, gridMin, gridMax, tLightEnter, tLightExit)) {
@@ -235,7 +248,7 @@ void getHeightFogScatter(float3 startPos, float3 endPos, inout uint randomSeed, 
     }
 }
 
-void getFluidFogScatter(float3 startPos, float3 endPos, inout uint randomSeed, VolumetricFogInfo fogInfo, inout float3 L, inout float3 attenuation, inout float3 attenuation2) {
+void getFluidFogScatter(float3 startPos, float3 endPos, inout uint randomSeed, VolumetricFogInfo fogInfo, inout float3 L, inout float3 attenuation) {
     FluidFogInfo fluidFogInfo = fluidFogInfoBuffer[fogInfo.volumetricFogTypeIndex];
 
     float3 fogStartPos = fogInfo.fogStartPos;
@@ -356,11 +369,11 @@ void getFluidFogScatter(float3 startPos, float3 endPos, inout uint randomSeed, V
     L += fogInfo.color * fogInfo.ambientIntensity;
     attenuation *= E;
 
-    float tLightEnter, tLightExit;
-    if (isHit(endPos - sceneInfo.lights[0].direction * 10.0f, endPos, gridMin, gridMax, tLightEnter, tLightExit)) {
-        float mainLightDt = tLightExit - tLightEnter;
-        attenuation2 *= lerp(1.0f, fluidFogInfo.lightAttenuationEstimator, mainLightDt / gridLength) * pushConst.lightAttenuationStrength;
-    }
+    //float tLightEnter, tLightExit;
+    //if (isHit(endPos - sceneInfo.lights[0].direction * 10.0f, endPos, gridMin, gridMax, tLightEnter, tLightExit)) {
+    //    float mainLightDt = tLightExit - tLightEnter;
+    //    attenuation2 *= lerp(1.0f, fluidFogInfo.lightAttenuationEstimator, mainLightDt / gridLength) * pushConst.lightAttenuationStrength;
+    //}
 }
 
 void getNoiseFogScatter(float3 startPos, float3 endPos, inout uint randomSeed, VolumetricFogInfo fogInfo, inout float3 L, inout float3 attenuation, inout float3 attenuation2) {
@@ -389,13 +402,14 @@ void getNoiseFogScatter(float3 startPos, float3 endPos, inout uint randomSeed, V
     float phase = fogInfo.phase;
     float phase2 = phase * phase;
 
-    uint sampleCount = 12;
+    uint sampleCount = 10;
     float tPart = tTotal / sampleCount;
     for (int sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex) {
         float tPartStart = sampleIndex * tPart + tEnter;
         float tSample = tPartStart + tPart * rand(randomSeed);
 
         float3 samplePoint = startPos + dir * tSample;
+        if (checkPointInAABB(samplePoint, groupGlobalInfo.fluidAABB) && groupGlobalInfo.fluidStartUp == 1) continue;
 
         CloudSetting cloudSetting = { noiseFogInfo.cloudScale, noiseFogInfo.cloudFlowSpeed, noiseFogInfo.cloudCoverage, noiseFogInfo.cloudTypePreference, noiseFogInfo.weatherScale };
         float density = SampleCloudDensity(samplePoint, gridMin, gridMax, pushConst.time, cloudSetting);
@@ -453,21 +467,27 @@ void getVolumetricFogScatter(float3 startPos, float3 endPos, inout uint randomSe
     fogInfo.phase = -0.7f;
     fogInfo.volumetricFogTypeIndex = -1;
 
-    getHeightFogScatter(startPos, endPos, randomSeed, fogInfo, L, attenuation, attenuation2);
+    float3 fluidL = 0.0f, fluidAttenuation = 1.0f;
+    float3 otherL = 0.0f, otherAttenuation = 1.0f;
+
+    getHeightFogScatter(startPos, endPos, randomSeed, fogInfo, L, attenuation, attenuation2, otherL, otherAttenuation);
     for (int i = 0; i < globalInfo.visibleVolumetricFogCount; ++i) {
         uint fogIndex = visibleVolumetricFogIndexBuffer[i];
         fogInfo = volumetricFogInfosBuffer[fogIndex];
         uint typeFogIndex = fogInfo.volumetricFogTypeIndex;
         if (fogInfo.type == VolumetricFogType::Height) {
-            getHeightFogScatter(startPos, endPos, randomSeed, fogInfo, L, attenuation, attenuation2);
-        } else if (fogInfo.type == VolumetricFogType::Fluid) {
-            getFluidFogScatter(startPos, endPos, randomSeed, fogInfo, L, attenuation, attenuation2);
+            getHeightFogScatter(startPos, endPos, randomSeed, fogInfo, L, attenuation, attenuation2, otherL, otherAttenuation);
+        } else if (fogInfo.type == VolumetricFogType::Fluid && globalInfo.fluidStartUp == 1) {
+            getFluidFogScatter(startPos, endPos, randomSeed, fogInfo, fluidL, fluidAttenuation);
         }
         else if (fogInfo.type == VolumetricFogType::Noise) {
             NoiseFogInfo noiseFogInfo = noiseFogInfoBuffer[typeFogIndex];
             getNoiseFogScatter(startPos, endPos, randomSeed, fogInfo, L, attenuation, attenuation2);
         }
     }
+
+    L += fluidL;
+    attenuation *= fluidAttenuation;
 }
 
 [numthreads(16, 16, 1)]

@@ -34,6 +34,7 @@ struct VSout
     float3 worldPos : POSITION;
     float3 worldNormal : NORMAL;
     float2 worldTexCoord : TEXCOORD0;
+    float3 posMesh;
 };
 
 [shader("vertex")]
@@ -58,6 +59,7 @@ VSout vertexMain(VSin input, uint vertexIndex: SV_VertexID)
     output.worldPos = pos.xyz;
     output.worldNormal = normalize(mul(normal, float3x3(pushConst.normalMatrix)));
     output.worldTexCoord = texCoord;
+    output.posMesh = posMesh;
 
     return output;
 }

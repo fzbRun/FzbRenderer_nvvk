@@ -13,6 +13,7 @@ struct VolumetricFogPushConstant{
 	float3 instanceVelocity;
 
 	int instanceIndex;
+	int fluidFogIndex;
 
 	float dt;
 	float time;
@@ -21,7 +22,7 @@ struct VolumetricFogPushConstant{
 	float lightAttenuationStrength = 1.0f;
 	uint volumetricFogCount;
 
-	float ambientFogDensity = 0.0f;
+	//float4x4 instanceTransformMatrix_lastTime;
 
 	int frameIndex;
 	SceneInfo* sceneInfoAddress;
@@ -71,6 +72,8 @@ struct VolumetricFogFluidVoxelInfo {
 };
 
 struct GlobalInfo_VolumetricFog {
+	AABB fluidAABB;
+	int fluidStartUp;
 	uint visibleVolumetricFogCount;
 };
 

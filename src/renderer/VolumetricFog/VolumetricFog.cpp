@@ -60,9 +60,9 @@ VolumetricFog::VolumetricFog(pugi::xml_node& rendererNode) {
 	volumetricFogNoiseIndexMap.insert({ 0, 0 });
 
 	volumetricFogInfos[1] = {
-		.fogStartPos = {5111.0f, -69.0f, -4453.0f},
+		.fogStartPos = {5096.0f, -70.0f, -4463.0f},
 		.fogVoxelGridSize = {32, 32, 32},
-		.fogVoxelSize = { 0.2, 0.2, 0.2 },
+		.fogVoxelSize = { 1.0, 0.2, 1.0 },
 		.color = {1.0f, 1.0f, 1.0f},
 		.ambientIntensity = 0.0f,
 		.absorption = { 0.1, 0.3 },
@@ -78,7 +78,7 @@ VolumetricFog::VolumetricFog(pugi::xml_node& rendererNode) {
 		.lightAttenuationEstimator = 1.0f,
 	};
 	volumetricFogFluidIndexMap.insert({ 0, 1 });
-	pushConstant.ambientFogDensity = 0.01f;
+	pushConstant.fluidFogIndex = 1;
 }
 
 void VolumetricFog::init() {
@@ -366,6 +366,10 @@ void VolumetricFog::createVolumetricFogImage(FzbRenderer::Image& image, shaderio
 	colorImageCreateInfo.samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
 	colorImageCreateInfo.samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
 	colorImageCreateInfo.samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	//colorImageCreateInfo.samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
+	//colorImageCreateInfo.samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+	//colorImageCreateInfo.samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+	//colorImageCreateInfo.samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
 
 	image.init(colorImageCreateInfo);
 }
@@ -965,6 +969,7 @@ void VolumetricFog::createGBuffers(VkCommandBuffer cmd) {
 			shaderio::float3 pos0 = shaderio::float3(instanceSet->transform * shaderio::float4(0.0f, 0.0f, 0.0f, 1.0f));
 			shaderio::float3 pos1 = shaderio::float3(instanceSet->transform_lastTime * shaderio::float4(0.0f, 0.0f, 0.0f, 1.0f));
 			pushConstant.instanceVelocity = (pos1 - pos0) / pushConstant.dt;
+			//pushConstant.instanceTransformMatrix_lastTime = instanceSet->transform_lastTime;
 
 			//pushConstant.volumetricFogFluidIndex = 1;	//表示会与流体进行交互，因此几何需要与流体进行判断
 		}
