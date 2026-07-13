@@ -27,6 +27,10 @@ struct VolumetricFogPushConstant{
 	int frameIndex;
 	SceneInfo* sceneInfoAddress;
 	float4x4 lightVP;
+
+	float3 mouseForcePosition;
+	float mouseForceStrength;
+	float mouseForceRadius;
 };
 
 enum class VolumetricFogType {
@@ -36,7 +40,7 @@ enum class VolumetricFogType {
 };
 struct VolumetricFogInfo {
 	float3 fogStartPos;
-	uint3 fogVoxelGridSize;		//²»ÒªÉèÖÃÎª1x1x1£¬·ñÔòÓÐbug
+	uint3 fogVoxelGridSize;		//ï¿½ï¿½Òªï¿½ï¿½ï¿½ï¿½Îª1x1x1ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½bug
 	float3 fogVoxelSize;
 	float3 color;
 	float ambientIntensity;
@@ -89,10 +93,10 @@ enum class StaticBindingPoints_VolumetricFog {
 	eVisibleVolumetricFogIndexBuffer,
 	eVolumetricFogInfosBuffer,
 
-	//¸ß¶È
+	//ï¿½ß¶ï¿½
 	eVolumetricFogHeightInfoBuffer,
 
-	//Á÷Ìå
+	//ï¿½ï¿½ï¿½ï¿½
 	eVolumetricFogFluidInfoBuffer,
 	eVolumetricFogFluidVoxelInfoBuffer,
 	eVolumetricFogFluidVoxelVelocityImage,
@@ -100,7 +104,7 @@ enum class StaticBindingPoints_VolumetricFog {
 	eVolumetricFogFluidVoxelInfoImages,
 	eVolumetricFogFluidVoxelInfoImages_sampler,
 
-	//ÔëÉù
+	//ï¿½ï¿½ï¿½ï¿½
 	eVolumetricFogNoiseInfoBuffer,
 
 	eShadowMap,

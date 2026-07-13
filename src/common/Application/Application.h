@@ -50,15 +50,15 @@ public:
 	void onUIRender() override;
 	void onResize(VkCommandBuffer cmd, const VkExtent2D& size);
 	/*
-	nvappµÄÂß¼­ÊÇ
-	1. m_maxFramesInFlight¼ÇÂ¼½»»»Á´µÄ×î´ó»º³å£¬±È·½ËµFIFOÊÇµ¥»º³å£»V-SyncÊÇË«»º³å£»Ò»°ãÊÇfast-Sync£¬Èı»º³å
-	2. ÄÇÃ´CPU×î¶àÍ¬Ê±´¦Àím_maxFramesInFlightµÄÖ¸Áî£¬¶øGPUÈÔÊÇÒ»Ö¡Ò»Ö¡Ö´ĞĞµÄ
-	3. m_maxFramesInFlight=3£¬ÄÇÃ´ÓĞÒ»¸ö´óĞ¡Îª3µÄÊı×é±íÊ¾µÈ´ıĞÅºÅÁ¿Ë÷Òı£¬Ò»¿ªÊ¼ÔªËØÊÇ0£¬1£¬2£»ÇÒÊ±¼äÏßĞÅºÅÁ¿Îª2
-	4. ÄÇÃ´0£¬1£¬2Ö¡CPU¿ÉÒÔÎŞĞèµÈ´ıGPUÖ´ĞĞÍêÖ±½Ó´¦ÀíÖ¸Áî£¬²¢½«ÏàÓ¦µÄÊı×éÔªËØ+3£»¶øµÚÈıÖ¡3 < 2²»ÄÜÖ´ĞĞ
-	5. µ±µÚÒ»Ö¡GPUÖ´ĞĞÍêºó£¬Ê±¼äÏßĞÅºÅÁ¿+1±äÎª3£¬ÄÇÃ´µÚÈıÖ¡¿ÉÒÔÖ´ĞĞ£¬²¢½«Êı×éÔªËØÉèÖÃÎª6
-	6. ¡­¡­
+	nvappï¿½ï¿½ï¿½ß¼ï¿½ï¿½ï¿½
+	1. m_maxFramesInFlightï¿½ï¿½Â¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ó»º³å£¬ï¿½È·ï¿½ËµFIFOï¿½Çµï¿½ï¿½ï¿½ï¿½å£»V-Syncï¿½ï¿½Ë«ï¿½ï¿½ï¿½å£»Ò»ï¿½ï¿½ï¿½ï¿½fast-Syncï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	2. ï¿½ï¿½Ã´CPUï¿½ï¿½ï¿½Í¬Ê±ï¿½ï¿½ï¿½ï¿½m_maxFramesInFlightï¿½ï¿½Ö¸ï¿½î£¬ï¿½ï¿½GPUï¿½ï¿½ï¿½ï¿½Ò»Ö¡Ò»Ö¡Ö´ï¿½Ğµï¿½
+	3. m_maxFramesInFlight=3ï¿½ï¿½ï¿½ï¿½Ã´ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½Ğ¡Îª3ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê¾ï¿½È´ï¿½ï¿½Åºï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½Ê¼Ôªï¿½ï¿½ï¿½ï¿½0ï¿½ï¿½1ï¿½ï¿½2ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ï¿½ï¿½Åºï¿½ï¿½ï¿½Îª2
+	4. ï¿½ï¿½Ã´0ï¿½ï¿½1ï¿½ï¿½2Ö¡CPUï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È´ï¿½GPUÖ´ï¿½ï¿½ï¿½ï¿½Ö±ï¿½Ó´ï¿½ï¿½ï¿½Ö¸ï¿½î£¬ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ó¦ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ôªï¿½ï¿½+3ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¡3 < 2ï¿½ï¿½ï¿½ï¿½Ö´ï¿½ï¿½
+	5. ï¿½ï¿½ï¿½ï¿½Ò»Ö¡GPUÖ´ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ï¿½ï¿½Åºï¿½ï¿½ï¿½+1ï¿½ï¿½Îª3ï¿½ï¿½ï¿½ï¿½Ã´ï¿½ï¿½ï¿½ï¿½Ö¡ï¿½ï¿½ï¿½ï¿½Ö´ï¿½Ğ£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ôªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Îª6
+	6. ï¿½ï¿½ï¿½ï¿½
 
-	²¢ÇÒÆääÖÈ¾Ë³ĞòÎªUIRender->PreRender->Render
+	ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È¾Ë³ï¿½ï¿½ÎªUIRender->PreRender->Render
 	*/
 	void onPreRender() override;
 	void onRender(VkCommandBuffer* cmd) override;
@@ -70,7 +70,7 @@ public:
 	inline static nvvk::ContextInitInfo vkContextInitInfo{};
 	inline static nvvk::Context* vkContext = nullptr;
 
-	//ËùÓĞµÄÈ«¾Ö¹²ÓÃ×ÊÔ´
+	//ï¿½ï¿½ï¿½Ğµï¿½È«ï¿½Ö¹ï¿½ï¿½ï¿½ï¿½ï¿½Ô´
 	inline static nvapp::Application* app{};
 	inline static nvvk::ResourceAllocator allocator{};
 	inline static nvvk::StagingUploader   stagingUploader{};
@@ -89,19 +89,21 @@ public:
 	inline static int frameIndex = -1;
 	inline static bool UIModified = false;
 	inline static VkDescriptorSet viewportImage = nullptr;
+	inline static ImVec2 viewportScreenPos = ImVec2(0, 0);
+	inline static ImVec2 viewportContentSize = ImVec2(0, 0);
 
 	static void uploadResource();
 private:
 	/*
-		Õâ¸öº¯Êı»á´ÓÏîÄ¿¸ùÄ¿Â¼/rendererInfo/rendererInfo.xmlÖĞ¶ÁÈ¡ĞÅÏ¢£¬°üÀ¨
-		1. äÖÈ¾Æ÷Ãû³Æ¡¢·Ö±æÂÊ
-		2. äÖÈ¾sceneInfo.xmlµÄµØÖ·
-		3. äÖÈ¾Æ÷µÄÀàĞÍ£¬ÈçÇ°ÏòäÖÈ¾¡¢Â·¾¶×·×Ù£¬²¢³õÊ¼»¯ÏàÓ¦µÄäÖÈ¾Æ÷
+		ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä¿ï¿½ï¿½Ä¿Â¼/rendererInfo/rendererInfo.xmlï¿½Ğ¶ï¿½È¡ï¿½ï¿½Ï¢ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+		1. ï¿½ï¿½È¾ï¿½ï¿½ï¿½ï¿½ï¿½Æ¡ï¿½ï¿½Ö±ï¿½ï¿½ï¿½
+		2. ï¿½ï¿½È¾sceneInfo.xmlï¿½Äµï¿½Ö·
+		3. ï¿½ï¿½È¾ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í£ï¿½ï¿½ï¿½Ç°ï¿½ï¿½ï¿½ï¿½È¾ï¿½ï¿½Â·ï¿½ï¿½×·ï¿½Ù£ï¿½ï¿½ï¿½ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½Ó¦ï¿½ï¿½ï¿½ï¿½È¾ï¿½ï¿½
 	*/
 	void getAppInfoFromXML(nvapp::ApplicationCreateInfo& appInfo);
 	void initSlangCompiler();
 
-	std::vector<std::string> slangIncludes;	//slangµÄincludeµØÖ·
+	std::vector<std::string> slangIncludes;	//slangï¿½ï¿½includeï¿½ï¿½Ö·
 
 	std::shared_ptr<FzbRenderer::Renderer> renderer;
 };

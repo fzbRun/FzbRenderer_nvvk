@@ -71,31 +71,36 @@ private:
 
 	ShadowMap shadowMap;
 
+	// mouse force
+	glm::vec3 mouseForcePosition = glm::vec3(0.0f);
+	float mouseForceStrength = 0.0f;
+	float mouseForceRadius = 3.0f;
+
 	FzbRenderer::Buffer GlobalInfoBuffer;
-	FzbRenderer::Buffer visibleVolumetricFogIndexBuffer;					//Ïà»ú·¶Î§ÄÚµÄÌå»ýÎíË÷Òý
+	FzbRenderer::Buffer visibleVolumetricFogIndexBuffer;					//ï¿½ï¿½ï¿½ï¿½ï¿½Î§ï¿½Úµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
-	uint32_t volumetricFogCount = 1;										//Ìå»ýÎíÊýÁ¿
-	std::vector<shaderio::VolumetricFogInfo> volumetricFogInfos;			//Ìå»ýÎí»ù´¡ÐÅÏ¢
-	FzbRenderer::Buffer volumetricFogInfosBuffer;							//Ìå»ýÎí»ù´¡ÐÅÏ¢»º³åÇø
-	std::vector<int> volumetricFogInfoModified;								//Ìå»ýÎíÊý¾ÝÊÇ·ñ±»ÐÞ¸Ä£¬Ã¿Ö¡ÖØÖÃ
+	uint32_t volumetricFogCount = 1;										//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	std::vector<shaderio::VolumetricFogInfo> volumetricFogInfos;			//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ï¢
+	FzbRenderer::Buffer volumetricFogInfosBuffer;							//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ï¢ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	std::vector<int> volumetricFogInfoModified;								//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ç·ï¿½ï¿½Þ¸Ä£ï¿½Ã¿Ö¡ï¿½ï¿½ï¿½ï¿½
 
-	uint32_t volumetricFogHeightCount = 0;									//¸ß¶ÈÎíÊýÁ¿
-	std::map<int, int> volumetricFogHeightIndexMap;							//¸ß¶ÈÎíË÷Òý -> Ìå»ýÎíË÷Òý
-	std::vector<shaderio::HeightFogInfo> volumetricFogHeightInfos;			//Á÷ÌåÎí»ù´¡ÐÅÏ¢
-	FzbRenderer::Buffer volumetricFogHeightInfoBuffer;						//Á÷ÌåÎí»ù´¡ÐÅÏ¢»º³åÇø
+	uint32_t volumetricFogHeightCount = 0;									//ï¿½ß¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	std::map<int, int> volumetricFogHeightIndexMap;							//ï¿½ß¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ -> ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	std::vector<shaderio::HeightFogInfo> volumetricFogHeightInfos;			//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ï¢
+	FzbRenderer::Buffer volumetricFogHeightInfoBuffer;						//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ï¢ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
-	uint32_t volumetricFogFluidCount = 0;									//Á÷ÌåÎíÊýÁ¿
-	std::map<int, int> volumetricFogFluidIndexMap;							//Á÷ÌåÎíË÷Òý -> Ìå»ýÎíË÷Òý
-	std::vector<shaderio::FluidFogInfo> volumetricFogFluidInfos;			//Á÷ÌåÎí»ù´¡ÐÅÏ¢
-	FzbRenderer::Buffer volumetricFogFluidInfoBuffer;						//Á÷ÌåÎí»ù´¡ÐÅÏ¢»º³åÇø
-	std::vector<FzbRenderer::Buffer> volumetricFogFluidVoxelInfoBuffers;	//Á÷ÌåÎívoxelÐÅÏ¢»º³åÇø
-	std::vector<FzbRenderer::Image> volumetricFogFluidVoxelVelocityImages;	//Á÷ÌåÎívoxelËÙ¶È3DTexture
-	std::vector<FzbRenderer::Image> volumetricFogFluidVoxelInfoImages;		//Á÷ÌåÎí voxelÐÅÏ¢ 3DTexture x: ÎüÊÕ y: É¢Éä z: phase
+	uint32_t volumetricFogFluidCount = 0;									//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	std::map<int, int> volumetricFogFluidIndexMap;							//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ -> ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	std::vector<shaderio::FluidFogInfo> volumetricFogFluidInfos;			//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ï¢
+	FzbRenderer::Buffer volumetricFogFluidInfoBuffer;						//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ï¢ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	std::vector<FzbRenderer::Buffer> volumetricFogFluidVoxelInfoBuffers;	//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½voxelï¿½ï¿½Ï¢ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	std::vector<FzbRenderer::Image> volumetricFogFluidVoxelVelocityImages;	//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½voxelï¿½Ù¶ï¿½3DTexture
+	std::vector<FzbRenderer::Image> volumetricFogFluidVoxelInfoImages;		//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ voxelï¿½ï¿½Ï¢ 3DTexture x: ï¿½ï¿½ï¿½ï¿½ y: É¢ï¿½ï¿½ z: phase
 
 	uint32_t volumetricFogNoiseCount = 0;
-	std::map<int, int> volumetricFogNoiseIndexMap;							//ÔëÉùÎíË÷Òý -> Ìå»ýÎíË÷Òý
-	std::vector<shaderio::NoiseFogInfo> volumetricFogNoiseInfos;			//Á÷ÌåÎí»ù´¡ÐÅÏ¢
-	FzbRenderer::Buffer volumetricFogNoiseInfoBuffer;						//Á÷ÌåÎí»ù´¡ÐÅÏ¢»º³åÇø
+	std::map<int, int> volumetricFogNoiseIndexMap;							//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ -> ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	std::vector<shaderio::NoiseFogInfo> volumetricFogNoiseInfos;			//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ï¢
+	FzbRenderer::Buffer volumetricFogNoiseInfoBuffer;						//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ï¢ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
 #ifndef NDEBUG
 	void renderVolumetricFogVoxelGrid(VkCommandBuffer cmd);

@@ -5,6 +5,7 @@
 #include <common/Shader/Shader.h>
 #include <nvvk/compute_pipeline.hpp>
 #include <nvvk/default_structs.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <iostream>
 
 using namespace FzbRenderer;
@@ -60,9 +61,10 @@ VolumetricFog::VolumetricFog(pugi::xml_node& rendererNode) {
 	volumetricFogNoiseIndexMap.insert({ 0, 0 });
 
 	volumetricFogInfos[1] = {
-		.fogStartPos = {5096.0f, -70.0f, -4467.0f},
+		//.fogStartPos = {5096.0f, -70.0f, -4467.0f},
+		.fogStartPos = {5109.0f, -69.0f, -4455.0f},
 		.fogVoxelGridSize = {32, 32, 32},
-		.fogVoxelSize = { 1.0, 0.2, 1.0 },
+		.fogVoxelSize = { 0.2, 0.2, 0.2 },
 		.color = {1.0f, 1.0f, 1.0f},
 		.ambientIntensity = 0.0f,
 		.absorption = { 0.1, 0.3 },
@@ -230,6 +232,82 @@ void VolumetricFog::uiRender() {
 	ImGui::End();
 
 	shadowMap.uiRender();
+
+	// 鼠标点击施加力
+	if ((ImGui::IsMouseDown(ImGuiMouseButton_Left) || ImGui::IsMouseClicked(ImGuiMouseButton_Left)) && !ImGui::IsAnyItemHovered()) {
+		ImVec2 mousePos = ImGui::GetMousePos();
+		ImVec2 vpPos = Application::viewportScreenPos;
+		ImVec2 vpSize = Application::viewportContentSize;
+
+		// 使用 viewport 局部坐标
+		float mouseRelX = mousePos.x - vpPos.x;
+		float mouseRelY = mousePos.y - vpPos.y;
+		if (vpSize.x <= 0 || vpSize.y <= 0 ||
+			mouseRelX < 0 || mouseRelX > vpSize.x ||
+			mouseRelY < 0 || mouseRelY > vpSize.y) return; // 鼠标不在 viewport 内
+
+		float ndcX = (2.0f * mouseRelX / vpSize.x) - 1.0f;
+		float ndcY = (2.0f * mouseRelY / vpSize.y) - 1.0f;  // OpenGL NDC：投影矩阵已含Vulkan Y翻转，这里不要再翻
+
+		const glm::mat4& viewMat = Application::sceneResource.cameraManip->getViewMatrix();
+		const glm::mat4& projMat = Application::sceneResource.cameraManip->getPerspectiveMatrix();
+		glm::mat4 invProj = glm::inverse(projMat);
+		glm::mat4 invView = glm::inverse(viewMat);
+
+		glm::vec4 clipNear(ndcX, ndcY, 0.0f, 1.0f);
+		glm::vec4 clipFar(ndcX, ndcY, 1.0f, 1.0f);
+		glm::vec4 viewNear = invProj * clipNear; viewNear /= viewNear.w;
+		glm::vec4 viewFar = invProj * clipFar; viewFar /= viewFar.w;
+		glm::vec3 worldNear = glm::vec3(invView * viewNear);
+		glm::vec3 worldFar = glm::vec3(invView * viewFar);
+		glm::vec3 rayDir = glm::normalize(worldFar - worldNear);
+
+		// 射线与流体 AABB 求交
+		bool hit = false;
+		for (int i = 0; i < volumetricFogCount; ++i) {
+			if (volumetricFogInfos[i].type != shaderio::VolumetricFogType::Fluid) continue;
+			if (volumetricFogFluidInfos[volumetricFogInfos[i].volumetricFogTypeIndex].startUp == 0) continue;
+
+			glm::vec3 fogMin = glm::vec3(volumetricFogInfos[i].fogStartPos.x, volumetricFogInfos[i].fogStartPos.y, volumetricFogInfos[i].fogStartPos.z);
+			glm::vec3 fogMax = fogMin + glm::vec3(volumetricFogInfos[i].fogVoxelGridSize.x * volumetricFogInfos[i].fogVoxelSize.x,
+												   volumetricFogInfos[i].fogVoxelGridSize.y * volumetricFogInfos[i].fogVoxelSize.y,
+												   volumetricFogInfos[i].fogVoxelGridSize.z * volumetricFogInfos[i].fogVoxelSize.z);
+
+			float tMin = 0.0f, tMax = std::numeric_limits<float>::max();
+			for (int axis = 0; axis < 3; ++axis) {
+				float invD = 1.0f / (std::abs(rayDir[axis]) > 1e-8f ? rayDir[axis] : (rayDir[axis] >= 0 ? 1e-8f : -1e-8f));
+				float t0 = (fogMin[axis] - worldNear[axis]) * invD;
+				float t1 = (fogMax[axis] - worldNear[axis]) * invD;
+				if (invD < 0.0f) std::swap(t0, t1);
+				tMin = std::max(tMin, t0);
+				tMax = std::min(tMax, t1);
+				if (tMin > tMax) break;
+			}
+
+			if (tMin <= tMax && tMax >= 0.0f) {
+				float tHit = std::max(tMin, 0.0f);
+				mouseForcePosition = worldNear + rayDir * tHit;
+				mouseForceStrength = 10.0f;
+				hit = true;
+	#ifndef NDEBUG
+				std::cout << "[VolumetricFog] Force hit at world: ("
+						  << mouseForcePosition.x << ", " << mouseForcePosition.y << ", " << mouseForcePosition.z << ")" << std::endl;
+	#endif
+				break;
+			}
+		}
+	#ifndef NDEBUG
+		if (!hit) {
+			static int missLogCounter = 0;
+			if (missLogCounter++ % 60 == 0)
+				std::cout << "[VolumetricFog] Ray miss AABB, ndc=(" << ndcX << ", " << ndcY << ")"
+							  << " near=(" << worldNear.x << "," << worldNear.y << "," << worldNear.z << ")"
+							  << " dir=(" << rayDir.x << "," << rayDir.y << "," << rayDir.z << ")"
+							  << " FluidAABB=("
+							  << volumetricFogInfos[1].fogStartPos.x << "," << volumetricFogInfos[1].fogStartPos.y << "," << volumetricFogInfos[1].fogStartPos.z << ")" << std::endl;
+		}
+	#endif
+	}
 }
 void VolumetricFog::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 	NVVK_CHECK(gBuffers.update(cmd, size));
@@ -290,6 +368,16 @@ void VolumetricFog::preRender() {
 	if (scene.cameraChange) Application::frameIndex = 0;
 	pushConstant.frameIndex = Application::frameIndex;
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
+
+	pushConstant.mouseForcePosition = { mouseForcePosition.x, mouseForcePosition.y, mouseForcePosition.z };
+	pushConstant.mouseForceStrength = mouseForceStrength;
+	pushConstant.mouseForceRadius = mouseForceRadius;
+
+	// 力衰减
+	if (mouseForceStrength > 0.0f) {
+		mouseForceStrength *= 0.8f;
+		if (mouseForceStrength < 0.01f) mouseForceStrength = 0.0f;
+	}
 
 	shadowMap.preRender();
 }
@@ -1014,6 +1102,8 @@ void VolumetricFog::createGBuffers(VkCommandBuffer cmd) {
 }
 void VolumetricFog::createVolumetricFog(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
+
+
 
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, staticDescPack.getSetPtr(), 0, nullptr);
 

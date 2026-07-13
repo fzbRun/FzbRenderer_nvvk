@@ -249,8 +249,11 @@ void FzbRenderer::Application::onUIRender() {
 	ImGui::End();
 	renderer->uiRender();
 
-	if (ImGui::Begin("Viewport"))
-		ImGui::Image(ImTextureID(viewportImage), ImGui::GetContentRegionAvail());
+	if (ImGui::Begin("Viewport")) {
+		viewportScreenPos = ImGui::GetCursorScreenPos();
+		viewportContentSize = ImGui::GetContentRegionAvail();
+		ImGui::Image(ImTextureID(viewportImage), viewportContentSize);
+	}
 	ImGui::End();
 }
 void FzbRenderer::Application::onResize(VkCommandBuffer cmd, const VkExtent2D& size) {

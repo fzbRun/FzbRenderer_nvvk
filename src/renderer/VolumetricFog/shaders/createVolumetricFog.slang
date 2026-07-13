@@ -127,6 +127,7 @@ void computeMain_initVolumetricFogFluid(uint3 voxelIndex: SV_DispatchThreadID, u
     VolumetricFogInfo fogInfo = groupOtherTypeFogInfos[pushConst.instanceIndex];
     if (any(voxelIndex >= fogInfo.fogVoxelGridSize)) return;
 
+    /*
     if (pushConst.time == 0) {
         float3 voxelCenter = fogInfo.fogStartPos + (float3(voxelIndex) + 0.5f) * fogInfo.fogVoxelSize;
         float heightAttenuation = exp(-1.0f * (voxelCenter.y - (-69.5f)));
@@ -164,6 +165,16 @@ void computeMain_initVolumetricFogFluid(uint3 voxelIndex: SV_DispatchThreadID, u
         envPhase /= max(envExtinction, 1e-30f);
         envColor /= max(envExtinction, 1e-30f);
         float4 voxelInfo = float4(envExtinction, envScattering, envPhase, envColor);
+        volumetricFogFluidVoxelInfoImages[fogInfo.volumetricFogTypeIndex][voxelIndex] = voxelInfo;
+
+        volumetricFogFluidVoxelVelocityImage[fogInfo.volumetricFogTypeIndex][voxelIndex] = 0.0f;
+    }
+    */
+    if (pushConst.time == 0) {
+        float4 voxelInfo;
+        voxelInfo.x = getRestSmokeDensity(voxelIndex, fogInfo);
+        voxelInfo.y = fogInfo.scattering;
+        voxelInfo.z = fogInfo.phase;
         volumetricFogFluidVoxelInfoImages[fogInfo.volumetricFogTypeIndex][voxelIndex] = voxelInfo;
 
         volumetricFogFluidVoxelVelocityImage[fogInfo.volumetricFogTypeIndex][voxelIndex] = 0.0f;
@@ -384,18 +395,39 @@ void computeMain_createVolumetricFog_Fluid_F(uint3 voxelIndex: SV_DispatchThread
         uint fIdx = fogInfo.volumetricFogTypeIndex;
         uint iteration = pushConst.iteration & 1;
 
-        float3 worldPos = fogInfo.fogStartPos + fogInfo.fogVoxelSize * (float3(voxelIndex) + 0.5f);
-
         float3 vel = voxelInfo.dirtyVelocity_pressure[iteration].xyz;
         // vel.y += -9.8f * pushConst.dt * groupFluidFogInfo.FIntensity;
-        //
+        //float3 worldPos = fogInfo.fogStartPos + fogInfo.fogVoxelSize * (float3(voxelIndex) + 0.5f);
         // float height = worldPos.y - (-69.5f);
         //float ambientFogDensity = (0.01f + 0.03f) * exp(-1.0f * height);
         //float buoyancy = -(voxelInfo.density.x - ambientFogDensity) * 9.8f * pushConst.dt * groupFluidFogInfo.FIntensity;
         //vel.y += buoyancy;
 
+        // apply mouse force
+        if (pushConst.mouseForceStrength > 0.0f) {
+            float3 worldPos = fogInfo.fogStartPos + fogInfo.fogVoxelSize * (float3(voxelIndex) + 0.5f);
+            float dist = distance(worldPos, pushConst.mouseForcePosition);
+            if (dist < pushConst.mouseForceRadius) {
+                float falloff = exp(-dist * dist / (pushConst.mouseForceRadius * pushConst.mouseForceRadius * 0.1f));
+                float3 forceDir = normalize(worldPos - pushConst.mouseForcePosition + 1e-8f);
+                vel += forceDir * pushConst.mouseForceStrength * falloff * pushConst.dt * groupFluidFogInfo.FIntensity;
+
+                float densityFalloff = exp(-dist * dist / (pushConst.mouseForceRadius * pushConst.mouseForceRadius * 0.3f));
+                float eraseAmount = densityFalloff * pushConst.mouseForceStrength * pushConst.dt * 0.15f;
+                voxelInfo.voxelFogInfo.x = max(voxelInfo.voxelFogInfo.x - eraseAmount, 0.0f);
+            }
+        }
+
         voxelInfo.dirtyVelocity_pressure[0].xyz = vel;
         voxelInfo.dirtyVelocity_pressure[1].xyz = vel;
+
+        //float restDensity = getRestSmokeDensity(voxelIndex, fogInfo);
+        //float restoreRate = 0.5f;
+        ////float speedDamping = exp(-length(vel) * 3.0f);
+        //float restoreWeight = saturate(restoreRate * pushConst.dt) * 20.0f;
+        //voxelInfo.voxelFogInfo.x = lerp(voxelInfo.voxelFogInfo.x, restDensity, restoreWeight);
+        //voxelInfo.voxelFogInfo.y = lerp(voxelInfo.voxelFogInfo.y, fogInfo.scattering, restoreWeight);
+        //voxelInfo.voxelFogInfo.z = lerp(voxelInfo.voxelFogInfo.z, fogInfo.phase, restoreWeight);
     }
 
     volumetricFogFluidVoxelInfoImages[fogInfo.volumetricFogTypeIndex][voxelIndex] = voxelInfo.voxelFogInfo;
