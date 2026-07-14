@@ -217,20 +217,42 @@ void getHeightFogScatter(
             float3 activeSunColor = lightColor * lightAttenuation * pushConst.lightAttenuationStrength;
             if (lightIndex == 0) activeSunColor *= getShadow(float4(samplePoint, 1.0f));
 
-            indirectL += activeSunColor * fp * scattering * E / extinctionCoeff * (1.0f - exp(-extinctionCoeff * tPart));
+            indirectL += activeSunColor * fp * fogInfo.color * scattering * E / extinctionCoeff * (1.0f - exp(-extinctionCoeff * tPart));
         }
 
         float a = exp(-extinctionCoeff * tPart);
-        if (checkPointInAABB(samplePoint, groupGlobalInfo.fluidAABB) && groupGlobalInfo.fluidStartUp == 1) {
-            fluidAreaL += indirectL;
-            fluidAreaAttenuation *= a;
-        } else {
-            L += indirectL;
-            attenuation *= a;
+        /*
+            //if (checkPointInAABB(samplePoint, groupGlobalInfo.fluidAABB) && groupGlobalInfo.fluidStartUp == 1) {
+            //    fluidAreaL += indirectL;
+            //    fluidAreaAttenuation *= a;
+            //} else {
+            //    L += indirectL;
+            //    attenuation *= a;
+            //}
+            //E *= a;
+            //if (all(attenuation <= 1e-3f)) break;
+        */
+
+        // Soft boundary blending based on distance to fluid AABB
+        float fluidBlend = 0.0f;
+        GlobalInfo_VolumetricFog globalInfo = groupGlobalInfo;
+        float3 fluidAABBHalfSize = (globalInfo.fluidAABB.maximum - globalInfo.fluidAABB.minimum) * 0.5f;
+        AABB mergeAABB = { globalInfo.fluidAABB.minimum - 0.5f * fluidAABBHalfSize, globalInfo.fluidAABB.maximum + 0.5f * fluidAABBHalfSize };
+        if (globalInfo.fluidStartUp == 1 && checkPointInAABB(samplePoint, mergeAABB)) {
+            float3 d = min(abs(samplePoint - mergeAABB.minimum), abs(mergeAABB.maximum - samplePoint));
+            float3 fluidGridCenter = (mergeAABB.minimum + mergeAABB.maximum) * 0.5f;
+            float3 maxD = min(fluidGridCenter - mergeAABB.minimum, mergeAABB.maximum - fluidGridCenter);
+            fluidBlend = min(min(d.x, d.y), d.z) / min(min(maxD.x, maxD.y), maxD.z);
         }
+
+        fluidAreaL += indirectL * fluidBlend;
+        fluidAreaAttenuation *= lerp(1.0f, a, fluidBlend);
+        L += indirectL * (1.0f - fluidBlend);
+        attenuation *= lerp(a, 1.0f, fluidBlend);
 
         E *= a;
         if (all(attenuation <= 1e-3f)) break;
+        if (all(attenuation * fluidAreaAttenuation <= 1e-3f)) break;
     }
     L += fogInfo.color * fogInfo.ambientIntensity;
 
@@ -258,6 +280,7 @@ void getFluidFogScatter(float3 startPos, float3 endPos, inout uint randomSeed, V
 
     float3 gridMin = fogStartPos;
     float3 gridMax = fogStartPos + float3(gridSize) * voxelSize;
+    float3 gridCenter = (gridMin + gridMax) * 0.5f;
 
     float3 rayDir = endPos - startPos;
     float maxDist = length(rayDir);
@@ -317,6 +340,7 @@ void getFluidFogScatter(float3 startPos, float3 endPos, inout uint randomSeed, V
         tNext = min(tNext, tExit);
         float dt = tNext - tCurrent;
 
+        float3 fluidL = 0.0f;
         if (dt > 0.0) {
             float tSample = tCurrent + dt * rand(randomSeed);
             float3 samplePoint = startPos + dir * tSample;
@@ -351,11 +375,17 @@ void getFluidFogScatter(float3 startPos, float3 endPos, inout uint randomSeed, V
                 float3 activeSunColor = lightColor * lerp(1.0f, fluidFogInfo.lightAttenuationEstimator, lightDt / gridLength) * pushConst.lightAttenuationStrength;
                 if (lightIndex == 0) activeSunColor *= getShadow(float4(samplePoint, 1.0f));
 
-                L += activeSunColor * fp * scattering * color * E / extinctionCoeff * (1.0f - exp(-extinctionCoeff * dt));
+                fluidL += activeSunColor * fp * scattering * color * E / extinctionCoeff * (1.0f - exp(-extinctionCoeff * dt));
                 //L += extinctionCoeff * fogInfo.color * fogInfo.ambientIntensity;
             }
 
-            E *= exp(-extinctionCoeff * dt);
+            float3 d = min(samplePoint - groupGlobalInfo.fluidAABB.minimum, groupGlobalInfo.fluidAABB.maximum - samplePoint);
+            float3 maxD = min(gridCenter - groupGlobalInfo.fluidAABB.minimum, groupGlobalInfo.fluidAABB.maximum - gridCenter);
+            float fluidBlend = min(min(d.x, d.y), d.z) / min(min(maxD.x, maxD.y), maxD.z);
+
+            float a = exp(-extinctionCoeff * dt);
+            E *= lerp(1.0f, a, fluidBlend);
+            L += lerp(0.0f, fluidL, fluidBlend);
             if (all(E <= 0.0f)) break;
         }
 

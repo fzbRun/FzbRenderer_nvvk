@@ -70,9 +70,9 @@ VolumetricFog::VolumetricFog(pugi::xml_node& rendererNode) {
 		.fogStartPos = {5098.0f, -69.5f, -4470.0f},
 		.fogVoxelGridSize = {16, 16, 16},
 		.fogVoxelSize = {2.0f, 0.1f, 2.0f},
-		.color = {100.0f, 100.0f, 100.0f},
+		.color = {1.0f, 1.0f, 1.0f},
 		.ambientIntensity = 0.001f,
-		.absorption = { 2.5, 100.0 },
+		.absorption = { 0.01, 100.0 },
 		.scattering = 0.7f,
 		.phase = 0.5,
 		.type = shaderio::VolumetricFogType::Height,
@@ -100,7 +100,7 @@ VolumetricFog::VolumetricFog(pugi::xml_node& rendererNode) {
 		.viscosity = 0.01f,
 		.FIntensity = 4.0f,
 		.lightAttenuationEstimator = 1.0f,
-		.restoreSpeed = 100.0f,
+		.restoreSpeed = 10.0f,
 	};
 	volumetricFogFluidIndexMap.insert({ 0, 1 });
 	pushConstant.fluidFogIndex = 1;
@@ -1305,6 +1305,88 @@ void VolumetricFog::deferredRenderring(VkCommandBuffer cmd) {
 	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
 
 	//nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getDepthImage(), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
+}
+void VolumetricFog::renderTransparentMaterial(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
+
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, staticDescPack.getSetPtr(), 0, nullptr);
+
+	uint32_t numColorAttachments = (uint32_t)GBuffers_VolumetricFog::eEmissive + 1;
+	std::vector<VkRenderingAttachmentInfo> colorAttachments(numColorAttachments);
+	for (int i = 0; i <= (uint32_t)GBuffers_VolumetricFog::eEmissive; ++i) {
+		nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(i), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
+
+		colorAttachments[i] = DEFAULT_VkRenderingAttachmentInfo;
+		colorAttachments[i].clearValue = { .color = {0, 0, 0, 1.0f} };
+		colorAttachments[i].imageView = gBuffers.getColorImageView(i);
+	}
+
+	VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
+	renderingInfo.renderArea = DEFAULT_VkRect2D(gBuffers.getSize());
+	renderingInfo.colorAttachmentCount = colorAttachments.size();
+	renderingInfo.pColorAttachments = colorAttachments.data();
+	renderingInfo.pDepthAttachment = nullptr;
+
+	vkCmdBeginRendering(cmd, &renderingInfo);
+
+	graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
+	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;	//背面物体可能影响流体
+	graphicsDynamicPipeline.depthStencilState.stencilTestEnable = VK_FALSE;
+	graphicsDynamicPipeline.cmdApplyAllStates(cmd);
+	graphicsDynamicPipeline.cmdSetViewportAndScissor(cmd, Application::app->getViewportSize());
+
+	VkColorComponentFlags writeMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+	VkBool32 blendEnable = VK_FALSE;
+	for (uint32_t i = 0; i < numColorAttachments; ++i) {
+		vkCmdSetColorWriteMaskEXT(cmd, i, 1, &writeMask);
+		vkCmdSetColorBlendEnableEXT(cmd, i, 1, &blendEnable);
+	}
+
+	vkCmdSetDepthTestEnable(cmd, VK_TRUE);
+	graphicsDynamicPipeline.cmdBindShaders(cmd, { .vertex = vertexShader_createGBuffer, .fragment = fragmentShader_createGBuffer });
+
+	VkVertexInputBindingDescription2EXT bindingDescription{};
+	VkVertexInputAttributeDescription2EXT attributeDescription = {};
+	vkCmdSetVertexInputEXT(cmd, 0, nullptr, 0, nullptr);
+
+	for (size_t i = 0; i < Application::sceneResource.instances.size(); ++i)
+	{
+		uint32_t meshIndex = Application::sceneResource.instances[i].meshIndex;
+		const shaderio::Mesh& mesh = Application::sceneResource.meshes[meshIndex];
+		const shaderio::TriangleMesh& triMesh = mesh.triMesh;
+
+		//pushConstant.volumetricFogFluidIndex = -1;
+		pushConstant.instanceVelocity = shaderio::float3(0.0f);
+		if (Application::sceneResource.periodInstanceIndexToInstanceSetIndex.count(i)) {
+			uint32_t instanceSetIndex = Application::sceneResource.periodInstanceIndexToInstanceSetIndex[i];
+			FzbRenderer::InstanceSet* instanceSet = &Application::sceneResource.periodInstanceSets[instanceSetIndex];
+
+			//先不考虑旋转带来的力
+			shaderio::float3 pos0 = shaderio::float3(instanceSet->transform * shaderio::float4(1.0f, 1.0f, 1.0f, 1.0f));
+			shaderio::float3 pos1 = shaderio::float3(instanceSet->transform_lastTime * shaderio::float4(1.0f, 1.0f, 1.0f, 1.0f));
+			pushConstant.instanceVelocity = (pos0 - pos1) / pushConstant.dt;
+			//pushConstant.transofrm_lastTime = instanceSet->transform_lastTime;
+
+			//pushConstant.volumetricFogFluidIndex = 1;	//表示会与流体进行交互，因此几何需要与流体进行判断
+		}
+
+		pushConstant.normalMatrix = glm::transpose(glm::inverse(glm::mat3(Application::sceneResource.instances[i].transform)));
+		pushConstant.instanceIndex = int(i);
+		vkCmdPushConstants2(cmd, &pushInfo);
+
+		uint32_t bufferIndex = Application::sceneResource.getMeshBufferIndex(meshIndex);
+		const nvvk::Buffer& v = Application::sceneResource.bDatas[bufferIndex];
+
+		vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(mesh.indexType));
+
+		vkCmdDrawIndexed(cmd, triMesh.indices.count, 1, 0, 0, 0);
+	}
+
+	vkCmdEndRendering(cmd);
+
+	for (int i = 0; i <= (uint32_t)GBuffers_VolumetricFog::eEmissive; ++i)
+		nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(i), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getDepthImage(), VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
 }
 
 #ifndef NDEBUG

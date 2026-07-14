@@ -128,6 +128,8 @@ void computeMain_initVolumetricFogFluid(uint3 voxelIndex: SV_DispatchThreadID, u
     VolumetricFogInfo fogInfo = groupOtherTypeFogInfos[pushConst.instanceIndex];
     if (any(voxelIndex >= fogInfo.fogVoxelGridSize)) return;
 
+    FluidFogInfo fluidFogInfo = volumetricFogFluidInfoBuffer[fogInfo.volumetricFogTypeIndex];
+
     float3 voxelCenter = fogInfo.fogStartPos + (float3(voxelIndex) + 0.5f) * fogInfo.fogVoxelSize;
     float heightAttenuation = exp(-1.0f * (voxelCenter.y - (-69.5f)));
     float extinction = (0.01f + 0.03f) * heightAttenuation;
@@ -165,29 +167,33 @@ void computeMain_initVolumetricFogFluid(uint3 voxelIndex: SV_DispatchThreadID, u
     envColor /= max(envExtinction, 1e-30f);
     float4 envVoxelInfo = float4(envExtinction, envScattering, envPhase, luminance(envColor));
     float4 voxelInfo = envVoxelInfo;
-    if (pushConst.time == 0) volumetricFogFluidVoxelVelocityImage[fogInfo.volumetricFogTypeIndex][voxelIndex] = 0.0f;
-    else {
-        voxelInfo = volumetricFogFluidVoxelInfoImages[fogInfo.volumetricFogTypeIndex][voxelIndex];
-        FluidFogInfo fluidFogInfo = volumetricFogFluidInfoBuffer[fogInfo.volumetricFogTypeIndex];
 
-        float3 velocity = volumetricFogFluidVoxelVelocityImage[fogInfo.volumetricFogTypeIndex][voxelIndex].xyz;
-        float d = length(((float3)voxelIndex - (float3)(fogInfo.fogVoxelGridSize) * 0.5f) * fogInfo.fogVoxelSize);
-        float speedDamping = exp(-length(velocity) * d * 3.0f); // spped + distance
+    int3 voxelIndex_lastTime = int3((voxelCenter - fluidFogInfo.fogStartPos_lastTime) / fogInfo.fogVoxelSize);
+    if (any(voxelIndex_lastTime < 0) || any(voxelIndex_lastTime > fogInfo.fogVoxelGridSize - 1) || pushConst.time == 0) {
+        volumetricFogFluidVoxelVelocityImage[fogInfo.volumetricFogTypeIndex][voxelIndex].xyz = 0.0f;
+    } else {
+        voxelInfo = volumetricFogFluidVoxelInfoImages[fogInfo.volumetricFogTypeIndex][voxelIndex_lastTime];
+
+        float3 velocity = volumetricFogFluidVoxelVelocityImage[fogInfo.volumetricFogTypeIndex][voxelIndex_lastTime].xyz;
+        //float3 halfGrid = (float3)(fogInfo.fogVoxelGridSize) * 0.5f;
+        //float3 distToEdge = halfGrid - abs((float3)voxelIndex - halfGrid);
+        //float d = length(distToEdge * fogInfo.fogVoxelSize);
+        //float speedDamping = exp(-length(velocity) * d * 3.0f); // spped + distance
+        //float restoreRate = 0.5f;
+        //float restoreWeight = saturate(restoreRate * pushConst.dt) * speedDamping * fluidFogInfo.restoreSpeed;
+
+        float3 halfGrid = float3(fogInfo.fogVoxelGridSize) * 0.5f;
+        float3 distToCenter = abs(float3(voxelIndex) - halfGrid);
+        float maxPossibleDist = length(halfGrid);
+        float centerDist = length(distToCenter) / maxPossibleDist;
+
+        float edgeFactor = smoothstep(0.0, 1.0, centerDist);
         float restoreRate = 0.5f;
-        float restoreWeight = saturate(restoreRate * pushConst.dt) * speedDamping * fluidFogInfo.restoreSpeed;
-        /*
-            float3 color = UnpackFloatToFloat3(voxelInfo.w);
-            color = lerp(color, envColor, restoreWeight);
-            voxelInfo.w = PackFloat3ToFloat(color);
-            {
-                float3 color2 = UnpackFloatToFloat3(voxelInfo.w);
-                if (pushConst.frameIndex == 0 && all(voxelIndex == 0)) printf("color_before: %f %f %f, color_after: %f %f %f\n", color.x, color.y, color.z, color2.x, color2.y, color2.z);
-            }
-            voxelInfo.xyz = lerp(voxelInfo.xyz, envVoxelInfo.xyz, restoreWeight);
-        */
+        float restoreWeight = saturate(restoreRate * pushConst.dt) * edgeFactor * fluidFogInfo.restoreSpeed;
+
         voxelInfo = lerp(voxelInfo, envVoxelInfo, restoreWeight);
 
-        velocity = lerp(velocity, 0.0f, restoreWeight);
+        velocity = lerp(velocity, 0.0f, restoreWeight); 
         volumetricFogFluidVoxelVelocityImage[fogInfo.volumetricFogTypeIndex][voxelIndex].xyz = velocity;
     }
     volumetricFogFluidVoxelInfoImages[fogInfo.volumetricFogTypeIndex][voxelIndex] = voxelInfo;
@@ -456,6 +462,16 @@ void computeMain_createVolumetricFog_Fluid_F(uint3 voxelIndex: SV_DispatchThread
         //voxelInfo.voxelFogInfo.z = lerp(voxelInfo.voxelFogInfo.z, fogInfo.phase, restoreWeight);
     }
 
+    // Boundary feathering: fade extinction at voxel grid edges to prevent hard seam with environment fog
+    //{
+    //    float3 halfGrid = float3(fogInfo.fogVoxelGridSize) * 0.5f;
+    //    float3 distToEdge = halfGrid - abs(float3(voxelIndex) - halfGrid);
+    //    float minDistToEdge = min(min(distToEdge.x, distToEdge.y), distToEdge.z);
+    //    float featherWidth = 2.5f; // voxels from edge where blending begins
+    //    float edgeFeather = 1.0f - smoothstep(0.0f, featherWidth, minDistToEdge);
+    //    voxelInfo.voxelFogInfo.x *= (1.0f - edgeFeather * 0.6f);
+    //}
+
     volumetricFogFluidVoxelInfoImages[fogInfo.volumetricFogTypeIndex][voxelIndex] = voxelInfo.voxelFogInfo;
     volumetricFogFluidVoxelInfoBuffer[fogInfo.volumetricFogTypeIndex][voxelIndexU] = voxelInfo;
 }
@@ -523,9 +539,9 @@ void computeMain_createVolumetricFog_Fluid_S(uint3 voxelIndex: SV_DispatchThread
 
     uint3 lIdx = voxelIndex - threadGroupIndex * 4 + 1;
 
-    float3 velocity = 0.0f;
+    float4 selfData = groupVoxelInfos[lIdx.z][lIdx.y][lIdx.x];
+    float3 velocity = selfData.xyz;
     if (!groupVoxelBoundary[lIdx.z][lIdx.y][lIdx.x]) {
-        float4 selfData = groupVoxelInfos[lIdx.z][lIdx.y][lIdx.x];
         float3 vel_dirty = selfData.xyz;
 
         float3 cellSize = fogInfo.fogVoxelSize;

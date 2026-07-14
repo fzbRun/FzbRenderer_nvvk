@@ -46,6 +46,7 @@ private:
 	void createGBuffers(VkCommandBuffer cmd);
 	void createVolumetricFog(VkCommandBuffer cmd);
 	void deferredRenderring(VkCommandBuffer cmd);
+	void renderTransparentMaterial(VkCommandBuffer cmd);
 
 	VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures{};
 	VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR derivFeatures = {};
