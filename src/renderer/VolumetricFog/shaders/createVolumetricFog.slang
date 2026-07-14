@@ -1,4 +1,4 @@
-#include "renderer/VolumetricFog/VolumetricFogShaderio.h"
+﻿#include "renderer/VolumetricFog/VolumetricFogShaderio.h"
 #include "common/Shader/nvvk/Slang/pbr.h.slang"
 #include <nvshaders/slang_types.h>
 #include "common/Shader/shaderStructType.h"
@@ -43,13 +43,16 @@ void computeMain_getVisibleVolumetricFog(uint threadIndex: SV_DispatchThreadID) 
     if (inCameraFrustum)
         visibleVolumetricFogIndexBuffer[visibleFogOffset] = threadIndex;
 
-    //if (pushConst.frameIndex == 0 && inCameraFrustum) printf("%d %d\n", threadIndex, visibleFogOffset);
-
     if (threadIndex == 0) {
         GlobalInfo_VolumetricFog globalInfo;
         globalInfo.visibleVolumetricFogCount = groupVisibleFogCount;
 
         VolumetricFogInfo fogInfo = volumetricFogInfosBuffer[pushConst.fluidFogIndex];
+
+        //SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+        //float3 startPos = sceneInfo.cameraPosition - fogInfo.fogVoxelGridSize * fogInfo.fogVoxelSize * 0.5f;
+        //volumetricFogInfosBuffer[pushConst.fluidFogIndex].fogStartPos = startPos;
+
         globalInfo.fluidAABB = { fogInfo.fogStartPos, fogInfo.fogStartPos + fogInfo.fogVoxelGridSize * fogInfo.fogVoxelSize };
         FluidFogInfo fluidFogInfo = volumetricFogFluidInfoBuffer[fogInfo.volumetricFogTypeIndex];
         globalInfo.fluidStartUp = fluidFogInfo.startUp;
@@ -69,8 +72,8 @@ void computeMain_createVolumetricFog(uint3 voxelIndex: SV_DispatchThreadID, uint
 //--------------------------------------------------------------------------------Fluid-------------------------------------------------------------------------------------
 // BoundaryCondition_Velocity: float3(1.0f, 1.0f, 1.0f): Non; float3(-1.0f, 1.0f, 1.0f): Slip; float3(-1.0f, -1.0f, -1.0f): NoSlip
 // BoundaryCondition_Pressure: 0: Non; 1: Slip or NoSlip;
-#define BoundaryConditionType 1
-#if BoundaryConditionType == 1  //Non
+#define BoundaryConditionType 0
+#if BoundaryConditionType == 0  //Non
     #define BoundaryCondition_Have false
     #define BoundaryCondition_Velocity float3(1.0f, 1.0f, 1.0f)
     #define BoundaryCondition_Pressure 0
@@ -83,8 +86,6 @@ void computeMain_createVolumetricFog(uint3 voxelIndex: SV_DispatchThreadID, uint
         #define BoundaryCondition_Velocity float3(-1.0f, -1.0f, -1.0f)
     #endif
 #endif
-
-
 
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogFluidVoxelVelocityImage)]] RWTexture3D<float4> volumetricFogFluidVoxelVelocityImage[]; // xyz: velocity; w:
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogFluidVoxelInfoBuffer)]] RWStructuredBuffer<VolumetricFogFluidVoxelInfo, ScalarDataLayout> volumetricFogFluidVoxelInfoBuffer[];
@@ -127,59 +128,81 @@ void computeMain_initVolumetricFogFluid(uint3 voxelIndex: SV_DispatchThreadID, u
     VolumetricFogInfo fogInfo = groupOtherTypeFogInfos[pushConst.instanceIndex];
     if (any(voxelIndex >= fogInfo.fogVoxelGridSize)) return;
 
-    /*
-    if (pushConst.time == 0) {
-        float3 voxelCenter = fogInfo.fogStartPos + (float3(voxelIndex) + 0.5f) * fogInfo.fogVoxelSize;
-        float heightAttenuation = exp(-1.0f * (voxelCenter.y - (-69.5f)));
-        float extinction = (0.01f + 0.03f) * heightAttenuation;
-        float envExtinction = extinction;
-        float envScattering = extinction * 0.03f;
-        float envPhase = extinction * -0.7f;
-        float envColor = 1.0f;
+    float3 voxelCenter = fogInfo.fogStartPos + (float3(voxelIndex) + 0.5f) * fogInfo.fogVoxelSize;
+    float heightAttenuation = exp(-1.0f * (voxelCenter.y - (-69.5f)));
+    float extinction = (0.01f + 0.03f) * heightAttenuation;
+    float envExtinction = extinction;
+    float envScattering = extinction * 0.03f;
+    float envPhase = extinction * -0.7f;
+    float3 envColor = extinction * 1.0f;
 
-        for (int i = 0; i < pushConst.volumetricFogCount; ++i) {
-            if (i == pushConst.instanceIndex) continue;
-            VolumetricFogInfo otherFogInfo = groupOtherTypeFogInfos[i];
-            AABB otherFogAABB = { otherFogInfo.fogStartPos, otherFogInfo.fogStartPos + otherFogInfo.fogVoxelGridSize * otherFogInfo.fogVoxelSize };
-            if (!checkPointInAABB(voxelCenter, otherFogAABB)) continue;
+    for (int i = 0; i < pushConst.volumetricFogCount; ++i) {
+        if (i == pushConst.instanceIndex) continue;
+        VolumetricFogInfo otherFogInfo = groupOtherTypeFogInfos[i];
+        AABB otherFogAABB = { otherFogInfo.fogStartPos, otherFogInfo.fogStartPos + otherFogInfo.fogVoxelGridSize * otherFogInfo.fogVoxelSize };
+        if (!checkPointInAABB(voxelCenter, otherFogAABB)) continue;
 
-            if (otherFogInfo.type == VolumetricFogType::Height) {
-                float heightScale = heightFogInfoBuffer[otherFogInfo.volumetricFogTypeIndex].heightScale;
-                float height = voxelCenter.y - otherFogInfo.fogStartPos.y;
-                heightAttenuation = exp(-heightScale * height);
-                extinction = (otherFogInfo.absorption.x + otherFogInfo.scattering) * heightAttenuation;
-            } else if (otherFogInfo.type == VolumetricFogType::Fluid) continue;
-            else if (otherFogInfo.type == VolumetricFogType::Noise) {
-                NoiseFogInfo noiseFogInfo = noiseFogInfoBuffer[otherFogInfo.volumetricFogTypeIndex];
-                CloudSetting cloudSetting = { noiseFogInfo.cloudScale, noiseFogInfo.cloudFlowSpeed, noiseFogInfo.cloudCoverage, noiseFogInfo.cloudTypePreference, noiseFogInfo.weatherScale };
-                float fogDensity = SampleCloudDensity(voxelCenter, otherFogAABB.minimum, otherFogAABB.maximum, pushConst.time, cloudSetting);
-                extinction = (otherFogInfo.absorption.x + otherFogInfo.scattering) * fogDensity;
-            }
-
-            envExtinction += extinction;
-            envScattering += extinction * otherFogInfo.scattering;
-            envPhase += extinction * otherFogInfo.phase;
-            envColor += extinction * PackFloat3ToFloat(otherFogInfo.color);
+        if (otherFogInfo.type == VolumetricFogType::Height) {
+            float heightScale = heightFogInfoBuffer[otherFogInfo.volumetricFogTypeIndex].heightScale;
+            float height = voxelCenter.y - otherFogInfo.fogStartPos.y;
+            heightAttenuation = exp(-heightScale * height);
+            extinction = (otherFogInfo.absorption.x + otherFogInfo.scattering) * heightAttenuation;
+        } else if (otherFogInfo.type == VolumetricFogType::Fluid) continue;
+        else if (otherFogInfo.type == VolumetricFogType::Noise) {
+            NoiseFogInfo noiseFogInfo = noiseFogInfoBuffer[otherFogInfo.volumetricFogTypeIndex];
+            CloudSetting cloudSetting = { noiseFogInfo.cloudScale, noiseFogInfo.cloudFlowSpeed, noiseFogInfo.cloudCoverage, noiseFogInfo.cloudTypePreference, noiseFogInfo.weatherScale };
+            float fogDensity = SampleCloudDensity(voxelCenter, otherFogAABB.minimum, otherFogAABB.maximum, pushConst.time, cloudSetting);
+            extinction = (otherFogInfo.absorption.x + otherFogInfo.scattering) * fogDensity;
         }
-        envScattering /= max(envExtinction, 1e-30f);
-        envPhase /= max(envExtinction, 1e-30f);
-        envColor /= max(envExtinction, 1e-30f);
-        float4 voxelInfo = float4(envExtinction, envScattering, envPhase, envColor);
-        volumetricFogFluidVoxelInfoImages[fogInfo.volumetricFogTypeIndex][voxelIndex] = voxelInfo;
 
-        volumetricFogFluidVoxelVelocityImage[fogInfo.volumetricFogTypeIndex][voxelIndex] = 0.0f;
+        envExtinction += extinction;
+        envScattering += extinction * otherFogInfo.scattering;
+        envPhase += extinction * otherFogInfo.phase;
+        envColor += extinction * otherFogInfo.color;
     }
+    envScattering /= max(envExtinction, 1e-30f);
+    envPhase /= max(envExtinction, 1e-30f);
+    envColor /= max(envExtinction, 1e-30f);
+    float4 envVoxelInfo = float4(envExtinction, envScattering, envPhase, luminance(envColor));
+    float4 voxelInfo = envVoxelInfo;
+    if (pushConst.time == 0) volumetricFogFluidVoxelVelocityImage[fogInfo.volumetricFogTypeIndex][voxelIndex] = 0.0f;
+    else {
+        voxelInfo = volumetricFogFluidVoxelInfoImages[fogInfo.volumetricFogTypeIndex][voxelIndex];
+        FluidFogInfo fluidFogInfo = volumetricFogFluidInfoBuffer[fogInfo.volumetricFogTypeIndex];
+
+        float3 velocity = volumetricFogFluidVoxelVelocityImage[fogInfo.volumetricFogTypeIndex][voxelIndex].xyz;
+        float d = length(((float3)voxelIndex - (float3)(fogInfo.fogVoxelGridSize) * 0.5f) * fogInfo.fogVoxelSize);
+        float speedDamping = exp(-length(velocity) * d * 3.0f); // spped + distance
+        float restoreRate = 0.5f;
+        float restoreWeight = saturate(restoreRate * pushConst.dt) * speedDamping * fluidFogInfo.restoreSpeed;
+        /*
+            float3 color = UnpackFloatToFloat3(voxelInfo.w);
+            color = lerp(color, envColor, restoreWeight);
+            voxelInfo.w = PackFloat3ToFloat(color);
+            {
+                float3 color2 = UnpackFloatToFloat3(voxelInfo.w);
+                if (pushConst.frameIndex == 0 && all(voxelIndex == 0)) printf("color_before: %f %f %f, color_after: %f %f %f\n", color.x, color.y, color.z, color2.x, color2.y, color2.z);
+            }
+            voxelInfo.xyz = lerp(voxelInfo.xyz, envVoxelInfo.xyz, restoreWeight);
+        */
+        voxelInfo = lerp(voxelInfo, envVoxelInfo, restoreWeight);
+
+        velocity = lerp(velocity, 0.0f, restoreWeight);
+        volumetricFogFluidVoxelVelocityImage[fogInfo.volumetricFogTypeIndex][voxelIndex].xyz = velocity;
+    }
+    volumetricFogFluidVoxelInfoImages[fogInfo.volumetricFogTypeIndex][voxelIndex] = voxelInfo;
+
+    /*
+        if (pushConst.time == 0) {
+            float4 voxelInfo;
+            voxelInfo.x = getRestSmokeDensity(voxelIndex, fogInfo);
+            voxelInfo.y = fogInfo.scattering;
+            voxelInfo.z = fogInfo.phase;
+            volumetricFogFluidVoxelInfoImages[fogInfo.volumetricFogTypeIndex][voxelIndex] = voxelInfo;
+
+            volumetricFogFluidVoxelVelocityImage[fogInfo.volumetricFogTypeIndex][voxelIndex] = 0.0f;
+        }
     */
-    if (pushConst.time == 0) {
-        float4 voxelInfo;
-        voxelInfo.x = getRestSmokeDensity(voxelIndex, fogInfo);
-        voxelInfo.y = fogInfo.scattering;
-        voxelInfo.z = fogInfo.phase;
-        volumetricFogFluidVoxelInfoImages[fogInfo.volumetricFogTypeIndex][voxelIndex] = voxelInfo;
-
-        volumetricFogFluidVoxelVelocityImage[fogInfo.volumetricFogTypeIndex][voxelIndex] = 0.0f;
-    }
-
     uint voxelIndexU = voxelIndex.z * fogInfo.fogVoxelGridSize.x * fogInfo.fogVoxelGridSize.y + voxelIndex.y * fogInfo.fogVoxelGridSize.x + voxelIndex.x;
     volumetricFogFluidVoxelInfoBuffer[fogInfo.volumetricFogTypeIndex][voxelIndexU].isBoundary = false;
 }
@@ -204,7 +227,6 @@ void computeMain_createVolumetricFog_Fluid_A(uint3 voxelIndex: SV_DispatchThread
     voxelAABB.maximum = voxelAABB.minimum + fogInfo.fogVoxelSize;
     float3 voxelCenter = (voxelAABB.minimum + voxelAABB.maximum) * 0.5f;
 
-    // float3 velocity = volumetricFogVoxelVelocityImage[fogInfo.volumetricFogTypeIndex][voxelIndex].xyz;
     float3 uvw = (voxelCenter - fogInfo.fogStartPos) / (fogInfo.fogVoxelGridSize * fogInfo.fogVoxelSize);
     float3 velocity = volumetricFogFluidVoxelVelocityImage_sample[fogInfo.volumetricFogTypeIndex].SampleLevel(uvw, 0).xyz;
 
@@ -216,12 +238,16 @@ void computeMain_createVolumetricFog_Fluid_A(uint3 voxelIndex: SV_DispatchThread
         #if BoundaryConditionType != 0
             uvw_lastTime = clamp(uvw_lastTime, 0.0f, 1.0f);
         #endif
-        velocity_lastTime = volumetricFogFluidVoxelVelocityImage_sample[fogInfo.volumetricFogTypeIndex].SampleLevel(uvw_lastTime, 0).xyz;
-
-        voxelInfo.voxelFogInfo = volumetricFogFluidVoxelInfoImages_sample[fogInfo.volumetricFogTypeIndex].SampleLevel(uvw_lastTime, 0);
-        // uint3 voxelIndex_lastTime = uint3((worldPos_lastTime - fogInfo.fogStartPos) / fogInfo.fogVoxelSize);
-        // voxelIndex_lastTime = clamp(voxelIndex_lastTime, 1, fogInfo.fogVoxelGridSize - 2);
-        // voxelInfo.density = volumetricFogImages[pushConst.instanceIndex][voxelIndex_lastTime].xyz;
+        int3 voxelIdx_lastTime = int3((worldPos_lastTime - fogInfo.fogStartPos) / fogInfo.fogVoxelSize);
+        voxelIdx_lastTime = clamp(voxelIdx_lastTime, int3(0, 0, 0), int3(fogInfo.fogVoxelGridSize) - 1);
+        uint voxelIdxU_lastTime = voxelIdx_lastTime.z * fogInfo.fogVoxelGridSize.x * fogInfo.fogVoxelGridSize.y + voxelIdx_lastTime.y * fogInfo.fogVoxelGridSize.x + voxelIdx_lastTime.x;
+        bool backtrackIntoBoundary = volumetricFogFluidVoxelInfoBuffer[fogInfo.volumetricFogTypeIndex][voxelIdxU_lastTime].isBoundary;
+        if (backtrackIntoBoundary) {
+            voxelInfo.voxelFogInfo = volumetricFogFluidVoxelInfoImages_sample[fogInfo.volumetricFogTypeIndex].SampleLevel(uvw, 0);
+        } else {
+            velocity_lastTime = volumetricFogFluidVoxelVelocityImage_sample[fogInfo.volumetricFogTypeIndex].SampleLevel(uvw_lastTime, 0).xyz;
+            voxelInfo.voxelFogInfo = volumetricFogFluidVoxelInfoImages_sample[fogInfo.volumetricFogTypeIndex].SampleLevel(uvw_lastTime, 0);
+        }
     }
 
     voxelInfo.dirtyVelocity_pressure[0].xyz = velocity_lastTime;
@@ -396,7 +422,7 @@ void computeMain_createVolumetricFog_Fluid_F(uint3 voxelIndex: SV_DispatchThread
         uint iteration = pushConst.iteration & 1;
 
         float3 vel = voxelInfo.dirtyVelocity_pressure[iteration].xyz;
-        // vel.y += -9.8f * pushConst.dt * groupFluidFogInfo.FIntensity;
+        vel.y += -9.8f * voxelInfo.voxelFogInfo.x * pushConst.dt * groupFluidFogInfo.FIntensity;
         //float3 worldPos = fogInfo.fogStartPos + fogInfo.fogVoxelSize * (float3(voxelIndex) + 0.5f);
         // float height = worldPos.y - (-69.5f);
         //float ambientFogDensity = (0.01f + 0.03f) * exp(-1.0f * height);
@@ -404,19 +430,19 @@ void computeMain_createVolumetricFog_Fluid_F(uint3 voxelIndex: SV_DispatchThread
         //vel.y += buoyancy;
 
         // apply mouse force
-        if (pushConst.mouseForceStrength > 0.0f) {
-            float3 worldPos = fogInfo.fogStartPos + fogInfo.fogVoxelSize * (float3(voxelIndex) + 0.5f);
-            float dist = distance(worldPos, pushConst.mouseForcePosition);
-            if (dist < pushConst.mouseForceRadius) {
-                float falloff = exp(-dist * dist / (pushConst.mouseForceRadius * pushConst.mouseForceRadius * 0.1f));
-                float3 forceDir = normalize(worldPos - pushConst.mouseForcePosition + 1e-8f);
-                vel += forceDir * pushConst.mouseForceStrength * falloff * pushConst.dt * groupFluidFogInfo.FIntensity;
-
-                float densityFalloff = exp(-dist * dist / (pushConst.mouseForceRadius * pushConst.mouseForceRadius * 0.3f));
-                float eraseAmount = densityFalloff * pushConst.mouseForceStrength * pushConst.dt * 0.15f;
-                voxelInfo.voxelFogInfo.x = max(voxelInfo.voxelFogInfo.x - eraseAmount, 0.0f);
-            }
-        }
+        //if (pushConst.mouseForceStrength > 0.0f) {
+        //    float3 worldPos = fogInfo.fogStartPos + fogInfo.fogVoxelSize * (float3(voxelIndex) + 0.5f);
+        //    float dist = distance(worldPos, pushConst.mouseForcePosition);
+        //    if (dist < pushConst.mouseForceRadius) {
+        //        float falloff = exp(-dist * dist / (pushConst.mouseForceRadius * pushConst.mouseForceRadius * 0.1f));
+        //        float3 forceDir = normalize(worldPos - pushConst.mouseForcePosition + 1e-8f);
+        //        vel += forceDir * pushConst.mouseForceStrength * falloff * pushConst.dt * groupFluidFogInfo.FIntensity;
+        //
+        //        float densityFalloff = exp(-dist * dist / (pushConst.mouseForceRadius * pushConst.mouseForceRadius * 0.3f));
+        //        float eraseAmount = densityFalloff * pushConst.mouseForceStrength * pushConst.dt * 0.15f;
+        //        voxelInfo.voxelFogInfo.x = max(voxelInfo.voxelFogInfo.x - eraseAmount, 0.0f);
+        //    }
+        //}
 
         voxelInfo.dirtyVelocity_pressure[0].xyz = vel;
         voxelInfo.dirtyVelocity_pressure[1].xyz = vel;
@@ -513,35 +539,44 @@ void computeMain_createVolumetricFog_Fluid_S(uint3 voxelIndex: SV_DispatchThread
         float4 nL = groupVoxelInfos[lIdx.z][lIdx.y][lIdx.x - 1];
         if (groupVoxelBoundary[lIdx.z][lIdx.y][lIdx.x - 1]) {
             nL.w = selfData.w;
-            obstV.x = nL.x; vMask.x = 0;
+            obstV.x = nL.x;
+            vMask.x = 0;
         }
         float4 nR = groupVoxelInfos[lIdx.z][lIdx.y][lIdx.x + 1];
         if (groupVoxelBoundary[lIdx.z][lIdx.y][lIdx.x + 1]) {
             nR.w = selfData.w;
-            obstV.x = nR.x; vMask.x = 0;
+            obstV.x = nR.x; 
+            vMask.x = 0;
         }
         float4 nB = groupVoxelInfos[lIdx.z][lIdx.y - 1][lIdx.x];
         if (groupVoxelBoundary[lIdx.z][lIdx.y - 1][lIdx.x]) {
             nB.w = selfData.w;
-            obstV.y = nB.y; vMask.y = 0;
+            obstV.y = nB.y;
+            vMask.y = 0;
         }
         float4 nT = groupVoxelInfos[lIdx.z][lIdx.y + 1][lIdx.x];
         if (groupVoxelBoundary[lIdx.z][lIdx.y + 1][lIdx.x]) {
             nT.w = selfData.w;
-            obstV.y = nT.y; vMask.y = 0;
+            obstV.y = nT.y; 
+            vMask.y = 0;
         }
         float4 nD = groupVoxelInfos[lIdx.z - 1][lIdx.y][lIdx.x];
         if (groupVoxelBoundary[lIdx.z - 1][lIdx.y][lIdx.x]) {
             nD.w = selfData.w;
-            obstV.z = nD.z; vMask.z = 0;
+            obstV.z = nD.z; 
+            vMask.z = 0;
         }
         float4 nU = groupVoxelInfos[lIdx.z + 1][lIdx.y][lIdx.x];
         if (groupVoxelBoundary[lIdx.z + 1][lIdx.y][lIdx.x]) {
             nU.w = selfData.w;
-            obstV.z = nU.z; vMask.z = 0;
+            obstV.z = nU.z; 
+            vMask.z = 0;
         }
 
         float3 pg = float3((nR.w - nL.w) / halfDx, (nT.w - nB.w) / halfDy, (nU.w - nD.w) / halfDz);
+        //#if BoundaryConditionType != 0
+        //obstV *= int3(voxelIndex == 0) * int3(voxelIndex == fogInfo.fogVoxelGridSize - 1);
+        //#endif
         velocity = ((vel_dirty - pg) * vMask) + obstV;
     }
 

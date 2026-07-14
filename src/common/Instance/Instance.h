@@ -21,6 +21,9 @@ public:
 	std::string instanceID = "defaultInstanceID";
 	InstanceType type = Static;
 	glm::mat4 baseMatrix = glm::mat4(1.0f);
+	glm::mat4 baseMatrix_translate = glm::mat4(1.0f);
+	glm::mat4 baseMatrix_rotate = glm::mat4(1.0f);
+	glm::mat4 baseMatrix_scale = glm::mat4(1.0f);
 
 	uint32_t time = 100;
 	glm::mat4 translateMatrix = glm::mat4(1.0f);

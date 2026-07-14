@@ -47,6 +47,7 @@ private:
 	void createVolumetricFog(VkCommandBuffer cmd);
 	void deferredRenderring(VkCommandBuffer cmd);
 
+	VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures{};
 	VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR derivFeatures = {};
 
 	VkPushConstantsInfo pushInfo;
@@ -77,30 +78,32 @@ private:
 	float mouseForceRadius = 3.0f;
 
 	FzbRenderer::Buffer GlobalInfoBuffer;
-	FzbRenderer::Buffer visibleVolumetricFogIndexBuffer;					//�����Χ�ڵ����������
+	FzbRenderer::Buffer visibleVolumetricFogIndexBuffer;					
 
-	uint32_t volumetricFogCount = 1;										//���������
-	std::vector<shaderio::VolumetricFogInfo> volumetricFogInfos;			//�����������Ϣ
-	FzbRenderer::Buffer volumetricFogInfosBuffer;							//�����������Ϣ������
-	std::vector<int> volumetricFogInfoModified;								//����������Ƿ��޸ģ�ÿ֡����
+	uint32_t volumetricFogCount = 1;										
+	std::vector<shaderio::VolumetricFogInfo> volumetricFogInfos;			
+	FzbRenderer::Buffer volumetricFogInfosBuffer;							
+	std::vector<int> volumetricFogInfoModified;								
 
-	uint32_t volumetricFogHeightCount = 0;									//�߶�������
-	std::map<int, int> volumetricFogHeightIndexMap;							//�߶������� -> ���������
-	std::vector<shaderio::HeightFogInfo> volumetricFogHeightInfos;			//������������Ϣ
-	FzbRenderer::Buffer volumetricFogHeightInfoBuffer;						//������������Ϣ������
+	uint32_t volumetricFogHeightCount = 0;									
+	std::map<int, int> volumetricFogHeightIndexMap;							
+	std::vector<shaderio::HeightFogInfo> volumetricFogHeightInfos;			
+	FzbRenderer::Buffer volumetricFogHeightInfoBuffer;						
 
-	uint32_t volumetricFogFluidCount = 0;									//����������
-	std::map<int, int> volumetricFogFluidIndexMap;							//���������� -> ���������
-	std::vector<shaderio::FluidFogInfo> volumetricFogFluidInfos;			//������������Ϣ
-	FzbRenderer::Buffer volumetricFogFluidInfoBuffer;						//������������Ϣ������
-	std::vector<FzbRenderer::Buffer> volumetricFogFluidVoxelInfoBuffers;	//������voxel��Ϣ������
-	std::vector<FzbRenderer::Image> volumetricFogFluidVoxelVelocityImages;	//������voxel�ٶ�3DTexture
-	std::vector<FzbRenderer::Image> volumetricFogFluidVoxelInfoImages;		//������ voxel��Ϣ 3DTexture x: ���� y: ɢ�� z: phase
+	uint32_t volumetricFogFluidCount = 0;								
+	std::map<int, int> volumetricFogFluidIndexMap;							
+	std::vector<shaderio::FluidFogInfo> volumetricFogFluidInfos;			
+	FzbRenderer::Buffer volumetricFogFluidInfoBuffer;						
+	std::vector<FzbRenderer::Buffer> volumetricFogFluidVoxelInfoBuffers;	
+	std::vector<FzbRenderer::Image> volumetricFogFluidVoxelVelocityImages;	
+	std::vector<FzbRenderer::Image> volumetricFogFluidVoxelInfoImages;	
+
+	shaderio::float3 fluidLocalStartPos;
 
 	uint32_t volumetricFogNoiseCount = 0;
-	std::map<int, int> volumetricFogNoiseIndexMap;							//���������� -> ���������
-	std::vector<shaderio::NoiseFogInfo> volumetricFogNoiseInfos;			//������������Ϣ
-	FzbRenderer::Buffer volumetricFogNoiseInfoBuffer;						//������������Ϣ������
+	std::map<int, int> volumetricFogNoiseIndexMap;							
+	std::vector<shaderio::NoiseFogInfo> volumetricFogNoiseInfos;			
+	FzbRenderer::Buffer volumetricFogNoiseInfoBuffer;						
 
 #ifndef NDEBUG
 	void renderVolumetricFogVoxelGrid(VkCommandBuffer cmd);

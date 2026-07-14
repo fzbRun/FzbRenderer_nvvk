@@ -28,9 +28,9 @@ struct VolumetricFogPushConstant{
 	SceneInfo* sceneInfoAddress;
 	float4x4 lightVP;
 
-	float3 mouseForcePosition;
-	float mouseForceStrength;
-	float mouseForceRadius;
+	//float3 mouseForcePosition;
+	//float mouseForceStrength;
+	//float mouseForceRadius;
 };
 
 enum class VolumetricFogType {
@@ -40,7 +40,7 @@ enum class VolumetricFogType {
 };
 struct VolumetricFogInfo {
 	float3 fogStartPos;
-	uint3 fogVoxelGridSize;		//��Ҫ����Ϊ1x1x1��������bug
+	uint3 fogVoxelGridSize;
 	float3 fogVoxelSize;
 	float3 color;
 	float ambientIntensity;
@@ -59,6 +59,8 @@ struct FluidFogInfo {
 	float viscosity;
 	float FIntensity;
 	float lightAttenuationEstimator;
+	float restoreSpeed;
+	float3 fogStartPos_lastTime;
 };
 struct NoiseFogInfo {
 	float3 cloudScale;
@@ -72,7 +74,6 @@ struct VolumetricFogFluidVoxelInfo {
 	float4 dirtyVelocity_pressure[2];
 	bool isBoundary;
 	float4 voxelFogInfo;
-	//float3 temperature;
 };
 
 struct GlobalInfo_VolumetricFog {

@@ -232,6 +232,7 @@ void getHeightFogScatter(
         E *= a;
         if (all(attenuation <= 1e-3f)) break;
     }
+    L += fogInfo.color * fogInfo.ambientIntensity;
 
     float tLightEnter, tLightExit;
     float3 mainLightPos = endPos - sceneInfo.lights[0].direction * 1000.0f;
@@ -327,7 +328,7 @@ void getFluidFogScatter(float3 startPos, float3 endPos, inout uint randomSeed, V
             float scattering = voxelInfo.y;
             float phase = voxelInfo.z;
             float phase2 = phase * phase;
-            //float3 color = UnpackFloatToFloat3(voxelInfo.w);
+            float3 color = voxelInfo.w; //UnpackFloatToFloat3(voxelInfo.w);
 
             for (int lightIndex = 0; lightIndex < sceneInfo.numLights; ++lightIndex) {
                 Light light = sceneInfo.lights[lightIndex];
@@ -350,7 +351,7 @@ void getFluidFogScatter(float3 startPos, float3 endPos, inout uint randomSeed, V
                 float3 activeSunColor = lightColor * lerp(1.0f, fluidFogInfo.lightAttenuationEstimator, lightDt / gridLength) * pushConst.lightAttenuationStrength;
                 if (lightIndex == 0) activeSunColor *= getShadow(float4(samplePoint, 1.0f));
 
-                L += activeSunColor * fp * scattering * E / extinctionCoeff * (1.0f - exp(-extinctionCoeff * dt));
+                L += activeSunColor * fp * scattering * color * E / extinctionCoeff * (1.0f - exp(-extinctionCoeff * dt));
                 //L += extinctionCoeff * fogInfo.color * fogInfo.ambientIntensity;
             }
 
@@ -468,6 +469,8 @@ void getVolumetricFogScatter(float3 startPos, float3 endPos, inout uint randomSe
     fogInfo.absorption = 0.01f;
     fogInfo.scattering = 0.03f;
     fogInfo.phase = -0.7f;
+    fogInfo.color = 1.0f;
+    fogInfo.ambientIntensity = 0.0f;
     fogInfo.volumetricFogTypeIndex = -1;
 
     float3 fluidL = 0.0f, fluidAttenuation = 1.0f;

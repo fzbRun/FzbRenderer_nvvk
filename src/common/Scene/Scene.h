@@ -92,7 +92,7 @@ public:
 	std::map<std::string, uint32_t> meshSetIDToIndex;	//根据meshSetID获取meshSet数组的索引
 	std::vector<uint32_t> meshToBufferIndex;	//meshToBufferIndex[meshIndex] = bufferIndex，前向或延时渲染时按mesh渲染时使用
 	std::vector<uint32_t> meshIndexToMeshSetIndex;
-	std::map<std::string, std::pair<uint32_t, uint32_t>> instanceIDToInstance;
+	//std::map<std::string, std::pair<uint32_t, uint32_t>> instanceIDToInstance;
 	std::map<std::string, std::pair<uint32_t, uint32_t>> instanceIDToInstanceSet;
 	std::map<uint32_t, uint32_t> staticInstanceIndexToInstanceSetIndex;
 	std::map<uint32_t, uint32_t> periodInstanceIndexToInstanceSetIndex;

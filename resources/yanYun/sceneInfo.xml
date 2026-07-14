@@ -27,20 +27,33 @@
 		<instance>
 			<meshRef id = "yanYun"/>
 		</instance>
-		<!--
-		<instance type="periodMotion">
+		
+		<instance type="periodMotion" id="mainCharacter">
 			<meshRef id = "dragon"/>
 			
 			<transform name="to_world">
-				<translate value ="5117.0f, -69.8f, -4451.0f" />
+				<translate value ="5114.0f, -69.8f, -4451.0f" />
 				<rotate value = "0, 0, 0" />
 				<scale value = "0.4, 0.4, 0.4" />
 				<period time="100">
-					<translate value = "-15, 0, 0" />
+					<translate value = "-10, 0, 0" />
+					<rotate value="0, 90, 0" />
 				</period>
 			</transform>
-			
 		</instance>
-		-->
+		
+<!--
+		<instance type="periodMotion" >
+			<transform name="to_world">
+				<translate value ="5110.5f, -69.0f, -4451.0f" />
+				<rotate value = "-90, 0, 0" />
+				<scale value = "4.0, 4.0, 4.0" />
+				<period time="100">
+					<translate value = "0, 2, 0" />
+				</period>
+			</transform>
+			<meshRef id="custom" type="plane" />
+		</instance>
+-->
 	</instances>
 </scene>

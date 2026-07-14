@@ -84,7 +84,8 @@ void FzbRenderer::Scene::createSceneFromXML() {
 		VkExtent2D resolution = Application::app->getWindowSize();
 		cameraManip->setWindowSize(glm::uvec2(resolution.width, resolution.height));
 
-		cameraManip->setClipPlanes(glm::vec2(0.1f, 100.0f));		
+		cameraManip->setClipPlanes(glm::vec2(0.1f, 100.0f));	
+		cameraManip->setMode(nvutils::CameraManipulator::Fly);
 	}
 	//------------------------------------------------²ÄÖÊ---------------------------------------------------------------
 	materials.resize(0);
@@ -132,8 +133,11 @@ void FzbRenderer::Scene::createSceneFromXML() {
 	pugi::xml_node instancesNode = sceneInfoNode.child("instances");
 	for (pugi::xml_node instanceNode : instancesNode.children("instance")) {
 		InstanceSet instanceSet = InstanceSet(instanceNode);
-		if(instanceSet.instanceID != "defaultInstanceID")
-			instanceIDToInstance.insert({ instanceSet.instanceID, {instanceSet.type, getInstanceSetSize(instanceSet.type)}});
+		if (instanceSet.instanceID != "defaultInstanceID") {
+			//instanceIDToInstance.insert({ instanceSet.instanceID, {instanceSet.type, getInstanceSetSize(instanceSet.type)} });
+			instanceIDToInstanceSet.insert({ instanceSet.instanceID, {instanceSet.type, getInstanceSetSize(instanceSet.type)} });
+		}
+			
 		addInstanceSet(instanceSet);
 		if (instanceSet.type == Static) {
 			staticInstanceCount += instanceSet.childInstances.size();
