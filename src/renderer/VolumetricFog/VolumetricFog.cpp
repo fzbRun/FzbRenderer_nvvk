@@ -112,7 +112,12 @@ VolumetricFog::VolumetricFog(pugi::xml_node& rendererNode) {
 	volumetricFogFluidIndexMap.insert({ 0, 1 });
 	pushConstant.fluidFogIndex = 1;
 
-	attenuationImageSize = { 32, 32, 32 };
+	pushConstant.randomStepping = 1;
+
+	pushConstant.useAttenuationImage = 0;
+	pushConstant.forwardSampleCount = 0;
+	pushConstant.sampleCount = 20;
+	attenuationImageSize = { 64, 64, 128 };
 	pushConstant.attenuationGridSize = { attenuationImageSize.width, attenuationImageSize.height, attenuationImageSize.depth };
 }
 
@@ -198,6 +203,9 @@ void VolumetricFog::clean() {
 	vkDestroyShaderEXT(device, computeShader_createAttenuationImage, nullptr);
 	vkDestroyShaderEXT(device, computeShader_deferredRenderring, nullptr);
 
+	vkDestroyShaderEXT(device, vertexShader_renderTransparentMaterial, nullptr);
+	vkDestroyShaderEXT(device, fragmentShader_renderTransparentMaterial, nullptr);
+
 	GlobalInfoBuffer.clean();
 	volumetricFogInfosBuffer.clean();
 
@@ -235,6 +243,10 @@ void VolumetricFog::uiRender() {
 
 	uint32_t heightFogIndex = 0, fluidFogIndex = 0, noiseFogIndex = 0;
 	if (ImGui::Begin("Volumetric Fog Setting")) {
+		UIModified |= ImGui::Checkbox("Random Stepping ", (bool*)&pushConstant.randomStepping);
+		UIModified |= ImGui::Checkbox("use Attenuation Image ", (bool*)&pushConstant.useAttenuationImage);
+		UIModified |= ImGui::DragInt("Attenuation Sample Count ", (int*)&pushConstant.sampleCount, 1.0f, 0.0f, 50.0f);
+
 		for (int i = 0; i < volumetricFogCount; ++i) {
 			volumetricFogInfoModified[i] = false;
 			if (ImGui::CollapsingHeader(std::string("Volumetric Fog Properties " + std::to_string(i)).c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -487,9 +499,12 @@ void VolumetricFog::render(VkCommandBuffer* cmdPtr) {
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
 	deferredRenderring(cmd);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
+
+	renderTransparentMaterial(cmd);
 
 #ifndef NDEBUG
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
 	renderVolumetricFogVoxelGrid(cmd);
 #endif
 	nvvk::cmdMemoryBarrier(cmd,
@@ -1048,6 +1063,28 @@ void VolumetricFog::compileAndCreateShaders() {
 	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_deferredRenderring);
 	NVVK_DBG_NAME(computeShader_deferredRenderring);
 
+	//--------------------------------------------------------------------------------------
+	shaderSource = shaderPath / "renderTransparentMaterial.slang";
+	shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
+
+	vkDestroyShaderEXT(device, vertexShader_renderTransparentMaterial, nullptr);
+	shaderInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+	shaderInfo.nextStage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	shaderInfo.pName = "vertexMain";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(Application::app->getDevice(), 1U, &shaderInfo, nullptr, &vertexShader_renderTransparentMaterial);
+	NVVK_DBG_NAME(vertexShader_renderTransparentMaterial);
+
+	vkDestroyShaderEXT(device, fragmentShader_renderTransparentMaterial, nullptr);
+	shaderInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	shaderInfo.nextStage = 0;
+	shaderInfo.pName = "fragmentMain";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(Application::app->getDevice(), 1U, &shaderInfo, nullptr, &fragmentShader_renderTransparentMaterial);
+	NVVK_DBG_NAME(fragmentShader_renderTransparentMaterial);
+
 #ifndef NDEBUG
 	shaderSource = shaderPath / "renderVolumetricFogVoxelGrid.slang";
 	shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
@@ -1372,6 +1409,8 @@ void VolumetricFog::createVolumetricFog(VkCommandBuffer cmd) {
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 }
 void VolumetricFog::createAttenuationImage(VkCommandBuffer cmd) {
+	if (!pushConstant.useAttenuationImage) return;
+
 	NVVK_DBG_SCOPE(cmd);
 
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, staticDescPack.getSetPtr(), 0, nullptr);
@@ -1435,59 +1474,57 @@ void VolumetricFog::renderTransparentMaterial(VkCommandBuffer cmd) {
 	colorAttachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
 	colorAttachments[0].imageView = gBuffers.getColorImageView(renderImageIndex);
 
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getDepthImage(), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
+	VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
+	depthAttachment.imageView = gBuffers.getDepthImageView();
+	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+
 	VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
 	renderingInfo.renderArea = DEFAULT_VkRect2D(gBuffers.getSize());
 	renderingInfo.colorAttachmentCount = colorAttachments.size();
 	renderingInfo.pColorAttachments = colorAttachments.data();
-	renderingInfo.pDepthAttachment = nullptr;
+	renderingInfo.pDepthAttachment = &depthAttachment;
 
 	vkCmdBeginRendering(cmd, &renderingInfo);
 
 	graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
-	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;
-	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_FALSE;
+	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
+	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_TRUE;
+	graphicsDynamicPipeline.depthStencilState.depthWriteEnable = VK_FALSE;
 	graphicsDynamicPipeline.depthStencilState.stencilTestEnable = VK_FALSE;
+
+	graphicsDynamicPipeline.colorBlendEnables = { VK_TRUE };
+	graphicsDynamicPipeline.colorWriteMasks = { VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT };
+	graphicsDynamicPipeline.colorBlendEquations = { {
+		.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+		.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+		.colorBlendOp = VK_BLEND_OP_ADD,
+		.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+		.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+		.alphaBlendOp = VK_BLEND_OP_ADD,
+	} };
+
 	graphicsDynamicPipeline.cmdApplyAllStates(cmd);
 	graphicsDynamicPipeline.cmdSetViewportAndScissor(cmd, Application::app->getViewportSize());
-
-	VkColorComponentFlags writeMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-	VkBool32 blendEnable = VK_TRUE;
-	vkCmdSetColorWriteMaskEXT(cmd, 0, 1, &writeMask);
-	vkCmdSetColorBlendEnableEXT(cmd, 0, 1, &blendEnable);
-
-	vkCmdSetDepthTestEnable(cmd, VK_FALSE);
-	graphicsDynamicPipeline.cmdBindShaders(cmd, { .vertex = vertexShader_createGBuffer, .fragment = fragmentShader_createGBuffer });
+	graphicsDynamicPipeline.cmdBindShaders(cmd, { .vertex = vertexShader_renderTransparentMaterial, .fragment = fragmentShader_renderTransparentMaterial });
 
 	VkVertexInputBindingDescription2EXT bindingDescription{};
 	VkVertexInputAttributeDescription2EXT attributeDescription = {};
 	vkCmdSetVertexInputEXT(cmd, 0, nullptr, 0, nullptr);
 
-	for (size_t i = 0; i < Application::sceneResource.instances.size(); ++i)
-	{
-		uint32_t meshIndex = Application::sceneResource.instances[i].meshIndex;
-		const shaderio::Mesh& mesh = Application::sceneResource.meshes[meshIndex];
+	for (size_t i = 0; i < Application::sceneResource.instances.size(); ++i){
+		shaderio::Instance instance = Application::sceneResource.instances[i];
+		const shaderio::Mesh& mesh = Application::sceneResource.meshes[instance.meshIndex];
 		const shaderio::TriangleMesh& triMesh = mesh.triMesh;
 
-
-
-		//pushConstant.volumetricFogFluidIndex = -1;
-		pushConstant.instanceVelocity = shaderio::float3(0.0f);
-		if (Application::sceneResource.periodInstanceIndexToInstanceSetIndex.count(i)) {
-			uint32_t instanceSetIndex = Application::sceneResource.periodInstanceIndexToInstanceSetIndex[i];
-			FzbRenderer::InstanceSet* instanceSet = &Application::sceneResource.periodInstanceSets[instanceSetIndex];
-
-			shaderio::float3 pos0 = shaderio::float3(instanceSet->transform * shaderio::float4(1.0f, 1.0f, 1.0f, 1.0f));
-			shaderio::float3 pos1 = shaderio::float3(instanceSet->transform_lastTime * shaderio::float4(1.0f, 1.0f, 1.0f, 1.0f));
-			pushConstant.instanceVelocity = (pos0 - pos1) / pushConstant.dt;
-
-			//pushConstant.volumetricFogFluidIndex = 1;	//表示会与流体进行交互，因此几何需要与流体进行判断
-		}
+		shaderio::BSDFMaterial material = Application::sceneResource.materials[instance.materialIndex];
+		if (material.type != shaderio::MaterialType::RoughDielectric) continue;
 
 		pushConstant.normalMatrix = glm::transpose(glm::inverse(glm::mat3(Application::sceneResource.instances[i].transform)));
 		pushConstant.instanceIndex = int(i);
 		vkCmdPushConstants2(cmd, &pushInfo);
 
-		uint32_t bufferIndex = Application::sceneResource.getMeshBufferIndex(meshIndex);
+		uint32_t bufferIndex = Application::sceneResource.getMeshBufferIndex(instance.meshIndex);
 		const nvvk::Buffer& v = Application::sceneResource.bDatas[bufferIndex];
 
 		vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(mesh.indexType));
@@ -1497,8 +1534,7 @@ void VolumetricFog::renderTransparentMaterial(VkCommandBuffer cmd) {
 
 	vkCmdEndRendering(cmd);
 
-	for (int i = 0; i <= (uint32_t)GBuffers_VolumetricFog::eEmissive; ++i)
-		nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(i), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(renderImageIndex), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
 	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getDepthImage(), VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
 }
 

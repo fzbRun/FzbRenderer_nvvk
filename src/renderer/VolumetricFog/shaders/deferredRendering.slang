@@ -4,6 +4,7 @@
 #include "common/Shader/shaderStructType.h"
 #include "common/Shader/Slang/commonFunction.slang"
 
+#define COMPUTE_SHADER
 #include "renderer/VolumetricFog/shaders/getVolumetricFog.slang"
 
 [[vk::binding(StaticBindingPoints_VolumetricFog::eAlbedoImage)]] Texture2D<float4> albedoImage;
@@ -43,17 +44,19 @@ void computeMain_deferredRendering(uint2 threadIndex: SV_DispatchThreadID, uint2
 
     float3 hitWorldPos = sceneInfo.cameraPosition; float3 uvw;
     float3 attenuation = 1.0f, attenuation2 = 1.0f, L = 0.0f;
-    if (getCameraFrustumFogData(worldPos.xyz, hitWorldPos, uvw, threadIndex)) {
-        attenuation = volumetricFogAttenuationImage_sample.SampleLevel(uvw, 0).xyz;
-        attenuation2 = volumetricFogAttenuation2Image_sample.SampleLevel(uvw, 0).xyz;
-        L = volumetricFogLImage_sample.SampleLevel(uvw, 0).xyz;
-    
-        //attenuation = volumetricFogAttenuationImage[int3(uvw)].xyz;
-        //attenuation2 = volumetricFogAttenuation2Image[int3(uvw)].xyz;
-        //L = volumetricFogLImage[int3(uvw)].xyz;
+    if (pushConst.useAttenuationImage == 1 && getCameraFrustumFogData(worldPos.xyz, hitWorldPos, uvw)) {
+       attenuation = volumetricFogAttenuationImage_sample.SampleLevel(uvw, 0).xyz;
+       attenuation2 = volumetricFogAttenuation2Image_sample.SampleLevel(uvw, 0).xyz;
+       L = volumetricFogLImage_sample.SampleLevel(uvw, 0).xyz;
+
+       //uvw *= pushConst.attenuationGridSize;
+       //attenuation = volumetricFogAttenuationImage[int3(uvw)].xyz;
+       //attenuation2 = volumetricFogAttenuation2Image[int3(uvw)].xyz;
+       //L = volumetricFogLImage[int3(uvw)].xyz;
     }
 
-    if (length(worldPos.xyz - hitWorldPos) > 1e-5f) {
+    float d = length(worldPos.xyz - hitWorldPos);
+    if (d > 1e-5f) {
         uint randomSeed = xxhash32(uint3(pushConst.frameIndex, threadIndex));
         getVolumetricFogScatter(hitWorldPos, worldPos.xyz, randomSeed, 10, L, attenuation, attenuation2);
     }

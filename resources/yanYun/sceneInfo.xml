@@ -1,6 +1,7 @@
 <scene>
 	<sensor type="perspective">
 		<fov value="60"/>
+		<plane value="0.1, 10000" />
 		<transform type = "lookAt">
 			<matrix value="-1 0 0 0 0 1 0 1 0 0 -1 4 0 0 0 1"/>
 			<eye value = "5112.308, -61.677, -4441.671" />
@@ -12,7 +13,18 @@
 	<lights>
 		<useSky value = "true" />
 		<backgroundColor value = "0.0, 0.0, 0.0" />
-	</lights>				
+	</lights>
+
+	<bsdfs>
+		<bsdf type = "roughDielectric" id = "T_red">
+			<roughness value = "0.2" />
+			<eta value = "78.0, 11.24, 13.93" />
+		</bsdf>
+		<bsdf type = "roughDielectric" id = "T_green">
+			<roughness value = "0.2" />
+			<eta value = "1.925, 13.93, 2.618" />
+		</bsdf>
+	</bsdfs>
 	
 	<meshes>
 		<mesh type="obj" id="yanYun">
@@ -40,6 +52,32 @@
 					<rotate value="0, 90, 0" />
 				</period>
 			</transform>
+		</instance>
+
+		<instance type="periodMotion" >
+			<transform name="to_world">
+				<translate value ="5113.5f, -69.0f, -4451.0f" />
+				<rotate value = "0, 0, 0" />
+				<scale value = "2.0, 2.0, 2.0" />
+				<period time="100">
+					<translate value = "0, 2, 0" />
+				</period>
+			</transform>
+			<meshRef id="custom" type="sphere" />
+			<materialRef id = "T_red" />
+		</instance>
+
+		<instance type="periodMotion" >
+			<transform name="to_world">
+				<translate value ="5110.5f, -69.0f, -4450.0f" />
+				<rotate value = "0, 0, 0" />
+				<scale value = "2.0, 2.0, 2.0" />
+				<period time="100">
+					<rotate value = "0, 140, 0" />
+				</period>
+			</transform>
+			<meshRef id="custom" type="cube" />
+			<materialRef id = "T_green" />
 		</instance>
 		
 <!--

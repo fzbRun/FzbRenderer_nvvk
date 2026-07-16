@@ -99,6 +99,8 @@ PSout fragmentMain(VSout input){
     }
     //}
 
+    if (material.type == MaterialType::RoughDielectric) discard;
+
     return { float4(material.albedo, 1.0f), float4(normalize(input.worldNormal), 1.0f), float4(material.emissive, 1.0f) };
     //return { float4(material.albedo, 1.0f), float4(normalize(input.worldNormal), 1.0f), float4(0.0f, 0.0f, 0.0f, 1.0f) };
 }

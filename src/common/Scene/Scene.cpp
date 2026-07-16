@@ -84,7 +84,9 @@ void FzbRenderer::Scene::createSceneFromXML() {
 		VkExtent2D resolution = Application::app->getWindowSize();
 		cameraManip->setWindowSize(glm::uvec2(resolution.width, resolution.height));
 
-		cameraManip->setClipPlanes(glm::vec2(0.1f, 100.0f));	
+		glm::vec2 plane = glm::vec2(0.1f, 100.0f);
+		if (cameraNode.child("plane")) plane = FzbRenderer::getfloat2FromString(cameraNode.child("plane").attribute("value").value());
+		cameraManip->setClipPlanes(plane);
 		cameraManip->setMode(nvutils::CameraManipulator::Fly);
 	}
 	//------------------------------------------------²ÄÖÊ---------------------------------------------------------------

@@ -15,8 +15,7 @@
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogAttenuation2Image_sample)]] Sampler3D<float4> volumetricFogAttenuation2Image_sample;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogLImage_sample)]] Sampler3D<float4> volumetricFogLImage_sample;
 
-__generic<T : IFloat> T getAttribute(uint8_t *dataBufferAddress, BufferView bufferView, uint attributeIndex)
-{
+__generic<T : IFloat> T getAttribute(uint8_t *dataBufferAddress, BufferView bufferView, uint attributeIndex){
     if (bufferView.count > 0)
     {
         T *ptr = (T *)(dataBufferAddress + bufferView.offset + attributeIndex * bufferView.byteStride);
@@ -79,7 +78,7 @@ PSout fragmentMain(VSout input) {
 
     float3 hitWorldPos = sceneInfo.cameraPosition; float3 uvw;
     float3 attenuation = 1.0f, attenuation2 = 1.0f, L = 0.0f;
-    if (getCameraFrustumFogData(worldPos.xyz, hitWorldPos, uvw, {0, 0})) {
+    if (pushConst.useAttenuationImage == 1 && getCameraFrustumFogData(worldPos.xyz, hitWorldPos, uvw)) {
         attenuation = volumetricFogAttenuationImage_sample.SampleLevel(uvw, 0).xyz;
         attenuation2 = volumetricFogAttenuation2Image_sample.SampleLevel(uvw, 0).xyz;
         L = volumetricFogLImage_sample.SampleLevel(uvw, 0).xyz;
@@ -109,5 +108,5 @@ PSout fragmentMain(VSout input) {
 
     float3 emissive = material.emissive;
 
-    return { float4((ambient + (diffuse + specular) * shadow * attenuation2 + emissive) * attenuation + L, 1.0f) };
+    return { float4((ambient + (diffuse + specular) * shadow * attenuation2 + emissive) * attenuation + L, 0.5f) };
 }

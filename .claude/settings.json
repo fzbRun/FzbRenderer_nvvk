@@ -1,0 +1,13 @@
+﻿{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem *)",
+      "Bash(Get-Item *)",
+      "Bash(Test-Path *)",
+      "Bash(Resolve-Path *)",
+      "Bash(Get-Content *)",
+      "Bash(Select-String *)",
+      "Bash(Measure-Object *)"
+    ]
+  }
+}

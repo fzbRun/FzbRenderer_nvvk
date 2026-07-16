@@ -21,18 +21,18 @@
 
 [[vk::binding(StaticBindingPoints_VolumetricFog::eShadowMap)]] Sampler2DShadow shadowMap;
 
+#ifdef COMPUTE_SHADER
 groupshared GlobalInfo_VolumetricFog groupGlobalInfo;
 groupshared SceneInfo groupSceneInfo;
 groupshared VolumetricFogInfo groupVolumetricFogInfos[MAX_VOLUMETRIC_FOG_COUNT];
 groupshared HeightFogInfo groupHeightFogInfos[MAX_HEIGHT_FOG_COUNT];
 groupshared FluidFogInfo groupFluidFogInfos[MAX_FLUID_FOG_COUNT];
 groupshared NoiseFogInfo groupNoiseFogInfos[MAX_NOISE_FOG_COUNT];
-#endif
 
 void getGroupsharedData(uint groupThreadIndex) {
     if (groupThreadIndex >= MAX_VOLUMETRIC_FOG_COUNT) return;
 
-    if (groupThreadIndex == 0){
+    if (groupThreadIndex == 0) {
         groupGlobalInfo = globalInfoBuffer[0];
         groupSceneInfo = pushConst.sceneInfoAddress[0];
     }
@@ -41,6 +41,8 @@ void getGroupsharedData(uint groupThreadIndex) {
     if (groupThreadIndex < min(pushConst.fluidFogCount, MAX_FLUID_FOG_COUNT)) groupFluidFogInfos[groupThreadIndex] = fluidFogInfoBuffer[groupThreadIndex];
     if (groupThreadIndex < min(pushConst.noiseFogCount, MAX_NOISE_FOG_COUNT)) groupNoiseFogInfos[groupThreadIndex] = noiseFogInfoBuffer[groupThreadIndex];
 }
+#endif
+#endif
 
 float getShadow(float4 worldPos) {
     float4 lightMapNdcPos = mul(worldPos, pushConst.lightVP);
@@ -169,7 +171,13 @@ void getHeightFogScatter(
     inout float3 L, inout float3 attenuation, inout float3 attenuation2
 ) {
     HeightFogInfo heightFogInfo = { 1.0f };
-    if (fogInfo.volumetricFogTypeIndex >= 0) heightFogInfo = groupHeightFogInfos[fogInfo.volumetricFogTypeIndex];
+    if (fogInfo.volumetricFogTypeIndex >= 0){
+        #ifdef COMPUTE_SHADER
+        heightFogInfo = groupHeightFogInfos[fogInfo.volumetricFogTypeIndex];
+        #else
+        heightFogInfo = heightFogInfoBuffer[fogInfo.volumetricFogTypeIndex];
+        #endif
+    }
 
     float3 fogStartPos = fogInfo.fogStartPos;
     float3 gridMin = fogStartPos;
@@ -193,10 +201,13 @@ void getHeightFogScatter(
     SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
     float E = 1.0f;
 
-    float tPart = tTotal / sampleCount;
+    const float distancePower = 2.0f;
     for (int sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex) {
-        float tPartStart = sampleIndex * tPart + tEnter;
-        float tSample = tPartStart + tPart * rand(randomSeed);
+        float u0 = pow(float(sampleIndex) / float(sampleCount), distancePower);
+        float u1 = pow(float(sampleIndex + 1) / float(sampleCount), distancePower);
+        float tPart = (u1 - u0) * tTotal;
+        float tPartStart = tEnter + u0 * tTotal;
+        float tSample = tPartStart + tPart * (pushConst.randomStepping == 1 ? rand(randomSeed) : 0.5f);
 
         float3 samplePoint = startPos + dir * tSample;
 
@@ -276,7 +287,11 @@ void getFluidFogScatter(
     VolumetricFogInfo fogInfo, GlobalInfo_VolumetricFog globalInfo,
     inout float3 L, inout float3 attenuation
 ) {
-    FluidFogInfo fluidFogInfo = groupFluidFogInfos[fogInfo.volumetricFogTypeIndex];
+    #ifdef COMPUTE_SHADER
+        FluidFogInfo fluidFogInfo = groupFluidFogInfos[fogInfo.volumetricFogTypeIndex];
+    #else
+        FluidFogInfo fluidFogInfo = fluidFogInfoBuffer[fogInfo.volumetricFogTypeIndex];
+    #endif
 
     float3 fogStartPos = fogInfo.fogStartPos;
     float3 voxelSize = fogInfo.fogVoxelSize;
@@ -417,7 +432,11 @@ void getNoiseFogScatter(
     VolumetricFogInfo fogInfo, GlobalInfo_VolumetricFog globalInfo,
     inout float3 L, inout float3 attenuation, inout float3 attenuation2
 ) {
+    #ifdef COMPUTE_SHADER
     NoiseFogInfo noiseFogInfo = groupNoiseFogInfos[fogInfo.volumetricFogTypeIndex];
+    #else
+    NoiseFogInfo noiseFogInfo = noiseFogInfoBuffer[fogInfo.volumetricFogTypeIndex];
+    #endif
 
     float3 fogStartPos = fogInfo.fogStartPos;
     float3 voxelSize = fogInfo.fogVoxelSize;
@@ -442,10 +461,13 @@ void getNoiseFogScatter(
     float phase = fogInfo.phase;
     float phase2 = phase * phase;
 
-    float tPart = tTotal / sampleCount;
+    const float distancePower = 2.0f;
     for (int sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex) {
-        float tPartStart = sampleIndex * tPart + tEnter;
-        float tSample = tPartStart + tPart * rand(randomSeed);
+        float u0 = pow(float(sampleIndex) / float(sampleCount), distancePower);
+        float u1 = pow(float(sampleIndex + 1) / float(sampleCount), distancePower);
+        float tPart = (u1 - u0) * tTotal;
+        float tPartStart = tEnter + u0 * tTotal;
+        float tSample = tPartStart + tPart * (pushConst.randomStepping == 1 ? rand(randomSeed) : 0.5f);
 
         float3 samplePoint = startPos + dir * tSample;
         if (checkPointInAABB(samplePoint, globalInfo.fluidAABB) && globalInfo.fluidStartUp == 1) continue;
@@ -494,16 +516,46 @@ void getNoiseFogScatter(
     }
 }
 
-bool getCameraFrustumFogData(float3 worldPos, inout float3 hitWorldPos, inout float3 uvw, uint2 threadIndex) {
-    float3 cameraPos = groupSceneInfo.cameraPosition;
-    float3 viewDir = normalize(cameraPos - worldPos);
+bool getCameraFrustumFogData(float3 worldPos, inout float3 hitWorldPos, inout float3 uvw) {
+    SceneInfo sceneInfo;
+    #ifdef COMPUTE_SHADER
+    sceneInfo = groupSceneInfo;
+    #else
+    sceneInfo = pushConst.sceneInfoAddress[0];
+    #endif
+    float3 cameraPos = sceneInfo.cameraPosition;
+    float3 cameraRight = sceneInfo.viewInvMatrix[0].xyz;
+    float3 cameraUp = sceneInfo.viewInvMatrix[1].xyz;
+    float3 cameraForward = -sceneInfo.viewInvMatrix[2].xyz;
 
-    float3 voxelSize = 1.0f;
-    float3 gridStartPos = cameraPos - pushConst.attenuationGridSize * voxelSize * 0.5f;
-    AABB grid = { gridStartPos, gridStartPos + pushConst.attenuationGridSize * voxelSize };
-    hitWorldPos = getFirstPointAtAABB(grid, worldPos, viewDir);
-    uvw = ((hitWorldPos - gridStartPos) / voxelSize) / pushConst.attenuationGridSize;
-    clamp(uvw, 0.0f, 1.0f - 1e-10f);
+    uint3 gridSize = pushConst.attenuationGridSize;
+    float nearPlane = pushConst.attenuationNearPlane;
+    float farPlane  = pushConst.attenuationFarPlane;
+    float tanHalfFov = pushConst.tanCameraFov_2;
+    float aspect = pushConst.aspectRatio;
+
+    float3 toPoint = worldPos - cameraPos;
+    float viewZ = dot(toPoint, cameraForward);
+    float viewX = dot(toPoint, cameraRight);
+    float viewY = dot(toPoint, cameraUp);
+
+    float entryDepth = clamp(viewZ, nearPlane, farPlane);
+
+    float halfHeight = entryDepth * tanHalfFov;
+    float halfWidth  = halfHeight * aspect;
+
+    float scale = entryDepth / max(viewZ, 1e-8f);
+    float entryViewX = viewX * scale;
+    float entryViewY = viewY * scale;
+
+    uvw.x = (entryViewX / halfWidth  + 1.0f) * 0.5f;
+    uvw.y = (entryViewY / halfHeight + 1.0f) * 0.5f;
+    float tLinear = (entryDepth - nearPlane) / (farPlane - nearPlane);
+    const float zPower = 3.0f;
+    uvw.z = pow(tLinear, 1.0f / zPower);
+    uvw = clamp(uvw, 0.0f, 1.0f - 1e-6f);
+
+    hitWorldPos = cameraPos + cameraRight * entryViewX + cameraUp * entryViewY + cameraForward * entryDepth;
 
     return true;
 }
@@ -512,7 +564,11 @@ void getVolumetricFogScatter(
     float3 startPos, float3 endPos, inout uint randomSeed, uint sampleCount,
     inout float3 L, inout float3 attenuation, inout float3 attenuation2
 ) {
+    #ifdef COMPUTE_SHADER
     GlobalInfo_VolumetricFog globalInfo = groupGlobalInfo;
+    #else
+    GlobalInfo_VolumetricFog globalInfo = globalInfoBuffer[0];
+    #endif
 
     VolumetricFogInfo fogInfo;
     fogInfo.fogStartPos = { 5084.0f, -69.5f, -4486.0f };
@@ -528,7 +584,13 @@ void getVolumetricFogScatter(
     getHeightFogScatter(startPos, endPos, randomSeed, sampleCount, fogInfo, globalInfo, L, attenuation, attenuation2);
     for (int i = 0; i < globalInfo.visibleVolumetricFogCount; ++i) {
         uint fogIndex = globalInfo.visibleVolumetricFogIndices[i];
+
+        #ifdef COMPUTE_SHADER
         fogInfo = groupVolumetricFogInfos[fogIndex];
+        #else
+        fogInfo = volumetricFogInfosBuffer[fogIndex];
+        #endif
+
         uint typeFogIndex = fogInfo.volumetricFogTypeIndex;
         if (fogInfo.type == VolumetricFogType::Height) {
             getHeightFogScatter(startPos, endPos, randomSeed, sampleCount, fogInfo, globalInfo, L, attenuation, attenuation2);

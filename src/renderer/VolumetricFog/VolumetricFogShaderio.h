@@ -6,7 +6,7 @@
 #define FZBRENDERER_VOLUMETRIC_FOG_SHADER_IO_H
 NAMESPACE_SHADERIO_BEGIN()
 
-#define Jacobi_Iteration_Count 60u
+#define Jacobi_Iteration_Count 40u
 
 #define MAX_VOLUMETRIC_FOG_COUNT 10
 #define MAX_HEIGHT_FOG_COUNT 3
@@ -24,6 +24,7 @@ struct VolumetricFogPushConstant{
 	float time;
 	uint iteration = 0;
 	
+	int randomStepping;
 	float lightAttenuationStrength = 1.0f;
 	uint volumetricFogCount;
 	uint heightFogCount;
@@ -38,6 +39,9 @@ struct VolumetricFogPushConstant{
 	//float mouseForceStrength;
 	//float mouseForceRadius;
 
+	int useAttenuationImage;
+	int forwardSampleCount;
+	int sampleCount;
 	float attenuationNearPlane;
 	float attenuationFarPlane;
 	uint3 attenuationGridSize;

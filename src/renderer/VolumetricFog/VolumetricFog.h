@@ -69,6 +69,8 @@ private:
 	VkShaderEXT computeShader_createLightAttenuationEstimator{};
 
 	VkShaderEXT computeShader_deferredRenderring{};
+	VkShaderEXT vertexShader_renderTransparentMaterial{};
+	VkShaderEXT fragmentShader_renderTransparentMaterial{};
 
 	shaderio::VolumetricFogPushConstant pushConstant;
 
