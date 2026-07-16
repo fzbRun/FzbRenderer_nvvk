@@ -45,6 +45,7 @@ private:
 	void initVolumetricFogFluid(VkCommandBuffer cmd);
 	void createGBuffers(VkCommandBuffer cmd);
 	void createVolumetricFog(VkCommandBuffer cmd);
+	void createAttenuationImage(VkCommandBuffer cmd);
 	void deferredRenderring(VkCommandBuffer cmd);
 	void renderTransparentMaterial(VkCommandBuffer cmd);
 
@@ -78,8 +79,7 @@ private:
 	float mouseForceStrength = 0.0f;
 	float mouseForceRadius = 3.0f;
 
-	FzbRenderer::Buffer GlobalInfoBuffer;
-	FzbRenderer::Buffer visibleVolumetricFogIndexBuffer;					
+	FzbRenderer::Buffer GlobalInfoBuffer;				
 
 	uint32_t volumetricFogCount = 1;										
 	std::vector<shaderio::VolumetricFogInfo> volumetricFogInfos;			
@@ -104,7 +104,13 @@ private:
 	uint32_t volumetricFogNoiseCount = 0;
 	std::map<int, int> volumetricFogNoiseIndexMap;							
 	std::vector<shaderio::NoiseFogInfo> volumetricFogNoiseInfos;			
-	FzbRenderer::Buffer volumetricFogNoiseInfoBuffer;						
+	FzbRenderer::Buffer volumetricFogNoiseInfoBuffer;		
+
+	VkShaderEXT computeShader_createAttenuationImage{};
+	VkExtent3D attenuationImageSize;
+	FzbRenderer::Image volumetricFogAttenuationImage;
+	FzbRenderer::Image volumetricFogAttenuation2Image;
+	FzbRenderer::Image volumetricFogLImage;
 
 #ifndef NDEBUG
 	void renderVolumetricFogVoxelGrid(VkCommandBuffer cmd);

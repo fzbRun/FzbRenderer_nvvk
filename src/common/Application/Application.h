@@ -49,17 +49,7 @@ public:
 	void onDetach() override;
 	void onUIRender() override;
 	void onResize(VkCommandBuffer cmd, const VkExtent2D& size);
-	/*
-	nvapp���߼���
-	1. m_maxFramesInFlight��¼����������󻺳壬�ȷ�˵FIFO�ǵ����壻V-Sync��˫���壻һ����fast-Sync��������
-	2. ��ôCPU���ͬʱ����m_maxFramesInFlight��ָ���GPU����һ֡һִ֡�е�
-	3. m_maxFramesInFlight=3����ô��һ����СΪ3�������ʾ�ȴ��ź���������һ��ʼԪ����0��1��2����ʱ�����ź���Ϊ2
-	4. ��ô0��1��2֡CPU��������ȴ�GPUִ����ֱ�Ӵ���ָ�������Ӧ������Ԫ��+3��������֡3 < 2����ִ��
-	5. ����һ֡GPUִ�����ʱ�����ź���+1��Ϊ3����ô����֡����ִ�У���������Ԫ������Ϊ6
-	6. ����
 
-	��������Ⱦ˳��ΪUIRender->PreRender->Render
-	*/
 	void onPreRender() override;
 	void onRender(VkCommandBuffer* cmd) override;
 
@@ -70,7 +60,6 @@ public:
 	inline static nvvk::ContextInitInfo vkContextInitInfo{};
 	inline static nvvk::Context* vkContext = nullptr;
 
-	//���е�ȫ�ֹ�����Դ
 	inline static nvapp::Application* app{};
 	inline static nvvk::ResourceAllocator allocator{};
 	inline static nvvk::StagingUploader   stagingUploader{};
@@ -94,12 +83,6 @@ public:
 
 	static void uploadResource();
 private:
-	/*
-		������������Ŀ��Ŀ¼/rendererInfo/rendererInfo.xml�ж�ȡ��Ϣ������
-		1. ��Ⱦ�����ơ��ֱ���
-		2. ��ȾsceneInfo.xml�ĵ�ַ
-		3. ��Ⱦ�������ͣ���ǰ����Ⱦ��·��׷�٣�����ʼ����Ӧ����Ⱦ��
-	*/
 	void getAppInfoFromXML(nvapp::ApplicationCreateInfo& appInfo);
 	void initSlangCompiler();
 

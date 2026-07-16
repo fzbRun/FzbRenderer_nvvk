@@ -8,6 +8,11 @@ NAMESPACE_SHADERIO_BEGIN()
 
 #define Jacobi_Iteration_Count 60u
 
+#define MAX_VOLUMETRIC_FOG_COUNT 10
+#define MAX_HEIGHT_FOG_COUNT 3
+#define MAX_FLUID_FOG_COUNT 3
+#define MAX_NOISE_FOG_COUNT 3
+
 struct VolumetricFogPushConstant{
 	float3x3 normalMatrix;
 	float3 instanceVelocity;
@@ -21,8 +26,9 @@ struct VolumetricFogPushConstant{
 	
 	float lightAttenuationStrength = 1.0f;
 	uint volumetricFogCount;
-
-	//float4x4 instanceTransformMatrix_lastTime;
+	uint heightFogCount;
+	uint fluidFogCount;
+	uint noiseFogCount;
 
 	int frameIndex;
 	SceneInfo* sceneInfoAddress;
@@ -31,6 +37,12 @@ struct VolumetricFogPushConstant{
 	//float3 mouseForcePosition;
 	//float mouseForceStrength;
 	//float mouseForceRadius;
+
+	float attenuationNearPlane;
+	float attenuationFarPlane;
+	uint3 attenuationGridSize;
+	float tanCameraFov_2;	//fov / 2
+	float aspectRatio;
 };
 
 enum class VolumetricFogType {
@@ -80,6 +92,7 @@ struct GlobalInfo_VolumetricFog {
 	AABB fluidAABB;
 	int fluidStartUp;
 	uint visibleVolumetricFogCount;
+	uint visibleVolumetricFogIndices[MAX_VOLUMETRIC_FOG_COUNT];
 };
 
 
@@ -91,13 +104,10 @@ enum class StaticBindingPoints_VolumetricFog {
 	eEmissiveImage,
 
 	eGlobalInfoBuffer,
-	eVisibleVolumetricFogIndexBuffer,
 	eVolumetricFogInfosBuffer,
 
-	//�߶�
 	eVolumetricFogHeightInfoBuffer,
 
-	//����
 	eVolumetricFogFluidInfoBuffer,
 	eVolumetricFogFluidVoxelInfoBuffer,
 	eVolumetricFogFluidVoxelVelocityImage,
@@ -105,8 +115,14 @@ enum class StaticBindingPoints_VolumetricFog {
 	eVolumetricFogFluidVoxelInfoImages,
 	eVolumetricFogFluidVoxelInfoImages_sampler,
 
-	//����
 	eVolumetricFogNoiseInfoBuffer,
+
+	eVolumetricFogAttenuationImage,
+	eVolumetricFogAttenuationImage_sample,
+	eVolumetricFogAttenuation2Image,
+	eVolumetricFogAttenuation2Image_sample,
+	eVolumetricFogLImage,
+	eVolumetricFogLImage_sample,
 
 	eShadowMap,
 	eRenderedImage,

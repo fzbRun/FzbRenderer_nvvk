@@ -7,7 +7,6 @@
 [[vk::push_constant]] ConstantBuffer<VolumetricFogPushConstant> pushConst;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eGlobalInfoBuffer)]] RWStructuredBuffer<GlobalInfo_VolumetricFog> globalInfoBuffer;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogInfosBuffer)]] RWStructuredBuffer<VolumetricFogInfo, ScalarDataLayout> volumetricFogInfosBuffer;
-[[vk::binding(StaticBindingPoints_VolumetricFog::eVisibleVolumetricFogIndexBuffer)]] RWStructuredBuffer<uint> visibleVolumetricFogIndexBuffer;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogFluidInfoBuffer)]] RWStructuredBuffer<FluidFogInfo, ScalarDataLayout> volumetricFogFluidInfoBuffer;
 
 // localVolumetricFogCount <= 1024, so one threadGroup can deal with
@@ -41,23 +40,15 @@ void computeMain_getVisibleVolumetricFog(uint threadIndex: SV_DispatchThreadID) 
 
     visibleFogOffset += WavePrefixCountBits(inCameraFrustum);
     if (inCameraFrustum)
-        visibleVolumetricFogIndexBuffer[visibleFogOffset] = threadIndex;
+        globalInfoBuffer[0].visibleVolumetricFogIndices[visibleFogOffset] = threadIndex;
 
     if (threadIndex == 0) {
-        GlobalInfo_VolumetricFog globalInfo;
-        globalInfo.visibleVolumetricFogCount = groupVisibleFogCount;
-
         VolumetricFogInfo fogInfo = volumetricFogInfosBuffer[pushConst.fluidFogIndex];
-
-        //SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
-        //float3 startPos = sceneInfo.cameraPosition - fogInfo.fogVoxelGridSize * fogInfo.fogVoxelSize * 0.5f;
-        //volumetricFogInfosBuffer[pushConst.fluidFogIndex].fogStartPos = startPos;
-
-        globalInfo.fluidAABB = { fogInfo.fogStartPos, fogInfo.fogStartPos + fogInfo.fogVoxelGridSize * fogInfo.fogVoxelSize };
         FluidFogInfo fluidFogInfo = volumetricFogFluidInfoBuffer[fogInfo.volumetricFogTypeIndex];
-        globalInfo.fluidStartUp = fluidFogInfo.startUp;
 
-        globalInfoBuffer[0] = globalInfo;
+        globalInfoBuffer[0].visibleVolumetricFogCount = groupVisibleFogCount;
+        globalInfoBuffer[0].fluidAABB = { fogInfo.fogStartPos, fogInfo.fogStartPos + fogInfo.fogVoxelGridSize * fogInfo.fogVoxelSize };
+        globalInfoBuffer[0].fluidStartUp = fluidFogInfo.startUp;
     }
 }
 //-----------------------------------------------------------------------------Height----------------------------------------------------------------------------------------

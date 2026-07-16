@@ -161,6 +161,40 @@ float3 getAABBPoint(AABB aabb, float3 x, float3 sampleDir) {
 
     return x + sampleDir * tExit;
 }
+float3 getFirstPointAtAABB(AABB aabb, float3 x, float3 sampleDir) {
+    if (x.x >= aabb.minimum.x && x.x <= aabb.maximum.x &&
+        x.y >= aabb.minimum.y && x.y <= aabb.maximum.y &&
+        x.z >= aabb.minimum.z && x.z <= aabb.maximum.z) {
+        return x;
+    }
+
+    float tEnter = -1e30;
+    float tExit = 1e30;
+
+    for (int i = 0; i < 3; ++i)
+    {
+        float d = sampleDir[i];
+        float o = x[i];
+
+        if (abs(d) < 1e-12)
+        {
+            if (o < aabb.minimum[i] || o > aabb.maximum[i]) return x;
+            continue;
+        }
+
+        float t0 = (aabb.minimum[i] - o) / d;
+        float t1 = (aabb.maximum[i] - o) / d;
+        float tMin = min(t0, t1);
+        float tMax = max(t0, t1);
+
+        tEnter = max(tEnter, tMin);
+        tExit = min(tExit, tMax);
+
+        if (tEnter > tExit) return x;
+    }
+
+    return x + sampleDir * tEnter;
+}
 float PointToAABBDistance(float3 pos, AABB aabb)
 {
     float dx = max(aabb.minimum.x - pos.x, max(0.0f, pos.x - aabb.maximum.x));
