@@ -40,13 +40,18 @@ struct VolumetricFogPushConstant{
 	//float mouseForceRadius;
 
 	int useAttenuationImage;
+	int compressionPrecision;
 	int forwardSampleCount;
 	int sampleCount;
 	float attenuationNearPlane;
-	float attenuationFarPlane;
 	uint3 attenuationGridSize;
+	float attenuationFarPlane;
 	float tanCameraFov_2;	//fov / 2
 	float aspectRatio;
+
+#ifndef NDEBUG
+	SceneInfo* showCameraInfoAddress;
+#endif
 };
 
 enum class VolumetricFogType {

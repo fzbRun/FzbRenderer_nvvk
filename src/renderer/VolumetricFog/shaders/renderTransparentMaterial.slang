@@ -11,10 +11,6 @@
 [[vk::binding(StaticBindingPoints_VolumetricFog::eDepthImage)]] Texture2D<float> depthImage;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eEmissiveImage)]] Texture2D<float4> emissiveImage;
 
-[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogAttenuationImage_sample)]] Sampler3D<float4> volumetricFogAttenuationImage_sample;
-[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogAttenuation2Image_sample)]] Sampler3D<float4> volumetricFogAttenuation2Image_sample;
-[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogLImage_sample)]] Sampler3D<float4> volumetricFogLImage_sample;
-
 __generic<T : IFloat> T getAttribute(uint8_t *dataBufferAddress, BufferView bufferView, uint attributeIndex){
     if (bufferView.count > 0)
     {
@@ -76,18 +72,10 @@ PSout fragmentMain(VSout input) {
 
     float3 worldPos = input.worldPos;
 
-    float3 hitWorldPos = sceneInfo.cameraPosition; float3 uvw;
     float3 attenuation = 1.0f, attenuation2 = 1.0f, L = 0.0f;
-    if (pushConst.useAttenuationImage == 1 && getCameraFrustumFogData(worldPos.xyz, hitWorldPos, uvw)) {
-        attenuation = volumetricFogAttenuationImage_sample.SampleLevel(uvw, 0).xyz;
-        attenuation2 = volumetricFogAttenuation2Image_sample.SampleLevel(uvw, 0).xyz;
-        L = volumetricFogLImage_sample.SampleLevel(uvw, 0).xyz;
-    }
-
-    if (length(worldPos.xyz - hitWorldPos) > 1e-5f) {
-        uint randomSeed = xxhash32(uint3(pushConst.frameIndex, pushConst.instanceIndex, instance.meshIndex));
-        getVolumetricFogScatter(hitWorldPos, worldPos.xyz, randomSeed, 10, L, attenuation, attenuation2);
-    }
+    uint randomSeed = xxhash32(uint3(pushConst.frameIndex, pushConst.instanceIndex, instance.meshIndex));
+    uint sampleCount = pushConst.useAttenuationImage == 1 ? 0 : 10;
+    getVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, sampleCount, L, attenuation, attenuation2);
 
     float shadow = getShadow(float4(worldPos, 1.0f));
 

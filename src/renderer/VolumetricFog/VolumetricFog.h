@@ -116,12 +116,20 @@ private:
 
 #ifndef NDEBUG
 	void renderVolumetricFogVoxelGrid(VkCommandBuffer cmd);
+	void renderCameraFrustum(VkCommandBuffer cmd);
 
 	VkShaderEXT vertexShader_renderVoxelGrid{};
 	VkShaderEXT fragmentShader_renderVoxelGrid{};
 
+	VkShaderEXT vertexShader_renderCameraFrustum{};
+	VkShaderEXT fragmentShader_renderCameraFrustum{};
+
 	bool showVolumetricFogVoxelGrid = false;
 	std::vector<int> showVolumetricFogVoxelGrids;
+
+	bool showCameraFrustum = false;
+	shaderio::SceneInfo showCameraInfo;
+	nvvk::Buffer bShowCameraInfo;
 #endif
 };
 }

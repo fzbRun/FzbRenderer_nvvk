@@ -34,22 +34,32 @@ void computeMain_createAttenuationImage(uint3 voxelIndex: SV_DispatchThreadID, u
 
     float u = (float(voxelIndex.x) + 0.5f) / float(gridSize.x) * 2.0f - 1.0f;
     float v = (float(voxelIndex.y) + 0.5f) / float(gridSize.y) * 2.0f - 1.0f;
-    float t = (float(voxelIndex.z) + 0.5f) / float(gridSize.z);
-    const float zPower = 3.0f;
-    t = pow(t, zPower);
-    float depth = lerp(nearPlane, farPlane, t);
+    //float t = (float(voxelIndex.z) + 0.5f) / float(gridSize.z);
+    //t = pow(t, pushConst.compressionPrecision);
+    //float depth = lerp(nearPlane, farPlane, t);
+
+    float t_last = float(voxelIndex.z) / float(gridSize.z);
+    t_last = pow(t_last, pushConst.compressionPrecision);
+    float depth_last = lerp(nearPlane, farPlane, t_last);
+
+    float t_next = float(voxelIndex.z + 1) / float(gridSize.z);
+    t_next = pow(t_next, pushConst.compressionPrecision);
+    float depth_next = lerp(nearPlane, farPlane, t_next);
+
+    float halfDepth = (depth_next - depth_last) * 0.5f;
+    float depth = depth_last + halfDepth;
 
     float halfHeight = depth * tanHalfFov;
     float halfWidth  = halfHeight * aspect;
     float3 viewPos = float3(u * halfWidth, v * halfHeight, depth);
-
     float3 voxelCenter = cameraPos + cameraRight * viewPos.x + cameraUp * viewPos.y + cameraForward * viewPos.z;
 
     uint voxelIndexU = voxelIndex.z * pushConst.attenuationGridSize.x * pushConst.attenuationGridSize.y + voxelIndex.y * pushConst.attenuationGridSize.x + voxelIndex.x;
-    uint randomSeed = xxhash32(voxelIndex);   //xxhash32(uint3(pushConst.frameIndex, voxelIndexU, 0));
+    uint randomSeed = xxhash32(uint3(pushConst.frameIndex, voxelIndexU, 0));
+    float3 samplePoint = voxelCenter + (float3(rand(randomSeed), rand(randomSeed), rand(randomSeed)) * 2.0f - 1.0f) * float3(halfWidth / gridSize.x, halfHeight / gridSize.y, halfDepth);
 
     float3 L = 0.0f; float3 attenuation = 1.0f; float3 attenuation2 = 1.0f;
-    getVolumetricFogScatter(cameraPos, voxelCenter, randomSeed, pushConst.sampleCount, L, attenuation, attenuation2);
+    getVolumetricFogScatter(cameraPos, samplePoint, randomSeed, pushConst.sampleCount, L, attenuation, attenuation2);
 
     volumetricFogAttenuationImage[voxelIndex] = float4(attenuation, 1.0f);
     volumetricFogAttenuation2Image[voxelIndex] = float4(attenuation2, 1.0f);

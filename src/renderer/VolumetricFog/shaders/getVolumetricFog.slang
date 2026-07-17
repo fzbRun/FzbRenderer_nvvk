@@ -19,6 +19,14 @@
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogFluidVoxelInfoImages_sampler)]] Sampler3D<float4> volumetricFogFluidVoxelInfoImages_sample[];
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogNoiseInfoBuffer)]] StructuredBuffer<NoiseFogInfo, ScalarDataLayout> noiseFogInfoBuffer;
 
+[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogAttenuationImage_sample)]] Sampler3D<float4> volumetricFogAttenuationImage_sample;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogAttenuation2Image_sample)]] Sampler3D<float4> volumetricFogAttenuation2Image_sample;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogLImage_sample)]] Sampler3D<float4> volumetricFogLImage_sample;
+
+//[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogAttenuationImage)]] RWTexture3D<float4> volumetricFogAttenuationImage;
+//[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogAttenuation2Image)]] RWTexture3D<float4> volumetricFogAttenuation2Image;
+//[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogLImage)]] RWTexture3D<float4> volumetricFogLImage;
+
 [[vk::binding(StaticBindingPoints_VolumetricFog::eShadowMap)]] Sampler2DShadow shadowMap;
 
 #ifdef COMPUTE_SHADER
@@ -539,7 +547,17 @@ bool getCameraFrustumFogData(float3 worldPos, inout float3 hitWorldPos, inout fl
     float viewX = dot(toPoint, cameraRight);
     float viewY = dot(toPoint, cameraUp);
 
-    float entryDepth = clamp(viewZ, nearPlane, farPlane);
+    float viewZClamped = clamp(viewZ, nearPlane, farPlane);
+    float tLinear = (viewZClamped - nearPlane) / (farPlane - nearPlane);
+    float curUvwZ = pow(tLinear, 1.0f / pushConst.compressionPrecision);
+
+    float voxelZ = curUvwZ * float(gridSize.z);
+    float entryVoxelZ = max(0.0f, voxelZ - float(pushConst.forwardSampleCount));
+    float entryUvwZ = entryVoxelZ / float(gridSize.z);
+
+    float entryTLinear = pow(entryUvwZ, pushConst.compressionPrecision);
+    float entryDepth = lerp(nearPlane, farPlane, entryTLinear);
+    entryDepth = max(entryDepth, nearPlane);
 
     float halfHeight = entryDepth * tanHalfFov;
     float halfWidth  = halfHeight * aspect;
@@ -550,9 +568,7 @@ bool getCameraFrustumFogData(float3 worldPos, inout float3 hitWorldPos, inout fl
 
     uvw.x = (entryViewX / halfWidth  + 1.0f) * 0.5f;
     uvw.y = (entryViewY / halfHeight + 1.0f) * 0.5f;
-    float tLinear = (entryDepth - nearPlane) / (farPlane - nearPlane);
-    const float zPower = 3.0f;
-    uvw.z = pow(tLinear, 1.0f / zPower);
+    uvw.z = entryUvwZ;
     uvw = clamp(uvw, 0.0f, 1.0f - 1e-6f);
 
     hitWorldPos = cameraPos + cameraRight * entryViewX + cameraUp * entryViewY + cameraForward * entryDepth;
@@ -566,9 +582,25 @@ void getVolumetricFogScatter(
 ) {
     #ifdef COMPUTE_SHADER
     GlobalInfo_VolumetricFog globalInfo = groupGlobalInfo;
+    SceneInfo sceneInfo = groupSceneInfo;
     #else
     GlobalInfo_VolumetricFog globalInfo = globalInfoBuffer[0];
+    SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
     #endif
+
+    float3 hitWorldPos = sceneInfo.cameraPosition; float3 uvw;
+    if (pushConst.useAttenuationImage == 1 && getCameraFrustumFogData(endPos, hitWorldPos, uvw)) {
+        attenuation = volumetricFogAttenuationImage_sample.SampleLevel(uvw, 0).xyz;
+        attenuation2 = volumetricFogAttenuation2Image_sample.SampleLevel(uvw, 0).xyz;
+        L = volumetricFogLImage_sample.SampleLevel(uvw, 0).xyz;
+
+        // uvw *= pushConst.attenuationGridSize;
+        // attenuation = volumetricFogAttenuationImage[int3(uvw)].xyz;
+        // attenuation2 = volumetricFogAttenuation2Image[int3(uvw)].xyz;
+        // L = volumetricFogLImage[int3(uvw)].xyz;
+    }
+    if (length(endPos - hitWorldPos) <= 1e-5f || sampleCount == 0) return;
+    startPos = hitWorldPos;
 
     VolumetricFogInfo fogInfo;
     fogInfo.fogStartPos = { 5084.0f, -69.5f, -4486.0f };

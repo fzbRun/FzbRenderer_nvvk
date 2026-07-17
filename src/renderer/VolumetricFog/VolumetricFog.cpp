@@ -77,7 +77,7 @@ VolumetricFog::VolumetricFog(pugi::xml_node& rendererNode) {
 		.fogStartPos = {5098.0f, -69.5f, -4470.0f},
 		.fogVoxelGridSize = {16, 16, 16},
 		.fogVoxelSize = {2.0f, 0.1f, 2.0f},
-		.color = {1.0f, 1.0f, 1.0f},
+		.color = {100.0f, 100.0f, 100.0f},
 		.ambientIntensity = 0.001f,
 		.absorption = { 0.01, 100.0 },
 		.scattering = 0.7f,
@@ -115,6 +115,7 @@ VolumetricFog::VolumetricFog(pugi::xml_node& rendererNode) {
 	pushConstant.randomStepping = 1;
 
 	pushConstant.useAttenuationImage = 0;
+	pushConstant.compressionPrecision = 3;
 	pushConstant.forwardSampleCount = 0;
 	pushConstant.sampleCount = 20;
 	attenuationImageSize = { 64, 64, 128 };
@@ -182,7 +183,7 @@ void VolumetricFog::init() {
 	fluidLocalStartPos.y = 0.0f;
 
 	pushConstant.attenuationNearPlane = Application::sceneResource.cameraManip->getClipPlanes().x;
-	pushConstant.attenuationFarPlane = Application::sceneResource.cameraManip->getClipPlanes().y * 0.5f;
+	pushConstant.attenuationFarPlane = Application::sceneResource.cameraManip->getClipPlanes().y * 0.02f;
 	pushConstant.tanCameraFov_2 = glm::tan(glm::radians(Application::sceneResource.cameraManip->getFov() * 0.5f));
 	pushConstant.aspectRatio = Application::sceneResource.cameraManip->getAspectRatio();
 }
@@ -229,6 +230,11 @@ void VolumetricFog::clean() {
 #ifndef NDEBUG
 	vkDestroyShaderEXT(device, vertexShader_renderVoxelGrid, nullptr);
 	vkDestroyShaderEXT(device, fragmentShader_renderVoxelGrid, nullptr);
+
+	vkDestroyShaderEXT(device, vertexShader_renderCameraFrustum, nullptr);
+	vkDestroyShaderEXT(device, fragmentShader_renderCameraFrustum, nullptr);
+
+	Application::allocator.destroyBuffer(bShowCameraInfo);
 #endif
 
 	Renderer::clean();
@@ -245,7 +251,13 @@ void VolumetricFog::uiRender() {
 	if (ImGui::Begin("Volumetric Fog Setting")) {
 		UIModified |= ImGui::Checkbox("Random Stepping ", (bool*)&pushConstant.randomStepping);
 		UIModified |= ImGui::Checkbox("use Attenuation Image ", (bool*)&pushConstant.useAttenuationImage);
+		UIModified |= ImGui::DragInt("Compression Precision ", (int*)&pushConstant.compressionPrecision, 1, 1, 100);
 		UIModified |= ImGui::DragInt("Attenuation Sample Count ", (int*)&pushConstant.sampleCount, 1.0f, 0.0f, 50.0f);
+		UIModified |= ImGui::DragInt("Forward Sample Count ", (int*)&pushConstant.forwardSampleCount, 1, 0, pushConstant.attenuationGridSize.z / 2);
+		if (ImGui::Checkbox("Show Camera Frustum ", (bool*)&showCameraFrustum)) {
+			UIModified = true;
+			showCameraInfo = Application::sceneResource.sceneInfo;
+		}
 
 		for (int i = 0; i < volumetricFogCount; ++i) {
 			volumetricFogInfoModified[i] = false;
@@ -430,6 +442,9 @@ void VolumetricFog::preRender() {
 	if (scene.cameraChange) Application::frameIndex = 0;
 	pushConstant.frameIndex = Application::frameIndex;
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
+#ifndef NDEBUG
+	pushConstant.showCameraInfoAddress = (shaderio::SceneInfo*)bShowCameraInfo.address;
+#endif
 
 	//pushConstant.mouseForcePosition = { mouseForcePosition.x, mouseForcePosition.y, mouseForcePosition.z };
 	//pushConstant.mouseForceStrength = mouseForceStrength;
@@ -506,6 +521,7 @@ void VolumetricFog::render(VkCommandBuffer* cmdPtr) {
 #ifndef NDEBUG
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
 	renderVolumetricFogVoxelGrid(cmd);
+	renderCameraFrustum(cmd);
 #endif
 	nvvk::cmdMemoryBarrier(cmd,
 		VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
@@ -610,6 +626,11 @@ void VolumetricFog::createVolumetricFogData() {
 	createVolumetricFogImage(volumetricFogAttenuationImage, { attenuationImageSize.width, attenuationImageSize.height, attenuationImageSize.depth });
 	createVolumetricFogImage(volumetricFogAttenuation2Image, { attenuationImageSize.width, attenuationImageSize.height, attenuationImageSize.depth });
 	createVolumetricFogImage(volumetricFogLImage, { attenuationImageSize.width, attenuationImageSize.height, attenuationImageSize.depth });
+#ifndef NDEBUG
+	NVVK_CHECK(Application::allocator.createBuffer(bShowCameraInfo,
+		std::span<const shaderio::SceneInfo>(&showCameraInfo, 1).size_bytes(),
+		VK_BUFFER_USAGE_2_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT));
+#endif
 	
 	Application::app->submitAndWaitTempCmdBuffer(cmd);
 }
@@ -1106,6 +1127,27 @@ void VolumetricFog::compileAndCreateShaders() {
 	shaderInfo.pCode = shaderCode.pCode;
 	vkCreateShadersEXT(Application::app->getDevice(), 1U, &shaderInfo, nullptr, &fragmentShader_renderVoxelGrid);
 	NVVK_DBG_NAME(fragmentShader_renderVoxelGrid);
+	//--------------------------------------------------------------------------------------
+	shaderSource = shaderPath / "renderCameraFrustum.slang";
+	shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
+
+	vkDestroyShaderEXT(device, vertexShader_renderCameraFrustum, nullptr);
+	shaderInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+	shaderInfo.nextStage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	shaderInfo.pName = "vertexMain";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(Application::app->getDevice(), 1U, &shaderInfo, nullptr, &vertexShader_renderCameraFrustum);
+	NVVK_DBG_NAME(vertexShader_renderCameraFrustum);
+
+	vkDestroyShaderEXT(device, fragmentShader_renderCameraFrustum, nullptr);
+	shaderInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	shaderInfo.nextStage = 0;
+	shaderInfo.pName = "fragmentMain";
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+	vkCreateShadersEXT(Application::app->getDevice(), 1U, &shaderInfo, nullptr, &fragmentShader_renderCameraFrustum);
+	NVVK_DBG_NAME(fragmentShader_renderCameraFrustum);
 #endif
 }
 void VolumetricFog::updateDataPerFrame(VkCommandBuffer cmd) {
@@ -1150,6 +1192,15 @@ void VolumetricFog::updateDataPerFrame(VkCommandBuffer cmd) {
 	if (fluidModified) nvvk::cmdBufferMemoryBarrier(cmd, { volumetricFogFluidInfoBuffer.buffer.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT });
 	if (noiseModified) nvvk::cmdBufferMemoryBarrier(cmd, { volumetricFogNoiseInfoBuffer.buffer.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT });
 
+#ifndef NDEBUG
+	static bool showCameraGetTrue = false;
+	if (showCameraGetTrue == false && showCameraFrustum) {
+		nvvk::cmdBufferMemoryBarrier(cmd, { bShowCameraInfo.buffer, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT });
+		vkCmdUpdateBuffer(cmd, bShowCameraInfo.buffer, 0, sizeof(shaderio::SceneInfo), &showCameraInfo);
+		nvvk::cmdBufferMemoryBarrier(cmd, { bShowCameraInfo.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT });
+	}
+	showCameraGetTrue = showCameraFrustum;
+#endif
 }
 
 void VolumetricFog::initVolumetricFogFluid(VkCommandBuffer cmd) {
@@ -1418,7 +1469,9 @@ void VolumetricFog::createAttenuationImage(VkCommandBuffer cmd) {
 	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createAttenuationImage);
 
+	pushConstant.useAttenuationImage = 0;
 	vkCmdPushConstants2(cmd, &pushInfo);
+	pushConstant.useAttenuationImage = 1;
 
 	VkExtent3D groupSize = nvvk::getGroupCounts(VkExtent3D{ attenuationImageSize.width, attenuationImageSize.height, attenuationImageSize.depth }, VkExtent3D{ 4, 4, 4 });
 	vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
@@ -1570,7 +1623,7 @@ void VolumetricFog::renderVolumetricFogVoxelGrid(VkCommandBuffer cmd) {
 	vkCmdBeginRendering(cmd, &renderingInfo);
 
 	graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
-	graphicsDynamicPipeline.inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;		//�����ʹ�����߿�������rasterizationLineState
+	graphicsDynamicPipeline.inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
 	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;
 	graphicsDynamicPipeline.rasterizationState.lineWidth = 2.0f;
 	graphicsDynamicPipeline.rasterizationState.polygonMode = VK_POLYGON_MODE_LINE;
@@ -1602,6 +1655,64 @@ void VolumetricFog::renderVolumetricFogVoxelGrid(VkCommandBuffer cmd) {
 		}
 
 	}
+
+	vkCmdEndRendering(cmd);
+
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(renderedImage), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getDepthImage(), VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
+}
+void VolumetricFog::renderCameraFrustum(VkCommandBuffer cmd) {
+	if (!showCameraFrustum) return;
+	NVVK_DBG_SCOPE(cmd);
+
+	uint32_t renderedImage = uint32_t(GBuffers_VolumetricFog::eRendered);
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(renderedImage), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getDepthImage(), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
+
+	VkRenderingAttachmentInfo colorAttachment = DEFAULT_VkRenderingAttachmentInfo;
+	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+	colorAttachment.imageView = gBuffers.getColorImageView(renderedImage);
+
+	VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
+	depthAttachment.imageView = gBuffers.getDepthImageView();
+	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+
+	VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
+	renderingInfo.renderArea = { {0, 0}, gBuffers.getSize() };
+	renderingInfo.colorAttachmentCount = 1;
+	renderingInfo.pColorAttachments = &colorAttachment;
+	renderingInfo.pDepthAttachment = &depthAttachment;
+
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, staticDescPack.getSetPtr(), 0, nullptr);
+
+	vkCmdBeginRendering(cmd, &renderingInfo);
+
+	graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
+	graphicsDynamicPipeline.inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;
+	graphicsDynamicPipeline.rasterizationState.lineWidth = 2.0f;
+	graphicsDynamicPipeline.rasterizationState.polygonMode = VK_POLYGON_MODE_LINE;
+	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_TRUE;
+	graphicsDynamicPipeline.depthStencilState.depthWriteEnable = VK_FALSE;
+	graphicsDynamicPipeline.cmdApplyAllStates(cmd);
+	graphicsDynamicPipeline.cmdSetViewportAndScissor(cmd, gBuffers.getSize());
+	graphicsDynamicPipeline.cmdBindShaders(cmd, { .vertex = vertexShader_renderCameraFrustum, .fragment = fragmentShader_renderCameraFrustum });
+
+	VkVertexInputBindingDescription2EXT bindingDescription{};
+	VkVertexInputAttributeDescription2EXT attributeDescription = {};
+	vkCmdSetVertexInputEXT(cmd, 0, nullptr, 0, nullptr);
+
+	uint32_t wireframeMeshIndex = 0;
+	const shaderio::Mesh& mesh = scene.meshes[wireframeMeshIndex];
+	const shaderio::TriangleMesh& triMesh = mesh.triMesh;
+
+	vkCmdPushConstants2(cmd, &pushInfo);
+
+	uint32_t bufferIndex = scene.getMeshBufferIndex(wireframeMeshIndex);
+	const nvvk::Buffer& v = scene.bDatas[bufferIndex];
+
+	vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(mesh.indexType));
+	vkCmdDrawIndexed(cmd, triMesh.indices.count, pushConstant.attenuationGridSize.x * pushConstant.attenuationGridSize.y * pushConstant.attenuationGridSize.z, 0, 0, 0);
 
 	vkCmdEndRendering(cmd);
 
