@@ -20,16 +20,16 @@ VSout vertexMain(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID
     float3 cameraUp = sceneInfo.viewInvMatrix[1].xyz;
     float3 cameraForward = -sceneInfo.viewInvMatrix[2].xyz;
 
-    uint3 gridSize = pushConst.attenuationGridSize;
-    float nearPlane = pushConst.attenuationNearPlane;
-    float farPlane = pushConst.attenuationFarPlane;
+    uint3 gridSize = pushConst.frustumGridSize;
+    float nearPlane = pushConst.cameraNearPlane;
+    float farPlane = pushConst.cameraFarPlane;
     float tanHalfFov = pushConst.tanCameraFov_2;
     float aspect = pushConst.aspectRatio;
 
     uint3 voxelIndex;
-    voxelIndex.z = instanceIndex / (pushConst.attenuationGridSize.x * pushConst.attenuationGridSize.y);
-    voxelIndex.y = (instanceIndex - voxelIndex.z * (pushConst.attenuationGridSize.x * pushConst.attenuationGridSize.y)) / pushConst.attenuationGridSize.x;
-    voxelIndex.x = instanceIndex - voxelIndex.z * (pushConst.attenuationGridSize.x * pushConst.attenuationGridSize.y) - voxelIndex.y * pushConst.attenuationGridSize.x;
+    voxelIndex.z = instanceIndex / (pushConst.frustumGridSize.x * pushConst.frustumGridSize.y);
+    voxelIndex.y = (instanceIndex - voxelIndex.z * (pushConst.frustumGridSize.x * pushConst.frustumGridSize.y)) / pushConst.frustumGridSize.x;
+    voxelIndex.x = instanceIndex - voxelIndex.z * (pushConst.frustumGridSize.x * pushConst.frustumGridSize.y) - voxelIndex.y * pushConst.frustumGridSize.x;
     float u = (float(voxelIndex.x) + 0.5f) / float(gridSize.x) * 2.0f - 1.0f;
     float v = (float(voxelIndex.y) + 0.5f) / float(gridSize.y) * 2.0f - 1.0f;
     //float t = (float(voxelIndex.z) + 0.5f) / float(gridSize.z);

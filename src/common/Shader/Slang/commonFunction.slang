@@ -400,6 +400,230 @@ void ExtractFrustumPlanes(float4x4 cameraVP, out FrustumPlane planes[6]) {
         planes[i].distance = -p[i].w * invLen;
     }
 }
+
+bool rayFrustumIntersection(
+    float3 rayOrigin, float3 rayDir,
+    float3 cameraPos, float3 cameraForward, float3 cameraRight, float3 cameraUp,
+    float tanHalfFov, float aspect, float nearPlane, float farPlane,
+    out float tEntry, out float tExit)
+{
+    tEntry = 0.0f;
+    tExit = 0.0f;
+
+    float halfWidth = aspect * tanHalfFov;
+    float halfHeight = tanHalfFov;
+
+    float3 nNear = cameraForward;
+    float dNear = dot(cameraForward, cameraPos) + nearPlane;
+
+    float3 nFar = -cameraForward;
+    float dFar = -dot(cameraForward, cameraPos) - farPlane;
+
+    float3 nLeft = cameraRight + halfWidth * cameraForward;
+    float dLeft = dot(nLeft, cameraPos);
+
+    float3 nRight = -cameraRight + halfWidth * cameraForward;
+    float dRight = dot(nRight, cameraPos);
+
+    float3 nBottom = cameraUp + halfHeight * cameraForward;
+    float dBottom = dot(nBottom, cameraPos);
+
+    float3 nTop = -cameraUp + halfHeight * cameraForward;
+    float dTop = dot(nTop, cameraPos);
+
+    float tmin = 0.0;
+    float tmax = 1e10;
+
+    float denom, dist;
+    denom = dot(nNear, rayDir);
+    dist = dNear - dot(nNear, rayOrigin);
+    if (abs(denom) < 1e-6) { if (dist > 0) return false; }
+    else { float t = dist / denom; if (denom > 0) tmin = max(tmin, t); else tmax = min(tmax, t); }
+
+    denom = dot(nFar, rayDir);
+    dist = dFar - dot(nFar, rayOrigin);
+    if (abs(denom) < 1e-6) { if (dist > 0) return false; }
+    else { float t = dist / denom; if (denom > 0) tmin = max(tmin, t); else tmax = min(tmax, t); }
+
+    denom = dot(nLeft, rayDir);
+    dist = dLeft - dot(nLeft, rayOrigin);
+    if (abs(denom) < 1e-6) { if (dist > 0) return false; }
+    else { float t = dist / denom; if (denom > 0) tmin = max(tmin, t); else tmax = min(tmax, t); }
+
+    denom = dot(nRight, rayDir);
+    dist = dRight - dot(nRight, rayOrigin);
+    if (abs(denom) < 1e-6) { if (dist > 0) return false; }
+    else { float t = dist / denom; if (denom > 0) tmin = max(tmin, t); else tmax = min(tmax, t); }
+
+    denom = dot(nBottom, rayDir);
+    dist = dBottom - dot(nBottom, rayOrigin);
+    if (abs(denom) < 1e-6) { if (dist > 0) return false; }
+    else { float t = dist / denom; if (denom > 0) tmin = max(tmin, t); else tmax = min(tmax, t); }
+
+    denom = dot(nTop, rayDir);
+    dist = dTop - dot(nTop, rayOrigin);
+    if (abs(denom) < 1e-6) { if (dist > 0) return false; }
+    else { float t = dist / denom; if (denom > 0) tmin = max(tmin, t); else tmax = min(tmax, t); }
+
+    if (tmin <= tmax) {
+        tEntry = tmin;
+        tExit = tmax;
+        return true;
+    }
+    return false;
+} 
+bool segmentFrustumIntersection(
+    float3 segStart, float3 segEnd,
+    float3 cameraPos, float3 cameraForward, float3 cameraRight, float3 cameraUp,
+    float tanHalfFov, float aspect, float nearPlane, float farPlane,
+    out float tEntry, out float tExit)
+{
+    tEntry = 0.0f;
+    tExit = 0.0f;
+
+    float3 rayVec = segEnd - segStart;
+    float segLen = length(rayVec);
+    if (segLen < 1e-8f) return false;
+
+    float3 rayDir = rayVec; // 非归一化，保留原样
+    float tmin = -1e10, tmax = 1e10;
+
+    float halfWidth = aspect * tanHalfFov;
+    float halfHeight = tanHalfFov;
+
+    float3 nNear = cameraForward;
+    float dNear = dot(cameraForward, cameraPos) + nearPlane;
+    float3 nFar = -cameraForward;
+    float dFar = -dot(cameraForward, cameraPos) - farPlane;
+    float3 nLeft = cameraRight + halfWidth * cameraForward;
+    float dLeft = dot(nLeft, cameraPos);
+    float3 nRight = -cameraRight + halfWidth * cameraForward;
+    float dRight = dot(nRight, cameraPos);
+    float3 nBottom = cameraUp + halfHeight * cameraForward;
+    float dBottom = dot(nBottom, cameraPos);
+    float3 nTop = -cameraUp + halfHeight * cameraForward;
+    float dTop = dot(nTop, cameraPos);
+
+    float denom, dist;
+    denom = dot(nNear, rayDir);
+    dist = dNear - dot(nNear, segStart);
+    if (abs(denom) < 1e-6) { if (dist > 0) return false; }
+    else { float t = dist / denom; if (denom > 0) tmin = max(tmin, t); else tmax = min(tmax, t); }
+
+    denom = dot(nFar, rayDir);
+    dist = dFar - dot(nFar, segStart);
+    if (abs(denom) < 1e-6) { if (dist > 0) return false; }
+    else { float t = dist / denom; if (denom > 0) tmin = max(tmin, t); else tmax = min(tmax, t); }
+
+    denom = dot(nLeft, rayDir);
+    dist = dLeft - dot(nLeft, segStart);
+    if (abs(denom) < 1e-6) { if (dist > 0) return false; }
+    else { float t = dist / denom; if (denom > 0) tmin = max(tmin, t); else tmax = min(tmax, t); }
+
+    denom = dot(nRight, rayDir);
+    dist = dRight - dot(nRight, segStart);
+    if (abs(denom) < 1e-6) { if (dist > 0) return false; }
+    else { float t = dist / denom; if (denom > 0) tmin = max(tmin, t); else tmax = min(tmax, t); }
+
+    denom = dot(nBottom, rayDir);
+    dist = dBottom - dot(nBottom, segStart);
+    if (abs(denom) < 1e-6) { if (dist > 0) return false; }
+    else { float t = dist / denom; if (denom > 0) tmin = max(tmin, t); else tmax = min(tmax, t); }
+
+    denom = dot(nTop, rayDir);
+    dist = dTop - dot(nTop, segStart);
+    if (abs(denom) < 1e-6) { if (dist > 0) return false; }
+    else { float t = dist / denom; if (denom > 0) tmin = max(tmin, t); else tmax = min(tmax, t); }
+
+    tEntry = max(tmin, 0.0f) * segLen;
+    tExit = min(tmax, 1.0f) * segLen;
+    return tEntry <= tExit;
+}
+
+float3 getCameraFrustumVoxelCenter(uint3 voxelIndex, float3 cameraPos, float4x4 viewInvMatrix, uint3 gridSize, float nearPlane, float farPlane, float tanHalfFov, float aspect, float compressionPrecision) {
+    float3 cameraRight = viewInvMatrix[0].xyz;
+    float3 cameraUp = viewInvMatrix[1].xyz;
+    float3 cameraForward = -viewInvMatrix[2].xyz;
+
+    float u = (float(voxelIndex.x) + 0.5f) / float(gridSize.x) * 2.0f - 1.0f;
+    float v = (float(voxelIndex.y) + 0.5f) / float(gridSize.y) * 2.0f - 1.0f;
+
+    float t_last = float(voxelIndex.z) / float(gridSize.z);
+    t_last = pow(t_last, compressionPrecision);
+    float depth_last = lerp(nearPlane, farPlane, t_last);
+
+    float t_next = float(voxelIndex.z + 1) / float(gridSize.z);
+    t_next = pow(t_next, compressionPrecision);
+    float depth_next = lerp(nearPlane, farPlane, t_next);
+
+    float halfDepth = (depth_next - depth_last) * 0.5f;
+    float depth = depth_last + halfDepth;
+
+    float halfHeight = depth * tanHalfFov;
+    float halfWidth = halfHeight * aspect;
+    float3 viewPos = float3(u * halfWidth, v * halfHeight, depth);
+    float3 voxelCenter = cameraPos + cameraRight * viewPos.x + cameraUp * viewPos.y + cameraForward * viewPos.z;
+    return voxelCenter;
+}
+bool getCameraFrustumData(
+    float3 worldPos, float3 cameraPos, float4x4 viewInvMatrix, uint3 gridSize, float nearPlane, float farPlane, 
+    float tanHalfFov, float aspect, float compressionPrecision, int forwardSampleCount,
+    inout float3 hitWorldPos, inout float3 uvw
+) {
+    float3 cameraRight = viewInvMatrix[0].xyz;
+    float3 cameraUp = viewInvMatrix[1].xyz;
+    float3 cameraForward = -viewInvMatrix[2].xyz;
+
+    float3 toPoint = worldPos - cameraPos;
+    float viewZ = dot(toPoint, cameraForward);
+    float viewX = dot(toPoint, cameraRight);
+    float viewY = dot(toPoint, cameraUp);
+
+    float viewZClamped = clamp(viewZ, nearPlane, farPlane);
+    float tLinear = (viewZClamped - nearPlane) / (farPlane - nearPlane);
+    float curUvwZ = pow(tLinear, 1.0f / compressionPrecision);
+
+    float voxelZ = curUvwZ * float(gridSize.z);
+
+    float entryVoxelZ = voxelZ;
+    if (forwardSampleCount > 0) {
+        float P = float(compressionPrecision);
+        float N = float(gridSize.z);
+
+        float maxRaymarchDist = float(forwardSampleCount);
+        if (P > 1.001f) {
+            float proposedEntryZ = voxelZ / P;
+
+            float entryDepth_min = max(nearPlane, viewZClamped - maxRaymarchDist);
+            float tEntry_min = pow((entryDepth_min - nearPlane) / (farPlane - nearPlane), 1.0f / P);
+            float entryVoxelZ_min = tEntry_min * N;
+
+            entryVoxelZ = max(proposedEntryZ, entryVoxelZ_min);
+            entryVoxelZ = clamp(entryVoxelZ, 0.0f, voxelZ);
+        }
+    }
+    float entryUvwZ = entryVoxelZ / float(gridSize.z);
+
+    float entryTLinear = pow(entryUvwZ, compressionPrecision);
+    float entryDepth = lerp(nearPlane, farPlane, entryTLinear);
+    entryDepth = max(entryDepth, nearPlane);
+
+    float halfHeight = entryDepth * tanHalfFov;
+    float halfWidth = halfHeight * aspect;
+
+    float scale = entryDepth / max(viewZ, 1e-8f);
+    float entryViewX = viewX * scale;
+    float entryViewY = viewY * scale;
+
+    uvw.x = (entryViewX / halfWidth + 1.0f) * 0.5f;
+    uvw.y = (entryViewY / halfHeight + 1.0f) * 0.5f;
+    uvw.z = entryUvwZ;
+    uvw = clamp(uvw, 0.0f, 1.0f - 1e-6f);
+
+    hitWorldPos = cameraPos + cameraRight * entryViewX + cameraUp * entryViewY + cameraForward * entryDepth;
+
+    return true;
+}
 //------------------------------------------------SphericalFibonacci---------------------------------------------
 #define M_PHI 1.618033988749895
 //y axis is up, get worldPos

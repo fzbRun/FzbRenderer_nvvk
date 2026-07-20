@@ -25,6 +25,7 @@ struct VolumetricFogPushConstant{
 	uint iteration = 0;
 	
 	int randomStepping;
+	int sampleCount;
 	float lightAttenuationStrength = 1.0f;
 	uint volumetricFogCount;
 	uint heightFogCount;
@@ -39,13 +40,12 @@ struct VolumetricFogPushConstant{
 	//float mouseForceStrength;
 	//float mouseForceRadius;
 
-	int useAttenuationImage;
+	int useEnvAccFog;
 	int compressionPrecision;
 	int forwardSampleCount;
-	int sampleCount;
-	float attenuationNearPlane;
-	uint3 attenuationGridSize;
-	float attenuationFarPlane;
+	float cameraNearPlane;
+	uint3 frustumGridSize;
+	float cameraFarPlane;
 	float tanCameraFov_2;	//fov / 2
 	float aspectRatio;
 
@@ -102,6 +102,8 @@ struct GlobalInfo_VolumetricFog {
 	int fluidStartUp;
 	uint visibleVolumetricFogCount;
 	uint visibleVolumetricFogIndices[MAX_VOLUMETRIC_FOG_COUNT];
+	float envFogLightAttenuationEstimator;
+	float envFogLightAttenuationLength;
 };
 
 
@@ -127,14 +129,10 @@ enum class StaticBindingPoints_VolumetricFog {
 	eVolumetricFogNoiseInfoBuffer,
 
 	eVolumetricFogAttenuationImage,
-	eVolumetricFogAttenuationImage_sample,
 	eVolumetricFogAttenuation2Image,
-	eVolumetricFogAttenuation2Image_sample,
 	eVolumetricFogLImage,
-	eVolumetricFogLImage_sample,
 
-	eVolumetricFogTotalInfoImage,
-	eVolumetricFogTotalInfoImage_sample,
+	eEnvVolumetricFogInfoImage,
 
 	eShadowMap,
 	eRenderedImage,

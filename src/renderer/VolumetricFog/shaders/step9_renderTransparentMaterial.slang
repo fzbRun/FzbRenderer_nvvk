@@ -74,8 +74,8 @@ PSout fragmentMain(VSout input) {
 
     float3 attenuation = 1.0f, attenuation2 = 1.0f, L = 0.0f;
     uint randomSeed = xxhash32(uint3(pushConst.frameIndex, pushConst.instanceIndex, instance.meshIndex));
-    uint sampleCount = pushConst.useAttenuationImage == 1 ? 0 : 10;
-    getVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, sampleCount, L, attenuation, attenuation2);
+    uint sampleCount = pushConst.useEnvAccFog == 1 ? 0 : 10;
+    getEnvVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, sampleCount, L, attenuation, attenuation2);
 
     float shadow = getShadow(float4(worldPos, 1.0f));
 

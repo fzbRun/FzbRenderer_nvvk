@@ -42,10 +42,13 @@ private:
 	void compileAndCreateShaders() override;
 	void updateDataPerFrame(VkCommandBuffer cmd) override;
 
+	void getVisibleFog(VkCommandBuffer cmd);
 	void initVolumetricFogFluid(VkCommandBuffer cmd);
 	void createGBuffers(VkCommandBuffer cmd);
-	void createVolumetricFog(VkCommandBuffer cmd);
-	void createAttenuationImage(VkCommandBuffer cmd);
+	void fluidSimulation(VkCommandBuffer cmd);
+	void createEnvFog(VkCommandBuffer cmd);
+	void envFogLightAttenuationEstimate(VkCommandBuffer cmd);
+	void createFrustumAccFog(VkCommandBuffer cmd);
 	void deferredRenderring(VkCommandBuffer cmd);
 	void renderTransparentMaterial(VkCommandBuffer cmd);
 
@@ -54,21 +57,26 @@ private:
 
 	VkPushConstantsInfo pushInfo;
 
-	VkShaderEXT vertexShader_createGBuffer{};
-	VkShaderEXT fragmentShader_createGBuffer{};
-
 	VkShaderEXT computeShader_getVisibleVolumetricFog{};
 
 	VkShaderEXT computeShader_initVolumetricFogFluid{};
+
+	VkShaderEXT vertexShader_createGBuffer{};
+	VkShaderEXT fragmentShader_createGBuffer{};
+
 	VkShaderEXT computeShader_createVolumetricFog_Fluid_A{};
 	VkShaderEXT computeShader_createVolumetricFog_Fluid_D{};
 	VkShaderEXT computeShader_createVolumetricFog_Fluid_F{};
 	VkShaderEXT computeShader_createVolumetricFog_Fluid_P{};
 	VkShaderEXT computeShader_createVolumetricFog_Fluid_S{};
 
+	VkShaderEXT computeShader_createEnvionmentFog{};
 	VkShaderEXT computeShader_createLightAttenuationEstimator{};
 
+	VkShaderEXT computeShader_createFrustumAccFog{};
+
 	VkShaderEXT computeShader_deferredRenderring{};
+
 	VkShaderEXT vertexShader_renderTransparentMaterial{};
 	VkShaderEXT fragmentShader_renderTransparentMaterial{};
 
@@ -108,13 +116,12 @@ private:
 	std::vector<shaderio::NoiseFogInfo> volumetricFogNoiseInfos;			
 	FzbRenderer::Buffer volumetricFogNoiseInfoBuffer;		
 
-	VkShaderEXT computeShader_createAttenuationImage{};
-	VkExtent3D attenuationImageSize;
+	FzbRenderer::Image envVolumetricFogInfoImage;
+
+	VkExtent3D frustumGridSize;
 	FzbRenderer::Image volumetricFogAttenuationImage;
 	FzbRenderer::Image volumetricFogAttenuation2Image;
 	FzbRenderer::Image volumetricFogLImage;
-
-	FzbRenderer::Image volumetricFogTotalInfoImage;
 
 #ifndef NDEBUG
 	void renderVolumetricFogVoxelGrid(VkCommandBuffer cmd);

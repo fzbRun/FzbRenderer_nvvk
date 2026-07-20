@@ -19,13 +19,12 @@
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogFluidVoxelInfoImages_sampler)]] Sampler3D<float4> volumetricFogFluidVoxelInfoImages_sample[];
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogNoiseInfoBuffer)]] StructuredBuffer<NoiseFogInfo, ScalarDataLayout> noiseFogInfoBuffer;
 
-[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogAttenuationImage_sample)]] Sampler3D<float4> volumetricFogAttenuationImage_sample;
-[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogAttenuation2Image_sample)]] Sampler3D<float4> volumetricFogAttenuation2Image_sample;
-[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogLImage_sample)]] Sampler3D<float4> volumetricFogLImage_sample;
 
-//[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogAttenuationImage)]] RWTexture3D<float4> volumetricFogAttenuationImage;
-//[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogAttenuation2Image)]] RWTexture3D<float4> volumetricFogAttenuation2Image;
-//[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogLImage)]] RWTexture3D<float4> volumetricFogLImage;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogAttenuationImage)]] RWTexture3D<float4> volumetricFogAttenuationImage;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogAttenuation2Image)]] RWTexture3D<float4> volumetricFogAttenuation2Image;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogLImage)]] RWTexture3D<float4> volumetricFogLImage;
+
+[[vk::binding(StaticBindingPoints_VolumetricFog::eEnvVolumetricFogInfoImage)]] RWTexture3D<float4> envVolumetricFogInfoImage;
 
 [[vk::binding(StaticBindingPoints_VolumetricFog::eShadowMap)]] Sampler2DShadow shadowMap;
 
@@ -219,7 +218,7 @@ void getHeightFogScatter(
 
         float3 samplePoint = startPos + dir * tSample;
 
-        float fogHeight = samplePoint.y - fogStartPos.y;
+        float fogHeight = max(samplePoint.y - fogStartPos.y, 0.0f);
         float extinctionCoeff = (absorption + scattering) * exp(-heightScale * fogHeight);
         extinctionCoeff = max(extinctionCoeff, 1e-30f);
 
@@ -523,7 +522,7 @@ void getNoiseFogScatter(
         attenuation2 *= pushConst .lightAttenuationStrength; // lerp(1.0f, fogInfo.lightAttenuationEstimator, mainLightDt / gridLength);
     }
 }
-
+/*
 bool getCameraFrustumFogData(float3 worldPos, inout float3 hitWorldPos, inout float3 uvw) {
     SceneInfo sceneInfo;
     #ifdef COMPUTE_SHADER
@@ -536,9 +535,9 @@ bool getCameraFrustumFogData(float3 worldPos, inout float3 hitWorldPos, inout fl
     float3 cameraUp = sceneInfo.viewInvMatrix[1].xyz;
     float3 cameraForward = -sceneInfo.viewInvMatrix[2].xyz;
 
-    uint3 gridSize = pushConst.attenuationGridSize;
-    float nearPlane = pushConst.attenuationNearPlane;
-    float farPlane  = pushConst.attenuationFarPlane;
+    uint3 gridSize = pushConst.frustumGridSize;
+    float nearPlane = pushConst.cameraNearPlane;
+    float farPlane  = pushConst.cameraFarPlane;
     float tanHalfFov = pushConst.tanCameraFov_2;
     float aspect = pushConst.aspectRatio;
 
@@ -593,7 +592,7 @@ bool getCameraFrustumFogData(float3 worldPos, inout float3 hitWorldPos, inout fl
 
     return true;
 }
-
+*/
 void getVolumetricFogScatter(
     float3 startPos, float3 endPos, inout uint randomSeed, uint sampleCount,
     inout float3 L, inout float3 attenuation, inout float3 attenuation2
@@ -607,17 +606,15 @@ void getVolumetricFogScatter(
     #endif
 
     float3 hitWorldPos = sceneInfo.cameraPosition; float3 uvw;
-    if (pushConst.useAttenuationImage == 1 && getCameraFrustumFogData(endPos, hitWorldPos, uvw)) {
-        uint3 voxelIndex = uint3(uvw * pushConst.attenuationGridSize);
-        // attenuation = volumetricFogAttenuationImage_sample.SampleLevel(uvw, 0).xyz;
-        attenuation = volumetricFogAttenuationImage_sample[voxelIndex].xyz;
-        attenuation2 = volumetricFogAttenuation2Image_sample.SampleLevel(uvw, 0).xyz;
-        L = volumetricFogLImage_sample.SampleLevel(uvw, 0).xyz;
-
-        // uvw *= pushConst.attenuationGridSize;
-        // attenuation = volumetricFogAttenuationImage[int3(uvw)].xyz;
-        // attenuation2 = volumetricFogAttenuation2Image[int3(uvw)].xyz;
-        // L = volumetricFogLImage[int3(uvw)].xyz;
+    if (pushConst.useEnvAccFog == 1) {
+        bool inCameraFrustum = getCameraFrustumData( endPos, sceneInfo.cameraPosition, sceneInfo.viewInvMatrix, pushConst.frustumGridSize, pushConst.cameraNearPlane, 
+            pushConst.cameraFarPlane, pushConst.tanCameraFov_2, pushConst.aspectRatio, pushConst.compressionPrecision, pushConst.forwardSampleCount, hitWorldPos, uvw);
+        if (inCameraFrustum) {
+            uint3 voxelIndex = uint3(uvw * pushConst.frustumGridSize);
+            attenuation = volumetricFogAttenuationImage[voxelIndex].xyz;
+            attenuation2 = volumetricFogAttenuation2Image[voxelIndex].xyz;
+            L = volumetricFogLImage[voxelIndex].xyz;
+        }
     }
     if (length(endPos - hitWorldPos) <= 1e-5f || sampleCount == 0) return;
     startPos = hitWorldPos;
@@ -654,6 +651,97 @@ void getVolumetricFogScatter(
             getNoiseFogScatter(startPos, endPos, randomSeed, sampleCount, fogInfo, globalInfo, L, attenuation, attenuation2);
         }
     }
+}
+
+void getEnvVolumetricFogScatter(
+    float3 startPos, float3 endPos, inout uint randomSeed, uint sampleCount,
+    inout float3 L, inout float3 attenuation, inout float3 attenuation2
+) {
+    #ifdef COMPUTE_SHADER
+    GlobalInfo_VolumetricFog globalInfo = groupGlobalInfo;
+    SceneInfo sceneInfo = groupSceneInfo;
+    #else
+    GlobalInfo_VolumetricFog globalInfo = globalInfoBuffer[0];
+    SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+    #endif
+    float3 cameraPos = sceneInfo.cameraPosition;
+    float3 cameraForward = -sceneInfo.viewInvMatrix[2].xyz;
+    float3 cameraRight = sceneInfo.viewInvMatrix[0].xyz;
+    float3 cameraUp = sceneInfo.viewInvMatrix[1].xyz;
+
+    float tEntry, tExit;
+    if (!segmentFrustumIntersection(startPos, endPos, cameraPos, cameraForward, cameraRight, cameraUp, pushConst.tanCameraFov_2, pushConst.aspectRatio, pushConst.cameraNearPlane, pushConst.cameraFarPlane, tEntry, tExit)) return;
+    float tTotal = tExit - tEntry;
+    float3 dir = normalize(endPos - startPos);
+    startPos = startPos + tEntry * dir;
+    endPos = startPos + tTotal * dir;
+
+    float3 hitWorldPos = startPos; float3 uvw;
+    if (pushConst.useEnvAccFog == 1) {
+        bool inCameraFrustum = getCameraFrustumData(endPos, cameraPos, sceneInfo.viewInvMatrix, pushConst.frustumGridSize, pushConst.cameraNearPlane, 
+            pushConst.cameraFarPlane, pushConst.tanCameraFov_2, pushConst.aspectRatio, pushConst.compressionPrecision, pushConst.forwardSampleCount, hitWorldPos, uvw);
+        if (inCameraFrustum) {
+            uint3 voxelIndex = uint3(uvw * pushConst.frustumGridSize);
+            attenuation = volumetricFogAttenuationImage[voxelIndex].xyz;
+            attenuation2 = volumetricFogAttenuation2Image[voxelIndex].xyz;
+            L = volumetricFogLImage[voxelIndex].xyz;
+        }
+    }
+    if (length(endPos - hitWorldPos) <= 1e-5f || sampleCount == 0) return;
+    startPos = hitWorldPos;
+    tTotal = distance(startPos, endPos);
+
+    float3 E = 1.0f;
+    float tPart = tTotal / sampleCount;
+    for (int sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex) {
+        float tSample = tPart * ((float)sampleIndex + rand(randomSeed));
+        float3 samplePoint = startPos + dir * tSample;
+
+        getCameraFrustumData(samplePoint, cameraPos, sceneInfo.viewInvMatrix, pushConst.frustumGridSize,
+                             pushConst.cameraNearPlane, pushConst.cameraFarPlane, pushConst.tanCameraFov_2, pushConst.aspectRatio, pushConst.compressionPrecision, 0, hitWorldPos, uvw);
+
+        float4 voxelInfo = envVolumetricFogInfoImage[uint3(uvw * pushConst.frustumGridSize)];
+        float extinctionCoeff = max(voxelInfo.x, 1e-30f);
+        float scattering = voxelInfo.y;
+        float phase = voxelInfo.z;
+        float phase2 = phase * phase;
+        float3 color = voxelInfo.w;
+
+        for (int lightIndex = 0; lightIndex < sceneInfo.numLights; ++lightIndex) {
+            Light light = sceneInfo.lights[lightIndex];
+            float3 lightColor = light.color * light.intensity;
+            float3 lightDirection; float3 lightPos;
+            if (light.type == LightType::Direction) {
+                lightDirection = -light.direction;
+                lightPos = samplePoint + 1000.0f * lightDirection;
+            } else if (light.type == LightType::Point) {
+                lightDirection = normalize(light.pos - samplePoint);
+                lightPos = light.pos;
+            }
+
+            float fp = (1.0f - phase2) / (4.0f * M_PI * pow((1 + phase2 - 2.0f * phase * dot(-dir, lightDirection)), 1.5f));
+
+            float tLightEnter, tLightExit;
+            segmentFrustumIntersection(lightPos, samplePoint, cameraPos, cameraForward, cameraRight, cameraUp, pushConst.tanCameraFov_2, pushConst.aspectRatio, pushConst.cameraNearPlane, pushConst.cameraFarPlane, tLightEnter, tLightExit);
+            float lightDt = tLightExit - tLightEnter;
+
+            float3 activeSunColor = lightColor * lerp(1.0f, globalInfo.envFogLightAttenuationEstimator, lightDt / globalInfo.envFogLightAttenuationLength) * pushConst.lightAttenuationStrength;
+            if (lightIndex == 0) activeSunColor *= getShadow(float4(samplePoint, 1.0f));
+
+            L += activeSunColor * fp * scattering * color * E / extinctionCoeff * (1.0f - exp(-extinctionCoeff * tPart));
+        }
+        //L += color;
+
+        E *= exp(-extinctionCoeff * tPart);
+        if (all(E <= 0.0f)) break;
+    }
+    attenuation *= E;
+
+    float tLightEnter, tLightExit;
+    float3 mainLightDir = sceneInfo.lights[0].direction;
+    segmentFrustumIntersection(endPos - mainLightDir * 1000.0f, endPos, cameraPos, cameraForward, cameraRight, cameraUp, pushConst.tanCameraFov_2, pushConst.aspectRatio, pushConst.cameraNearPlane, pushConst.cameraFarPlane, tLightEnter, tLightExit);
+    float mainLightDt = tLightExit - tLightEnter;
+    attenuation2 *= lerp(1.0f, globalInfo.envFogLightAttenuationEstimator, mainLightDt / globalInfo.envFogLightAttenuationLength) * pushConst.lightAttenuationStrength;
 }
 
 #endif
