@@ -36,7 +36,7 @@ void computeMain_deferredRendering(uint2 threadIndex: SV_DispatchThreadID, uint2
 
     float3 attenuation = 1.0f, attenuation2 = 1.0f, L = 0.0f;
     uint randomSeed = xxhash32(uint3(pushConst.frameIndex, threadIndex));
-    uint sampleCount = pushConst.useAttenuationImage == 1 ? 0 : 10;
+    uint sampleCount = pushConst.useAttenuationImage == 1 ? 2 : 10;
     getVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, sampleCount, L, attenuation, attenuation2);
         
     if (depth >= 1.0f - 1e-30f) {

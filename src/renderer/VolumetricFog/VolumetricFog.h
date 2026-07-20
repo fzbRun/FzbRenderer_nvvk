@@ -114,6 +114,8 @@ private:
 	FzbRenderer::Image volumetricFogAttenuation2Image;
 	FzbRenderer::Image volumetricFogLImage;
 
+	FzbRenderer::Image volumetricFogTotalInfoImage;
+
 #ifndef NDEBUG
 	void renderVolumetricFogVoxelGrid(VkCommandBuffer cmd);
 	void renderCameraFrustum(VkCommandBuffer cmd);

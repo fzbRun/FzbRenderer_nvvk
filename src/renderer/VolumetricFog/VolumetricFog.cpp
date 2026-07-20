@@ -224,6 +224,7 @@ void VolumetricFog::clean() {
 	volumetricFogAttenuationImage.clean();
 	volumetricFogAttenuation2Image.clean();
 	volumetricFogLImage.clean();
+	volumetricFogTotalInfoImage.clean();
 
 	shadowMap.clean();
 
@@ -253,7 +254,7 @@ void VolumetricFog::uiRender() {
 		UIModified |= ImGui::Checkbox("use Attenuation Image ", (bool*)&pushConstant.useAttenuationImage);
 		UIModified |= ImGui::DragInt("Compression Precision ", (int*)&pushConstant.compressionPrecision, 1, 1, 100);
 		UIModified |= ImGui::DragInt("Attenuation Sample Count ", (int*)&pushConstant.sampleCount, 1.0f, 0.0f, 50.0f);
-		UIModified |= ImGui::DragInt("Forward Sample Count ", (int*)&pushConstant.forwardSampleCount, 1, 0, pushConstant.attenuationGridSize.z / 2);
+		UIModified |= ImGui::DragInt("Forward Sample Number", (int*)&pushConstant.forwardSampleCount, 1.0f, 0.0f, 100.0f);
 		if (ImGui::Checkbox("Show Camera Frustum ", (bool*)&showCameraFrustum)) {
 			UIModified = true;
 			showCameraInfo = Application::sceneResource.sceneInfo;
@@ -626,6 +627,31 @@ void VolumetricFog::createVolumetricFogData() {
 	createVolumetricFogImage(volumetricFogAttenuationImage, { attenuationImageSize.width, attenuationImageSize.height, attenuationImageSize.depth });
 	createVolumetricFogImage(volumetricFogAttenuation2Image, { attenuationImageSize.width, attenuationImageSize.height, attenuationImageSize.depth });
 	createVolumetricFogImage(volumetricFogLImage, { attenuationImageSize.width, attenuationImageSize.height, attenuationImageSize.depth });
+
+	{
+		volumetricFogTotalInfoImage.clean();
+
+		static int imageCount = 0;
+		volumetricFogTotalInfoImage = FzbRenderer::Image("volumetricFog3DTexture" + std::to_string(imageCount));
+		++imageCount;
+
+		FzbRenderer::ImageCreateInfo colorImageCreateInfo = FzbRenderer::createDefaultImageCreateInfo();
+		colorImageCreateInfo.info.format = VK_FORMAT_R32G32B32A32_UINT;
+		colorImageCreateInfo.info.imageType = VK_IMAGE_TYPE_3D;
+		colorImageCreateInfo.info.extent = { attenuationImageSize.width, attenuationImageSize.height, attenuationImageSize.depth };
+
+		colorImageCreateInfo.viewInfo.format = colorImageCreateInfo.info.format;
+		colorImageCreateInfo.viewInfo.viewType = VK_IMAGE_VIEW_TYPE_3D;
+
+		colorImageCreateInfo.samplerInfo.magFilter = VK_FILTER_LINEAR;
+		colorImageCreateInfo.samplerInfo.minFilter = VK_FILTER_LINEAR;
+		colorImageCreateInfo.samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+		colorImageCreateInfo.samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		colorImageCreateInfo.samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		colorImageCreateInfo.samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+
+		volumetricFogTotalInfoImage.init(colorImageCreateInfo);
+	}
 #ifndef NDEBUG
 	NVVK_CHECK(Application::allocator.createBuffer(bShowCameraInfo,
 		std::span<const shaderio::SceneInfo>(&showCameraInfo, 1).size_bytes(),
@@ -760,6 +786,17 @@ void VolumetricFog::createDescriptorSetLayout() {
 			.stageFlags = VK_SHADER_STAGE_ALL });
 		bindings.addBinding({
 			.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eVolumetricFogLImage_sample,
+			.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eVolumetricFogTotalInfoImage,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eVolumetricFogTotalInfoImage_sample,
 			.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 			.descriptorCount = 1,
 			.stageFlags = VK_SHADER_STAGE_ALL });
@@ -900,6 +937,14 @@ void VolumetricFog::createDescriptorSet() {
 		attenuationImageWrite =
 			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eVolumetricFogLImage_sample, 0, 0, 1);
 		write.append(attenuationImageWrite, volumetricFogLImage.image);
+
+		VkWriteDescriptorSet	preCalInfoImageWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eVolumetricFogTotalInfoImage, 0, 0, 1);
+		write.append(preCalInfoImageWrite, volumetricFogTotalInfoImage.image);
+
+		preCalInfoImageWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eVolumetricFogTotalInfoImage_sample, 0, 0, 1);
+		write.append(preCalInfoImageWrite, volumetricFogTotalInfoImage.image);
 	}
 	//---------------------------------------------------------------------------------------------------------------------------------------------
 	VkWriteDescriptorSet	shadowMapWrite =
@@ -1496,6 +1541,7 @@ void VolumetricFog::createAttenuationImage(VkCommandBuffer cmd) {
 	barrierImage(volumetricFogAttenuationImage.image.image);
 	barrierImage(volumetricFogAttenuation2Image.image.image);
 	barrierImage(volumetricFogLImage.image.image);
+	barrierImage(volumetricFogTotalInfoImage.image.image);
 }
 void VolumetricFog::deferredRenderring(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
@@ -1565,6 +1611,8 @@ void VolumetricFog::renderTransparentMaterial(VkCommandBuffer cmd) {
 	VkVertexInputAttributeDescription2EXT attributeDescription = {};
 	vkCmdSetVertexInputEXT(cmd, 0, nullptr, 0, nullptr);
 
+	int forwardSampleCount = pushConstant.forwardSampleCount;
+	pushConstant.forwardSampleCount = 0;
 	for (size_t i = 0; i < Application::sceneResource.instances.size(); ++i){
 		shaderio::Instance instance = Application::sceneResource.instances[i];
 		const shaderio::Mesh& mesh = Application::sceneResource.meshes[instance.meshIndex];
@@ -1584,6 +1632,7 @@ void VolumetricFog::renderTransparentMaterial(VkCommandBuffer cmd) {
 
 		vkCmdDrawIndexed(cmd, triMesh.indices.count, 1, 0, 0, 0);
 	}
+	pushConstant.forwardSampleCount = forwardSampleCount;
 
 	vkCmdEndRendering(cmd);
 

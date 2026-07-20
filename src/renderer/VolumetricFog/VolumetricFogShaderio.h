@@ -133,6 +133,9 @@ enum class StaticBindingPoints_VolumetricFog {
 	eVolumetricFogLImage,
 	eVolumetricFogLImage_sample,
 
+	eVolumetricFogTotalInfoImage,
+	eVolumetricFogTotalInfoImage_sample,
+
 	eShadowMap,
 	eRenderedImage,
 #ifndef NDEBUG

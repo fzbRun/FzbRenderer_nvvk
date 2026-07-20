@@ -552,7 +552,25 @@ bool getCameraFrustumFogData(float3 worldPos, inout float3 hitWorldPos, inout fl
     float curUvwZ = pow(tLinear, 1.0f / pushConst.compressionPrecision);
 
     float voxelZ = curUvwZ * float(gridSize.z);
-    float entryVoxelZ = max(0.0f, voxelZ - float(pushConst.forwardSampleCount));
+
+    float entryVoxelZ = voxelZ;
+    if(pushConst.forwardSampleCount > 0){
+        float P = float(pushConst.compressionPrecision);
+        float N = float(gridSize.z);
+
+        float maxRaymarchDist = float(pushConst.forwardSampleCount);
+        if (P > 1.001f) {
+            float proposedEntryZ = voxelZ / P;
+
+            float entryDepth_min = max(nearPlane, viewZClamped - maxRaymarchDist);
+            float tEntry_min = pow((entryDepth_min - nearPlane) / (farPlane - nearPlane), 1.0f / P);
+            float entryVoxelZ_min = tEntry_min * N;
+
+            entryVoxelZ = max(proposedEntryZ, entryVoxelZ_min);
+            entryVoxelZ = clamp(entryVoxelZ, 0.0f, voxelZ);
+            //if (pushConst.frameIndex == 0 && voxelZ > 30.0f && voxelZ < 40.0f) printf("voxelZ: %f, entryVoxelZ: %f\n", voxelZ, entryVoxelZ);
+        }
+    }
     float entryUvwZ = entryVoxelZ / float(gridSize.z);
 
     float entryTLinear = pow(entryUvwZ, pushConst.compressionPrecision);
@@ -590,7 +608,9 @@ void getVolumetricFogScatter(
 
     float3 hitWorldPos = sceneInfo.cameraPosition; float3 uvw;
     if (pushConst.useAttenuationImage == 1 && getCameraFrustumFogData(endPos, hitWorldPos, uvw)) {
-        attenuation = volumetricFogAttenuationImage_sample.SampleLevel(uvw, 0).xyz;
+        uint3 voxelIndex = uint3(uvw * pushConst.attenuationGridSize);
+        // attenuation = volumetricFogAttenuationImage_sample.SampleLevel(uvw, 0).xyz;
+        attenuation = volumetricFogAttenuationImage_sample[voxelIndex].xyz;
         attenuation2 = volumetricFogAttenuation2Image_sample.SampleLevel(uvw, 0).xyz;
         L = volumetricFogLImage_sample.SampleLevel(uvw, 0).xyz;
 
