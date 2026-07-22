@@ -5,7 +5,6 @@
 #include "common/Shader/Slang/commonFunction.slang"
 
 [[vk::push_constant]] ConstantBuffer<VolumetricFogPushConstant> pushConst;
-[[vk::binding(StaticBindingPoints_VolumetricFog::eGlobalInfoBuffer)]] RWStructuredBuffer<GlobalInfo_VolumetricFog> globalInfoBuffer;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogInfosBuffer)]] RWStructuredBuffer<VolumetricFogInfo, ScalarDataLayout> volumetricFogInfosBuffer;
 
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogFluidInfoBuffer)]] RWStructuredBuffer<FluidFogInfo, ScalarDataLayout> volumetricFogFluidInfoBuffer;
@@ -67,7 +66,7 @@ void computeMain_initVolumetricFogFluid(uint3 voxelIndex: SV_DispatchThreadID, u
 
         if (otherFogInfo.type == VolumetricFogType::Height) {
             float heightScale = heightFogInfoBuffer[otherFogInfo.volumetricFogTypeIndex].heightScale;
-            float height = voxelCenter.y - otherFogInfo.fogStartPos.y;
+            float height = max(voxelCenter.y - otherFogInfo.fogStartPos.y, 0.0f);
             heightAttenuation = exp(-heightScale * height);
             extinction = (otherFogInfo.absorption.x + otherFogInfo.scattering) * heightAttenuation;
         } else if (otherFogInfo.type == VolumetricFogType::Fluid) continue;
@@ -112,24 +111,13 @@ void computeMain_initVolumetricFogFluid(uint3 voxelIndex: SV_DispatchThreadID, u
         float restoreRate = 0.5f;
         float restoreWeight = saturate(restoreRate * pushConst.dt) * edgeFactor * fluidFogInfo.restoreSpeed;
 
-        voxelInfo = lerp(voxelInfo, envVoxelInfo, restoreWeight);
+        voxelInfo = lerp(voxelInfo, envVoxelInfo, saturate(restoreWeight));
 
-        velocity = lerp(velocity, 0.0f, restoreWeight);
+        velocity = lerp(velocity, 0.0f, saturate(restoreWeight));
         volumetricFogFluidVoxelVelocityImage[fogInfo.volumetricFogTypeIndex][voxelIndex].xyz = velocity;
     }
     volumetricFogFluidVoxelInfoImages[fogInfo.volumetricFogTypeIndex][voxelIndex] = voxelInfo;
 
-    /*
-        if (pushConst.time == 0) {
-            float4 voxelInfo;
-            voxelInfo.x = getRestSmokeDensity(voxelIndex, fogInfo);
-            voxelInfo.y = fogInfo.scattering;
-            voxelInfo.z = fogInfo.phase;
-            volumetricFogFluidVoxelInfoImages[fogInfo.volumetricFogTypeIndex][voxelIndex] = voxelInfo;
-
-            volumetricFogFluidVoxelVelocityImage[fogInfo.volumetricFogTypeIndex][voxelIndex] = 0.0f;
-        }
-    */
     uint voxelIndexU = voxelIndex.z * fogInfo.fogVoxelGridSize.x * fogInfo.fogVoxelGridSize.y + voxelIndex.y * fogInfo.fogVoxelGridSize.x + voxelIndex.x;
     volumetricFogFluidVoxelInfoBuffer[fogInfo.volumetricFogTypeIndex][voxelIndexU].isBoundary = false;
 }

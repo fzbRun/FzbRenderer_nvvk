@@ -35,15 +35,15 @@ void computeMain_createFrustumAccFog(uint3 voxelIndex: SV_DispatchThreadID, uint
 
     SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
     float3 cameraPos = sceneInfo.cameraPosition;
-    float3 voxelCenter = getCameraFrustumVoxelCenter( voxelIndex, cameraPos, sceneInfo.viewInvMatrix, pushConst.frustumGridSize, 
+    float3 voxelCenter = getCameraFrustumVoxelCenter(voxelIndex, cameraPos, sceneInfo.viewInvMatrix, pushConst.frustumGridSize, 
         pushConst.cameraNearPlane, pushConst.cameraFarPlane, pushConst.tanCameraFov_2, pushConst.aspectRatio, pushConst.compressionPrecision);
 
     uint voxelIndexU = voxelIndex.z * pushConst.frustumGridSize.x * pushConst.frustumGridSize.y + voxelIndex.y * pushConst.frustumGridSize.x + voxelIndex.x;
-    uint randomSeed = xxhash32(voxelIndex); // xxhash32(uint3(pushConst.frameIndex, voxelIndexU, 0));
+    uint randomSeed =  xxhash32(uint3(pushConst.frameIndex, voxelIndexU, 0));
     float3 samplePoint = voxelCenter;   // + (float3(rand(randomSeed), rand(randomSeed), rand(randomSeed)) * 2.0f - 1.0f) * float3(halfWidth / gridSize.x, halfHeight / gridSize.y, halfDepth);
 
     float3 L = 0.0f; float3 attenuation = 1.0f; float3 attenuation2 = 1.0f;
-    getEnvVolumetricFogScatter(cameraPos, samplePoint, randomSeed, pushConst.sampleCount, L, attenuation, attenuation2);
+    getEnvVolumetricFogScatter(cameraPos, samplePoint, randomSeed, L, attenuation, attenuation2);
 
     volumetricFogAttenuationImage[voxelIndex] = float4(attenuation, 1.0f);
     volumetricFogAttenuation2Image[voxelIndex] = float4(attenuation2, 1.0f);

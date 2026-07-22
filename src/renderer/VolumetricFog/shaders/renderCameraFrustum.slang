@@ -30,33 +30,30 @@ VSout vertexMain(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID
     voxelIndex.z = instanceIndex / (pushConst.frustumGridSize.x * pushConst.frustumGridSize.y);
     voxelIndex.y = (instanceIndex - voxelIndex.z * (pushConst.frustumGridSize.x * pushConst.frustumGridSize.y)) / pushConst.frustumGridSize.x;
     voxelIndex.x = instanceIndex - voxelIndex.z * (pushConst.frustumGridSize.x * pushConst.frustumGridSize.y) - voxelIndex.y * pushConst.frustumGridSize.x;
+
     float u = (float(voxelIndex.x) + 0.5f) / float(gridSize.x) * 2.0f - 1.0f;
     float v = (float(voxelIndex.y) + 0.5f) / float(gridSize.y) * 2.0f - 1.0f;
-    //float t = (float(voxelIndex.z) + 0.5f) / float(gridSize.z);
-    //t = pow(t, pushConst.compressionPrecision);
-    //float depth = lerp(nearPlane, farPlane, t);
 
-    float t_last = float(voxelIndex.z) / float(gridSize.z);
-    t_last = pow(t_last, pushConst.compressionPrecision);
-    float depth_last = lerp(nearPlane, farPlane, t_last);
+    float t_near = float(voxelIndex.z) / float(gridSize.z);
+    t_near = pow(t_near, pushConst.compressionPrecision);
+    float depth_near = lerp(nearPlane, farPlane, t_near);
 
-    float t_next = float(voxelIndex.z + 1) / float(gridSize.z);
-    t_next = pow(t_next, pushConst.compressionPrecision);
-    float depth_next = lerp(nearPlane, farPlane, t_next);
+    float t_far = float(voxelIndex.z + 1) / float(gridSize.z);
+    t_far = pow(t_far, pushConst.compressionPrecision);
+    float depth_far = lerp(nearPlane, farPlane, t_far);
 
-    float halfDepth = (depth_next - depth_last) * 0.5f;
-    float depth = depth_last + halfDepth;
-
+    float depth = (depth_far + depth_near) * 0.5f;
+    
     float halfHeight = depth * tanHalfFov;
     float halfWidth = halfHeight * aspect;
     float3 viewPos = float3(u * halfWidth, v * halfHeight, depth);
     float3 voxelCenter = cameraPos + cameraRight * viewPos.x + cameraUp * viewPos.y + cameraForward * viewPos.z;
 
-    float3 worldPos;
-    worldPos.x = ((vertexIndex & 3) * 2) % 6 == 0 ? -halfWidth / gridSize.x : halfWidth / gridSize.x;
-    worldPos.y = (vertexIndex & 3) <= 1 ? -halfHeight / gridSize.y : halfHeight / gridSize.y;
-    worldPos.z = vertexIndex / 4 == 0 ? -halfDepth : halfDepth;
-    worldPos += voxelCenter;
+    float dx = ((vertexIndex & 3) * 2) % 6 == 0 ? -halfWidth / gridSize.x : halfWidth / gridSize.x;
+    float dy = (vertexIndex & 3) <= 1 ? -halfHeight / gridSize.y : halfHeight / gridSize.y;
+    float dz = vertexIndex / 4 == 0 ? depth_near : depth_far;
+
+    float3 worldPos = cameraPos + cameraRight * (viewPos.x + dx) + cameraUp * (viewPos.y + dy) + cameraForward * dz;
 
     VSout output;
     output.sv_position = mul(float4(worldPos, 1.0f), pushConst.sceneInfoAddress[0].viewProjMatrix);

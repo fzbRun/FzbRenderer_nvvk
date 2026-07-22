@@ -33,7 +33,7 @@ public:
 	void render(VkCommandBuffer* cmd) override;
 
 private:
-	void createVolumetricFogImage(FzbRenderer::Image& image, shaderio::uint3 size);
+	void createVolumetricFogImage(FzbRenderer::Image& image, shaderio::uint3 size, bool linear = true);
 	void createVolumetricFogData();
 
 	void createDescriptorSetLayout() override;
@@ -90,7 +90,7 @@ private:
 	float mouseForceRadius = 3.0f;
 
 	FzbRenderer::Buffer GlobalInfoBuffer;				
-
+	//--------------------------FogInfo-----------------------------------
 	uint32_t volumetricFogCount = 1;										
 	std::vector<shaderio::VolumetricFogInfo> volumetricFogInfos;			
 	FzbRenderer::Buffer volumetricFogInfosBuffer;							
@@ -115,13 +115,22 @@ private:
 	std::map<int, int> volumetricFogNoiseIndexMap;							
 	std::vector<shaderio::NoiseFogInfo> volumetricFogNoiseInfos;			
 	FzbRenderer::Buffer volumetricFogNoiseInfoBuffer;		
-
-	FzbRenderer::Image envVolumetricFogInfoImage;
-
+	//-------------------------Frustum------------------------------------
 	VkExtent3D frustumGridSize;
+	//-------------------------Environment--------------------------------
+	FzbRenderer::Image envVolumetricFogInfoImage;
+	//-------------------------FogAcc-------------------------------------
 	FzbRenderer::Image volumetricFogAttenuationImage;
 	FzbRenderer::Image volumetricFogAttenuation2Image;
 	FzbRenderer::Image volumetricFogLImage;
+
+	uint32_t rmSampleCountSampleCount_fogAcc = 20;
+	int randomStepping_fogAcc = false;
+	//-------------------------Opaque------------------------------------
+	uint32_t forwardSampleCount = 1;
+	uint32_t rmSampleCount_opaque_noFogAcc = 10;
+	uint32_t rmSampleCount_opaque_FogAcc = 1;
+	uint32_t randomStepping_opaque = true;
 
 #ifndef NDEBUG
 	void renderVolumetricFogVoxelGrid(VkCommandBuffer cmd);

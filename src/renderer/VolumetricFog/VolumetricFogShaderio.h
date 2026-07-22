@@ -36,10 +36,6 @@ struct VolumetricFogPushConstant{
 	SceneInfo* sceneInfoAddress;
 	float4x4 lightVP;
 
-	//float3 mouseForcePosition;
-	//float mouseForceStrength;
-	//float mouseForceRadius;
-
 	int useEnvAccFog;
 	int compressionPrecision;
 	int forwardSampleCount;

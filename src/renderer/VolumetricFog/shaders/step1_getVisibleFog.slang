@@ -49,5 +49,25 @@ void computeMain_getVisibleVolumetricFog(uint threadIndex: SV_DispatchThreadID) 
         globalInfoBuffer[0].visibleVolumetricFogCount = groupVisibleFogCount;
         globalInfoBuffer[0].fluidAABB = { fogInfo.fogStartPos, fogInfo.fogStartPos + fogInfo.fogVoxelGridSize * fogInfo.fogVoxelSize };
         globalInfoBuffer[0].fluidStartUp = fluidFogInfo.startUp;
+
+        //{
+        //    SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+        //    float3 cameraForward = -sceneInfo.viewInvMatrix[2].xyz;
+        //    float3 testPos = sceneInfo.cameraPosition + 10.0f * cameraForward;
+        //
+        //    uint3 voxelIndex = { 10, 10, 10 };
+        //    float3 voxelCenter = getCameraFrustumVoxelCenter(voxelIndex, sceneInfo.cameraPosition, sceneInfo.viewInvMatrix, pushConst.frustumGridSize, pushConst.cameraNearPlane, pushConst.cameraFarPlane, pushConst.tanCameraFov_2, pushConst.aspectRatio, pushConst.compressionPrecision);
+        //
+        //    float3 hitWorldPos, uvw;
+        //    getCameraFrustumData(voxelCenter, sceneInfo.cameraPosition, sceneInfo.viewInvMatrix, pushConst.frustumGridSize, pushConst.cameraNearPlane, pushConst.cameraFarPlane, pushConst.tanCameraFov_2, pushConst.aspectRatio, pushConst.compressionPrecision, 0, hitWorldPos, uvw);
+        //
+        //    if (pushConst.frameIndex == 0)
+        //        printf("\nvoxelIndex: %d %d %d\nvoxelCenter: %f %f %f\nhitWorldPos: %f %f %f\nuvw: %f %f %f\n\n",
+        //            voxelIndex.x, voxelIndex.y, voxelIndex.z,
+        //            voxelCenter.x, voxelCenter.y, voxelCenter.z,
+        //            hitWorldPos.x, hitWorldPos.y, hitWorldPos.z,
+        //            uvw.x, uvw.y, uvw.z,
+        //        );
+        //}
     }
 }

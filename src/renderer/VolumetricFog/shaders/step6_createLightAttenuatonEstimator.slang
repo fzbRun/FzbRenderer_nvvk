@@ -38,7 +38,7 @@ void computeMain_createLightAttenuationEstimator(uint threadIndex: SV_DispatchTh
             getCameraFrustumData(samplePoint, sceneInfo.cameraPosition, sceneInfo.viewInvMatrix, pushConst.frustumGridSize, 
                 pushConst.cameraNearPlane, pushConst.cameraFarPlane, pushConst.tanCameraFov_2, pushConst.aspectRatio, pushConst.compressionPrecision, 0, hitWorldPos, uvw);
 
-            float4 voxelInfo = envVolumetricFogInfoImage[uint3(uvw * pushConst.frustumGridSize)];
+            float4 voxelInfo = getFrustumImageInfo(samplePoint, true, envVolumetricFogInfoImage, 0);
 
             lightAttenuation *= exp(-voxelInfo.x * tPart);
             if (lightAttenuation <= 0.0f) break;
