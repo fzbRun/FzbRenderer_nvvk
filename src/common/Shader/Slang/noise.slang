@@ -182,6 +182,12 @@ float turbulenceWarp(float3 p) {
     return fbm(warped);
 }
 
+float InterleavedGradientNoise(float2 uv, float FrameId){
+    (uv) += (((FrameId) * (((float2(47, 17)) * (0.695)))));
+    const float3 magic = float3(0.06711056, 0.00583715, 52.9829189);
+    return frac(((magic.z) * (frac(dot(uv, magic.xy)))));
+}
+
 //---------------------------------------------------------------------clouad-----------------------------------------------------------------------
 float3 hash33(float3 p) {
     uint3 q = uint3(int3(p)) * 2798796415U;

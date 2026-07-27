@@ -35,8 +35,10 @@ void computeMain_deferredRendering(uint2 threadIndex: SV_DispatchThreadID, uint2
     worldPos /= worldPos.w;
 
     float3 attenuation = 1.0f, attenuation2 = 1.0f, L = 0.0f;
-    uint randomSeed = xxhash32(uint3(pushConst.frameIndex, threadIndex));
-    getEnvVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, L, attenuation, attenuation2);
+    uint randomSeed = xxhash32(uint3(int(pushConst.time * 1000.0f), threadIndex));
+    // getEnvVolumetricFogScatter_DDA(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, L, attenuation, attenuation2);
+    getEnvVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, true, L, attenuation, attenuation2);
+    //getVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, pushConst.sampleCount, L, attenuation, attenuation2);
     // if (threadIndex.y == 0 && pushConst.frameIndex == 0) printf("L: %f %f %f, a: %f %f %f, a2: %f %f %f\n", L.x, L.y, L.z, attenuation.x, attenuation.y, attenuation.z, attenuation2.x, attenuation2.y, attenuation2.z);
 
     float3 result = 0.0f;
@@ -62,6 +64,7 @@ void computeMain_deferredRendering(uint2 threadIndex: SV_DispatchThreadID, uint2
 
         float3 emissive = emissiveImage[threadIndex].xyz;
 
+        attenuation = 1.0f; attenuation2 = 1.0f;
         result = (ambient + (diffuse + specular) * shadow * attenuation2 + emissive) * attenuation + L;
     }
     renderedImage[threadIndex] = float4(result, 1.0f);

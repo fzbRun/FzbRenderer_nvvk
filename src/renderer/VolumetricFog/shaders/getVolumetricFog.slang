@@ -19,12 +19,13 @@
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogFluidVoxelInfoImages_sampler)]] Sampler3D<float4> volumetricFogFluidVoxelInfoImages_sample[];
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogNoiseInfoBuffer)]] StructuredBuffer<NoiseFogInfo, ScalarDataLayout> noiseFogInfoBuffer;
 
-
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogAttenuationImage)]] RWTexture3D<float4> volumetricFogAttenuationImage;
-[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogAttenuation2Image)]] RWTexture3D<float4> volumetricFogAttenuation2Image;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogAttenuationImage_sample)]] Sampler3D<float4> volumetricFogAttenuationImage_sample;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogLImage)]] RWTexture3D<float4> volumetricFogLImage;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogLImage_sample)]] Sampler3D<float4> volumetricFogLImage_sample;
 
 [[vk::binding(StaticBindingPoints_VolumetricFog::eEnvVolumetricFogInfoImage)]] RWTexture3D<float4> envVolumetricFogInfoImage;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eEnvVolumetricFogInfoImage_sample)]] Sampler3D<float4> envVolumetricFogInfoImage_sample;
 
 [[vk::binding(StaticBindingPoints_VolumetricFog::eShadowMap)]] Sampler2DShadow shadowMap;
 
@@ -205,18 +206,22 @@ void getHeightFogScatter(
     float3 dir = rayDir / maxDist;
 
     float tEnter, tExit;
-    if (!isHit(startPos, endPos, gridMin, gridMax, tEnter, tExit)) return;
+    if (!isHit(startPos, endPos, gridMin, gridMax, tEnter, tExit)) {
+        //if (pushConst.frameIndex == 0) printf("startPos: %f %f %f, endPos: %f %f %f, gridMin: %f %f %f, gridMax: %f %f %f\n", 
+        //    startPos.x, startPos.y, startPos.z, 
+        //    endPos.x, endPos.y, endPos.z,
+        //    gridMin.x, gridMin.y, gridMin.z,
+        //    gridMax.x, gridMax.y, gridMax.z,
+        //);
+        return;
+    }
     float tTotal = tExit - tEnter;
 
     SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
-    float E = 1.0f;
-
-    const float distancePower = 2.0f;
+    float3 E = 1.0f;
+    float tPart = tTotal / sampleCount;
     for (int sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex) {
-        float u0 = pow(float(sampleIndex) / float(sampleCount), distancePower);
-        float u1 = pow(float(sampleIndex + 1) / float(sampleCount), distancePower);
-        float tPart = (u1 - u0) * tTotal;
-        float tPartStart = tEnter + u0 * tTotal;
+        float tPartStart = tEnter + sampleIndex * tPart;
         float tSample = tPartStart + tPart * (pushConst.randomStepping == 1 ? rand(randomSeed) : 0.5f);
 
         float3 samplePoint = startPos + dir * tSample;
@@ -253,7 +258,9 @@ void getHeightFogScatter(
             float3 activeSunColor = lightColor * lightAttenuation * pushConst.lightAttenuationStrength;
             if (lightIndex == 0) activeSunColor *= getShadow(float4(samplePoint, 1.0f));
 
-            indirectL += activeSunColor * fp * fogInfo.color * scattering * E / extinctionCoeff * (1.0f - exp(-extinctionCoeff * tPart));
+            float x = extinctionCoeff * tPart;
+            float factor = (x < 1e-4) ? tPart * (1.0 - 0.5 * x) : (1.0 - exp(-x)) / extinctionCoeff;
+            indirectL += activeSunColor * fp * fogInfo.color * scattering * E * factor;
         }
 
         float a = exp(-extinctionCoeff * tPart);
@@ -270,12 +277,12 @@ void getHeightFogScatter(
         }
 
         L += indirectL * (1.0f - fluidBlend);
-        attenuation *= lerp(a, 1.0f, fluidBlend);
+        E *= lerp(a, 1.0f, fluidBlend);
 
-        E *= a;
-        if (all(attenuation <= 1e-3f)) break;
+        if (all(E <= 1e-3f)) break;
     }
     L += fogInfo.color * fogInfo.ambientIntensity;
+    attenuation *= E;
 
     float tLightEnter, tLightExit;
     float3 mainLightPos = endPos - sceneInfo.lights[0].direction * 1000.0f;
@@ -402,7 +409,9 @@ void getFluidFogScatter(
                 float3 activeSunColor = lightColor * lerp(1.0f, fluidFogInfo.lightAttenuationEstimator, lightDt / gridLength) * pushConst.lightAttenuationStrength;
                 if (lightIndex == 0) activeSunColor *= getShadow(float4(samplePoint, 1.0f));
 
-                fluidL += activeSunColor * fp * scattering * color * E / extinctionCoeff * (1.0f - exp(-extinctionCoeff * dt));
+                float x = extinctionCoeff * dt;
+                float factor = (x < 1e-4) ? dt * (1.0 - 0.5 * x) : (1.0 - exp(-x)) / extinctionCoeff;
+                fluidL += activeSunColor * fp * scattering * color * E * factor;
                 // L += extinctionCoeff * fogInfo.color * fogInfo.ambientIntensity;
             }
 
@@ -419,12 +428,18 @@ void getFluidFogScatter(
         tCurrent = tNext;
         if (tCurrent >= tExit - 1e-6) break;
 
-        if (tMax.x < tMax.y) {
-            if (tMax.x < tMax.z) { voxel.x += step.x; tMax.x += tDelta.x; }
-            else { voxel.z += step.z; tMax.z += tDelta.z; }
-        } else {
-            if (tMax.y < tMax.z) { voxel.y += step.y; tMax.y += tDelta.y; }
-            else { voxel.z += step.z; tMax.z += tDelta.z; }
+        float axisEpsilon = 1e-6f;
+        if (tMax.x <= tNext + axisEpsilon) {
+            voxel.x += step.x;
+            tMax.x += tDelta.x;
+        }
+        if (tMax.y <= tNext + axisEpsilon) {
+            voxel.y += step.y;
+            tMax.y += tDelta.y;
+        }
+        if (tMax.z <= tNext + axisEpsilon) {
+            voxel.z += step.z;
+            tMax.z += tDelta.z;
         }
     }
     L += fogInfo.color * fogInfo.ambientIntensity;
@@ -509,7 +524,9 @@ void getNoiseFogScatter(
             float3 activeSunColor = lightColor * pushConst .lightAttenuationStrength; // * lerp(1.0f, fogInfo.lightAttenuationEstimator, lightDt / gridLength);
             if (lightIndex == 0) activeSunColor *= getShadow(float4(samplePoint, 1.0f));
 
-            L += activeSunColor * fp * fogInfo.scattering * fogInfo.color * E / extinctionCoeff * (1.0f - exp(-extinctionCoeff * tPart));
+            float x = extinctionCoeff * tPart;
+            float factor = (x < 1e-4) ? tPart * (1.0 - 0.5 * x) : (1.0 - exp(-x)) / extinctionCoeff;
+            L += activeSunColor * fp * fogInfo.scattering * fogInfo.color * E * factor;
         }
 
         E *= exp(-extinctionCoeff * tPart);
@@ -596,6 +613,7 @@ bool getCameraFrustumFogData(float3 worldPos, inout float3 hitWorldPos, inout fl
     return true;
 }
 */
+
 void getVolumetricFogScatter(
     float3 startPos, float3 endPos, inout uint randomSeed, uint sampleCount,
     inout float3 L, inout float3 attenuation, inout float3 attenuation2
@@ -608,17 +626,15 @@ void getVolumetricFogScatter(
     SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
     #endif
 
-    float3 hitWorldPos = sceneInfo.cameraPosition; float3 uvw;
-    if (pushConst.useEnvAccFog == 1) {
-        getCameraFrustumData(endPos, sceneInfo.cameraPosition, sceneInfo.viewInvMatrix, pushConst.frustumGridSize, pushConst.cameraNearPlane, 
-            pushConst.cameraFarPlane, pushConst.tanCameraFov_2, pushConst.aspectRatio, pushConst.compressionPrecision, pushConst.forwardSampleCount, hitWorldPos, uvw);
-        uint3 voxelIndex = min(uint3(uvw * pushConst.frustumGridSize), pushConst.frustumGridSize - 1);
-        attenuation = volumetricFogAttenuationImage[voxelIndex].xyz;
-        attenuation2 = volumetricFogAttenuation2Image[voxelIndex].xyz;
-        L = volumetricFogLImage[voxelIndex].xyz;
-    }
-    if (length(endPos - hitWorldPos) <= 1e-5f || sampleCount == 0) return;
-    startPos = hitWorldPos;
+    //float3 hitWorldPos = sceneInfo.cameraPosition; uint3 voxelIndex;
+    //if (pushConst.useEnvAccFog == 1) {
+    //    getCameraFrustumData(endPos, sceneInfo.cameraPosition, sceneInfo.viewInvMatrix, pushConst.frustumGridSize, pushConst.cameraNearPlane, 
+    //        pushConst.cameraFarPlane, pushConst.tanCameraFov_2, pushConst.aspectRatio, pushConst.compressionParams, pushConst.forwardSampleCount, hitWorldPos, voxelIndex);
+    //    attenuation = volumetricFogAttenuationImage[voxelIndex].xyz;
+    //    L = volumetricFogLImage[voxelIndex].xyz;
+    //}
+    //if (length(endPos - hitWorldPos) <= 1e-5f || sampleCount == 0) return;
+    //startPos = hitWorldPos;
 
     VolumetricFogInfo fogInfo;
     fogInfo.fogStartPos = { 5084.0f, -69.5f, -4486.0f };
@@ -653,8 +669,38 @@ void getVolumetricFogScatter(
         }
     }
 }
+
 //------------------------------------------------------------------------------------------------------------------------------------------------
-float4 getFrustumImageInfo(float3 worldPos, bool linear, RWTexture3D<float4> image, int forwardSampleCount) {
+/*
+float4 sampleFrustumLayer(float u, float v, int iz, uint3 gridSize, float3 gridSizeF, bool linear, RWTexture3D<float4> image) {
+    float w = (float(iz) + 0.5f) / gridSizeF.z;
+
+    if (!linear) {
+        uint3 coord = min(uint3(uint(u * gridSizeF.x), uint(v * gridSizeF.y), uint(w * gridSizeF.z)), gridSize - 1);
+        return image[coord];
+    }
+
+    float posX = u * gridSizeF.x;
+    float posY = v * gridSizeF.y;
+    posX = clamp(posX, 0.5f, gridSizeF.x - 0.5f);
+    posY = clamp(posY, 0.5f, gridSizeF.y - 0.5f);
+
+    float2 coordXY = float2(posX, posY) - 0.5f;
+    int2 baseXY = int2(floor(coordXY));
+    float2 blendXY = coordXY - float2(baseXY);
+    int2 idx0XY = baseXY;
+    int2 idx1XY = baseXY + 1;
+
+    uint3 i00 = uint3(idx0XY.x, idx0XY.y, iz);
+    uint3 i10 = uint3(idx1XY.x, idx0XY.y, iz);
+    uint3 i01 = uint3(idx0XY.x, idx1XY.y, iz);
+    uint3 i11 = uint3(idx1XY.x, idx1XY.y, iz);
+
+    float4 c0 = lerp(image[i00], image[i10], blendXY.x);
+    float4 c1 = lerp(image[i01], image[i11], blendXY.x);
+    return lerp(c0, c1, blendXY.y);
+}
+float4 getFrustumImageInfo(float3 worldPos, bool linear, bool dither, RWTexture3D<float4> image, inout uint randomSeed) {
     #ifdef COMPUTE_SHADER
     SceneInfo sceneInfo = groupSceneInfo;
     #else
@@ -663,79 +709,181 @@ float4 getFrustumImageInfo(float3 worldPos, bool linear, RWTexture3D<float4> ima
 
     float nearPlane = pushConst.cameraNearPlane;
     float farPlane = pushConst.cameraFarPlane;
-    float compressionPrecision = pushConst.compressionPrecision;
+    float3 compressionParams = pushConst.compressionParams;
+    float tanHalfFov = pushConst.tanCameraFov_2;
+    float aspect = pushConst.aspectRatio;
+    uint3 gridSize = pushConst.frustumGridSize;
+    float3 gridSizeF = float3(gridSize);
 
-    float3 hitWorldPos;
-    float3 uvw;
-    getCameraFrustumData(worldPos, sceneInfo.cameraPosition, sceneInfo.viewInvMatrix, pushConst.frustumGridSize,
-                         nearPlane, farPlane, pushConst.tanCameraFov_2,
-                         pushConst.aspectRatio, compressionPrecision, forwardSampleCount, hitWorldPos, uvw);
+    float3 cameraRight = sceneInfo.viewInvMatrix[0].xyz;
+    float3 cameraUp = sceneInfo.viewInvMatrix[1].xyz;
+    float3 cameraForward = -sceneInfo.viewInvMatrix[2].xyz;
 
-    float3 gridSize = float3(pushConst.frustumGridSize);
-    if (!linear) {
-        uint3 voxelIndex = min(uint3(uvw * gridSize), pushConst.frustumGridSize - 1);
-        return envVolumetricFogInfoImage[voxelIndex];
+    float3 toPoint = worldPos - sceneInfo.cameraPosition;
+    float viewZ = dot(toPoint, cameraForward);
+    float viewX = dot(toPoint, cameraRight);
+    float viewY = dot(toPoint, cameraUp);
+
+    if (viewZ <= 0.0f) return float4(0, 0, 0, 0);
+    if (dither) {
+        viewZ += (rand(randomSeed) * 2.0f - 1.0f) * 1.0f;
+        viewX += (rand(randomSeed) * 2.0f - 1.0f) * 1.0f;
+        viewY += (rand(randomSeed) * 2.0f - 1.0f) * 1.0f;
     }
 
-    int3 gridSizeI = int3(pushConst.frustumGridSize);
-    float2 voxelCoordXY = uvw.xy * gridSize.xy - 0.5f;
-    int2 baseIndexXY = int2(floor(voxelCoordXY));
-    int2 index0XY = clamp(baseIndexXY, int2(0, 0), gridSizeI.xy - 1);
-    int2 index1XY = clamp(baseIndexXY + 1, int2(0, 0), gridSizeI.xy - 1);
-    float2 blendXY = voxelCoordXY - floor(voxelCoordXY);
+    float clampedZ = clamp(viewZ, nearPlane, farPlane);
+    float scale = clampedZ / viewZ;
+    viewX *= scale; viewY *= scale; viewZ = clampedZ;
 
-    int voxelCoordZ = int(uvw.z * gridSize.z);
-    int voxelIndexZ = clamp(voxelCoordZ, 0, gridSizeI.z - 1);
+    float depthOffset = viewZ - nearPlane;
+    int voxelZ = int(frustumInvMap(depthOffset, compressionParams, farPlane - nearPlane) / (farPlane - nearPlane) * gridSize.z);
+    voxelZ = clamp(voxelZ, 0, int(gridSize.z) - 1);
 
-    float depth = dot(worldPos - sceneInfo.cameraPosition, -sceneInfo.viewInvMatrix[2].xyz);
-    depth = clamp(depth, nearPlane, farPlane);
+    float depth = viewZ;
 
-    float depth_0 = lerp(nearPlane, farPlane, pow(voxelIndexZ / gridSize.z, compressionPrecision));
-    float depth_1 = lerp(nearPlane, farPlane, pow((voxelIndexZ + 1) / gridSize.z, compressionPrecision));
-    float centerZ0 = (depth_0 + depth_1) * 0.5f;
+    float depth0 = nearPlane + frustumMap(float(voxelZ) / gridSizeF.z * (farPlane - nearPlane), compressionParams, farPlane - nearPlane);
+    float depth1 = nearPlane + frustumMap(float(voxelZ + 1) / gridSizeF.z * (farPlane - nearPlane), compressionParams, farPlane - nearPlane);
+    float centerZ = (depth0 + depth1) * 0.5f;
 
+    int z0 = voxelZ, z1 = voxelZ;
     float blendZ = 0.0f;
-    int voxelIndexZ0 = voxelIndexZ, voxelIndexZ1 = voxelIndexZ;
-    if (depth == centerZ0) {}
-    else if (depth < centerZ0) {
-        if (voxelIndexZ > 0) {
-            voxelIndexZ0 = voxelIndexZ -1;
-            float depth2 = lerp(nearPlane, farPlane, pow((voxelIndexZ - 1) / gridSize.z, compressionPrecision));
-            float centerZ1 = (depth_0 + depth2) * 0.5f;
-            blendZ = (depth - centerZ1) / (centerZ0 - centerZ1);
-        }
-    } else {
-        if (voxelIndexZ < gridSize.z - 1) {
-            voxelIndexZ1 = voxelIndexZ + 1;
-            float depth2 = lerp(nearPlane, farPlane, pow((voxelIndexZ + 2) / gridSize.z, compressionPrecision));
-            float centerZ1 = (depth_1 + depth2) * 0.5f;
-            blendZ = (depth - centerZ0) / (centerZ1 - centerZ0);
-        }
+    if (depth < centerZ && voxelZ > 0) {
+        z0 = voxelZ - 1; z1 = voxelZ;
+        float dPrev = nearPlane + frustumMap(float(z0) / gridSizeF.z * (farPlane - nearPlane), compressionParams, farPlane - nearPlane);
+        float centerPrev = (dPrev + depth0) * 0.5f;
+        blendZ = (depth - centerPrev) / (centerZ - centerPrev);
+    } else if (depth > centerZ && voxelZ < int(gridSize.z) - 1) {
+        z1 = voxelZ + 1;
+        float dNext = nearPlane + frustumMap(float(z1 + 1) / gridSizeF.z * (farPlane - nearPlane), compressionParams, farPlane - nearPlane);
+        float centerNext = (depth1 + dNext) * 0.5f;
+        blendZ = (depth - centerZ) / (centerNext - centerZ);
     }
+    //if (dither) {
+    //    float randomNumber = rand(randomSeed) * 2.0f - 1.0f;
+    //    blendZ = clamp(blendZ + randomNumber * 0.5f, 0.0f, 1.0f);
+    //}
 
-    uint3 i000 = uint3(index0XY.x, index0XY.y, voxelIndexZ0);
-    uint3 i100 = uint3(index1XY.x, index0XY.y, voxelIndexZ0);
-    uint3 i010 = uint3(index0XY.x, index1XY.y, voxelIndexZ0);
-    uint3 i110 = uint3(index1XY.x, index1XY.y, voxelIndexZ0);
-    float4 c00 = lerp(image[i000], image[i100], blendXY.x);
-    float4 c10 = lerp(image[i010], image[i110], blendXY.x);
-
-    float4 c01 = c00, c11 = c10;
-    if (depth != centerZ0) {
-        uint3 i001 = uint3(index0XY.x, index0XY.y, voxelIndexZ1);
-        uint3 i101 = uint3(index1XY.x, index0XY.y, voxelIndexZ1);
-        uint3 i011 = uint3(index0XY.x, index1XY.y, voxelIndexZ1);
-        uint3 i111 = uint3(index1XY.x, index1XY.y, voxelIndexZ1);
-        c01 = lerp(image[i001], image[i101], blendXY.x);
-        c11 = lerp(image[i011], image[i111], blendXY.x);
-    }
-
-    float4 c0 = lerp(c00, c10, blendXY.y);
-    float4 c1 = lerp(c01, c11, blendXY.y);
-    return lerp(c0, c1, blendZ);
+    float4 s0 = sampleFrustumLayer(viewX, viewY, depth, z0, gridSize, gridSizeF, nearPlane, farPlane, compressionParams, tanHalfFov, aspect, linear, image);
+    if (!linear || depth == centerZ) return s0;
+    float4 s1 = sampleFrustumLayer(viewX, viewY, depth, z1, gridSize, gridSizeF, nearPlane, farPlane, compressionParams, tanHalfFov, aspect, linear, image);
+    return lerp(s0, s1, blendZ);
 }
+*/
+float4 sampleFrustumLayer(float viewX, float viewY, float depth, int iz, uint3 gridSize, float3 gridSizeF, float nearPlane, float farPlane, float3 compressionParams, float tanHalfFov, float aspect, bool linear, RWTexture3D<float4> image) {
+    float d0 = nearPlane + frustumMap(float(iz) / gridSizeF.z * (farPlane - nearPlane), compressionParams, farPlane - nearPlane);
+    float d1 = nearPlane + frustumMap(float(iz + 1) / gridSizeF.z * (farPlane - nearPlane), compressionParams, farPlane - nearPlane);
+    float d = (d0 + d1) * 0.5f;
+
+    float s = d / depth;
+    float u = (viewX * s / (d * tanHalfFov * aspect) + 1.0f) * 0.5f;
+    float v = (viewY * s / (d * tanHalfFov) + 1.0f) * 0.5f;
+    float w = (float(iz) + 0.5f) / gridSizeF.z;
+
+    if (!linear) {
+        uint3 coord = min(uint3(uint(u * gridSizeF.x), uint(v * gridSizeF.y), uint(w * gridSizeF.z)), gridSize - 1);
+        return image[coord];
+    }
+
+    float2 coordXY = float2(u * gridSizeF.x, v * gridSizeF.y) - 0.5f;
+    int2 baseXY = int2(floor(coordXY));
+    int2 idx0XY = clamp(baseXY, int2(0, 0), int2(gridSize.xy) - 1);
+    int2 idx1XY = clamp(baseXY + 1, int2(0, 0), int2(gridSize.xy) - 1);
+    float2 blendXY = coordXY - floor(coordXY);
+
+    uint3 i00 = uint3(idx0XY.x, idx0XY.y, iz);
+    uint3 i10 = uint3(idx1XY.x, idx0XY.y, iz);
+    uint3 i01 = uint3(idx0XY.x, idx1XY.y, iz);
+    uint3 i11 = uint3(idx1XY.x, idx1XY.y, iz);
+
+    float4 c0 = lerp(image[i00], image[i10], blendXY.x);
+    float4 c1 = lerp(image[i01], image[i11], blendXY.x);
+    return lerp(c0, c1, blendXY.y);
+}
+float4 getFrustumImageInfo(float3 worldPos, bool linear, bool dither, Sampler3D<float4> image, inout uint randomSeed) {
+    #ifdef COMPUTE_SHADER
+    SceneInfo sceneInfo = groupSceneInfo;
+    #else
+    SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+    #endif
+
+    float nearPlane = pushConst.cameraNearPlane;
+    float farPlane = pushConst.cameraFarPlane;
+    float3 compressionParams = pushConst.compressionParams;
+    float tanHalfFov = pushConst.tanCameraFov_2;
+    float aspect = pushConst.aspectRatio;
+    uint3 gridSize = pushConst.frustumGridSize;
+    float3 gridSizeF = float3(gridSize);
+
+    float3 cameraRight = sceneInfo.viewInvMatrix[0].xyz;
+    float3 cameraUp = sceneInfo.viewInvMatrix[1].xyz;
+    float3 cameraForward = -sceneInfo.viewInvMatrix[2].xyz;
+
+    float3 toPoint = worldPos - sceneInfo.cameraPosition;
+    float viewZ = dot(toPoint, cameraForward);
+    float viewX = dot(toPoint, cameraRight);
+    float viewY = dot(toPoint, cameraUp);
+    if (viewZ <= 0.0f) return float4(0, 0, 0, 0);
+    if (dither) {
+        float strength = pushConst.jitterStrength; // * frustumMap(viewZ, compressionParams, farPlane - nearPlane);// * lerp(1.0f, 2.0f, length(pushConst.cameraMoveDir));
+        viewZ += (rand(randomSeed) * 2.0f - 1.0f) * strength;
+        viewX += (rand(randomSeed) * 2.0f - 1.0f) * strength;
+        viewY += (rand(randomSeed) * 2.0f - 1.0f) * strength;
+    }
+
+    float clampedZ = clamp(viewZ, nearPlane, farPlane);
+    float scale = clampedZ / viewZ;
+    viewX *= scale; viewY *= scale; viewZ = clampedZ;
+
+    float halfHeight = viewZ * tanHalfFov;
+    float halfWidth = halfHeight * aspect;
+    float u = viewX / halfWidth * 0.5f + 0.5f;
+    float v = viewY / halfHeight * 0.5f + 0.5f;
+    float w = frustumInvMap(viewZ - nearPlane, compressionParams, farPlane - nearPlane) / (farPlane - nearPlane);
+    return image.SampleLevel(float3(u, v, w), 0);
+
+    /*
+    float depth = viewZ;
+    float depth0 = nearPlane + frustumMap(float(voxelZ) / gridSizeF.z * (farPlane - nearPlane), compressionParams, farPlane - nearPlane);
+    float depth1 = nearPlane + frustumMap(float(voxelZ + 1) / gridSizeF.z * (farPlane - nearPlane), compressionParams, farPlane - nearPlane);
+    float centerZ = (depth0 + depth1) * 0.5f;
+
+    int z0 = voxelZ, z1 = voxelZ;
+    //float depthZ0, depthZ1;
+    float blendZ = 0.0f;
+    if (depth < centerZ && voxelZ > 0) {
+        z0 = voxelZ - 1; z1 = voxelZ;
+        float dPrev = nearPlane + frustumMap(float(z0) / gridSizeF.z * (farPlane - nearPlane), compressionParams, farPlane - nearPlane);
+        float centerPrev = (dPrev + depth0) * 0.5f;
+        blendZ = (depth - centerPrev) / (centerZ - centerPrev);
+
+        //depthZ0 = centerPrev; depthZ1 = centerZ;
+    } else if (depth > centerZ && voxelZ < int(gridSize.z) - 1) {
+        z1 = voxelZ + 1;
+        float dNext = nearPlane + frustumMap(float(z1 + 1) / gridSizeF.z * (farPlane - nearPlane), compressionParams, farPlane - nearPlane);
+        float centerNext = (depth1 + dNext) * 0.5f;
+        blendZ = (depth - centerZ) / (centerNext - centerZ);
+
+        //depthZ0 = centerZ; depthZ1 = centerNext;
+    }
+
+    // float halfHeight = depthZ0 * tanHalfFov;
+    // float halfWidth = halfHeight * aspect;
+    // float u = viewX / halfWidth * 0.5f + 0.5f;
+    // float v = viewY / halfHeight * 0.5f + 0.5f;
+    float4 s0 = sampleFrustumLayer(viewX, viewY, depth, z0, gridSize, gridSizeF, nearPlane, farPlane, compressionParams, tanHalfFov, aspect, linear, image);
+    if (!linear || depth == centerZ) return s0;
+
+    // halfHeight = depthZ1 * tanHalfFov;
+    // halfWidth = halfHeight * aspect;
+    // u = viewX / halfWidth * 0.5f + 0.5f;
+    // v = viewY / halfHeight * 0.5f + 0.5f;
+    float4 s1 = sampleFrustumLayer(viewX, viewY, depth, z1, gridSize, gridSizeF, nearPlane, farPlane, compressionParams, tanHalfFov, aspect, linear, image);
+    return lerp(s0, s1, blendZ);
+    */
+}
+
 void getEnvVolumetricFogScatter(
-    float3 startPos, float3 endPos, inout uint randomSeed,
+    float3 startPos, float3 endPos, inout uint randomSeed, bool rayMarching,
     inout float3 L, inout float3 attenuation, inout float3 attenuation2
 ) {
     #ifdef COMPUTE_SHADER
@@ -745,31 +893,50 @@ void getEnvVolumetricFogScatter(
     GlobalInfo_VolumetricFog globalInfo = globalInfoBuffer[0];
     SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
     #endif
+    float3 dir = normalize(endPos - startPos);
+
     float3 cameraPos = sceneInfo.cameraPosition;
     float3 cameraForward = -sceneInfo.viewInvMatrix[2].xyz;
     float3 cameraRight = sceneInfo.viewInvMatrix[0].xyz;
     float3 cameraUp = sceneInfo.viewInvMatrix[1].xyz;
 
-    float tEntry, tExit;
-    if (!IntersectFrustum(startPos, endPos, cameraPos, cameraForward, cameraRight, cameraUp, pushConst.tanCameraFov_2, pushConst.aspectRatio, pushConst.cameraNearPlane, pushConst.cameraFarPlane, tEntry, tExit)) return;
-    float tTotal = tExit - tEntry;
-    float3 dir = normalize(endPos - startPos);
-    startPos = startPos + tEntry * dir;
-    endPos = startPos + tTotal * dir;
+    float nearPlane = pushConst.cameraNearPlane;
+    float farPlane = pushConst.cameraFarPlane;
+    float tanHalfFov = pushConst.tanCameraFov_2;
+    float aspect = pushConst.aspectRatio;
+    float3 compressionPrecision = pushConst.compressionParams;
 
-    float3 hitWorldPos = startPos; float3 uvw;
+    float3 hitWorldPos = startPos;
     if (pushConst.useEnvAccFog == 1) {
-        getCameraFrustumData(endPos, cameraPos, sceneInfo.viewInvMatrix, pushConst.frustumGridSize, pushConst.cameraNearPlane, 
-            pushConst.cameraFarPlane, pushConst.tanCameraFov_2, pushConst.aspectRatio, pushConst.compressionPrecision, pushConst.forwardSampleCount, hitWorldPos, uvw);
-        uint3 voxelIndex = min(uint3(uvw * pushConst.frustumGridSize), pushConst.frustumGridSize - 1);
-        attenuation = volumetricFogAttenuationImage[voxelIndex].xyz;
-        attenuation2 = volumetricFogAttenuation2Image[voxelIndex].xyz;
-        L = getFrustumImageInfo(endPos, true, volumetricFogLImage, pushConst.forwardSampleCount).xyz;
+        hitWorldPos = getCameraFrustumInteralPos(endPos, cameraPos, sceneInfo.viewInvMatrix, pushConst.frustumGridSize, nearPlane,
+            farPlane, tanHalfFov, aspect, pushConst.forwardSampleCount);
+        attenuation *= getFrustumImageInfo(hitWorldPos, true, true, volumetricFogAttenuationImage_sample, randomSeed).xyz;
+        L += getFrustumImageInfo(hitWorldPos, true, true, volumetricFogLImage_sample, randomSeed).xyz;
     }
-    if (length(endPos - hitWorldPos) <= 1e-5f || pushConst.sampleCount == 0) return;
+    if (length(endPos - hitWorldPos) <= 1e-5f || !rayMarching) return;
     startPos = hitWorldPos;
-    tTotal = distance(startPos, endPos);
+#ifdef Uniform_EnvFog_Grid
+    float3 gridMin = globalInfo.envStartPos;
+    float3 gridMax = globalInfo.envStartPos + float3(globalInfo.envGridSize) * globalInfo.envVoxelSize;
 
+    float tGridEnter, tGridExit;
+    if (!isHit(startPos, endPos, gridMin, gridMax, tGridEnter, tGridExit)) return;
+    endPos = startPos + tGridExit * dir;
+    startPos = startPos + tGridEnter * dir;
+
+    {
+        float tLightEnter, tLightExit;
+        float3 mainLightDir = sceneInfo.lights[0].direction;
+        float3 lightStart = endPos - mainLightDir * 1000.0f;
+        float mainLightDt = 1e-6f;
+        if (isHit(lightStart, endPos, gridMin, gridMax, tLightEnter, tLightExit))
+            mainLightDt = tLightExit - tLightEnter;
+        float attenuationLength = max(globalInfo.envFogLightAttenuationLength, 1e-6f);
+        float attenuationRatio = max(mainLightDt / attenuationLength, 0.0f);
+        float lightAttenuation = pow(max(globalInfo.envFogLightAttenuationEstimator, 1e-6f), attenuationRatio);
+        attenuation2 *= lightAttenuation * pushConst.lightAttenuationStrength;
+    }
+    float tTotal = tGridExit - tGridEnter;
     float3 E = 1.0f;
     float tPart = tTotal / pushConst.sampleCount;
     for (int sampleIndex = 0; sampleIndex < pushConst.sampleCount; ++sampleIndex) {
@@ -777,7 +944,8 @@ void getEnvVolumetricFogScatter(
         float tSample = tPart * ((float)sampleIndex + step);
         float3 samplePoint = startPos + dir * tSample;
 
-        float4 voxelInfo = getFrustumImageInfo(samplePoint, true, envVolumetricFogInfoImage, 0);
+        float3 uvw = (samplePoint - gridMin + 0.5f) / (gridMax - gridMin);
+        float4 voxelInfo = envVolumetricFogInfoImage_sample.SampleLevel(uvw, 0);
         float extinctionCoeff = max(voxelInfo.x, 1e-30f);
         float scattering = voxelInfo.y;
         float phase = voxelInfo.z;
@@ -809,23 +977,434 @@ void getEnvVolumetricFogScatter(
             float3 activeSunColor = lightColor * lightAttenuation * pushConst.lightAttenuationStrength;
             if (lightIndex == 0) activeSunColor *= getShadow(float4(samplePoint, 1.0f));
 
-            L += activeSunColor * fp * scattering * color * E / extinctionCoeff * (1.0f - exp(-extinctionCoeff * tPart));
+            float x = extinctionCoeff * tPart;
+            float factor = (x < 1e-4) ? tPart * (1.0 - 0.5 * x) : (1.0 - exp(-x)) / extinctionCoeff;
+            L += activeSunColor * fp * scattering * color * E * factor;
         }
 
         E *= exp(-extinctionCoeff * tPart);
         if (all(E <= 1e-3f)) break;
     }
     attenuation *= E;
+#else
+    float tEnter, tExit;
+    if(!IntersectFrustum(startPos, endPos, cameraPos, cameraForward, cameraRight, cameraUp, tanHalfFov, aspect, nearPlane, farPlane, tEnter, tExit)) return;
+    endPos = startPos + tExit * dir;
+    startPos = startPos + tEnter * dir;
 
-    float tLightEnter, tLightExit;
-    float3 mainLightDir = sceneInfo.lights[0].direction;
-    float mainLightDt = 1e-6f;
-    if (IntersectFrustum(endPos - mainLightDir * 1000.0f, endPos, cameraPos, cameraForward, cameraRight, cameraUp, pushConst.tanCameraFov_2, pushConst.aspectRatio, pushConst.cameraNearPlane, pushConst.cameraFarPlane, tLightEnter, tLightExit))
-        mainLightDt = tLightExit - tLightEnter;
-    float attenuationLength = max(globalInfo.envFogLightAttenuationLength, 1e-6f);
-    float attenuationRatio = max(mainLightDt / attenuationLength, 0.0f);
-    float lightAttenuation = pow(max(globalInfo.envFogLightAttenuationEstimator, 1e-6f), attenuationRatio);
-    attenuation2 *= lightAttenuation * pushConst.lightAttenuationStrength;
+    {
+        float tLightEnter, tLightExit;
+        float3 mainLightDir = sceneInfo.lights[0].direction;
+        float mainLightDt = 1e-6f;
+        if (IntersectFrustum(endPos - mainLightDir * 1000.0f, endPos, cameraPos, cameraForward, cameraRight, cameraUp, tanHalfFov, aspect, nearPlane, farPlane, tLightEnter, tLightExit))
+            mainLightDt = tLightExit - tLightEnter;
+        float attenuationLength = max(globalInfo.envFogLightAttenuationLength, 1e-6f);
+        float attenuationRatio = max(mainLightDt / attenuationLength, 0.0f);
+        float lightAttenuation = pow(max(globalInfo.envFogLightAttenuationEstimator, 1e-6f), attenuationRatio);
+        attenuation2 *= lightAttenuation * pushConst.lightAttenuationStrength;
+    }
+
+    float tTotal = tExit - tEnter;
+    float3 E = 1.0f;
+    float tPart = tTotal / pushConst.sampleCount;
+    for (int sampleIndex = 0; sampleIndex < pushConst.sampleCount; ++sampleIndex) {
+        float step = pushConst.randomStepping == 1 ? rand(randomSeed) : 0.5f;
+        float tSample = tPart * ((float)sampleIndex + step);
+        float3 samplePoint = startPos + dir * tSample;
+
+        float4 voxelInfo = getFrustumImageInfo(samplePoint, true, false, envVolumetricFogInfoImage_sample, randomSeed);
+        float extinctionCoeff = max(voxelInfo.x, 1e-30f);
+        float scattering = voxelInfo.y;
+        float phase = voxelInfo.z;
+        float phase2 = phase * phase;
+        float3 color = voxelInfo.w;
+
+        for (int lightIndex = 0; lightIndex < sceneInfo.numLights; ++lightIndex) {
+            Light light = sceneInfo.lights[lightIndex];
+            float3 lightColor = light.color * light.intensity;
+            float3 lightDirection; float3 lightPos;
+            if (light.type == LightType::Direction) {
+                lightDirection = -light.direction;
+                lightPos = samplePoint + 1000.0f * lightDirection;
+            } else if (light.type == LightType::Point) {
+                lightDirection = normalize(light.pos - samplePoint);
+                lightPos = light.pos;
+            }
+
+            float fp = (1.0f - phase2) / (4.0f * M_PI * pow((1 + phase2 - 2.0f * phase * dot(-dir, lightDirection)), 1.5f));
+
+            float tLightEnter, tLightExit;
+            float lightDt = 1e-6f;
+            if (IntersectFrustum(lightPos, samplePoint, cameraPos, cameraForward, cameraRight, cameraUp, pushConst.tanCameraFov_2, pushConst.aspectRatio, pushConst.cameraNearPlane, pushConst.cameraFarPlane, tLightEnter, tLightExit))
+                lightDt = tLightExit - tLightEnter;
+
+            float attenuationLength = max(globalInfo.envFogLightAttenuationLength, 1e-6f);
+            float attenuationRatio = max(lightDt / attenuationLength, 0.0f);
+            float lightAttenuation = pow(max(globalInfo.envFogLightAttenuationEstimator, 1e-6f), attenuationRatio);
+            float3 activeSunColor = lightColor * lightAttenuation * pushConst.lightAttenuationStrength;
+            if (lightIndex == 0) activeSunColor *= getShadow(float4(samplePoint, 1.0f));
+
+            float x = extinctionCoeff * tPart;
+            float factor = (x < 1e-4) ? tPart * (1.0 - 0.5 * x) : (1.0 - exp(-x)) / extinctionCoeff;
+            L += activeSunColor * fp * scattering * color * E * factor;
+        }
+
+        E *= exp(-extinctionCoeff * tPart);
+        if (all(E <= 1e-3f)) break;
+    }
+    attenuation *= E;
+#endif
+}
+
+void getEnvVolumetricFogScatter_DDA(
+    float3 startPos, float3 endPos, inout uint randomSeed, bool rayMarching,
+    inout float3 L, inout float3 attenuation, inout float3 attenuation2
+) {
+    #ifdef COMPUTE_SHADER
+    GlobalInfo_VolumetricFog globalInfo = groupGlobalInfo;
+    SceneInfo sceneInfo = groupSceneInfo;
+    #else
+    GlobalInfo_VolumetricFog globalInfo = globalInfoBuffer[0];
+    SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+    #endif
+    float3 dir = normalize(endPos - startPos);
+
+    float3 cameraPos = sceneInfo.cameraPosition;
+    float3 cameraForward = -sceneInfo.viewInvMatrix[2].xyz;
+    float3 cameraRight = sceneInfo.viewInvMatrix[0].xyz;
+    float3 cameraUp = sceneInfo.viewInvMatrix[1].xyz;
+
+    float nearPlane = pushConst.cameraNearPlane;
+    float farPlane = pushConst.cameraFarPlane;
+    float tanHalfFov = pushConst.tanCameraFov_2;
+    float aspect = pushConst.aspectRatio;
+    float3 compressionParams = pushConst.compressionParams;
+
+    float3 hitWorldPos = startPos;
+    if (pushConst.useEnvAccFog == 1) {
+        hitWorldPos = getCameraFrustumInteralPos(endPos, cameraPos, sceneInfo.viewInvMatrix, pushConst.frustumGridSize, nearPlane,
+            farPlane, tanHalfFov, aspect, pushConst.forwardSampleCount);
+        attenuation *= getFrustumImageInfo(hitWorldPos, true, true, volumetricFogAttenuationImage_sample, randomSeed).xyz;
+        L += getFrustumImageInfo(hitWorldPos, true, true, volumetricFogLImage_sample, randomSeed).xyz;
+    }
+    if (length(endPos - hitWorldPos) <= 1e-5f || !rayMarching) return;
+    startPos = hitWorldPos;
+#ifdef Uniform_EnvFog_Grid
+    float3 gridMin = globalInfo.envStartPos;
+    float3 gridMax = globalInfo.envStartPos + float3(globalInfo.envGridSize) * globalInfo.envVoxelSize;
+
+    float tGridEnter, tGridExit;
+    if (!isHit(startPos, endPos, gridMin, gridMax, tGridEnter, tGridExit)) return;
+    endPos = startPos + tGridExit * dir;
+    startPos = startPos + tGridEnter * dir;
+
+    {
+        float tLightEnter, tLightExit;
+        float3 mainLightDir = sceneInfo.lights[0].direction;
+        float3 lightStart = endPos - mainLightDir * 1000.0f;
+        float mainLightDt = 1e-6f;
+        if (isHit(lightStart, endPos, gridMin, gridMax, tLightEnter, tLightExit))
+            mainLightDt = tLightExit - tLightEnter;
+        float attenuationLength = max(globalInfo.envFogLightAttenuationLength, 1e-6f);
+        float attenuationRatio = max(mainLightDt / attenuationLength, 0.0f);
+        float lightAttenuation = pow(max(globalInfo.envFogLightAttenuationEstimator, 1e-6f), attenuationRatio);
+        attenuation2 *= lightAttenuation * pushConst.lightAttenuationStrength;
+    }
+
+    float3 uvwStart = (startPos - gridMin) / (gridMax - gridMin);
+    float3 uvwEnd = (endPos - gridMin) / (gridMax - gridMin);
+    float3 uvwDir = uvwEnd - uvwStart;
+    float uvwDist = length(uvwDir);
+    if (uvwDist < 1e-8) return;
+
+    int3 gridSize = int3(globalInfo.envGridSize);
+    float3 voxelSize = 1.0 / float3(gridSize);
+
+    int3 voxel = int3(floor(uvwStart * float3(gridSize)));
+    voxel = clamp(voxel, int3(0, 0, 0), gridSize - 1);
+
+    int3 step;
+    step.x = (uvwDir.x > 0.0) ? 1 : ((uvwDir.x < 0.0) ? -1 : 0);
+    step.y = (uvwDir.y > 0.0) ? 1 : ((uvwDir.y < 0.0) ? -1 : 0);
+    step.z = (uvwDir.z > 0.0) ? 1 : ((uvwDir.z < 0.0) ? -1 : 0);
+
+    float3 tDelta;
+    tDelta.x = (step.x != 0) ? voxelSize.x / abs(uvwDir.x) : 1e30;
+    tDelta.y = (step.y != 0) ? voxelSize.y / abs(uvwDir.y) : 1e30;
+    tDelta.z = (step.z != 0) ? voxelSize.z / abs(uvwDir.z) : 1e30;
+
+    float3 voxelBorder;
+    voxelBorder.x = (step.x > 0) ? (voxel.x + 1) * voxelSize.x : voxel.x * voxelSize.x;
+    voxelBorder.y = (step.y > 0) ? (voxel.y + 1) * voxelSize.y : voxel.y * voxelSize.y;
+    voxelBorder.z = (step.z > 0) ? (voxel.z + 1) * voxelSize.z : voxel.z * voxelSize.z;
+
+    float3 tMax;
+    tMax.x = (step.x != 0) ? (voxelBorder.x - uvwStart.x) / uvwDir.x : 1e30;
+    tMax.y = (step.y != 0) ? (voxelBorder.y - uvwStart.y) / uvwDir.y : 1e30;
+    tMax.z = (step.z != 0) ? (voxelBorder.z - uvwStart.z) / uvwDir.z : 1e30;
+
+    if (step.x != 0 && tMax.x < 0.0) tMax.x += tDelta.x;
+    if (step.y != 0 && tMax.y < 0.0) tMax.y += tDelta.y;
+    if (step.z != 0 && tMax.z < 0.0) tMax.z += tDelta.z;
+
+    float tCurrent = 0.0;
+
+    int maxIter = gridSize.x + gridSize.y + gridSize.z;
+    for (int i = 0; i < maxIter; i++) {
+        if (any(voxel < 0) || any(voxel >= gridSize)) break;
+
+        float tNext = min(min(tMax.x, tMax.y), tMax.z);
+        tNext = min(tNext, 1.0);
+        float tSegUVW = tNext - tCurrent;
+
+        if (tSegUVW > 0.0) {
+            float3 uvwEntry = uvwStart + tCurrent * uvwDir;
+            float3 uvwExit = uvwStart + tNext * uvwDir;
+
+            float jitter = pushConst.randomStepping == 1 ? rand(randomSeed) : 0.5;
+            float3 uvwJitter = uvwEntry + jitter * (uvwExit - uvwEntry);
+
+            float3 worldEntry = gridMin + uvwEntry * (gridMax - gridMin);
+            float3 worldExit = gridMin + uvwExit * (gridMax - gridMin);
+            float3 worldJitter = gridMin + uvwJitter * (gridMax - gridMin);
+            float tJitter = dot(worldJitter - startPos, dir);
+            float3 samplePoint = startPos + dir * tJitter;
+
+            float tWorldEntry = dot(worldEntry - startPos, dir);
+            float tWorldExit = dot(worldExit - startPos, dir);
+            float worldDt = max(tWorldExit - tWorldEntry, 1e-8f);
+
+            float3 uvwSample = (samplePoint - gridMin + 0.5f) / (gridMax - gridMin);
+            uint3 voxelIndex = clamp(uint3(uvwSample * gridSize), 0, gridSize - 1);
+            float4 voxelInfo = envVolumetricFogInfoImage_sample.SampleLevel(uvwSample, 0);
+
+            float extinctionCoeff = max(voxelInfo.x, 1e-30f);
+            float scattering = voxelInfo.y;
+            float phase = voxelInfo.z;
+            float phase2 = phase * phase;
+            float3 color = voxelInfo.w;
+
+            for (int lightIndex = 0; lightIndex < sceneInfo.numLights; ++lightIndex) {
+                Light light = sceneInfo.lights[lightIndex];
+                float3 lightColor = light.color * light.intensity;
+                float3 lightDirection; float3 lightPos;
+                if (light.type == LightType::Direction) {
+                    lightDirection = -light.direction;
+                    lightPos = samplePoint + 1000.0f * lightDirection;
+                } else if (light.type == LightType::Point) {
+                    lightDirection = normalize(light.pos - samplePoint);
+                    lightPos = light.pos;
+                }
+
+                float fp = (1.0f - phase2) / (4.0f * M_PI * pow((1 + phase2 - 2.0f * phase * dot(-dir, lightDirection)), 1.5f));
+
+                float tLightEnter, tLightExit;
+                float lightDt = 1e-6f;
+                if (isHit(lightPos, samplePoint, gridMin, gridMax, tLightEnter, tLightExit))
+                    lightDt = tLightExit - tLightEnter;
+
+                float attenuationLength = max(globalInfo.envFogLightAttenuationLength, 1e-6f);
+                float attenuationRatio = max(lightDt / attenuationLength, 0.0f);
+                float lightAttenuation = pow(max(globalInfo.envFogLightAttenuationEstimator, 1e-6f), attenuationRatio);
+                float3 activeSunColor = lightColor * lightAttenuation * pushConst.lightAttenuationStrength;
+                if (lightIndex == 0) activeSunColor *= getShadow(float4(samplePoint, 1.0f));
+
+                float x = extinctionCoeff * worldDt;
+                float factor = (x < 1e-4) ? worldDt * (1.0 - 0.5 * x) : (1.0 - exp(-x)) / extinctionCoeff;
+                L += activeSunColor * fp * scattering * color * attenuation * factor;
+            }
+
+            attenuation *= exp(-extinctionCoeff * worldDt);
+            if (all(attenuation <= 1e-3f)) break;
+        }
+
+        tCurrent = tNext;
+        if (tCurrent >= 1.0 - 1e-6) break;
+
+        float axisEpsilon = 1e-6f;
+        if (tMax.x <= tNext + axisEpsilon) {
+            voxel.x += step.x;
+            tMax.x += tDelta.x;
+        }
+        if (tMax.y <= tNext + axisEpsilon) {
+            voxel.y += step.y;
+            tMax.y += tDelta.y;
+        }
+        if (tMax.z <= tNext + axisEpsilon) {
+            voxel.z += step.z;
+            tMax.z += tDelta.z;
+        }
+    }
+#else
+    float tEntry, tExit;
+    if (!IntersectFrustum(startPos, endPos, cameraPos, cameraForward, cameraRight, cameraUp, tanHalfFov, aspect, nearPlane, farPlane, tEntry, tExit)) return;
+    float tTotal = tExit - tEntry;
+    startPos = startPos + tEntry * dir;
+    endPos = startPos + tTotal * dir;
+
+    {
+        float tLightEnter, tLightExit;
+        float3 mainLightDir = sceneInfo.lights[0].direction;
+        float mainLightDt = 1e-6f;
+        if (IntersectFrustum(endPos - mainLightDir * 1000.0f, endPos, cameraPos, cameraForward, cameraRight, cameraUp, tanHalfFov, aspect, nearPlane, farPlane, tLightEnter, tLightExit))
+            mainLightDt = tLightExit - tLightEnter;
+        float attenuationLength = max(globalInfo.envFogLightAttenuationLength, 1e-6f);
+        float attenuationRatio = max(mainLightDt / attenuationLength, 0.0f);
+        float lightAttenuation = pow(max(globalInfo.envFogLightAttenuationEstimator, 1e-6f), attenuationRatio);
+        attenuation2 *= lightAttenuation * pushConst.lightAttenuationStrength;
+    }
+
+    float3 toStart = startPos - cameraPos;
+    float depthS = dot(toStart, cameraForward);
+    float vxS = dot(toStart, cameraRight);
+    float vyS = dot(toStart, cameraUp);
+    float halfWS = depthS * tanHalfFov * aspect;
+    float halfHS = depthS * tanHalfFov;
+    float3 uvwStart;
+    uvwStart.z = frustumInvMap(depthS - nearPlane, compressionParams, farPlane - nearPlane) / (farPlane - nearPlane);
+    uvwStart.x = saturate((vxS / max(halfWS, 1e-8f) + 1.0) * 0.5);
+    uvwStart.y = saturate((vyS / max(halfHS, 1e-8f) + 1.0) * 0.5);
+
+    float3 toEnd = endPos - cameraPos;
+    float depthE = dot(toEnd, cameraForward);
+    float vxE = dot(toEnd, cameraRight);
+    float vyE = dot(toEnd, cameraUp);
+    float halfWE = depthE * tanHalfFov * aspect;
+    float halfHE = depthE * tanHalfFov;
+    float3 uvwEnd;
+    uvwEnd.z = frustumInvMap(depthE - nearPlane, compressionParams, farPlane - nearPlane) / (farPlane - nearPlane);
+    uvwEnd.x = saturate((vxE / max(halfWE, 1e-8f) + 1.0) * 0.5);
+    uvwEnd.y = saturate((vyE / max(halfHE, 1e-8f) + 1.0) * 0.5);
+
+    float3 uvwDir = uvwEnd - uvwStart;
+    float uvwDist = length(uvwDir);
+    if (uvwDist < 1e-8) return;
+
+    int3 gridSize = int3(pushConst.frustumGridSize);
+    float3 voxelSize = 1.0 / float3(gridSize);
+
+    int3 voxel = int3(floor(uvwStart * float3(gridSize)));
+    voxel = clamp(voxel, int3(0, 0, 0), gridSize - 1);
+
+    int3 step;
+    step.x = (uvwDir.x > 0.0) ? 1 : ((uvwDir.x < 0.0) ? -1 : 0);
+    step.y = (uvwDir.y > 0.0) ? 1 : ((uvwDir.y < 0.0) ? -1 : 0);
+    step.z = (uvwDir.z > 0.0) ? 1 : ((uvwDir.z < 0.0) ? -1 : 0);
+
+    float3 tDelta;
+    tDelta.x = (step.x != 0) ? voxelSize.x / abs(uvwDir.x) : 1e30;
+    tDelta.y = (step.y != 0) ? voxelSize.y / abs(uvwDir.y) : 1e30;
+    tDelta.z = (step.z != 0) ? voxelSize.z / abs(uvwDir.z) : 1e30;
+
+    float3 voxelBorder;
+    voxelBorder.x = (step.x > 0) ? (voxel.x + 1) * voxelSize.x : voxel.x * voxelSize.x;
+    voxelBorder.y = (step.y > 0) ? (voxel.y + 1) * voxelSize.y : voxel.y * voxelSize.y;
+    voxelBorder.z = (step.z > 0) ? (voxel.z + 1) * voxelSize.z : voxel.z * voxelSize.z;
+
+    float3 tMax;
+    tMax.x = (step.x != 0) ? (voxelBorder.x - uvwStart.x) / uvwDir.x : 1e30;
+    tMax.y = (step.y != 0) ? (voxelBorder.y - uvwStart.y) / uvwDir.y : 1e30;
+    tMax.z = (step.z != 0) ? (voxelBorder.z - uvwStart.z) / uvwDir.z : 1e30;
+
+    if (step.x != 0 && tMax.x < 0.0) tMax.x += tDelta.x;
+    if (step.y != 0 && tMax.y < 0.0) tMax.y += tDelta.y;
+    if (step.z != 0 && tMax.z < 0.0) tMax.z += tDelta.z;
+
+    float tCurrent = 0.0;
+    int maxIter = gridSize.x + gridSize.y + gridSize.z;
+    for (int i = 0; i < maxIter; i++) {
+        if (any(voxel < 0) || any(voxel >= gridSize)) break;
+
+        float tNext = min(min(tMax.x, tMax.y), tMax.z);
+        tNext = min(tNext, 1.0);
+        float tSegUVW = tNext - tCurrent;
+
+        if (tSegUVW > 0.0) {
+            float3 uvwEntry = uvwStart + tCurrent * uvwDir;
+            float3 uvwExit = uvwStart + tNext * uvwDir;
+
+            float jitter = pushConst.randomStepping == 1 ? rand(randomSeed) : 0.5;
+            float3 uvwJitter = uvwEntry + jitter * (uvwExit - uvwEntry);
+
+            float dEtry = frustumMap(uvwEntry.z * (farPlane - nearPlane), compressionParams, farPlane - nearPlane) + nearPlane;
+            float hhEtry = dEtry * tanHalfFov;
+            float3 worldEntry = cameraPos
+                + cameraRight * ((uvwEntry.x * 2.0 - 1.0) * hhEtry * aspect)
+                + cameraUp * ((uvwEntry.y * 2.0 - 1.0) * hhEtry)
+                + cameraForward * dEtry;
+
+            float dExit = frustumMap(uvwExit.z * (farPlane - nearPlane), compressionParams, farPlane - nearPlane) + nearPlane;
+            float hhExit = dExit * tanHalfFov;
+            float3 worldExit = cameraPos
+                + cameraRight * ((uvwExit.x * 2.0 - 1.0) * hhExit * aspect)
+                + cameraUp * ((uvwExit.y * 2.0 - 1.0) * hhExit)
+                + cameraForward * dExit;
+
+            float dJit = frustumMap(uvwJitter.z * (farPlane - nearPlane), compressionParams, farPlane - nearPlane) + nearPlane;
+            float hhJit = dJit * tanHalfFov;
+            float3 worldJitter = cameraPos
+                + cameraRight * ((uvwJitter.x * 2.0 - 1.0) * hhJit * aspect)
+                + cameraUp * ((uvwJitter.y * 2.0 - 1.0) * hhJit)
+                + cameraForward * dJit;
+            float tJitter = dot(worldJitter - startPos, dir);
+            float3 samplePoint = startPos + dir * tJitter;
+
+            float tWorldEntry = dot(worldEntry - startPos, dir);
+            float tWorldExit = dot(worldExit - startPos, dir);
+            float worldDt = max(tWorldExit - tWorldEntry, 1e-8f);
+
+            float4 voxelInfo = getFrustumImageInfo(samplePoint, true, true, envVolumetricFogInfoImage_sample, randomSeed);
+
+            float extinctionCoeff = max(voxelInfo.x, 1e-30f);
+            float scattering = voxelInfo.y;
+            float phase = voxelInfo.z;
+            float phase2 = phase * phase;
+            float3 color = voxelInfo.w;
+
+            for (int lightIndex = 0; lightIndex < sceneInfo.numLights; ++lightIndex) {
+                Light light = sceneInfo.lights[lightIndex];
+                float3 lightColor = light.color * light.intensity;
+                float3 lightDirection; float3 lightPos;
+                if (light.type == LightType::Direction) {
+                    lightDirection = -light.direction;
+                    lightPos = samplePoint + 1000.0f * lightDirection;
+                } else if (light.type == LightType::Point) {
+                    lightDirection = normalize(light.pos - samplePoint);
+                    lightPos = light.pos;
+                }
+
+                float fp = (1.0f - phase2) / (4.0f * M_PI * pow((1 + phase2 - 2.0f * phase * dot(-dir, lightDirection)), 1.5f));
+
+                float tLightEnter, tLightExit;
+                float lightDt = 1e-6f;
+                if (IntersectFrustum(lightPos, samplePoint, cameraPos, cameraForward, cameraRight, cameraUp, tanHalfFov, aspect, nearPlane, farPlane, tLightEnter, tLightExit))
+                    lightDt = tLightExit - tLightEnter;
+
+                float attenuationLength = max(globalInfo.envFogLightAttenuationLength, 1e-6f);
+                float attenuationRatio = max(lightDt / attenuationLength, 0.0f);
+                float lightAttenuation = pow(max(globalInfo.envFogLightAttenuationEstimator, 1e-6f), attenuationRatio);
+                float3 activeSunColor = lightColor * lightAttenuation * pushConst.lightAttenuationStrength;
+                if (lightIndex == 0) activeSunColor *= getShadow(float4(samplePoint, 1.0f));
+
+                L += activeSunColor * fp * scattering * color * attenuation / extinctionCoeff * (1.0f - exp(-extinctionCoeff * worldDt));
+            }
+
+            attenuation *= exp(-extinctionCoeff * worldDt);
+            if (all(attenuation <= 1e-3f)) break;
+        }
+
+        tCurrent = tNext;
+        if (tCurrent >= 1.0 - 1e-6) break;
+
+        if (tMax.x < tMax.y) {
+            if (tMax.x < tMax.z) { voxel.x += step.x; tMax.x += tDelta.x; }
+            else { voxel.z += step.z; tMax.z += tDelta.z; }
+        } else {
+            if (tMax.y < tMax.z) { voxel.y += step.y; tMax.y += tDelta.y; }
+            else { voxel.z += step.z; tMax.z += tDelta.z; }
+        }
+    }
+#endif
 }
 
 #endif

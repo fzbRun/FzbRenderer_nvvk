@@ -34,13 +34,8 @@ VSout vertexMain(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID
     float u = (float(voxelIndex.x) + 0.5f) / float(gridSize.x) * 2.0f - 1.0f;
     float v = (float(voxelIndex.y) + 0.5f) / float(gridSize.y) * 2.0f - 1.0f;
 
-    float t_near = float(voxelIndex.z) / float(gridSize.z);
-    t_near = pow(t_near, pushConst.compressionPrecision);
-    float depth_near = lerp(nearPlane, farPlane, t_near);
-
-    float t_far = float(voxelIndex.z + 1) / float(gridSize.z);
-    t_far = pow(t_far, pushConst.compressionPrecision);
-    float depth_far = lerp(nearPlane, farPlane, t_far);
+    float depth_near = nearPlane + frustumMap(float(voxelIndex.z) / gridSize.z * (farPlane - nearPlane), pushConst.compressionParams, farPlane - nearPlane);
+    float depth_far = nearPlane + frustumMap(float(voxelIndex.z + 1) / gridSize.z * (farPlane - nearPlane), pushConst.compressionParams, farPlane - nearPlane);
 
     float depth = (depth_far + depth_near) * 0.5f;
     

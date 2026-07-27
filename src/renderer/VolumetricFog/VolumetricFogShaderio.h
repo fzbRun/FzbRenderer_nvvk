@@ -6,6 +6,8 @@
 #define FZBRENDERER_VOLUMETRIC_FOG_SHADER_IO_H
 NAMESPACE_SHADERIO_BEGIN()
 
+#define USE_TAA
+
 #define Jacobi_Iteration_Count 40u
 
 #define MAX_VOLUMETRIC_FOG_COUNT 10
@@ -13,9 +15,14 @@ NAMESPACE_SHADERIO_BEGIN()
 #define MAX_FLUID_FOG_COUNT 3
 #define MAX_NOISE_FOG_COUNT 3
 
+#define Uniform_EnvFog_Grid
+#define Fog_Acc_Stepping
+
 struct VolumetricFogPushConstant{
 	float3x3 normalMatrix;
 	float3 instanceVelocity;
+
+	uint2 screenSize;
 
 	int instanceIndex;
 	int fluidFogIndex;
@@ -37,7 +44,7 @@ struct VolumetricFogPushConstant{
 	float4x4 lightVP;
 
 	int useEnvAccFog;
-	int compressionPrecision;
+	float3 compressionParams;
 	int forwardSampleCount;
 	float cameraNearPlane;
 	uint3 frustumGridSize;
@@ -45,9 +52,27 @@ struct VolumetricFogPushConstant{
 	float tanCameraFov_2;	//fov / 2
 	float aspectRatio;
 
+	float3 cameraMoveDir;
+	float jitterStrength;
+
 #ifndef NDEBUG
 	SceneInfo* showCameraInfoAddress;
 #endif
+};
+
+struct GlobalInfo_VolumetricFog {
+	float4x4 VPMatrix_lastFrame;
+
+	AABB fluidAABB;
+	int fluidStartUp;
+	uint visibleVolumetricFogCount;
+	uint visibleVolumetricFogIndices[MAX_VOLUMETRIC_FOG_COUNT];
+	float envFogLightAttenuationEstimator;
+	float envFogLightAttenuationLength;
+
+	float3 envStartPos;
+	uint3 envGridSize;
+	float3 envVoxelSize;
 };
 
 enum class VolumetricFogType {
@@ -93,16 +118,6 @@ struct VolumetricFogFluidVoxelInfo {
 	float4 voxelFogInfo;
 };
 
-struct GlobalInfo_VolumetricFog {
-	AABB fluidAABB;
-	int fluidStartUp;
-	uint visibleVolumetricFogCount;
-	uint visibleVolumetricFogIndices[MAX_VOLUMETRIC_FOG_COUNT];
-	float envFogLightAttenuationEstimator;
-	float envFogLightAttenuationLength;
-};
-
-
 enum class StaticBindingPoints_VolumetricFog {
 	eTextures = 0,
 	eAlbedoImage,
@@ -125,10 +140,12 @@ enum class StaticBindingPoints_VolumetricFog {
 	eVolumetricFogNoiseInfoBuffer,
 
 	eVolumetricFogAttenuationImage,
-	eVolumetricFogAttenuation2Image,
+	eVolumetricFogAttenuationImage_sample,
 	eVolumetricFogLImage,
+	eVolumetricFogLImage_sample,
 
 	eEnvVolumetricFogInfoImage,
+	eEnvVolumetricFogInfoImage_sample,
 
 	eShadowMap,
 	eRenderedImage,

@@ -85,6 +85,7 @@ CHECK_STRUCT_ALIGNMENT(Light)
 struct SceneInfo
 {
 	float4x4			   viewMatrix;
+	float4x4			   projMatrix;
 	float4x4               viewProjMatrix;     // View projection matrix for the scene
 	float4x4               projInvMatrix;      // Inverse projection matrix for the scene
 	float4x4               viewInvMatrix;      // Inverse view matrix for the scene

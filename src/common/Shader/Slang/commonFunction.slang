@@ -82,18 +82,68 @@ float3x3 Inverse3x3(float3x3 m) {
     return transpose(float3x3(r0, r1, r2));
 }
 float2x2 Inverse2x2(float2x2 m) {
-    // ��������ʽ��det = a*d - b*c
     float det = m[0][0] * m[1][1] - m[0][1] * m[1][0];
 
-    // ���� det != 0��ʵ��ʹ��ʱ�豣֤��
     float invDet = 1.0f / det;
 
-    // ʹ����������һ���Թ�������
     float2x2 result;
     result[0] = float2(m[1][1], -m[0][1]) * invDet;
     result[1] = float2(-m[1][0], m[0][0]) * invDet;
 
     return result;
+}
+
+void boxMuller(float u0, float u1, out float n0, out float n1) {
+    float r = sqrt(-2.0f * log(max(u0, 1e-10f)));
+    float theta = 2.0f * 3.14159265f * u1;
+    n0 = r * cos(theta);
+    n1 = r * sin(theta);
+}
+float3x3 randomRotationMatrix3x3(inout uint seed) {
+    float u0 = rand(seed), u1 = rand(seed);
+    float u2 = rand(seed), u3 = rand(seed);
+    float u4 = rand(seed), u5 = rand(seed);
+    float u6 = rand(seed), u7 = rand(seed);
+
+    float g0, g1, g2, g3;
+    float a, b, c, d;
+    boxMuller(u0, u1, a, b);
+    boxMuller(u2, u3, c, d);
+    boxMuller(u4, u5, g0, g1);
+    boxMuller(u6, u7, g2, g3);
+
+    float qx = a;
+    float qy = b;
+    float qz = c;
+    float qw = d;
+
+    float invLen = rsqrt(qx * qx + qy * qy + qz * qz + qw * qw);
+    qx *= invLen; qy *= invLen; qz *= invLen; qw *= invLen;
+
+    float3x3 rot;
+    rot[0] = float3(1.0f - 2.0f * (qy * qy + qz * qz), 2.0f * (qx * qy + qw * qz), 2.0f * (qx * qz - qw * qy));
+    rot[1] = float3(2.0f * (qx * qy - qw * qz), 1.0f - 2.0f * (qx * qx + qz * qz), 2.0f * (qy * qz + qw * qx));
+    rot[2] = float3(2.0f * (qx * qz + qw * qy), 2.0f * (qy * qz - qw * qx), 1.0f - 2.0f * (qx * qx + qy * qy));
+    return rot;
+}
+
+float3x3 randomRotationMatrixUniform(inout uint seed) {
+    float z = rand(seed) * 2.0f - 1.0f;
+    float theta = rand(seed) * 2.0f * 3.14159265f;
+    float r = sqrt(1.0f - z * z);
+    float3 axis = float3(r * cos(theta), r * sin(theta), z);
+
+    float cosAngle = rand(seed) * 2.0f - 1.0f;
+    float angle = acos(cosAngle);
+    float sinAngle = sin(angle);
+
+    float3x3 K = float3x3(
+        0.0f, -axis.z, axis.y,
+        axis.z, 0.0f, -axis.x,
+       -axis.y, axis.x, 0.0f
+    );
+    float3x3 I = float3x3(1, 0, 0, 0, 1, 0, 0, 0, 1);
+    return I + sinAngle * K + (1.0f - cosAngle) * mul(K, K);
 }
 //---------------------------------------------------AABB---------------------------------------------------
 inline bool checkPointInAABB(float3 pos, AABB aabb) {
@@ -549,34 +599,18 @@ bool IntersectFrustum(
     return tMin <= tMax;
 }
 
-float3 getCameraFrustumVoxelCenter(uint3 voxelIndex, float3 cameraPos, float4x4 viewInvMatrix, uint3 gridSize, float nearPlane, float farPlane, float tanHalfFov, float aspect, float compressionPrecision) {
-    float3 cameraRight = viewInvMatrix[0].xyz;
-    float3 cameraUp = viewInvMatrix[1].xyz;
-    float3 cameraForward = -viewInvMatrix[2].xyz;
-
-    float u = (float(voxelIndex.x) + 0.5f) / float(gridSize.x) * 2.0f - 1.0f;
-    float v = (float(voxelIndex.y) + 0.5f) / float(gridSize.y) * 2.0f - 1.0f;
-
-    float t_near = float(voxelIndex.z) / float(gridSize.z);
-    t_near = pow(t_near, compressionPrecision);
-    float depth_near = lerp(nearPlane, farPlane, t_near);
-
-    float t_far = float(voxelIndex.z + 1) / float(gridSize.z);
-    t_far = pow(t_far, compressionPrecision);
-    float depth_far = lerp(nearPlane, farPlane, t_far);
-
-    float depth = (depth_far + depth_near) * 0.5f;
-
-    float halfHeight = depth * tanHalfFov;
-    float halfWidth = halfHeight * aspect;
-    float3 viewPos = float3(u * halfWidth, v * halfHeight, depth);
-    float3 voxelCenter = cameraPos + cameraRight * viewPos.x + cameraUp * viewPos.y + cameraForward * viewPos.z;
-    return voxelCenter;
+// linear to non-linear
+float frustumMap(float viewZ, float3 CompressParams, float sizeZ) {
+    // return (log2(max(((((viewZ) * (CompressParams.x))) + (CompressParams.y)), 1e-06))) * (CompressParams.z) / sizeZ;
+    return pow(viewZ / sizeZ, CompressParams.x) * sizeZ;
+}
+float frustumInvMap(float viewZ, float3 CompressParams, float sizeZ) {
+    return pow(viewZ / sizeZ, 1.0f / CompressParams.x) * sizeZ;
 }
 void getCameraFrustumData(
     float3 worldPos, float3 cameraPos, float4x4 viewInvMatrix, uint3 gridSize, float nearPlane, float farPlane, 
-    float tanHalfFov, float aspect, float compressionPrecision, int forwardSampleCount,
-    inout float3 hitWorldPos, inout float3 uvw
+    float tanHalfFov, float aspect, float3 compressionParams, float forwardSampleDistance,
+    inout float3 hitWorldPos, inout uint3 voxelIndex
 ) {
     float3 cameraRight = viewInvMatrix[0].xyz;
     float3 cameraUp = viewInvMatrix[1].xyz;
@@ -587,7 +621,8 @@ void getCameraFrustumData(
     float viewX = dot(toPoint, cameraRight);
     float viewY = dot(toPoint, cameraUp);
 
-    if (viewZ > farPlane) {
+    bool clampToFrustum = viewZ > farPlane;
+    if (clampToFrustum) {
         float scale = farPlane / viewZ;
         viewX = viewX * scale;
         viewY = viewY * scale;
@@ -595,40 +630,71 @@ void getCameraFrustumData(
     }
     // if (viewZ < nearPlane) never appear this condition
 
-    float t = saturate((viewZ - nearPlane) / (farPlane - nearPlane));
-    int voxelZ = int(gridSize.z * pow(t, 1.0 / compressionPrecision));
-    voxelZ = clamp(voxelZ, 0, int(gridSize.z) - 1);
-
-    float voxelRatio = float(voxelZ) / max(float(gridSize.z - 1), 1.0f);
-    float adaptiveStart = 0.05f;
+    float vertexRatio = (viewZ - nearPlane) / (farPlane - nearPlane);
+    float adaptiveStart = 0.0f;
     float adaptiveEnd = 0.35f;
-    float adaptiveScale = smoothstep(adaptiveStart, adaptiveEnd, voxelRatio);
+    float adaptiveScale = smoothstep(adaptiveStart, adaptiveEnd, vertexRatio);
+    float entryViewZ = viewZ - adaptiveScale * forwardSampleDistance;
+    entryViewZ = max(entryViewZ, nearPlane);
 
-    int adaptiveForwardSampleCount = int(round(float(forwardSampleCount) * adaptiveScale));
-    int maxAllowedForwardSampleCount = int(float(voxelZ) * 0.75f);
-    adaptiveForwardSampleCount = min(adaptiveForwardSampleCount, maxAllowedForwardSampleCount);
-
-    float entryVoxelZ = max(voxelZ - adaptiveForwardSampleCount, 0);
-    entryVoxelZ = min(entryVoxelZ, int(gridSize.z) - 1);
-
-    float depth_near = lerp(nearPlane, farPlane, pow(entryVoxelZ / gridSize.z, compressionPrecision));
-    float depth_far = lerp(nearPlane, farPlane, pow((entryVoxelZ + 1) / gridSize.z, compressionPrecision));
-    float entryDepth = (depth_near + depth_far) * 0.5f;
-
-    float halfHeight = entryDepth * tanHalfFov;
+    float halfHeight = entryViewZ * tanHalfFov;
     float halfWidth = halfHeight * aspect;
 
-    float scale = entryDepth / max(viewZ, 1e-8f);
+    float scale = entryViewZ / max(viewZ, 1e-8f);
     float entryViewX = viewX * scale;
     float entryViewY = viewY * scale;
 
+    float3 uvw;
     uvw.x = (entryViewX / halfWidth + 1.0f) * 0.5f;
     uvw.y = (entryViewY / halfHeight + 1.0f) * 0.5f;
-    uvw.z = (entryVoxelZ + 0.5f) / gridSize.z;
+    uvw.z = frustumInvMap(entryViewZ - nearPlane, compressionParams, farPlane - nearPlane) / (farPlane - nearPlane);
     uvw = clamp(uvw, 0.0f, 1.0f - 1e-6f);
 
-    hitWorldPos = cameraPos + cameraRight * entryViewX + cameraUp * entryViewY + cameraForward * entryDepth;
+    voxelIndex = clamp(uint3(uvw * gridSize), 0, gridSize - 1);
+    hitWorldPos = worldPos;
+    if (clampToFrustum || forwardSampleDistance > 0)
+        hitWorldPos = cameraPos + cameraRight * entryViewX + cameraUp * entryViewY + cameraForward * entryViewZ;
 }
+float3 getCameraFrustumInteralPos(
+    float3 worldPos, float3 cameraPos, float4x4 viewInvMatrix, uint3 gridSize, float nearPlane, float farPlane, 
+    float tanHalfFov, float aspect, float forwardSampleDistance
+) {
+    float3 cameraRight = viewInvMatrix[0].xyz;
+    float3 cameraUp = viewInvMatrix[1].xyz;
+    float3 cameraForward = -viewInvMatrix[2].xyz;
+
+    float3 toPoint = worldPos - cameraPos;
+    float viewZ = dot(toPoint, cameraForward);
+    float viewX = dot(toPoint, cameraRight);
+    float viewY = dot(toPoint, cameraUp);
+
+    bool clampToFrustum = viewZ > farPlane;
+    if (clampToFrustum) {
+        float scale = farPlane / viewZ;
+        viewX = viewX * scale;
+        viewY = viewY * scale;
+        viewZ = farPlane;
+    }
+    // if (viewZ < nearPlane) never appear this condition
+
+    float vertexRatio = (viewZ - nearPlane) / (farPlane - nearPlane);
+    float adaptiveStart = 0.0f;
+    float adaptiveEnd = 0.35f;
+    float adaptiveScale = smoothstep(adaptiveStart, adaptiveEnd, vertexRatio);
+    float entryViewZ = viewZ - adaptiveScale * forwardSampleDistance;
+    entryViewZ = max(entryViewZ, nearPlane);
+
+    float halfHeight = entryViewZ * tanHalfFov;
+    float halfWidth = halfHeight * aspect;
+
+    float scale = entryViewZ / max(viewZ, 1e-8f);
+    float entryViewX = viewX * scale;
+    float entryViewY = viewY * scale;
+
+    float3 hitWorldPos = cameraPos + cameraRight * entryViewX + cameraUp * entryViewY + cameraForward * entryViewZ;
+    return hitWorldPos;
+}
+
 //------------------------------------------------SphericalFibonacci---------------------------------------------
 #define M_PHI 1.618033988749895
 //y axis is up, get worldPos

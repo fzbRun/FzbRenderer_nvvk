@@ -6,6 +6,7 @@
 
 [[vk::push_constant]] ConstantBuffer<VolumetricFogPushConstant> pushConst;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eTextures)]] Sampler2D textures[];
+[[vk::binding(StaticBindingPoints_VolumetricFog::eGlobalInfoBuffer)]] RWStructuredBuffer<GlobalInfo_VolumetricFog> globalInfoBuffer;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogInfosBuffer)]] RWStructuredBuffer<VolumetricFogInfo, ScalarDataLayout> volumetricFogInfosBuffer;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogFluidInfoBuffer)]] RWStructuredBuffer<FluidFogInfo, ScalarDataLayout> volumetricFogFluidInfoBuffer;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogFluidVoxelInfoBuffer)]] RWStructuredBuffer<VolumetricFogFluidVoxelInfo, ScalarDataLayout> volumetricFogVoxelInfosBuffer[];
@@ -35,6 +36,21 @@ struct VSout
     float3 worldNormal : NORMAL;
     float2 worldTexCoord : TEXCOORD0;
     float3 posMesh;
+
+    float2 screenPos_Current;
+    float2 screenPos_Last;
+};
+
+static float2 Halton_2_3[8] =
+{
+    float2(0.0f, -1.0f / 3.0f),
+    float2(-1.0f / 2.0f, 1.0f / 3.0f),
+    float2(1.0f / 2.0f, -7.0f / 9.0f),
+    float2(-3.0f / 4.0f, -1.0f / 9.0f),
+    float2(1.0f / 4.0f, 5.0f / 9.0f),
+    float2(-1.0f / 4.0f, -5.0f / 9.0f),
+    float2(3.0f / 4.0f, 1.0f / 9.0f),
+    float2(-7.0f / 8.0f, 7.0f / 9.0f)
 };
 
 [shader("vertex")]
@@ -54,12 +70,21 @@ VSout vertexMain(VSin input, uint vertexIndex: SV_VertexID)
 
     float4 pos = mul(float4(posMesh, 1.0), instance.transform);
 
+    float4x4 jitterMat = sceneInfo.projMatrix;
+    float2 jitter = float2(Halton_2_3[pushConst.iteration % 8].x * 1.0f / pushConst.screenSize.x, Halton_2_3[pushConst.iteration % 8].y * 1.0f / pushConst.screenSize.y);
+    jitterMat[2][0] += jitter.x;
+    jitterMat[2][1] += jitter.y;
+
     VSout output;
     output.sv_position = mul(pos, sceneInfo.viewProjMatrix);
     output.worldPos = pos.xyz;
     output.worldNormal = normalize(mul(normal, float3x3(pushConst.normalMatrix)));
     output.worldTexCoord = texCoord;
     output.posMesh = posMesh;
+
+    output.screenPos_Current = output.sv_position.xy / output.sv_position.w * 0.5f + 0.5f;
+    float4 clipPos_Last = mul(float4(posMesh, 1.0), pushConst.lightVP * globalInfoBuffer[0].VPMatrix_lastFrame);
+    output.screenPos_Last = clipPos_Last.xy / clipPos_Last.w * 0.5f + 0.5f;
 
     return output;
 }
@@ -69,6 +94,7 @@ struct PSout
     float4 albedo : SV_Target0;
     float4 normal : SV_Target1;
     float4 emissive : SV_Target2;
+    float4 velocity : SV_Target3;
 };
 
 [shader("pixel")]
@@ -101,6 +127,11 @@ PSout fragmentMain(VSout input){
 
     if (material.type == MaterialType::RoughDielectric) discard;
 
-    return { float4(material.albedo, 1.0f), float4(normalize(input.worldNormal), 1.0f), float4(material.emissive, 1.0f) };
+    PSout out;
+    out.albedo = float4(material.albedo, 1.0f);
+    out.normal = float4(normalize(input.worldNormal), 1.0f);
+    out.emissive = float4(material.emissive, 1.0f);
+    out.velocity = float4(input.screenPos_Current - input.screenPos_Last, 0.0f, 1.0f);
+    return out;
     //return { float4(material.albedo, 1.0f), float4(normalize(input.worldNormal), 1.0f), float4(0.0f, 0.0f, 0.0f, 1.0f) };
 }

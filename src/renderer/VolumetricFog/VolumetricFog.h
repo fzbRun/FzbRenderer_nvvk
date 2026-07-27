@@ -8,12 +8,14 @@
 #include "./VolumetricFogShaderio.h"
 #include <feature/ShadowMap/ShadowMap.h>
 #include <common/Buffer/Buffer.h>
+#include <feature/TAA/TAA.h>
 
 namespace FzbRenderer {
 enum class GBuffers_VolumetricFog{
 	eAlbedo = 0,
 	eNormal,
 	eEmissive,
+	eVelocity,
 	eRendered,
 	eTonemapping,
 };
@@ -82,12 +84,16 @@ private:
 
 	shaderio::VolumetricFogPushConstant pushConstant;
 
+	TAA taa;
 	ShadowMap shadowMap;
 
 	// mouse force
 	glm::vec3 mouseForcePosition = glm::vec3(0.0f);
 	float mouseForceStrength = 0.0f;
 	float mouseForceRadius = 3.0f;
+
+	glm::vec3 m_lastCameraPos = glm::vec3(0.0f);
+	shaderio::float4x4 VPMatrix_lastFrame;
 
 	FzbRenderer::Buffer GlobalInfoBuffer;				
 	//--------------------------FogInfo-----------------------------------
@@ -119,18 +125,27 @@ private:
 	VkExtent3D frustumGridSize;
 	//-------------------------Environment--------------------------------
 	FzbRenderer::Image envVolumetricFogInfoImage;
+
+	bool envChange = false;
+	shaderio::float3 envStartPos = { 5083.0f, -77.5f, -4480.0f };
+	shaderio::uint3 envGridSize = { 128, 128, 128 };
+	shaderio::float3 envVoxelSize = {1.6, 1, 1};
+	bool showEnvGrid = false;
+
+	int sampleCount_env = 20;
 	//-------------------------FogAcc-------------------------------------
 	FzbRenderer::Image volumetricFogAttenuationImage;
-	FzbRenderer::Image volumetricFogAttenuation2Image;
 	FzbRenderer::Image volumetricFogLImage;
 
 	uint32_t rmSampleCountSampleCount_fogAcc = 20;
 	int randomStepping_fogAcc = false;
+	float accJitterStrength = 0.0f;
 	//-------------------------Opaque------------------------------------
-	uint32_t forwardSampleCount = 1;
+	uint32_t forwardSampleCount = 0;
 	uint32_t rmSampleCount_opaque_noFogAcc = 10;
 	uint32_t rmSampleCount_opaque_FogAcc = 1;
 	uint32_t randomStepping_opaque = true;
+	float interpolationJitterStrength = 0.0f;
 
 #ifndef NDEBUG
 	void renderVolumetricFogVoxelGrid(VkCommandBuffer cmd);
