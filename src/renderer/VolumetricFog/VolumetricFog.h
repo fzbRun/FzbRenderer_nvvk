@@ -9,6 +9,7 @@
 #include <feature/ShadowMap/ShadowMap.h>
 #include <common/Buffer/Buffer.h>
 #include <feature/TAA/TAA.h>
+#include <feature/SVGF/SVGF.h>
 
 namespace FzbRenderer {
 enum class GBuffers_VolumetricFog{
@@ -16,6 +17,7 @@ enum class GBuffers_VolumetricFog{
 	eNormal,
 	eEmissive,
 	eVelocity,
+	eVertexInfo,	//meshID, instanceID, etc
 	eRendered,
 	eTonemapping,
 };
@@ -77,6 +79,8 @@ private:
 
 	VkShaderEXT computeShader_createFrustumAccFog{};
 
+	VkShaderEXT computeShader_smoothFog{};
+
 	VkShaderEXT computeShader_deferredRenderring{};
 
 	VkShaderEXT vertexShader_renderTransparentMaterial{};
@@ -84,6 +88,8 @@ private:
 
 	shaderio::VolumetricFogPushConstant pushConstant;
 
+	bool useSVGF = true;
+	SVGF svgf;
 	TAA taa;
 	ShadowMap shadowMap;
 
@@ -132,20 +138,22 @@ private:
 	shaderio::float3 envVoxelSize = {1.6, 1, 1};
 	bool showEnvGrid = false;
 
-	int sampleCount_env = 20;
+	int sampleCount_env = 1;
+	float jitterStrength_env = 0.0f;
 	//-------------------------FogAcc-------------------------------------
 	FzbRenderer::Image volumetricFogAttenuationImage;
 	FzbRenderer::Image volumetricFogLImage;
 
-	uint32_t rmSampleCountSampleCount_fogAcc = 20;
-	int randomStepping_fogAcc = false;
-	float accJitterStrength = 0.0f;
+	uint32_t rmSampleCountSampleCount_fogAcc = 10;
+	int randomStepping_fogAcc = true;
+	float accJitterStrength = 2.0f;
+	float interpolationJitterStrength_fogAcc = 1.0f;
 	//-------------------------Opaque------------------------------------
 	uint32_t forwardSampleCount = 0;
-	uint32_t rmSampleCount_opaque_noFogAcc = 10;
+	uint32_t rmSampleCount_opaque_noFogAcc = 50;
 	uint32_t rmSampleCount_opaque_FogAcc = 1;
 	uint32_t randomStepping_opaque = true;
-	float interpolationJitterStrength = 0.0f;
+	float interpolationJitterStrength = 10.0f;
 
 #ifndef NDEBUG
 	void renderVolumetricFogVoxelGrid(VkCommandBuffer cmd);
@@ -163,6 +171,9 @@ private:
 	bool showCameraFrustum = false;
 	shaderio::SceneInfo showCameraInfo;
 	nvvk::Buffer bShowCameraInfo;
+
+	VkShaderEXT computeShader_test{};
+	void test(VkCommandBuffer cmd);
 #endif
 };
 }

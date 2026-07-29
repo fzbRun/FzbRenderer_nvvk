@@ -145,6 +145,10 @@ float3x3 randomRotationMatrixUniform(inout uint seed) {
     float3x3 I = float3x3(1, 0, 0, 0, 1, 0, 0, 0, 1);
     return I + sinAngle * K + (1.0f - cosAngle) * mul(K, K);
 }
+float3x3 RandomRotationY(float r) {
+    r *= 6.2831853;
+    return float3x3(float3(cos(r), 0, sin(r)), float3(0, 1, 0), float3(-sin(r), 0, cos(r)));
+}
 //---------------------------------------------------AABB---------------------------------------------------
 inline bool checkPointInAABB(float3 pos, AABB aabb) {
     return all((pos - aabb.minimum >= 0.0f) && (aabb.maximum - pos >= 0.0f));
@@ -455,10 +459,16 @@ bool rayFrustumIntersection(
     float3 rayOrigin, float3 rayDir,
     float3 cameraPos, float3 cameraForward, float3 cameraRight, float3 cameraUp,
     float tanHalfFov, float aspect, float nearPlane, float farPlane,
-    out float tEntry, out float tExit)
+                            out float tEntry, out float tExit)
 {
-    tEntry = 0.0f;
-    tExit = 0.0f;
+    tEntry = 0.0;
+    tExit = 0.0;
+
+    float3 origin = rayOrigin;
+    float3 dir = rayDir;
+    float dirLen = length(dir);
+    if (dirLen > 1e-10 && dot(origin - cameraPos, origin - cameraPos) < 1e-10)
+        origin += (dir / dirLen) * 1e-4;
 
     float halfWidth = aspect * tanHalfFov;
     float halfHeight = tanHalfFov;
@@ -483,35 +493,29 @@ bool rayFrustumIntersection(
 
     float tmin = 0.0;
     float tmax = 1e10;
-
     float denom, dist;
-    denom = dot(nNear, rayDir);
-    dist = dNear - dot(nNear, rayOrigin);
+
+    denom = dot(nNear, dir); dist = dNear - dot(nNear, origin);
     if (abs(denom) < 1e-6) { if (dist > 0) return false; }
     else { float t = dist / denom; if (denom > 0) tmin = max(tmin, t); else tmax = min(tmax, t); }
 
-    denom = dot(nFar, rayDir);
-    dist = dFar - dot(nFar, rayOrigin);
+    denom = dot(nFar, dir); dist = dFar - dot(nFar, origin);
     if (abs(denom) < 1e-6) { if (dist > 0) return false; }
     else { float t = dist / denom; if (denom > 0) tmin = max(tmin, t); else tmax = min(tmax, t); }
 
-    denom = dot(nLeft, rayDir);
-    dist = dLeft - dot(nLeft, rayOrigin);
+    denom = dot(nLeft, dir); dist = dLeft - dot(nLeft, origin);
     if (abs(denom) < 1e-6) { if (dist > 0) return false; }
     else { float t = dist / denom; if (denom > 0) tmin = max(tmin, t); else tmax = min(tmax, t); }
 
-    denom = dot(nRight, rayDir);
-    dist = dRight - dot(nRight, rayOrigin);
+    denom = dot(nRight, dir); dist = dRight - dot(nRight, origin);
     if (abs(denom) < 1e-6) { if (dist > 0) return false; }
     else { float t = dist / denom; if (denom > 0) tmin = max(tmin, t); else tmax = min(tmax, t); }
 
-    denom = dot(nBottom, rayDir);
-    dist = dBottom - dot(nBottom, rayOrigin);
+    denom = dot(nBottom, dir); dist = dBottom - dot(nBottom, origin);
     if (abs(denom) < 1e-6) { if (dist > 0) return false; }
     else { float t = dist / denom; if (denom > 0) tmin = max(tmin, t); else tmax = min(tmax, t); }
 
-    denom = dot(nTop, rayDir);
-    dist = dTop - dot(nTop, rayOrigin);
+    denom = dot(nTop, dir); dist = dTop - dot(nTop, origin);
     if (abs(denom) < 1e-6) { if (dist > 0) return false; }
     else { float t = dist / denom; if (denom > 0) tmin = max(tmin, t); else tmax = min(tmax, t); }
 
@@ -668,8 +672,7 @@ float3 getCameraFrustumInteralPos(
     float viewX = dot(toPoint, cameraRight);
     float viewY = dot(toPoint, cameraUp);
 
-    bool clampToFrustum = viewZ > farPlane;
-    if (clampToFrustum) {
+    if (viewZ > farPlane) {
         float scale = farPlane / viewZ;
         viewX = viewX * scale;
         viewY = viewY * scale;

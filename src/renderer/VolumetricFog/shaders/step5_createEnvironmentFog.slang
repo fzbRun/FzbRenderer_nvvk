@@ -25,6 +25,9 @@ void computeMain_createEnvionmentFog(uint3 voxelIndex: SV_DispatchThreadID, uint
     float3 voxelDirY = float3(0.0f, 1.0f, 0.0f) * globalInfo.envVoxelSize;
     float3 voxelDirZ = float3(0.0f, 0.0f, 1.0f) * globalInfo.envVoxelSize;
     float3 voxelStartPos = voxelCenter - globalInfo.envVoxelSize * 0.5f;
+
+    float voxelLength = length(globalInfo.envVoxelSize);
+    uint sampleCount = pushConst.sampleCount;
 #else
     if (any(voxelIndex >= pushConst.frustumGridSize)) return;
     
@@ -53,43 +56,43 @@ void computeMain_createEnvionmentFog(uint3 voxelIndex: SV_DispatchThreadID, uint
     
     float voxelHalfHeight = halfHeight / gridSize.y;
     float voxelHalfWidth = halfWeight / gridSize.x;
-    float voxelHalfDepth = (depth_far - depth_near) * 0.5f; 
+    float voxelHalfDepth = (depth_far - depth_near) * 0.5f;
+    float voxelLength = length(float3(voxelHalfWidth, voxelHalfHeight, voxelHalfDepth) * 2.0f);
     
     float3 voxelDirX = cameraRight * (2.0f * voxelHalfWidth);
     float3 voxelDirY = cameraUp * (2.0f * voxelHalfHeight);
     float3 voxelDirZ = cameraForward * (2.0f * voxelHalfDepth);
     
     float3 voxelStartPos = voxelCenter - voxelHalfWidth * cameraRight - voxelHalfHeight * cameraUp - voxelHalfDepth * cameraForward;
-#endif
 
+    uint sampleCount = max(int(pushConst.sampleCount * lerp(0.1, 1, depth / (farPlane - nearPlane))), 1);
+#endif
     uint voxelIndexU = voxelIndex.z * gridSize.x * gridSize.y + voxelIndex.y * gridSize.x + voxelIndex.x;
     uint randomSeed = xxhash32(uint3(voxelIndexU, pushConst.frameIndex, 1));
-    float3x3 rotateMatrix = float3x3(1.0f); //randomRotationMatrixUniform(randomSeed);
+    float3x3 rotateMatrix = RandomRotationY(rand(randomSeed));  //randomRotationMatrixUniform(randomSeed);
 
-    uint sampleCount = pushConst.sampleCount;
     float4 envVoxelInfo = 0.0f;
+    float3 samplePoint = voxelCenter;
     for (int sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex) {
-        float3 samplePoint = voxelCenter;
-        if (sampleCount > 1) {
-            float3 sampleDir = mul(fibSpherePoint(sampleIndex, sampleCount), rotateMatrix);
-            AABB voxelAABB = { voxelStartPos, voxelStartPos + voxelDirX + voxelDirY + voxelDirZ };
-            samplePoint = getAABBPoint(voxelAABB, voxelCenter, sampleDir);
-            samplePoint = lerp(voxelCenter, samplePoint, rand(randomSeed));
+        if (sampleCount > 1 && sampleIndex > 0) {
+            float3 sampleDir = mul(fibSpherePoint(sampleIndex - 1, sampleCount - 1), rotateMatrix);
+            sampleDir = sampleDir * pushConst.jitterStrength * voxelLength;
+            samplePoint += lerp(0.0f, sampleDir, rand(randomSeed));
         }
-    
+
         float heightAttenuation = exp(-1.0f * max(samplePoint.y - (-69.5f), 0.0f));
         float extinction = (0.01f + 0.03f) * heightAttenuation;
         float envExtinction = extinction;
         float envScattering = extinction * 0.03f;
         float envPhase = extinction * -0.7f;
         float3 envColor = extinction * 1.0f;
-    
+
         for (int i = 0; i < globalInfo.visibleVolumetricFogCount; ++i) {
             uint fogIndex = globalInfo.visibleVolumetricFogIndices[i];
             VolumetricFogInfo fogInfo = groupVolumetricFogInfos[fogIndex];
             AABB fogAABB = { fogInfo.fogStartPos, fogInfo.fogStartPos + fogInfo.fogVoxelGridSize * fogInfo.fogVoxelSize };
             if (!checkPointInAABB(samplePoint, fogAABB)) continue;
-    
+
             extinction = 0.0f;
             float scattering = 0.0f, phase = 0.0f; float3 color = 0.0f;
             if (fogInfo.type == VolumetricFogType::Height) {
@@ -120,17 +123,17 @@ void computeMain_createEnvionmentFog(uint3 voxelIndex: SV_DispatchThreadID, uint
                 phase = fogInfo.phase;
                 color = fogInfo.color;
             }
-    
+
             envExtinction += extinction;
             envScattering += extinction * scattering;
             envPhase += extinction * phase;
             envColor += extinction * color;
         }
-    
+
         envScattering /= max(envExtinction, 1e-30f);
         envPhase /= max(envExtinction, 1e-30f);
         envColor /= max(envExtinction, 1e-30f);
-    
+
         envVoxelInfo += float4(envExtinction, envScattering, envPhase, luminance(envColor));
     }
     envVoxelInfo /= sampleCount;

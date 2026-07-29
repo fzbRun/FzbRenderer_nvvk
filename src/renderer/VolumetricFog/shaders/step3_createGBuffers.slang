@@ -95,6 +95,7 @@ struct PSout
     float4 normal : SV_Target1;
     float4 emissive : SV_Target2;
     float4 velocity : SV_Target3;
+    float4 vertexInfo : SV_Target4;
 };
 
 [shader("pixel")]
@@ -132,6 +133,7 @@ PSout fragmentMain(VSout input){
     out.normal = float4(normalize(input.worldNormal), 1.0f);
     out.emissive = float4(material.emissive, 1.0f);
     out.velocity = float4(input.screenPos_Current - input.screenPos_Last, 0.0f, 1.0f);
+    out.vertexInfo = float4(pushConst.instanceIndex, instance.meshIndex, instance.materialIndex, 1.0f);
     return out;
     //return { float4(material.albedo, 1.0f), float4(normalize(input.worldNormal), 1.0f), float4(0.0f, 0.0f, 0.0f, 1.0f) };
 }

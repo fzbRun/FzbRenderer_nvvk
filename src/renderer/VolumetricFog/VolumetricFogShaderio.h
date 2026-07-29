@@ -7,6 +7,7 @@
 NAMESPACE_SHADERIO_BEGIN()
 
 #define USE_TAA
+#define USE_SVGF
 
 #define Jacobi_Iteration_Count 40u
 
@@ -15,7 +16,7 @@ NAMESPACE_SHADERIO_BEGIN()
 #define MAX_FLUID_FOG_COUNT 3
 #define MAX_NOISE_FOG_COUNT 3
 
-#define Uniform_EnvFog_Grid
+//#define Uniform_EnvFog_Grid
 #define Fog_Acc_Stepping
 
 struct VolumetricFogPushConstant{
@@ -44,7 +45,7 @@ struct VolumetricFogPushConstant{
 	float4x4 lightVP;
 
 	int useEnvAccFog;
-	float3 compressionParams;
+	float compressionParams;
 	int forwardSampleCount;
 	float cameraNearPlane;
 	uint3 frustumGridSize;
@@ -54,6 +55,7 @@ struct VolumetricFogPushConstant{
 
 	float3 cameraMoveDir;
 	float jitterStrength;
+	float accJitterStrength;
 
 #ifndef NDEBUG
 	SceneInfo* showCameraInfoAddress;

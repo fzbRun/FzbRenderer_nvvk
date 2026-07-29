@@ -47,7 +47,7 @@ uint2 getClosestScreenPos(int2 screenPos){
 
     for (int i = -1; i <= 1; ++i){
         for (int j = -1; j <= 1; ++j) {
-            uint2 newScreenPos = clamp(screenPos + uint2(i, j), 0, pushConst.screenSize - 1);
+            uint2 newScreenPos = clamp(screenPos + int2(i, j), 0, pushConst.screenSize - 1);
             float depth = depthImage[newScreenPos];
 
             if (depth < closestDepth) {

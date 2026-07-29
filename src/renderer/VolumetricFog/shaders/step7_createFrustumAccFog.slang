@@ -272,12 +272,17 @@ void computeMain_createFrustumAccFog_Stepping(uint2 threadIndex: SV_DispatchThre
     float3 endPos = pos;
     float linearDepth_lastVoxel = max((float)depthIndex - 0.5f, 0.0f) / gridSize.z * (farPlane - nearPlane);
     float depth_lastVoxel = frustumMap(linearDepth_lastVoxel, compressionParams, farPlane - nearPlane);
-    float3 startPos = endPos - dir * (depth - depth_lastVoxel);
+
+    float depthOffset = depth - depth_lastVoxel;
+    float heightOffset = depthOffset * tanHalfFov;
+    float widthOffset = heightOffset * aspect;
+    float offset = length(float3(widthOffset, heightOffset, depthOffset));
+    float3 startPos = endPos - dir * offset;
 
     float3 attenuation = 1.0f, L = 0.0f;
     if (depthIndex > 0) {
-        float u = ((float)voxelIndex.x + 0.5f) / gridSize.x + (rand(randomSeed) * 2.0f - 1.0f) / gridSize.x * pushConst.jitterStrength;
-        float v = ((float)voxelIndex.y + 0.5f) / gridSize.y + (rand(randomSeed) * 2.0f - 1.0f) / gridSize.y * pushConst.jitterStrength;
+        float u = ((float)voxelIndex.x + 0.5f) / gridSize.x + (rand(randomSeed) * 2.0f - 1.0f) / gridSize.x * pushConst.accJitterStrength;
+        float v = ((float)voxelIndex.y + 0.5f) / gridSize.y + (rand(randomSeed) * 2.0f - 1.0f) / gridSize.y * pushConst.accJitterStrength;
         float w = (voxelIndex.z - 0.5f) / gridSize.z;
 
         // float3 uvw = (float3(voxelIndex.x, voxelIndex.y, voxelIndex.z - 1) + 0.5f) / gridSize;
@@ -287,7 +292,9 @@ void computeMain_createFrustumAccFog_Stepping(uint2 threadIndex: SV_DispatchThre
     }
 
     float3 a2;
-    getVolumetricFogScatter(startPos, endPos, randomSeed, pushConst.sampleCount, L, attenuation, a2);
+    // getVolumetricFogScatter(startPos, endPos, randomSeed, pushConst.sampleCount, L, attenuation, a2);
+    getEnvVolumetricFogScatter(startPos, endPos, randomSeed, true, 1, L, attenuation, a2);
+    //if (pushConst.frameIndex == 0 && voxelIndex.z == 0) printf("L: %f\n", L.x);
 
     //if (pushConst.frameIndex > 0) {
     //    //attenuation = lerp(attenuation, volumetricFogAttenuationImage[voxelIndex].xyz, saturate(length(pushConst.cameraMoveDir) * pushConst.jitterStrength));
