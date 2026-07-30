@@ -16,8 +16,12 @@ NAMESPACE_SHADERIO_BEGIN()
 #define MAX_FLUID_FOG_COUNT 3
 #define MAX_NOISE_FOG_COUNT 3
 
-//#define Uniform_EnvFog_Grid
+#define USE_ENVFOG
+#define Uniform_EnvFog_Grid
 #define Fog_Acc_Stepping
+#define BLUR_FOG
+
+#define Interpolation_Manual
 
 struct VolumetricFogPushConstant{
 	float3x3 normalMatrix;
@@ -53,9 +57,11 @@ struct VolumetricFogPushConstant{
 	float tanCameraFov_2;	//fov / 2
 	float aspectRatio;
 
-	float3 cameraMoveDir;
+	//float3 cameraMoveDir;
 	float jitterStrength;
 	float accJitterStrength;
+
+	int useFogBlur = true;
 
 #ifndef NDEBUG
 	SceneInfo* showCameraInfoAddress;
@@ -81,6 +87,7 @@ enum class VolumetricFogType {
 	Height,
 	Fluid,
 	Noise,
+	Grid,
 };
 struct VolumetricFogInfo {
 	float3 fogStartPos;
@@ -148,6 +155,13 @@ enum class StaticBindingPoints_VolumetricFog {
 
 	eEnvVolumetricFogInfoImage,
 	eEnvVolumetricFogInfoImage_sample,
+
+#ifdef BLUR_FOG
+	eRenderedFogImage,
+	eDepthGradientImage,
+	eFogVarianceImages,
+	eFilterImages,
+#endif
 
 	eShadowMap,
 	eRenderedImage,

@@ -654,36 +654,6 @@ void getVolumetricFogScatter(
     }
 }
 //------------------------------------------------------------------------------------------------------------------------------------------------
-float4 sampleFrustumLayer(float viewX, float viewY, float depth, int iz, uint3 gridSize, float3 gridSizeF, float nearPlane, float farPlane, float3 compressionParams, float tanHalfFov, float aspect, bool linear, RWTexture3D<float4> image) {
-    float d0 = nearPlane + frustumMap(float(iz) / gridSizeF.z * (farPlane - nearPlane), compressionParams, farPlane - nearPlane);
-    float d1 = nearPlane + frustumMap(float(iz + 1) / gridSizeF.z * (farPlane - nearPlane), compressionParams, farPlane - nearPlane);
-    float d = (d0 + d1) * 0.5f;
-
-    float s = d / depth;
-    float u = (viewX * s / (d * tanHalfFov * aspect) + 1.0f) * 0.5f;
-    float v = (viewY * s / (d * tanHalfFov) + 1.0f) * 0.5f;
-    float w = (float(iz) + 0.5f) / gridSizeF.z;
-
-    if (!linear) {
-        uint3 coord = min(uint3(uint(u * gridSizeF.x), uint(v * gridSizeF.y), uint(w * gridSizeF.z)), gridSize - 1);
-        return image[coord];
-    }
-
-    float2 coordXY = float2(u * gridSizeF.x, v * gridSizeF.y) - 0.5f;
-    int2 baseXY = int2(floor(coordXY));
-    int2 idx0XY = clamp(baseXY, int2(0, 0), int2(gridSize.xy) - 1);
-    int2 idx1XY = clamp(baseXY + 1, int2(0, 0), int2(gridSize.xy) - 1);
-    float2 blendXY = coordXY - floor(coordXY);
-
-    uint3 i00 = uint3(idx0XY.x, idx0XY.y, iz);
-    uint3 i10 = uint3(idx1XY.x, idx0XY.y, iz);
-    uint3 i01 = uint3(idx0XY.x, idx1XY.y, iz);
-    uint3 i11 = uint3(idx1XY.x, idx1XY.y, iz);
-
-    float4 c0 = lerp(image[i00], image[i10], blendXY.x);
-    float4 c1 = lerp(image[i01], image[i11], blendXY.x);
-    return lerp(c0, c1, blendXY.y);
-}
 float4 getFrustumImageInfo(float3 worldPos, bool linear, bool dither, Sampler3D<float4> image, inout uint randomSeed) {
     #ifdef COMPUTE_SHADER
     SceneInfo sceneInfo = groupSceneInfo;
@@ -709,8 +679,8 @@ float4 getFrustumImageInfo(float3 worldPos, bool linear, bool dither, Sampler3D<
     float viewY = dot(toPoint, cameraUp);
     if (viewZ <= 0.0f) return float4(0, 0, 0, 0);
     if (dither) {
-        float strength = pushConst.jitterStrength * lerp(0.1f, 1.0f, frustumMap(viewZ / (farPlane - nearPlane), compressionParams, 1.0f));  // * lerp(1.0f, 2.0f, length(pushConst.cameraMoveDir));
-        viewZ += (rand(randomSeed) * 2.0f - 1.0f) * strength;
+        float strength = pushConst.jitterStrength * lerp(0.0f, 1.0f, frustumMap((viewZ - nearPlane) / (farPlane - nearPlane), compressionParams, 1.0f)); // * lerp(1.0f, 2.0f, length(pushConst.cameraMoveDir));
+        viewZ = max(viewZ + (rand(randomSeed) * 2.0f - 1.0f) * strength, nearPlane);
         viewX += (rand(randomSeed) * 2.0f - 1.0f) * strength;
         viewY += (rand(randomSeed) * 2.0f - 1.0f) * strength;
     }
@@ -721,53 +691,46 @@ float4 getFrustumImageInfo(float3 worldPos, bool linear, bool dither, Sampler3D<
 
     float halfHeight = viewZ * tanHalfFov;
     float halfWidth = halfHeight * aspect;
-    float u = viewX / halfWidth * 0.5f + 0.5f;
-    float v = viewY / halfHeight * 0.5f + 0.5f;
+    float u = saturate(viewX / halfWidth * 0.5f + 0.5f);
+    float v = saturate(viewY / halfHeight * 0.5f + 0.5f);
+#ifdef Interpolation_Manual
+    uint voxelZ = clamp(int(frustumInvMap((viewZ - nearPlane) / (farPlane - nearPlane), compressionParams, 1.0f) * gridSize.z), 0, gridSize.z - 1);
+
+    float depth = viewZ - nearPlane;
+    float depth0 = frustumMap(float(voxelZ) / gridSizeF.z, compressionParams, 1.0f) * (farPlane - nearPlane);
+    float depth1 = frustumMap(float(voxelZ + 1) / gridSizeF.z, compressionParams, 1.0f) * (farPlane - nearPlane);
+    float centerZ = (depth0 + depth1) * 0.5f;
+    if (!linear || depth == centerZ) {
+        float w = (float(voxelZ) + 0.5f) / gridSize.z;
+        return image.SampleLevel(float3(u, v, w), 0);
+    }
+
+    int z0 = voxelZ, z1 = voxelZ;
+    float blendZ = 0.0f;
+    if (depth < centerZ && voxelZ > 0) {
+        z0 = voxelZ - 1; z1 = voxelZ;
+        float dPrev = frustumMap(float(z0) / gridSizeF.z, compressionParams, 1.0f) * (farPlane - nearPlane);
+        float centerPrev = (dPrev + depth0) * 0.5f;
+        blendZ = saturate((depth - centerPrev) / (centerZ - centerPrev));
+    } else if (depth > centerZ && voxelZ < int(gridSize.z) - 1) {
+        z1 = voxelZ + 1;
+        float dNext = frustumMap(float(z1 + 1) / gridSizeF.z, compressionParams, 1.0f) * (farPlane - nearPlane);
+        float centerNext = (depth1 + dNext) * 0.5f;
+        blendZ = saturate((depth - centerZ) / (centerNext - centerZ));
+    }
+    float w = (float(z0) + 0.5f) / gridSize.z;
+    float4 s0 = image.SampleLevel(float3(u, v, w), 0);
+
+    w = (float(z1) + 0.5f) / gridSize.z;
+    float4 s1 = image.SampleLevel(float3(u, v, w), 0);
+    return lerp(s0, s1, blendZ);
+#else
     float w = frustumInvMap(viewZ - nearPlane, compressionParams, farPlane - nearPlane) / (farPlane - nearPlane);
     float3 uvw = float3(u, v, w);
 
     if (linear) return image.SampleLevel(uvw, 0);
     else return image[uint3(uvw * gridSize)];
-
-    /*
-    float depth = viewZ;
-    float depth0 = nearPlane + frustumMap(float(voxelZ) / gridSizeF.z * (farPlane - nearPlane), compressionParams, farPlane - nearPlane);
-    float depth1 = nearPlane + frustumMap(float(voxelZ + 1) / gridSizeF.z * (farPlane - nearPlane), compressionParams, farPlane - nearPlane);
-    float centerZ = (depth0 + depth1) * 0.5f;
-
-    int z0 = voxelZ, z1 = voxelZ;
-    //float depthZ0, depthZ1;
-    float blendZ = 0.0f;
-    if (depth < centerZ && voxelZ > 0) {
-        z0 = voxelZ - 1; z1 = voxelZ;
-        float dPrev = nearPlane + frustumMap(float(z0) / gridSizeF.z * (farPlane - nearPlane), compressionParams, farPlane - nearPlane);
-        float centerPrev = (dPrev + depth0) * 0.5f;
-        blendZ = (depth - centerPrev) / (centerZ - centerPrev);
-
-        //depthZ0 = centerPrev; depthZ1 = centerZ;
-    } else if (depth > centerZ && voxelZ < int(gridSize.z) - 1) {
-        z1 = voxelZ + 1;
-        float dNext = nearPlane + frustumMap(float(z1 + 1) / gridSizeF.z * (farPlane - nearPlane), compressionParams, farPlane - nearPlane);
-        float centerNext = (depth1 + dNext) * 0.5f;
-        blendZ = (depth - centerZ) / (centerNext - centerZ);
-
-        //depthZ0 = centerZ; depthZ1 = centerNext;
-    }
-
-    // float halfHeight = depthZ0 * tanHalfFov;
-    // float halfWidth = halfHeight * aspect;
-    // float u = viewX / halfWidth * 0.5f + 0.5f;
-    // float v = viewY / halfHeight * 0.5f + 0.5f;
-    float4 s0 = sampleFrustumLayer(viewX, viewY, depth, z0, gridSize, gridSizeF, nearPlane, farPlane, compressionParams, tanHalfFov, aspect, linear, image);
-    if (!linear || depth == centerZ) return s0;
-
-    // halfHeight = depthZ1 * tanHalfFov;
-    // halfWidth = halfHeight * aspect;
-    // u = viewX / halfWidth * 0.5f + 0.5f;
-    // v = viewY / halfHeight * 0.5f + 0.5f;
-    float4 s1 = sampleFrustumLayer(viewX, viewY, depth, z1, gridSize, gridSizeF, nearPlane, farPlane, compressionParams, tanHalfFov, aspect, linear, image);
-    return lerp(s0, s1, blendZ);
-    */
+#endif
 }
 
 float3 getAttenuation2(float3 endPos, GlobalInfo_VolumetricFog globalInfo, SceneInfo sceneInfo) {

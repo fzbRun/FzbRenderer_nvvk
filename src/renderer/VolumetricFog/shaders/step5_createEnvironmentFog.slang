@@ -15,7 +15,6 @@ void computeMain_createEnvionmentFog(uint3 voxelIndex: SV_DispatchThreadID, uint
     GroupMemoryBarrierWithGroupSync();
     GlobalInfo_VolumetricFog globalInfo = groupGlobalInfo;
     SceneInfo sceneInfo = groupSceneInfo;
-
 #ifdef Uniform_EnvFog_Grid
     if (any(voxelIndex >= globalInfo.envGridSize)) return;
     float3 voxelCenter = globalInfo.envStartPos + (float3(voxelIndex) + 0.5f) * globalInfo.envVoxelSize;
@@ -26,7 +25,6 @@ void computeMain_createEnvionmentFog(uint3 voxelIndex: SV_DispatchThreadID, uint
     float3 voxelDirZ = float3(0.0f, 0.0f, 1.0f) * globalInfo.envVoxelSize;
     float3 voxelStartPos = voxelCenter - globalInfo.envVoxelSize * 0.5f;
 
-    float voxelLength = length(globalInfo.envVoxelSize);
     uint sampleCount = pushConst.sampleCount;
 #else
     if (any(voxelIndex >= pushConst.frustumGridSize)) return;
@@ -44,41 +42,34 @@ void computeMain_createEnvionmentFog(uint3 voxelIndex: SV_DispatchThreadID, uint
     float3 cameraUp = sceneInfo.viewInvMatrix[1].xyz;
     float3 cameraForward = -sceneInfo.viewInvMatrix[2].xyz;
     
-    float depth_near = frustumMap(float(voxelIndex.z) / gridSize.z * (farPlane - nearPlane), compressionPrecision, farPlane - nearPlane);
-    float depth_far = frustumMap(float(voxelIndex.z + 1) / gridSize.z * (farPlane - nearPlane), compressionPrecision, farPlane - nearPlane);
-    
-    float depth = (depth_near + depth_far) * 0.5f;
-    float halfHeight = (depth + nearPlane) * tanHalfFov;
-    float halfWeight = halfHeight * aspect;
-    float3 voxelCenter = cameraPos + (depth + nearPlane) * cameraForward +
-                         ((float(voxelIndex.x) + 0.5f) / gridSize.x * 2.0f - 1.0f) * halfWeight * cameraRight +
-                         ((float(voxelIndex.y) + 0.5f) / gridSize.y * 2.0f - 1.0f) * halfHeight * cameraUp;
-    
-    float voxelHalfHeight = halfHeight / gridSize.y;
-    float voxelHalfWidth = halfWeight / gridSize.x;
-    float voxelHalfDepth = (depth_far - depth_near) * 0.5f;
-    float voxelLength = length(float3(voxelHalfWidth, voxelHalfHeight, voxelHalfDepth) * 2.0f);
-    
-    float3 voxelDirX = cameraRight * (2.0f * voxelHalfWidth);
-    float3 voxelDirY = cameraUp * (2.0f * voxelHalfHeight);
-    float3 voxelDirZ = cameraForward * (2.0f * voxelHalfDepth);
-    
-    float3 voxelStartPos = voxelCenter - voxelHalfWidth * cameraRight - voxelHalfHeight * cameraUp - voxelHalfDepth * cameraForward;
-
+    float centerW = (float(voxelIndex.z) + 0.5f) / gridSizeF.z;
+    float depth = frustumMap(centerW * (farPlane - nearPlane), compressionPrecision, farPlane - nearPlane);
     uint sampleCount = max(int(pushConst.sampleCount * lerp(0.1, 1, depth / (farPlane - nearPlane))), 1);
 #endif
     uint voxelIndexU = voxelIndex.z * gridSize.x * gridSize.y + voxelIndex.y * gridSize.x + voxelIndex.x;
     uint randomSeed = xxhash32(uint3(voxelIndexU, pushConst.frameIndex, 1));
-    float3x3 rotateMatrix = RandomRotationY(rand(randomSeed));  //randomRotationMatrixUniform(randomSeed);
 
     float4 envVoxelInfo = 0.0f;
-    float3 samplePoint = voxelCenter;
     for (int sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex) {
-        if (sampleCount > 1 && sampleIndex > 0) {
-            float3 sampleDir = mul(fibSpherePoint(sampleIndex - 1, sampleCount - 1), rotateMatrix);
-            sampleDir = sampleDir * pushConst.jitterStrength * voxelLength;
-            samplePoint += lerp(0.0f, sampleDir, rand(randomSeed));
+        float3 localSample = 0.5f;
+        if (sampleCount > 1) {
+            localSample = float3(rand(randomSeed), rand(randomSeed), rand(randomSeed));
+            localSample = lerp(0.5f.xxx, localSample, saturate(pushConst.jitterStrength * 0.1f));
         }
+
+#ifdef Uniform_EnvFog_Grid
+        float3 samplePoint = voxelStartPos + voxelDirX * localSample.x + voxelDirY * localSample.y + voxelDirZ * localSample.z;
+#else
+        float sampleU = (float(voxelIndex.x) + localSample.x) / gridSizeF.x;
+        float sampleV = (float(voxelIndex.y) + localSample.y) / gridSizeF.y;
+        float sampleW = (float(voxelIndex.z) + localSample.z) / gridSizeF.z;
+
+        float sampleDepth = nearPlane + frustumMap(sampleW * (farPlane - nearPlane), compressionPrecision, farPlane - nearPlane);
+        float sampleHalfHeight = sampleDepth * tanHalfFov;
+        float sampleHalfWidth = sampleHalfHeight * aspect;
+
+        float3 samplePoint = cameraPos + cameraRight * ((sampleU * 2.0f - 1.0f) * sampleHalfWidth) + cameraUp * ((sampleV * 2.0f - 1.0f) * sampleHalfHeight) + cameraForward * sampleDepth;
+#endif
 
         float heightAttenuation = exp(-1.0f * max(samplePoint.y - (-69.5f), 0.0f));
         float extinction = (0.01f + 0.03f) * heightAttenuation;

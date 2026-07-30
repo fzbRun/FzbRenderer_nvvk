@@ -13,12 +13,14 @@
 [[vk::binding(StaticBindingPoints_VolumetricFog::eEmissiveImage)]] Texture2D<float4> emissiveImage;
 
 [[vk::binding(StaticBindingPoints_VolumetricFog::eRenderedImage)]] RWTexture2D<float4> renderedImage;
+#ifdef BLUR_FOG
+[[vk::binding(StaticBindingPoints_VolumetricFog::eRenderedFogImage)]] RWTexture2D<float4> renderedFogImage;
+#endif
 
 [numthreads(16, 16, 1)]
 [shader("compute")]
 void computeMain_deferredRendering(uint2 threadIndex: SV_DispatchThreadID, uint2 groupThreadIndex: SV_GroupThreadID) {
-    uint2 screenSize;
-    albedoImage.GetDimensions(screenSize.x, screenSize.y);
+    uint2 screenSize = pushConst.screenSize;
     if (threadIndex.x >= screenSize.x || threadIndex.y >= screenSize.y) return;
 
     uint groupThreadIndexU = groupThreadIndex.y * 16 + groupThreadIndex.x;
@@ -40,6 +42,14 @@ void computeMain_deferredRendering(uint2 threadIndex: SV_DispatchThreadID, uint2
     getEnvVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, true, 3, L, attenuation, attenuation2);
     //getVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, pushConst.sampleCount, L, attenuation, attenuation2);
     // if (threadIndex.y == 0 && pushConst.frameIndex == 0) printf("L: %f %f %f, a: %f %f %f, a2: %f %f %f\n", L.x, L.y, L.z, attenuation.x, attenuation.y, attenuation.z, attenuation2.x, attenuation2.y, attenuation2.z);
+
+    #ifdef BLUR_FOG
+    if (pushConst.useFogBlur == 1) {
+        renderedFogImage[threadIndex] = float4(L, 1.0f);
+        L = 0.0f;
+    }
+    
+    #endif
 
     float3 result = 0.0f;
     if (depth >= 1.0f - 1e-30f)

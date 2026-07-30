@@ -19,6 +19,14 @@ enum class GBuffers_VolumetricFog{
 	eVelocity,
 	eVertexInfo,	//meshID, instanceID, etc
 	eRendered,
+#ifdef BLUR_FOG
+	eRenderedFog,
+	eDepthGradient,
+	eFogVariance0,
+	eFogVariance1,
+	eFilter0,
+	eFilter1,
+#endif
 	eTonemapping,
 };
 
@@ -54,6 +62,7 @@ private:
 	void envFogLightAttenuationEstimate(VkCommandBuffer cmd);
 	void createFrustumAccFog(VkCommandBuffer cmd);
 	void deferredRenderring(VkCommandBuffer cmd);
+	void fogBlur(VkCommandBuffer cmd);
 	void renderTransparentMaterial(VkCommandBuffer cmd);
 
 	VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures{};
@@ -83,12 +92,18 @@ private:
 
 	VkShaderEXT computeShader_deferredRenderring{};
 
+	VkShaderEXT computeShader_getDepthGradient{};
+	VkShaderEXT computeShader_varianceConvolution{};
+	VkShaderEXT computeShader_blurFog_X{};
+	VkShaderEXT computeShader_blurFog_Y{};
+	VkShaderEXT computeShader_addFog{};
+
 	VkShaderEXT vertexShader_renderTransparentMaterial{};
 	VkShaderEXT fragmentShader_renderTransparentMaterial{};
 
 	shaderio::VolumetricFogPushConstant pushConstant;
 
-	bool useSVGF = true;
+	bool useSVGF = false;
 	SVGF svgf;
 	TAA taa;
 	ShadowMap shadowMap;
@@ -126,7 +141,7 @@ private:
 	uint32_t volumetricFogNoiseCount = 0;
 	std::map<int, int> volumetricFogNoiseIndexMap;							
 	std::vector<shaderio::NoiseFogInfo> volumetricFogNoiseInfos;			
-	FzbRenderer::Buffer volumetricFogNoiseInfoBuffer;		
+	FzbRenderer::Buffer volumetricFogNoiseInfoBuffer;	
 	//-------------------------Frustum------------------------------------
 	VkExtent3D frustumGridSize;
 	//-------------------------Environment--------------------------------
@@ -146,14 +161,17 @@ private:
 
 	uint32_t rmSampleCountSampleCount_fogAcc = 10;
 	int randomStepping_fogAcc = true;
-	float accJitterStrength = 2.0f;
-	float interpolationJitterStrength_fogAcc = 1.0f;
+	float accJitterStrength = 0.0f;
+	float interpolationJitterStrength_fogAcc = 2.0f;
 	//-------------------------Opaque------------------------------------
 	uint32_t forwardSampleCount = 0;
 	uint32_t rmSampleCount_opaque_noFogAcc = 50;
 	uint32_t rmSampleCount_opaque_FogAcc = 1;
 	uint32_t randomStepping_opaque = true;
 	float interpolationJitterStrength = 10.0f;
+	//-------------------------fogBlur------------------------------------
+	//bool useFogBlur = false;
+	int FogFilterCount = 4;
 
 #ifndef NDEBUG
 	void renderVolumetricFogVoxelGrid(VkCommandBuffer cmd);

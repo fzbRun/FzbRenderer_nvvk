@@ -86,7 +86,7 @@ void computeMain_Filter_X(uint2 threadIndex: SV_DispatchThreadID) {
         float weight = depthWeight * normalWeight * irradianceWeight * G5[i];
         weightSum += weight;
         irradianceSum += weight * (pushConst.filterIndex == 0 ? irradianceImage[offsetPixelIndex] : filterImage[0][offsetPixelIndex]).xyz;
-        varianceSum += (weight * weight) * varianceImage[0][offsetPixelIndex].xyz;
+        varianceSum += (weight * weight) * varianceImage[1][offsetPixelIndex].xyz;
     }
 
     irradianceSum /= max(weightSum, 1e-6f);
@@ -126,7 +126,7 @@ void computeMain_Filter_Y(uint2 threadIndex: SV_DispatchThreadID) {
         float weight = depthWeight * normalWeight * irradianceWeight * G5[i];
         weightSum += weight;
         irradianceSum += weight * filterImage[1][offsetPixelIndex].xyz;
-        varianceSum += (weight * weight) * varianceImage[0][offsetPixelIndex].xyz;
+        varianceSum += (weight * weight) * varianceImage[1][offsetPixelIndex].xyz;
     }
 
     irradianceSum /= max(weightSum, 1e-6f);
