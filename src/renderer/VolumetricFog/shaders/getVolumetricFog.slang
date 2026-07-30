@@ -170,6 +170,33 @@ void getHeightFogScatter(float3 startPos, float3 endPos, inout float3 L, inout f
     attenuation2 *= abs(height) < 1e-6f ? 0.0f : exp(-lightAttenuation * (1.0f - exp(-heightScale * height)) / (heightScale * height));
 }
 */
+
+void getFogScatter(
+    float3 samplePoint, float3 sampleDir, float sampleLength, SceneInfo sceneInfo, GlobalInfo_VolumetricFog globalInfo,
+    AABB fogAABB, float extinctionCoeff, float scattering, float phase, float3 color, float3 E,
+    inout float a, inout float3 L
+) {
+    Light light = sceneInfo.lights[0];
+    float3 lightColor = light.color * light.intensity;
+    float3 lightDirection = -light.direction;
+    float3 lightPos = samplePoint + 1000.0f * lightDirection;
+
+    float phase2 = phase * phase;
+    float fp = (1.0f - phase2) / (4.0f * M_PI * pow((1 + phase2 - 2.0f * phase * dot(-sampleDir, lightDirection)), 1.5f));
+
+    float tLightEnter, tLightExit;
+    isHit(lightPos, samplePoint, fogAABB.minimum, fogAABB.maximum, tLightEnter, tLightExit);
+    float lightDt = tLightExit - tLightEnter;
+
+    float3 activeSunColor = lightColor * getAttenuation2(samplePoint, globalInfo, sceneInfo);
+    activeSunColor *= getShadow(float4(samplePoint, 1.0f));
+
+    float x = extinctionCoeff * sampleLength;
+    float factor = (x < 1e-4) ? sampleLength * (1.0 - 0.5 * x) : (1.0 - exp(-x)) / extinctionCoeff;
+    L = activeSunColor * fp * color * scattering * E * factor;
+    a = exp(-extinctionCoeff * sampleLength);
+}
+
 void getHeightFogScatter(
     float3 startPos, float3 endPos, inout uint randomSeed, uint sampleCount,
     VolumetricFogInfo fogInfo, GlobalInfo_VolumetricFog globalInfo,
@@ -193,6 +220,7 @@ void getHeightFogScatter(
     float scattering = fogInfo.scattering;
     float phase = fogInfo.phase;
     float phase2 = phase * phase;
+    float3 color = fogInfo.color;
 
     float3 rayDir = endPos - startPos;
     float maxDist = length(rayDir);
@@ -200,15 +228,7 @@ void getHeightFogScatter(
     float3 dir = rayDir / maxDist;
 
     float tEnter, tExit;
-    if (!isHit(startPos, endPos, gridMin, gridMax, tEnter, tExit)) {
-        //if (pushConst.frameIndex == 0) printf("startPos: %f %f %f, endPos: %f %f %f, gridMin: %f %f %f, gridMax: %f %f %f\n", 
-        //    startPos.x, startPos.y, startPos.z, 
-        //    endPos.x, endPos.y, endPos.z,
-        //    gridMin.x, gridMin.y, gridMin.z,
-        //    gridMax.x, gridMax.y, gridMax.z,
-        //);
-        return;
-    }
+    if (!isHit(startPos, endPos, gridMin, gridMax, tEnter, tExit)) return;
     float tTotal = tExit - tEnter;
 
     SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
@@ -224,40 +244,8 @@ void getHeightFogScatter(
         float extinctionCoeff = (absorption + scattering) * exp(-heightScale * fogHeight);
         extinctionCoeff = max(extinctionCoeff, 1e-30f);
 
-        float3 indirectL = 0.0f;
-        for (int lightIndex = 0; lightIndex < sceneInfo.numLights; ++lightIndex) {
-            Light light = sceneInfo.lights[lightIndex];
-            float3 lightColor = light.color * light.intensity;
-            float3 lightDirection; float3 lightPos;
-            if (light.type == LightType::Direction) {
-                lightDirection = -light.direction;
-                lightPos = samplePoint + 1000.0f * lightDirection;
-            } else if (light.type == LightType::Point) {
-                lightDirection = normalize(light.pos - samplePoint);
-                lightPos = light.pos;
-            }
-
-            float fp = (1.0f - phase2) / (4.0f * M_PI * pow((1 + phase2 - 2.0f * phase * dot(-dir, lightDirection)), 1.5f));
-
-            float tLightEnter, tLightExit;
-            isHit(lightPos, samplePoint, gridMin, gridMax, tLightEnter, tLightExit);
-            float lightDt = tLightExit - tLightEnter;
-
-            float height = -lightDirection.y * lightDt;
-            float lightEnterY = lightPos.y + lightDirection.y * tLightEnter;
-            float lightAttenuation = (absorption + scattering) * lightDt * exp(-heightScale * (lightEnterY - fogStartPos.y));
-            lightAttenuation *= abs(height) < 1e-6f ? 1.0f : (1.0f - exp(-heightScale * height)) / (heightScale * height);
-            lightAttenuation = exp(-lightAttenuation);
-
-            float3 activeSunColor = lightColor * lightAttenuation * pushConst.lightAttenuationStrength;
-            if (lightIndex == 0) activeSunColor *= getShadow(float4(samplePoint, 1.0f));
-
-            float x = extinctionCoeff * tPart;
-            float factor = (x < 1e-4) ? tPart * (1.0 - 0.5 * x) : (1.0 - exp(-x)) / extinctionCoeff;
-            indirectL += activeSunColor * fp * fogInfo.color * scattering * E * factor;
-        }
-
-        float a = exp(-extinctionCoeff * tPart);
+        float3 indirectL; float a;
+        getFogScatter(samplePoint, dir, tPart, sceneInfo, globalInfo, { gridMin, gridMax }, extinctionCoeff, scattering, phase, color, E, a, indirectL);
 
         // Soft boundary blending based on distance to fluid AABB
         float fluidBlend = 0.0f;
@@ -277,7 +265,8 @@ void getHeightFogScatter(
     }
     L += fogInfo.color * fogInfo.ambientIntensity;
     attenuation *= E;
-
+    attenuation2 *= getAttenuation2(endPos, globalInfo, sceneInfo);
+    /*
     float tLightEnter, tLightExit;
     float3 mainLightPos = endPos - sceneInfo.lights[0].direction * 1000.0f;
     if (isHit(mainLightPos, endPos, gridMin, gridMax, tLightEnter, tLightExit)) {
@@ -291,6 +280,7 @@ void getHeightFogScatter(
 
         attenuation2 *= lightAttenuation;
     }
+    */
 }
 
 void getFluidFogScatter(
@@ -368,7 +358,6 @@ void getFluidFogScatter(
         tNext = min(tNext, tExit);
         float dt = tNext - tCurrent;
 
-        float3 fluidL = 0.0f;
         if (dt > 0.0) {
             float tSample = tCurrent + dt * rand(randomSeed);
             float3 samplePoint = startPos + dir * tSample;
@@ -382,38 +371,13 @@ void getFluidFogScatter(
             float phase2 = phase * phase;
             float3 color = voxelInfo.w; // UnpackFloatToFloat3(voxelInfo.w);
 
-            for (int lightIndex = 0; lightIndex < sceneInfo.numLights; ++lightIndex) {
-                Light light = sceneInfo.lights[lightIndex];
-                float3 lightColor = light.color * light.intensity;
-                float3 lightDirection; float3 lightPos;
-                if (light.type == LightType::Direction) {
-                    lightDirection = -light.direction;
-                    lightPos = samplePoint + 1000.0f * lightDirection;
-                } else if (light.type == LightType::Point) {
-                    lightDirection = normalize(light.pos - samplePoint);
-                    lightPos = light.pos;
-                }
-
-                float fp = (1.0f - phase2) / (4.0f * M_PI * pow((1 + phase2 - 2.0f * phase * dot(-dir, lightDirection)), 1.5f));
-
-                float tLightEnter, tLightExit;
-                isHit(lightPos, samplePoint, gridMin, gridMax, tLightEnter, tLightExit);
-                float lightDt = tLightExit - tLightEnter;
-
-                float3 activeSunColor = lightColor * lerp(1.0f, fluidFogInfo.lightAttenuationEstimator, lightDt / gridLength) * pushConst.lightAttenuationStrength;
-                if (lightIndex == 0) activeSunColor *= getShadow(float4(samplePoint, 1.0f));
-
-                float x = extinctionCoeff * dt;
-                float factor = (x < 1e-4) ? dt * (1.0 - 0.5 * x) : (1.0 - exp(-x)) / extinctionCoeff;
-                fluidL += activeSunColor * fp * scattering * color * E * factor;
-                // L += extinctionCoeff * fogInfo.color * fogInfo.ambientIntensity;
-            }
+            float3 fluidL; float a;
+            getFogScatter(samplePoint, dir, dt, sceneInfo, globalInfo, { gridMin, gridMax }, extinctionCoeff, scattering, phase, color, E, a, fluidL);
 
             float3 d = min(samplePoint - globalInfo.fluidAABB.minimum, globalInfo.fluidAABB.maximum - samplePoint);
             float3 maxD = min(gridCenter - globalInfo.fluidAABB.minimum, globalInfo.fluidAABB.maximum - gridCenter);
             float fluidBlend = min(min(d.x, d.y), d.z) / min(min(maxD.x, maxD.y), maxD.z);
 
-            float a = exp(-extinctionCoeff * dt);
             E *= lerp(1.0f, a, fluidBlend);
             L += lerp(0.0f, fluidL, fluidBlend);
             if (all(E <= 0.0f)) break;
@@ -477,8 +441,10 @@ void getNoiseFogScatter(
     float3 E = 1.0f;
     float gridLength = length((gridMax - gridMin));
 
+    float scattering = fogInfo.scattering;
     float phase = fogInfo.phase;
     float phase2 = phase * phase;
+    float3 color = fogInfo.color;
 
     const float distancePower = 2.0f;
     for (int sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex) {
@@ -497,33 +463,11 @@ void getNoiseFogScatter(
         float extinctionCoeff = (fogInfo.absorption.x + fogInfo.scattering) * density;
         extinctionCoeff = max(extinctionCoeff, 1e-30f);
 
-        for (int lightIndex = 0; lightIndex < sceneInfo.numLights; ++lightIndex) {
-            Light light = sceneInfo.lights[lightIndex];
-            float3 lightColor = light.color * light.intensity;
-            float3 lightDirection; float3 lightPos;
-            if (light.type == LightType::Direction) {
-                lightDirection = -light.direction;
-                lightPos = samplePoint + 1000.0f * lightDirection;
-            } else if (light.type == LightType::Point) {
-                lightDirection = normalize(light.pos - samplePoint);
-                lightPos = light.pos;
-            }
+        float3 indirectL; float a;
+        getFogScatter(samplePoint, dir, tPart, sceneInfo, globalInfo, { gridMin, gridMax }, extinctionCoeff, scattering, phase, color, E, a, indirectL);
 
-            float fp = (1.0f - phase2) / (4.0f * M_PI * pow((1 + phase2 - 2.0f * phase * dot(-dir, lightDirection)), 1.5f));
-
-            float tLightEnter, tLightExit;
-            isHit(lightPos, samplePoint, gridMin, gridMax, tLightEnter, tLightExit);
-            float lightDt = tLightExit - tLightEnter;
-
-            float3 activeSunColor = lightColor * pushConst .lightAttenuationStrength; // * lerp(1.0f, fogInfo.lightAttenuationEstimator, lightDt / gridLength);
-            if (lightIndex == 0) activeSunColor *= getShadow(float4(samplePoint, 1.0f));
-
-            float x = extinctionCoeff * tPart;
-            float factor = (x < 1e-4) ? tPart * (1.0 - 0.5 * x) : (1.0 - exp(-x)) / extinctionCoeff;
-            L += activeSunColor * fp * fogInfo.scattering * fogInfo.color * E * factor;
-        }
-
-        E *= exp(-extinctionCoeff * tPart);
+        L += indirectL;
+        E *= a;
         if (all(E <= 1e-3f)) break;
     }
 
@@ -733,6 +677,40 @@ float4 getFrustumImageInfo(float3 worldPos, bool linear, bool dither, Sampler3D<
 #endif
 }
 
+void getPreAccFog(
+    float3 startPos, float3 endPos, inout uint randomSeed,
+    inout float3 L, inout float3 attenuation, inout float3 attenuation2
+) {
+    #ifdef COMPUTE_SHADER
+    GlobalInfo_VolumetricFog globalInfo = groupGlobalInfo;
+    SceneInfo sceneInfo = groupSceneInfo;
+    #else
+    GlobalInfo_VolumetricFog globalInfo = globalInfoBuffer[0];
+    SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+    #endif
+    float3 dir = normalize(endPos - startPos);
+
+    float3 cameraPos = sceneInfo.cameraPosition;
+    float3 cameraForward = -sceneInfo.viewInvMatrix[2].xyz;
+    float3 cameraRight = sceneInfo.viewInvMatrix[0].xyz;
+    float3 cameraUp = sceneInfo.viewInvMatrix[1].xyz;
+
+    float nearPlane = pushConst.cameraNearPlane;
+    float farPlane = pushConst.cameraFarPlane;
+    float tanHalfFov = pushConst.tanCameraFov_2;
+    float aspect = pushConst.aspectRatio;
+    float3 compressionPrecision = pushConst.compressionParams;
+
+    float tEnter, tExit;
+    if (!IntersectFrustum(startPos, endPos, cameraPos, cameraForward, cameraRight, cameraUp, tanHalfFov, aspect, nearPlane, farPlane, tEnter, tExit)) return;
+    endPos = startPos + tExit * dir;
+    startPos = startPos + tEnter * dir;
+
+    attenuation *= getFrustumImageInfo(endPos, true, true, volumetricFogAttenuationImage_sample, randomSeed).xyz;
+    L += getFrustumImageInfo(endPos, true, true, volumetricFogLImage_sample, randomSeed).xyz;
+    attenuation2 *= getAttenuation2(endPos, globalInfo, sceneInfo);
+}
+//------------------------------------------------------------------------------------------------------------------------------------------------
 float3 getAttenuation2(float3 endPos, GlobalInfo_VolumetricFog globalInfo, SceneInfo sceneInfo) {
     /*
     float tLightEnter, tLightExit;
@@ -790,7 +768,7 @@ void getEnvVolumetricFogScatter(
     float3 compressionPrecision = pushConst.compressionParams;
 
     float3 hitWorldPos = startPos;
-    if (pushConst.useEnvAccFog == 1) {
+    if (pushConst.useAccFog == 1) {
         hitWorldPos = getCameraFrustumInteralPos(endPos, cameraPos, sceneInfo.viewInvMatrix, pushConst.frustumGridSize, nearPlane,
             farPlane, tanHalfFov, aspect, pushConst.forwardSampleCount);
         attenuation *= getFrustumImageInfo(hitWorldPos, true, true, volumetricFogAttenuationImage_sample, randomSeed).xyz;
@@ -929,7 +907,7 @@ void getEnvVolumetricFogScatter_DDA(
     float3 compressionParams = pushConst.compressionParams;
 
     float3 hitWorldPos = startPos;
-    if (pushConst.useEnvAccFog == 1) {
+    if (pushConst.useAccFog == 1) {
         hitWorldPos = getCameraFrustumInteralPos(endPos, cameraPos, sceneInfo.viewInvMatrix, pushConst.frustumGridSize, nearPlane,
             farPlane, tanHalfFov, aspect, pushConst.forwardSampleCount);
         attenuation *= getFrustumImageInfo(hitWorldPos, true, true, volumetricFogAttenuationImage_sample, randomSeed).xyz;

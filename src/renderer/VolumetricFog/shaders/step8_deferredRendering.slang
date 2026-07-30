@@ -38,17 +38,20 @@ void computeMain_deferredRendering(uint2 threadIndex: SV_DispatchThreadID, uint2
 
     float3 attenuation = 1.0f, attenuation2 = 1.0f, L = 0.0f;
     uint randomSeed = xxhash32(uint3(int(pushConst.time * 1000.0f), threadIndex));
-    //getEnvVolumetricFogScatter_DDA(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, true, L, attenuation, attenuation2);
-    getEnvVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, true, 3, L, attenuation, attenuation2);
-    //getVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, pushConst.sampleCount, L, attenuation, attenuation2);
-    // if (threadIndex.y == 0 && pushConst.frameIndex == 0) printf("L: %f %f %f, a: %f %f %f, a2: %f %f %f\n", L.x, L.y, L.z, attenuation.x, attenuation.y, attenuation.z, attenuation2.x, attenuation2.y, attenuation2.z);
+    if (pushConst.useAccFog == 1) getPreAccFog(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, L, attenuation, attenuation2);
+    else {
+        #ifdef USE_ENVFOG
+        getEnvVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, true, 1, L, attenuation, attenuation2);
+        #else
+        getVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, pushConst.sampleCount, L, attenuation, attenuation2);
+        #endif
+    }
 
     #ifdef BLUR_FOG
     if (pushConst.useFogBlur == 1) {
         renderedFogImage[threadIndex] = float4(L, 1.0f);
         L = 0.0f;
     }
-    
     #endif
 
     float3 result = 0.0f;

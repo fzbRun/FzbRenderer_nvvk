@@ -292,9 +292,11 @@ void computeMain_createFrustumAccFog_Stepping(uint2 threadIndex: SV_DispatchThre
     }
 
     float3 a2;
-    // getVolumetricFogScatter(startPos, endPos, randomSeed, pushConst.sampleCount, L, attenuation, a2);
+    #ifdef USE_ENVFOG
     getEnvVolumetricFogScatter(startPos, endPos, randomSeed, true, 1, L, attenuation, a2);
-    //if (pushConst.frameIndex == 0 && voxelIndex.z == 0) printf("L: %f\n", L.x);
+    #else
+    getVolumetricFogScatter(startPos, endPos, randomSeed, pushConst.sampleCount, L, attenuation, a2);
+    #endif
 
     //if (pushConst.frameIndex > 0) {
     //    //attenuation = lerp(attenuation, volumetricFogAttenuationImage[voxelIndex].xyz, saturate(length(pushConst.cameraMoveDir) * pushConst.jitterStrength));

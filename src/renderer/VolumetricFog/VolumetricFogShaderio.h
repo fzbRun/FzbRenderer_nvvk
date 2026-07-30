@@ -16,7 +16,7 @@ NAMESPACE_SHADERIO_BEGIN()
 #define MAX_FLUID_FOG_COUNT 3
 #define MAX_NOISE_FOG_COUNT 3
 
-#define USE_ENVFOG
+//#define USE_ENVFOG
 #define Uniform_EnvFog_Grid
 #define Fog_Acc_Stepping
 #define BLUR_FOG
@@ -48,7 +48,7 @@ struct VolumetricFogPushConstant{
 	SceneInfo* sceneInfoAddress;
 	float4x4 lightVP;
 
-	int useEnvAccFog;
+	int useAccFog;
 	float compressionParams;
 	int forwardSampleCount;
 	float cameraNearPlane;
