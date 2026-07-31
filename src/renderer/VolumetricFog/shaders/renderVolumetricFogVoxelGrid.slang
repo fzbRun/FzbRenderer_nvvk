@@ -7,7 +7,11 @@
 [[vk::push_constant]] ConstantBuffer<VolumetricFogPushConstant> pushConst;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eRenderedImage)]] RWTexture2D<float4> renderedImage;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eGlobalInfoBuffer)]] RWStructuredBuffer<GlobalInfo_VolumetricFog> globalInfoBuffer;
-[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogInfosBuffer)]] RWStructuredBuffer<VolumetricFogInfo, ScalarDataLayout> volumetricFogInfosBuffer;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eFogInfosBuffer)]] RWStructuredBuffer<VolumetricFogInfo, ScalarDataLayout> fogInfosBuffer;
+
+[[vk::binding(StaticBindingPoints_VolumetricFog::eHeightFogInfoBuffer)]] StructuredBuffer<HeightFogInfo, ScalarDataLayout> heightFogInfoBuffer;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eFluidFogInfoBuffer)]] RWStructuredBuffer<FluidFogInfo, ScalarDataLayout> fluidFogInfoBuffer;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eNoiseFogInfoBuffer)]] StructuredBuffer<NoiseFogInfo, ScalarDataLayout> noiseFogInfoBuffer;
 
 struct VSout {
     float4 sv_position : SV_Position;
@@ -22,10 +26,17 @@ VSout vertexMain(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID
         voxelSize = globalInfo.envVoxelSize;
         startPos = globalInfo.envStartPos;
     } else {
-        VolumetricFogInfo info = volumetricFogInfosBuffer[pushConst.instanceIndex];
-        gridSize = info.fogVoxelGridSize;
-        voxelSize = info.fogVoxelSize;
-        startPos = info.fogStartPos;
+        VolumetricFogInfo info = fogInfosBuffer[pushConst.instanceIndex];
+        if (info.type == VolumetricFogType::Height) {
+            HeightFogInfo heightFoginfo = heightFogInfoBuffer[info.typeFogIndex];
+            gridSize = 1;
+            voxelSize = info.aabb.maximum - info.aabb.minimum;
+        } else if (info.type == VolumetricFogType::Fluid) {
+            FluidFogInfo fluidFoginfo = fluidFogInfoBuffer[info.typeFogIndex];
+            gridSize = fluidFoginfo.gridSize;
+            voxelSize = fluidFoginfo.voxelSize;
+        }
+        startPos = info.aabb.minimum;
     }
 
     uint3 voxelIndex;

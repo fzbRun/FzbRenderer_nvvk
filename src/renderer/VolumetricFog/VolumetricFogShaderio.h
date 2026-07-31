@@ -1,6 +1,9 @@
 #pragma once
 
 #include <common/Shader/shaderStructType.h>
+#include <renderer/VolumetricFog/VolumetricFogCommonShaderio.h>
+#include <renderer/VolumetricFog/HeightFog/HeightFogShaderio.h>
+#include <renderer/VolumetricFog/FluidFog/FluidFogShaderio.h>
 
 #ifndef FZBRENDERER_VOLUMETRIC_FOG_SHADER_IO_H
 #define FZBRENDERER_VOLUMETRIC_FOG_SHADER_IO_H
@@ -12,12 +15,10 @@ NAMESPACE_SHADERIO_BEGIN()
 #define Jacobi_Iteration_Count 40u
 
 #define MAX_VOLUMETRIC_FOG_COUNT 10
-#define MAX_HEIGHT_FOG_COUNT 3
-#define MAX_FLUID_FOG_COUNT 3
 #define MAX_NOISE_FOG_COUNT 3
 
 //#define USE_ENVFOG
-#define Uniform_EnvFog_Grid
+//#define Uniform_EnvFog_Grid
 #define Fog_Acc_Stepping
 #define BLUR_FOG
 
@@ -50,7 +51,7 @@ struct VolumetricFogPushConstant{
 
 	int useAccFog;
 	float compressionParams;
-	int forwardSampleCount;
+	//int forwardSampleCount;
 	float cameraNearPlane;
 	uint3 frustumGridSize;
 	float cameraFarPlane;
@@ -58,8 +59,8 @@ struct VolumetricFogPushConstant{
 	float aspectRatio;
 
 	//float3 cameraMoveDir;
-	float jitterStrength;
-	float accJitterStrength;
+	float jitterStrength0;
+	float jitterStrength1;
 
 	int useFogBlur = true;
 
@@ -83,48 +84,12 @@ struct GlobalInfo_VolumetricFog {
 	float3 envVoxelSize;
 };
 
-enum class VolumetricFogType {
-	Height,
-	Fluid,
-	Noise,
-	Grid,
-};
-struct VolumetricFogInfo {
-	float3 fogStartPos;
-	uint3 fogVoxelGridSize;
-	float3 fogVoxelSize;
-	float3 color;
-	float ambientIntensity;
-	float2 absorption;
-	float scattering;
-	float phase;
-
-	VolumetricFogType type;
-	int volumetricFogTypeIndex;
-};
-struct HeightFogInfo {
-	float heightScale;
-};
-struct FluidFogInfo {
-	int startUp;
-	float viscosity;
-	float FIntensity;
-	float lightAttenuationEstimator;
-	float restoreSpeed;
-	float3 fogStartPos_lastTime;
-};
 struct NoiseFogInfo {
 	float3 cloudScale;
 	float cloudFlowSpeed;
 	float2 cloudCoverage;
 	float2 cloudTypePreference;
 	float weatherScale;
-};
-
-struct VolumetricFogFluidVoxelInfo {
-	float4 dirtyVelocity_pressure[2];
-	bool isBoundary;
-	float4 voxelFogInfo;
 };
 
 enum class StaticBindingPoints_VolumetricFog {
@@ -135,26 +100,26 @@ enum class StaticBindingPoints_VolumetricFog {
 	eEmissiveImage,
 
 	eGlobalInfoBuffer,
-	eVolumetricFogInfosBuffer,
+	eFogInfosBuffer,
 
-	eVolumetricFogHeightInfoBuffer,
+	eHeightFogInfoBuffer,
 
-	eVolumetricFogFluidInfoBuffer,
-	eVolumetricFogFluidVoxelInfoBuffer,
-	eVolumetricFogFluidVoxelVelocityImage,
-	eVolumetricFogFluidVoxelVelocityImage_sample,
-	eVolumetricFogFluidVoxelInfoImages,
-	eVolumetricFogFluidVoxelInfoImages_sampler,
+	eFluidFogInfoBuffer,
+	eFluidFogVoxelInfoBuffer,
+	eFluidFogVoxelVelocityImage,
+	eFluidFogVoxelVelocityImage_sample,
+	eFluidFogVoxelInfoImages,
+	eFluidFogVoxelInfoImages_sampler,
 
-	eVolumetricFogNoiseInfoBuffer,
+	eNoiseFogInfoBuffer,
 
-	eVolumetricFogAttenuationImage,
-	eVolumetricFogAttenuationImage_sample,
-	eVolumetricFogLImage,
-	eVolumetricFogLImage_sample,
+	eFogAttenuationImage,
+	eFogAttenuationImage_sample,
+	eFogLImage,
+	eFogLImage_sample,
 
-	eEnvVolumetricFogInfoImage,
-	eEnvVolumetricFogInfoImage_sample,
+	eEnvFogInfoImage,
+	eEnvFogInfoImage_sample,
 
 #ifdef BLUR_FOG
 	eRenderedFogImage,

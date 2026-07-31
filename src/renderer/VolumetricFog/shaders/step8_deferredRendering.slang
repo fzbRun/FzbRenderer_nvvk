@@ -46,6 +46,7 @@ void computeMain_deferredRendering(uint2 threadIndex: SV_DispatchThreadID, uint2
         getVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, pushConst.sampleCount, L, attenuation, attenuation2);
         #endif
     }
+    //if (all(threadIndex == 0)) printf("visibleFogCount : %d\n", groupGlobalInfo.visibleVolumetricFogCount);
 
     #ifdef BLUR_FOG
     if (pushConst.useFogBlur == 1) {
@@ -79,5 +80,16 @@ void computeMain_deferredRendering(uint2 threadIndex: SV_DispatchThreadID, uint2
 
         result = (ambient + (diffuse + specular) * shadow * attenuation2 + emissive) * attenuation + L;
     }
+
+    //depth = dot(worldPos.xyz - sceneInfo.cameraPosition, -sceneInfo.viewInvMatrix[2].xyz) - pushConst.cameraNearPlane;
+    //int voxelIndex = int(frustumInvMap(depth / (pushConst.cameraFarPlane - pushConst.cameraNearPlane), pushConst.compressionParams, 1.0f) * pushConst.frustumGridSize.z);
+    //result = 0.0f;
+    //result = voxelIndex & 1;
+
+    //result = attenuation;
+    //if (all(threadIndex > (screenSize / 2 - 10)) && all(threadIndex < (screenSize / 2 + 10))) {
+    //    if (pushConst.frameIndex == 0) printf("voxelIndex: %d, depth: %f\n", voxelIndex, depth);
+    //    result = float3(10.0f, 0.0f, 0.0f);
+    //}
     renderedImage[threadIndex] = float4(result, 1.0f);
 }

@@ -7,13 +7,12 @@
 [[vk::push_constant]] ConstantBuffer<VolumetricFogPushConstant> pushConst;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eTextures)]] Sampler2D textures[];
 [[vk::binding(StaticBindingPoints_VolumetricFog::eGlobalInfoBuffer)]] RWStructuredBuffer<GlobalInfo_VolumetricFog> globalInfoBuffer;
-[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogInfosBuffer)]] RWStructuredBuffer<VolumetricFogInfo, ScalarDataLayout> volumetricFogInfosBuffer;
-[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogFluidInfoBuffer)]] RWStructuredBuffer<FluidFogInfo, ScalarDataLayout> volumetricFogFluidInfoBuffer;
-[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogFluidVoxelInfoBuffer)]] RWStructuredBuffer<VolumetricFogFluidVoxelInfo, ScalarDataLayout> volumetricFogVoxelInfosBuffer[];
-[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogFluidVoxelVelocityImage)]] RWTexture3D<float4> volumetricFogVoxelVelocityImage[]; // xyz: velocity; w:
+[[vk::binding(StaticBindingPoints_VolumetricFog::eFogInfosBuffer)]] RWStructuredBuffer<VolumetricFogInfo, ScalarDataLayout> fogInfosBuffer;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eFluidFogInfoBuffer)]] RWStructuredBuffer<FluidFogInfo, ScalarDataLayout> fluidFogInfoBuffer;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eFluidFogVoxelInfoBuffer)]] RWStructuredBuffer<FluidFogVoxelInfo, ScalarDataLayout> fluidFogVoxelInfosBuffer[];
+[[vk::binding(StaticBindingPoints_VolumetricFog::eFluidFogVoxelVelocityImage)]] RWTexture3D<float4> fluidFogVoxelVelocityImage[]; // xyz: velocity; w:
 
-__generic<T : IFloat> T getAttribute(uint8_t *dataBufferAddress, BufferView bufferView, uint attributeIndex)
-{
+__generic<T : IFloat> T getAttribute(uint8_t *dataBufferAddress, BufferView bufferView, uint attributeIndex){
     if (bufferView.count > 0)
     {
         T *ptr = (T *)(dataBufferAddress + bufferView.offset + attributeIndex * bufferView.byteStride);
@@ -23,26 +22,22 @@ __generic<T : IFloat> T getAttribute(uint8_t *dataBufferAddress, BufferView buff
     return T(1); // Error case
 }
 
-struct VSin
-{
+struct VSin{
     float3 position : POSITION;
     float3 normal : NORMAL;
 };
 
-struct VSout
-{
+struct VSout{
     float4 sv_position : SV_Position;
     float3 worldPos : POSITION;
     float3 worldNormal : NORMAL;
     float2 worldTexCoord : TEXCOORD0;
-    float3 posMesh;
 
     float2 screenPos_Current;
     float2 screenPos_Last;
 };
 
-static float2 Halton_2_3[8] =
-{
+static float2 Halton_2_3[8] = {
     float2(0.0f, -1.0f / 3.0f),
     float2(-1.0f / 2.0f, 1.0f / 3.0f),
     float2(1.0f / 2.0f, -7.0f / 9.0f),
@@ -54,8 +49,7 @@ static float2 Halton_2_3[8] =
 };
 
 [shader("vertex")]
-VSout vertexMain(VSin input, uint vertexIndex: SV_VertexID)
-{
+VSout vertexMain(VSin input, uint vertexIndex: SV_VertexID){
     int instanceIndex = pushConst.instanceIndex;
 
     SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
@@ -80,7 +74,6 @@ VSout vertexMain(VSin input, uint vertexIndex: SV_VertexID)
     output.worldPos = pos.xyz;
     output.worldNormal = normalize(mul(normal, float3x3(pushConst.normalMatrix)));
     output.worldTexCoord = texCoord;
-    output.posMesh = posMesh;
 
     output.screenPos_Current = output.sv_position.xy / output.sv_position.w * 0.5f + 0.5f;
     float4 clipPos_Last = mul(float4(posMesh, 1.0), pushConst.lightVP * globalInfoBuffer[0].VPMatrix_lastFrame);
@@ -89,8 +82,7 @@ VSout vertexMain(VSin input, uint vertexIndex: SV_VertexID)
     return output;
 }
 
-struct PSout
-{
+struct PSout{
     float4 albedo : SV_Target0;
     float4 normal : SV_Target1;
     float4 emissive : SV_Target2;
@@ -104,28 +96,22 @@ PSout fragmentMain(VSout input){
     Instance instance = sceneInfo.instances[pushConst.instanceIndex];
     BSDFMaterial material = sceneInfo.materials[instance.materialIndex];
 
-    // if (pushConst.volumetricFogFluidIndex >= 0) {
     for (int i = 0; i < pushConst.volumetricFogCount; ++i) {
-        VolumetricFogInfo fogInfo = volumetricFogInfosBuffer[i];
+        VolumetricFogInfo fogInfo = fogInfosBuffer[i];
         if (fogInfo.type != VolumetricFogType::Fluid) continue;
-        AABB fogAABB = { fogInfo.fogStartPos, fogInfo.fogStartPos + fogInfo.fogVoxelGridSize * fogInfo.fogVoxelSize };
-        if (!checkPointInAABB(input.worldPos.xyz, fogAABB)) continue;
-        FluidFogInfo fluidFogInfo = volumetricFogFluidInfoBuffer[fogInfo.volumetricFogTypeIndex];
+        if (!checkPointInAABB(input.worldPos.xyz, fogInfo.aabb)) continue;
+        FluidFogInfo fluidFogInfo = fluidFogInfoBuffer[fogInfo.typeFogIndex];
         if (fluidFogInfo.startUp == 0) continue;
 
-        uint3 voxelIndex = min(uint3((input.worldPos.xyz - fogInfo.fogStartPos) / fogInfo.fogVoxelSize), fogInfo.fogVoxelGridSize - 1);
-        uint voxelIndexU = voxelIndex.z * fogInfo.fogVoxelGridSize.x * fogInfo.fogVoxelGridSize.y + voxelIndex.y * fogInfo.fogVoxelGridSize.x + voxelIndex.x;
-        volumetricFogVoxelInfosBuffer[fogInfo.volumetricFogTypeIndex][voxelIndexU].isBoundary = true;
-        volumetricFogVoxelVelocityImage[fogInfo.volumetricFogTypeIndex][voxelIndex].xyz = pushConst.instanceVelocity * fluidFogInfo.FIntensity;
+        float3 fogStartPos = fogInfo.aabb.minimum;
+        uint3 gridSize = fluidFogInfo.gridSize;
+        float3 voxelSize = fluidFogInfo.voxelSize;
 
-        //float4 worldPos_lastTime = mul(float4(input.posMesh, 1.0f), pushConst.transofrm_lastTime);
-        //float3 v = (input.worldPos - worldPos_lastTime.xyz) / pushConst.dt;
-        //InterlockedAdd<float>(volumetricFogVoxelVelocityImage[fogInfo.volumetricFogTypeIndex][voxelIndex].x, v.x);
-        //InterlockedAdd<float>(volumetricFogVoxelVelocityImage[fogInfo.volumetricFogTypeIndex][voxelIndex].y, v.y);
-        //InterlockedAdd<float>(volumetricFogVoxelVelocityImage[fogInfo.volumetricFogTypeIndex][voxelIndex].z, v.z);
+        uint3 voxelIndex = min(uint3((input.worldPos.xyz - fogStartPos) / voxelSize), gridSize - 1);
+        uint voxelIndexU = voxelIndex.z * gridSize.x * gridSize.y + voxelIndex.y * gridSize.x + voxelIndex.x;
+        fluidFogVoxelInfosBuffer[fogInfo.typeFogIndex][voxelIndexU].isBoundary = true;
+        fluidFogVoxelVelocityImage[fogInfo.typeFogIndex][voxelIndex].xyz = pushConst.instanceVelocity * fluidFogInfo.FIntensity;
     }
-    //}
-
     if (material.type == MaterialType::RoughDielectric) discard;
 
     PSout out;
@@ -135,5 +121,4 @@ PSout fragmentMain(VSout input){
     out.velocity = float4(input.screenPos_Current - input.screenPos_Last, 0.0f, 1.0f);
     out.vertexInfo = float4(pushConst.instanceIndex, instance.meshIndex, instance.materialIndex, 1.0f);
     return out;
-    //return { float4(material.albedo, 1.0f), float4(normalize(input.worldNormal), 1.0f), float4(0.0f, 0.0f, 0.0f, 1.0f) };
 }

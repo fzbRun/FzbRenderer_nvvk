@@ -10,6 +10,8 @@
 #include <common/Buffer/Buffer.h>
 #include <feature/TAA/TAA.h>
 #include <feature/SVGF/SVGF.h>
+#include "HeightFog/HeightFog.h"
+#include "FluidFog/FluidFog.h"
 
 namespace FzbRenderer {
 enum class GBuffers_VolumetricFog{
@@ -55,7 +57,7 @@ private:
 	void updateDataPerFrame(VkCommandBuffer cmd) override;
 
 	void getVisibleFog(VkCommandBuffer cmd);
-	void initVolumetricFogFluid(VkCommandBuffer cmd);
+	void initFluidFog(VkCommandBuffer cmd);
 	void createGBuffers(VkCommandBuffer cmd);
 	void fluidSimulation(VkCommandBuffer cmd);
 	void createEnvFog(VkCommandBuffer cmd);
@@ -72,7 +74,7 @@ private:
 
 	VkShaderEXT computeShader_getVisibleVolumetricFog{};
 
-	VkShaderEXT computeShader_initVolumetricFogFluid{};
+	VkShaderEXT computeShader_initFluidFog{};
 
 	VkShaderEXT vertexShader_createGBuffer{};
 	VkShaderEXT fragmentShader_createGBuffer{};
@@ -108,11 +110,6 @@ private:
 	TAA taa;
 	ShadowMap shadowMap;
 
-	// mouse force
-	glm::vec3 mouseForcePosition = glm::vec3(0.0f);
-	float mouseForceStrength = 0.0f;
-	float mouseForceRadius = 3.0f;
-
 	glm::vec3 m_lastCameraPos = glm::vec3(0.0f);
 	shaderio::float4x4 VPMatrix_lastFrame;
 
@@ -123,20 +120,8 @@ private:
 	FzbRenderer::Buffer volumetricFogInfosBuffer;							
 	std::vector<int> volumetricFogInfoModified;								
 
-	uint32_t volumetricFogHeightCount = 0;									
-	std::map<int, int> volumetricFogHeightIndexMap;							
-	std::vector<shaderio::HeightFogInfo> volumetricFogHeightInfos;			
-	FzbRenderer::Buffer volumetricFogHeightInfoBuffer;						
-
-	uint32_t volumetricFogFluidCount = 0;								
-	std::map<int, int> volumetricFogFluidIndexMap;							
-	std::vector<shaderio::FluidFogInfo> volumetricFogFluidInfos;			
-	FzbRenderer::Buffer volumetricFogFluidInfoBuffer;						
-	std::vector<FzbRenderer::Buffer> volumetricFogFluidVoxelInfoBuffers;	
-	std::vector<FzbRenderer::Image> volumetricFogFluidVoxelVelocityImages;	
-	std::vector<FzbRenderer::Image> volumetricFogFluidVoxelInfoImages;	
-
-	shaderio::float3 fluidLocalStartPos;
+	HeightFogSet heightFogSet;
+	FluidFogSet fluidFogSet;
 
 	uint32_t volumetricFogNoiseCount = 0;
 	std::map<int, int> volumetricFogNoiseIndexMap;							
@@ -159,16 +144,17 @@ private:
 	FzbRenderer::Image volumetricFogAttenuationImage;
 	FzbRenderer::Image volumetricFogLImage;
 
-	uint32_t rmSampleCountSampleCount_fogAcc = 10;
+	uint32_t rmSampleCountSampleCount_fogAcc = 4;
 	int randomStepping_fogAcc = true;
 	float accJitterStrength = 0.0f;
-	float interpolationJitterStrength_fogAcc = 2.0f;
+	float interpolationJitterStrength_fogAcc = 0.0f;
 	//-------------------------Opaque------------------------------------
 	uint32_t forwardSampleCount = 0;
 	uint32_t rmSampleCount_opaque_noFogAcc = 50;
 	uint32_t rmSampleCount_opaque_FogAcc = 1;
 	uint32_t randomStepping_opaque = true;
-	float interpolationJitterStrength = 10.0f;
+	float interpolationJitterStrength_attenuation = 1.0f;
+	float interpolationJitterStrength_L = 30.0f;
 	//-------------------------fogBlur------------------------------------
 	//bool useFogBlur = false;
 	int FogFilterCount = 4;

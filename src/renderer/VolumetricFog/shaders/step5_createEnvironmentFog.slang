@@ -54,7 +54,7 @@ void computeMain_createEnvionmentFog(uint3 voxelIndex: SV_DispatchThreadID, uint
         float3 localSample = 0.5f;
         if (sampleCount > 1) {
             localSample = float3(rand(randomSeed), rand(randomSeed), rand(randomSeed));
-            localSample = lerp(0.5f.xxx, localSample, saturate(pushConst.jitterStrength * 0.1f));
+            localSample = lerp(0.5f.xxx, localSample, saturate(pushConst.jitterStrength0 * 0.1f));
         }
 
 #ifdef Uniform_EnvFog_Grid
@@ -81,39 +81,43 @@ void computeMain_createEnvionmentFog(uint3 voxelIndex: SV_DispatchThreadID, uint
         for (int i = 0; i < globalInfo.visibleVolumetricFogCount; ++i) {
             uint fogIndex = globalInfo.visibleVolumetricFogIndices[i];
             VolumetricFogInfo fogInfo = groupVolumetricFogInfos[fogIndex];
-            AABB fogAABB = { fogInfo.fogStartPos, fogInfo.fogStartPos + fogInfo.fogVoxelGridSize * fogInfo.fogVoxelSize };
-            if (!checkPointInAABB(samplePoint, fogAABB)) continue;
+            if (!checkPointInAABB(samplePoint, fogInfo.aabb)) continue;
+
+            float3 fogStartPos = fogInfo.aabb.minimum;
 
             extinction = 0.0f;
             float scattering = 0.0f, phase = 0.0f; float3 color = 0.0f;
             if (fogInfo.type == VolumetricFogType::Height) {
-               float heightScale = groupHeightFogInfos[fogInfo.volumetricFogTypeIndex].heightScale;
-               float height = max(samplePoint.y - fogInfo.fogStartPos.y, 0.0f);
-               heightAttenuation = exp(-heightScale * height);
-               scattering = fogInfo.scattering;
-               extinction = (fogInfo.absorption.x + scattering) * heightAttenuation;
-               phase = fogInfo.phase;
-               color = fogInfo.color;
+                HeightFogInfo heightFogInfo = groupHeightFogInfos[fogInfo.typeFogIndex];
+                float heightScale = heightFogInfo.heightScale;
+                float height = max(samplePoint.y - fogStartPos.y, 0.0f);
+                heightAttenuation = exp(-heightScale * height);
+                scattering = heightFogInfo.scattering;
+                extinction = (heightFogInfo.absorption + scattering) * heightAttenuation;
+                phase = heightFogInfo.phase;
+                color = heightFogInfo.color;
             } else if (fogInfo.type == VolumetricFogType::Fluid && globalInfo.fluidStartUp == 1) {
-               float3 uvw = (samplePoint - fogInfo.fogStartPos) / (fogInfo.fogVoxelGridSize * fogInfo.fogVoxelSize);
-               uvw = clamp(uvw, 0.0f, 1.0f - 1e-6f);
-               float4 voxelInfo = volumetricFogFluidVoxelInfoImages_sample[fogInfo.volumetricFogTypeIndex].SampleLevel(uvw, 0);
-
-               // if in fluid, the voxelInfo has include the envionment fog info
-               envExtinction = max(voxelInfo.x, 1e-30f);
-               envScattering = envExtinction * voxelInfo.y;
-               envPhase = envExtinction * voxelInfo.z;
-               envColor = envExtinction * voxelInfo.w; // UnpackFloatToFloat3(voxelInfo.w);
-               break;
-            }else if (fogInfo.type == VolumetricFogType::Noise) {
-                NoiseFogInfo noiseFogInfo = groupNoiseFogInfos[fogInfo.volumetricFogTypeIndex];
-                CloudSetting cloudSetting = { noiseFogInfo.cloudScale, noiseFogInfo.cloudFlowSpeed, noiseFogInfo.cloudCoverage, noiseFogInfo.cloudTypePreference, noiseFogInfo.weatherScale };
-                float fogDensity = SampleCloudDensity(samplePoint, fogAABB.minimum, fogAABB.maximum, pushConst.time, cloudSetting);
-                scattering = fogInfo.scattering;
-                extinction = (fogInfo.absorption.x + scattering) * fogDensity;
-                phase = fogInfo.phase;
-                color = fogInfo.color;
+                FluidFogInfo fluidFogInfo = groupFluidFogInfos[fogInfo.typeFogIndex];
+                float3 uvw = (samplePoint - fogStartPos) / (fluidFogInfo.gridSize * fluidFogInfo.voxelSize);
+                uvw = clamp(uvw, 0.0f, 1.0f - 1e-6f);
+                float4 voxelInfo = FluidFogVoxelInfoImages_sample[fogInfo.typeFogIndex].SampleLevel(uvw, 0);
+                
+                // if in fluid, the voxelInfo has include the envionment fog info
+                envExtinction = max(voxelInfo.x, 1e-30f);
+                envScattering = envExtinction * voxelInfo.y;
+                envPhase = envExtinction * voxelInfo.z;
+                envColor = envExtinction * voxelInfo.w; // UnpackFloatToFloat3(voxelInfo.w);
+                break;
             }
+            //else if (fogInfo.type == VolumetricFogType::Noise) {
+            //    NoiseFogInfo noiseFogInfo = groupNoiseFogInfos[fogInfo.typeFogIndex];
+            //    CloudSetting cloudSetting = { noiseFogInfo.cloudScale, noiseFogInfo.cloudFlowSpeed, noiseFogInfo.cloudCoverage, noiseFogInfo.cloudTypePreference, noiseFogInfo.weatherScale };
+            //    float fogDensity = SampleCloudDensity(samplePoint, fogAABB.minimum, fogAABB.maximum, pushConst.time, cloudSetting);
+            //    scattering = fogInfo.scattering;
+            //    extinction = (fogInfo.absorption.x + scattering) * fogDensity;
+            //    phase = fogInfo.phase;
+            //    color = fogInfo.color;
+            //}
 
             envExtinction += extinction;
             envScattering += extinction * scattering;

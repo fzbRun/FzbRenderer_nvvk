@@ -262,27 +262,27 @@ void computeMain_createFrustumAccFog_Stepping(uint2 threadIndex: SV_DispatchThre
     float halfHeight = (depth + nearPlane) * tanHalfFov;
     float halfWidth = halfHeight * aspect;
 
-    float3 pos = cameraPos;
-    pos += (depth + nearPlane) * cameraForward;
-    pos += halfHeight * ((((float)voxelIndex.y + 0.5f) / gridSize.y) * 2.0f - 1.0f) * cameraUp;
-    pos += halfWidth * ((((float)voxelIndex.x + 0.5f) / gridSize.x) * 2.0f - 1.0f) * cameraRight;
+    float3 voxelCenter = cameraPos;
+    voxelCenter += (depth + nearPlane) * cameraForward;
+    voxelCenter += halfHeight * ((((float)voxelIndex.y + 0.5f) / gridSize.y) * 2.0f - 1.0f) * cameraUp;
+    voxelCenter += halfWidth * ((((float)voxelIndex.x + 0.5f) / gridSize.x) * 2.0f - 1.0f) * cameraRight;
 
-    float3 dir = normalize(pos - cameraPos);
+    float3 dir = normalize(voxelCenter - cameraPos);
 
-    float3 endPos = pos;
     float linearDepth_lastVoxel = max((float)depthIndex - 0.5f, 0.0f) / gridSize.z * (farPlane - nearPlane);
     float depth_lastVoxel = frustumMap(linearDepth_lastVoxel, compressionParams, farPlane - nearPlane);
 
-    float depthOffset = depth - depth_lastVoxel;
-    float heightOffset = depthOffset * tanHalfFov;
-    float widthOffset = heightOffset * aspect;
-    float offset = length(float3(widthOffset, heightOffset, depthOffset));
-    float3 startPos = endPos - dir * offset;
+    float halfHeight_prev = (depth_lastVoxel + nearPlane) * tanHalfFov;
+    float halfWidth_prev = halfHeight_prev * aspect;
+    float3 voxelCenter_lastVoxel = cameraPos;
+    voxelCenter_lastVoxel += (depth_lastVoxel + nearPlane) * cameraForward;
+    voxelCenter_lastVoxel += halfHeight_prev * (((float)voxelIndex.y + 0.5f) / gridSize.y * 2.0f - 1.0f) * cameraUp;
+    voxelCenter_lastVoxel += halfWidth_prev * (((float)voxelIndex.x + 0.5f) / gridSize.x * 2.0f - 1.0f) * cameraRight;
 
     float3 attenuation = 1.0f, L = 0.0f;
     if (depthIndex > 0) {
-        float u = ((float)voxelIndex.x + 0.5f) / gridSize.x + (rand(randomSeed) * 2.0f - 1.0f) / gridSize.x * pushConst.accJitterStrength;
-        float v = ((float)voxelIndex.y + 0.5f) / gridSize.y + (rand(randomSeed) * 2.0f - 1.0f) / gridSize.y * pushConst.accJitterStrength;
+        float u = ((float)voxelIndex.x + 0.5f) / gridSize.x + (rand(randomSeed) * 2.0f - 1.0f) / gridSize.x * pushConst.jitterStrength0;
+        float v = ((float)voxelIndex.y + 0.5f) / gridSize.y + (rand(randomSeed) * 2.0f - 1.0f) / gridSize.y * pushConst.jitterStrength0;
         float w = (voxelIndex.z - 0.5f) / gridSize.z;
 
         // float3 uvw = (float3(voxelIndex.x, voxelIndex.y, voxelIndex.z - 1) + 0.5f) / gridSize;
@@ -293,9 +293,100 @@ void computeMain_createFrustumAccFog_Stepping(uint2 threadIndex: SV_DispatchThre
 
     float3 a2;
     #ifdef USE_ENVFOG
-    getEnvVolumetricFogScatter(startPos, endPos, randomSeed, true, 1, L, attenuation, a2);
+    getEnvVolumetricFogScatter(voxelCenter_lastVoxel, voxelCenter, randomSeed, true, 1, L, attenuation, a2);
     #else
-    getVolumetricFogScatter(startPos, endPos, randomSeed, pushConst.sampleCount, L, attenuation, a2);
+    getVolumetricFogScatter(voxelCenter_lastVoxel, voxelCenter, randomSeed, pushConst.sampleCount, L, attenuation, a2);
+    /*
+    int sampleCount = pushConst.sampleCount;
+    float4 envVoxelInfo = 0.0f;
+    for (int sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex) {
+        float3 localSample = 0.5f;
+        if (sampleCount > 1) {
+            localSample = float3(rand(randomSeed), rand(randomSeed), rand(randomSeed));
+            localSample = lerp(0.5f.xxx, localSample, saturate(pushConst.jitterStrength * 0.1f));
+        }
+
+        float sampleU = (float(voxelIndex.x) + localSample.x) / gridSizeF.x;
+        float sampleV = (float(voxelIndex.y) + localSample.y) / gridSizeF.y;
+        float sampleW = (float(voxelIndex.z) + localSample.z) / gridSizeF.z;
+
+        float sampleDepth = nearPlane + frustumMap(sampleW * (farPlane - nearPlane), pushConst.compressionParams, farPlane - nearPlane);
+        float sampleHalfHeight = sampleDepth * tanHalfFov;
+        float sampleHalfWidth = sampleHalfHeight * aspect;
+
+        float3 samplePoint = cameraPos + cameraRight * ((sampleU * 2.0f - 1.0f) * sampleHalfWidth) + cameraUp * ((sampleV * 2.0f - 1.0f) * sampleHalfHeight) + cameraForward * sampleDepth;
+        samplePoint = voxelCenter;
+        {
+            float heightAttenuation = exp(-1.0f * max(samplePoint.y - (-69.5f), 0.0f));
+            float extinction = (0.01f + 0.03f) * heightAttenuation;
+            float envExtinction = extinction;
+            float envScattering = extinction * 0.03f;
+            float envPhase = extinction * -0.7f;
+            float3 envColor = extinction * 1.0f;
+
+            for (int i = 0; i < globalInfo.visibleVolumetricFogCount; ++i) {
+                uint fogIndex = globalInfo.visibleVolumetricFogIndices[i];
+                VolumetricFogInfo fogInfo = groupVolumetricFogInfos[fogIndex];
+                AABB fogAABB = { fogInfo.fogStartPos, fogInfo.fogStartPos + fogInfo.fogVoxelGridSize * fogInfo.fogVoxelSize };
+                if (!checkPointInAABB(samplePoint, fogAABB)) continue;
+
+                extinction = 0.0f;
+                float scattering = 0.0f, phase = 0.0f; float3 color = 0.0f;
+                if (fogInfo.type == VolumetricFogType::Height) {
+                    float heightScale = groupHeightFogInfos[fogInfo.typeFogIndex].heightScale;
+                    float height = max(samplePoint.y - fogInfo.fogStartPos.y, 0.0f);
+                    heightAttenuation = exp(-heightScale * height);
+                    scattering = fogInfo.scattering;
+                    extinction = (fogInfo.absorption.x + scattering) * heightAttenuation;
+                    phase = fogInfo.phase;
+                    color = fogInfo.color;
+                } else if (fogInfo.type == VolumetricFogType::Fluid && globalInfo.fluidStartUp == 1) {
+                    float3 uvw = (samplePoint - fogInfo.fogStartPos) / (fogInfo.fogVoxelGridSize * fogInfo.fogVoxelSize);
+                    uvw = clamp(uvw, 0.0f, 1.0f - 1e-6f);
+                    float4 voxelInfo = FluidFogVoxelInfoImages_sample[fogInfo.typeFogIndex].SampleLevel(uvw, 0);
+
+                    // if in fluid, the voxelInfo has include the envionment fog info
+                    envExtinction = max(voxelInfo.x, 1e-30f);
+                    envScattering = envExtinction * voxelInfo.y;
+                    envPhase = envExtinction * voxelInfo.z;
+                    envColor = envExtinction * voxelInfo.w; // UnpackFloatToFloat3(voxelInfo.w);
+                    break;
+                } else if (fogInfo.type == VolumetricFogType::Noise) {
+                    NoiseFogInfo noiseFogInfo = groupNoiseFogInfos[fogInfo.typeFogIndex];
+                    CloudSetting cloudSetting = { noiseFogInfo.cloudScale, noiseFogInfo.cloudFlowSpeed, noiseFogInfo.cloudCoverage, noiseFogInfo.cloudTypePreference, noiseFogInfo.weatherScale };
+                    float fogDensity = SampleCloudDensity(samplePoint, fogAABB.minimum, fogAABB.maximum, pushConst.time, cloudSetting);
+                    scattering = fogInfo.scattering;
+                    extinction = (fogInfo.absorption.x + scattering) * fogDensity;
+                    phase = fogInfo.phase;
+                    color = fogInfo.color;
+                }
+
+                envExtinction += extinction;
+                envScattering += extinction * scattering;
+                envPhase += extinction * phase;
+                envColor += extinction * color;
+            }
+
+            envScattering /= max(envExtinction, 1e-30f);
+            envPhase /= max(envExtinction, 1e-30f);
+            envColor /= max(envExtinction, 1e-30f);
+
+            envVoxelInfo += float4(envExtinction, envScattering, envPhase, luminance(envColor));
+        }
+    }
+    envVoxelInfo /= sampleCount;
+
+    float3 tPart = (voxelCenter - voxelCenter_lastVoxel) / 10;
+    for (int i = 0; i < 10; ++i) {
+        float3 tSample = (i + pushConst.randomStepping == 1 ? rand(randomSeed) : 0.5f) * tPart;
+        float3 samplePoint = voxelCenter_lastVoxel + tSample;
+        float a_part = 1.0f; float3 L_part = 0.0f;
+        getFogScatter(samplePoint, dir, length(tPart), sceneInfo, globalInfo, envVoxelInfo.x, envVoxelInfo.y, envVoxelInfo.z, envVoxelInfo.w, attenuation, a_part, L_part);
+
+        attenuation *= a_part;
+        L += L_part;
+    }
+    */
     #endif
 
     //if (pushConst.frameIndex > 0) {

@@ -6,8 +6,8 @@
 
 [[vk::push_constant]] ConstantBuffer<VolumetricFogPushConstant> pushConst;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eGlobalInfoBuffer)]] RWStructuredBuffer<GlobalInfo_VolumetricFog> globalInfoBuffer;
-[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogInfosBuffer)]] RWStructuredBuffer<VolumetricFogInfo, ScalarDataLayout> volumetricFogInfosBuffer;
-[[vk::binding(StaticBindingPoints_VolumetricFog::eVolumetricFogFluidInfoBuffer)]] RWStructuredBuffer<FluidFogInfo, ScalarDataLayout> volumetricFogFluidInfoBuffer;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eFogInfosBuffer)]] RWStructuredBuffer<VolumetricFogInfo, ScalarDataLayout> fogInfosBuffer;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eFluidFogInfoBuffer)]] RWStructuredBuffer<FluidFogInfo, ScalarDataLayout> fluidFogInfoBuffer;
 
 // localVolumetricFogCount <= 1024, so one threadGroup can deal with
 groupshared uint groupVisibleFogCount;
@@ -18,36 +18,30 @@ void computeMain_getVisibleVolumetricFog(uint threadIndex: SV_DispatchThreadID) 
     GroupMemoryBarrierWithGroupSync();
     if (threadIndex >= pushConst.volumetricFogCount) return;
 
-    VolumetricFogInfo info = volumetricFogInfosBuffer[threadIndex];
+    VolumetricFogInfo info = fogInfosBuffer[threadIndex];
     float4x4 cameraPV = pushConst.sceneInfoAddress[0].viewProjMatrix;
 
     FrustumPlane planes[6];
     ExtractFrustumPlanes(cameraPV, planes);
-
-    AABB fogAABB = { info.fogStartPos, info.fogStartPos + info.fogVoxelGridSize * info.fogVoxelSize };
-
-    bool inCameraFrustum = isAABBInsideFrustum(fogAABB, planes);
-
+    bool inCameraFrustum = isAABBInsideFrustum(info.aabb, planes);
     uint warpIndex = threadIndex / 32;
     uint warpLane = threadIndex & 31;
     uint warpVisibleFogCount = WaveActiveSum(uint(inCameraFrustum));
 
     uint visibleFogOffset;
-    if (warpLane == 0)
-        InterlockedAdd(groupVisibleFogCount, warpVisibleFogCount, visibleFogOffset);
+    if (warpLane == 0) InterlockedAdd(groupVisibleFogCount, warpVisibleFogCount, visibleFogOffset);
     visibleFogOffset = WaveReadLaneAt(visibleFogOffset, 0);
     GroupMemoryBarrierWithGroupSync();
 
     visibleFogOffset += WavePrefixCountBits(inCameraFrustum);
-    if (inCameraFrustum)
-        globalInfoBuffer[0].visibleVolumetricFogIndices[visibleFogOffset] = threadIndex;
+    if (inCameraFrustum) globalInfoBuffer[0].visibleVolumetricFogIndices[visibleFogOffset] = threadIndex;
 
     if (threadIndex == 0) {
-        VolumetricFogInfo fogInfo = volumetricFogInfosBuffer[pushConst.fluidFogIndex];
-        FluidFogInfo fluidFogInfo = volumetricFogFluidInfoBuffer[fogInfo.volumetricFogTypeIndex];
+        VolumetricFogInfo fogInfo = fogInfosBuffer[pushConst.fluidFogIndex];
+        FluidFogInfo fluidFogInfo = fluidFogInfoBuffer[fogInfo.typeFogIndex];
 
         globalInfoBuffer[0].visibleVolumetricFogCount = groupVisibleFogCount;
-        globalInfoBuffer[0].fluidAABB = { fogInfo.fogStartPos, fogInfo.fogStartPos + fogInfo.fogVoxelGridSize * fogInfo.fogVoxelSize };
+        globalInfoBuffer[0].fluidAABB = fogInfo.aabb;
         globalInfoBuffer[0].fluidStartUp = fluidFogInfo.startUp;
     }
 }
