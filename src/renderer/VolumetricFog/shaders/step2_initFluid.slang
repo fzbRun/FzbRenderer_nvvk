@@ -16,7 +16,8 @@
 [[vk::binding(StaticBindingPoints_VolumetricFog::eFluidFogVoxelInfoImages_sampler)]] Sampler3D<float4> FluidFogVoxelInfoImages_sample[];
 
 [[vk::binding(StaticBindingPoints_VolumetricFog::eHeightFogInfoBuffer)]] StructuredBuffer<HeightFogInfo, ScalarDataLayout> heightFogInfoBuffer;
-[[vk::binding(StaticBindingPoints_VolumetricFog::eNoiseFogInfoBuffer)]] StructuredBuffer<NoiseFogInfo, ScalarDataLayout> noiseFogInfoBuffer;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eGridFogInfoBuffer)]] StructuredBuffer<GridFogInfo, ScalarDataLayout> gridFogInfoBuffer;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eGridFogImages)]] Sampler3D<float4> gridFogImages[];
 
 groupshared VolumetricFogInfo groupOtherTypeFogInfos[MAX_VOLUMETRIC_FOG_COUNT];
 [numthreads(4, 4, 4)]
@@ -58,14 +59,19 @@ void computeMain_initFluidFog(uint3 voxelIndex: SV_DispatchThreadID, uint3 group
             scattering = heightFogInfo.scattering;
             extinction = (heightFogInfo.absorption + scattering) * heightAttenuation;
             phase = heightFogInfo.phase;
-            color = heightFogInfo.color;
+            color = heightFogInfo.color * (1.0f + heightFogInfo.ambientIntensity);
         } else if (otherFogInfo.type == VolumetricFogType::Fluid) continue;
-        //else if (otherFogInfo.type == VolumetricFogType::Noise) {
-        //    NoiseFogInfo noiseFogInfo = noiseFogInfoBuffer[otherFogInfo.typeFogIndex];
-        //    CloudSetting cloudSetting = { noiseFogInfo.cloudScale, noiseFogInfo.cloudFlowSpeed, noiseFogInfo.cloudCoverage, noiseFogInfo.cloudTypePreference, noiseFogInfo.weatherScale };
-        //    float fogDensity = SampleCloudDensity(voxelCenter, otherFogAABB.minimum, otherFogAABB.maximum, pushConst.time, cloudSetting);
-        //    extinction = (otherFogInfo.absorption.x + otherFogInfo.scattering) * fogDensity;
-        //}
+        else if (otherFogInfo.type == VolumetricFogType::Grid) {
+            GridFogInfo gridFogInfo = gridFogInfoBuffer[otherFogInfo.typeFogIndex];
+
+            float3 uvw = (voxelCenter - otherFogAABB.minimum) / (otherFogAABB.maximum - otherFogAABB.minimum);
+            float4 voxelInfo = gridFogImages[otherFogInfo.typeFogIndex].SampleLevel(uvw, 0);
+
+            extinction = voxelInfo.x;
+            scattering = voxelInfo.y;
+            phase = voxelInfo.z;
+            color = voxelInfo.w * (1.0f + gridFogInfo.ambientIntensity);
+        }
 
         envExtinction += extinction;
         envScattering += extinction * scattering;

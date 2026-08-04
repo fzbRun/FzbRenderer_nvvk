@@ -17,12 +17,11 @@
 [[vk::binding(StaticBindingPoints_VolumetricFog::eHeightFogInfoBuffer)]] StructuredBuffer<HeightFogInfo, ScalarDataLayout> heightFogInfoBuffer;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eFluidFogInfoBuffer)]] RWStructuredBuffer<FluidFogInfo, ScalarDataLayout> fluidFogInfoBuffer;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eFluidFogVoxelInfoImages_sampler)]] Sampler3D<float4> FluidFogVoxelInfoImages_sample[];
-[[vk::binding(StaticBindingPoints_VolumetricFog::eNoiseFogInfoBuffer)]] StructuredBuffer<NoiseFogInfo, ScalarDataLayout> noiseFogInfoBuffer;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eGridFogInfoBuffer)]] StructuredBuffer<GridFogInfo, ScalarDataLayout> gridFogInfoBuffer;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eGridFogImages)]] Sampler3D<float4> gridFogImages[];
 
-[[vk::binding(StaticBindingPoints_VolumetricFog::eFogAttenuationImage)]] RWTexture3D<float4> volumetricFogAttenuationImage;
-[[vk::binding(StaticBindingPoints_VolumetricFog::eFogAttenuationImage_sample)]] Sampler3D<float4> volumetricFogAttenuationImage_sample;
-[[vk::binding(StaticBindingPoints_VolumetricFog::eFogLImage)]] RWTexture3D<float4> volumetricFogLImage;
-[[vk::binding(StaticBindingPoints_VolumetricFog::eFogLImage_sample)]] Sampler3D<float4> volumetricFogLImage_sample;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eFogAccResultImage)]] RWTexture3D<float4> volumetricFogAccResultImage;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eFogAccResultImage_sample)]] Sampler3D<float4> volumetricFogAccResultImage_sample;
 
 [[vk::binding(StaticBindingPoints_VolumetricFog::eEnvFogInfoImage)]] RWTexture3D<float4> envVolumetricFogInfoImage;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eEnvFogInfoImage_sample)]] Sampler3D<float4> envVolumetricFogInfoImage_sample;
@@ -35,7 +34,7 @@ groupshared SceneInfo groupSceneInfo;
 groupshared VolumetricFogInfo groupVolumetricFogInfos[MAX_VOLUMETRIC_FOG_COUNT];
 groupshared HeightFogInfo groupHeightFogInfos[MAX_HEIGHT_FOG_COUNT];
 groupshared FluidFogInfo groupFluidFogInfos[MAX_FLUID_FOG_COUNT];
-groupshared NoiseFogInfo groupNoiseFogInfos[MAX_NOISE_FOG_COUNT];
+groupshared GridFogInfo grouGridFogInfos[MAX_GRID_FOG_COUNT];
 
 void getGroupsharedData(uint groupThreadIndex) {
     if (groupThreadIndex >= MAX_VOLUMETRIC_FOG_COUNT) return;
@@ -47,7 +46,7 @@ void getGroupsharedData(uint groupThreadIndex) {
     if (groupThreadIndex < min(pushConst.volumetricFogCount, MAX_VOLUMETRIC_FOG_COUNT)) groupVolumetricFogInfos[groupThreadIndex] = fogInfosBuffer[groupThreadIndex];
     if (groupThreadIndex < min(pushConst.heightFogCount, MAX_HEIGHT_FOG_COUNT)) groupHeightFogInfos[groupThreadIndex] = heightFogInfoBuffer[groupThreadIndex];
     if (groupThreadIndex < min(pushConst.fluidFogCount, MAX_FLUID_FOG_COUNT)) groupFluidFogInfos[groupThreadIndex] = fluidFogInfoBuffer[groupThreadIndex];
-    if (groupThreadIndex < min(pushConst.noiseFogCount, MAX_NOISE_FOG_COUNT)) groupNoiseFogInfos[groupThreadIndex] = noiseFogInfoBuffer[groupThreadIndex];
+    if (groupThreadIndex < min(pushConst.gridFogCount, MAX_GRID_FOG_COUNT)) grouGridFogInfos[groupThreadIndex] = gridFogInfoBuffer[groupThreadIndex];
 }
 #endif
 #endif
@@ -64,7 +63,7 @@ float getShadow(float4 worldPos) {
     return shadow;
 }
 
-float3 getAttenuation2(float3 endPos, GlobalInfo_VolumetricFog globalInfo, SceneInfo sceneInfo) {
+float getAttenuation2(float3 endPos, GlobalInfo_VolumetricFog globalInfo, SceneInfo sceneInfo) {
     /*
     float tLightEnter, tLightExit;
     float mainLightDt = 1e-6f;
@@ -98,7 +97,7 @@ float3 getAttenuation2(float3 endPos, GlobalInfo_VolumetricFog globalInfo, Scene
 
 void getFogScatter(
     float3 samplePoint, float3 sampleDir, float sampleLength, SceneInfo sceneInfo, GlobalInfo_VolumetricFog globalInfo,
-    float extinctionCoeff, float scattering, float phase, float3 color, float3 E,
+    float extinctionCoeff, float scattering, float phase, float3 color, float3 ambientIntensity, float3 E,
     inout float a, inout float3 L
 ) {
     Light light = sceneInfo.lights[0];
@@ -106,6 +105,7 @@ void getFogScatter(
     float3 lightDirection = -light.direction;
     float3 lightPos = samplePoint + 1000.0f * lightDirection;
 
+    phase = clamp(phase, -0.999f, 0.999f);
     float phase2 = phase * phase;
     float fp = (1.0f - phase2) / (4.0f * M_PI * pow((1 + phase2 - 2.0f * phase * dot(-sampleDir, lightDirection)), 1.5f));
 
@@ -115,7 +115,42 @@ void getFogScatter(
     float x = extinctionCoeff * sampleLength;
     float factor = (x < 1e-4) ? sampleLength * (1.0 - 0.5 * x) : (1.0 - exp(-x)) / extinctionCoeff;
     L = activeSunColor * fp * color * scattering * E * factor;
+    L += color * ambientIntensity * scattering * E * factor;
     a = exp(-extinctionCoeff * sampleLength);
+}
+
+VolumetricFogInfo getVolumetricFog(int i) {
+    #ifdef COMPUTE_SHADER
+    VolumetricFogInfo volumetricFogInfo = groupVolumetricFogInfos[i];
+    #else
+    VolumetricFogInfo volumetricFogInfo = fogInfosBuffer[i];
+    #endif
+    return volumetricFogInfo;
+}
+
+HeightFogInfo getHeightFog(int i) {
+    #ifdef COMPUTE_SHADER
+    HeightFogInfo heightFogInfo = groupHeightFogInfos[i];
+    #else
+    HeightFogInfo heightFogInfo = heightFogInfoBuffer[i];
+    #endif
+    return heightFogInfo;
+}
+FluidFogInfo getFluidFog(int i) {
+    #ifdef COMPUTE_SHADER
+    FluidFogInfo fluidFogInfo = groupFluidFogInfos[i];
+    #else
+    FluidFogInfo fluidFogInfo = fluidFogInfoBuffer[i];
+    #endif
+    return fluidFogInfo;
+}
+GridFogInfo getGridFog(int i) {
+    #ifdef COMPUTE_SHADER
+    GridFogInfo gridFogInfo = grouGridFogInfos[i];
+    #else
+    GridFogInfo gridFogInfo = gridFogInfoBuffer[i];
+    #endif
+    return gridFogInfo;
 }
 
 #endif

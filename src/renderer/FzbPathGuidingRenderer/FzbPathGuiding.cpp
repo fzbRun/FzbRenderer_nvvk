@@ -114,6 +114,7 @@ void FzbPathGuidingRenderer::uiRender() {
 			ImGui::Separator();
 		}
 
+#ifndef NDEBUG
 		if (PE::begin()) {
 			uint32_t debugImageIndex = (uint32_t)ImageType_FzbPG::eImgPGVariance;
 			if (PE::entry("PathGuiding Variance", [&] {
@@ -140,6 +141,7 @@ void FzbPathGuidingRenderer::uiRender() {
 			}
 		}
 		PE::end();
+#endif
 	}
 	ImGui::End();
 
@@ -150,10 +152,12 @@ void FzbPathGuidingRenderer::uiRender() {
 
 	if (UIModified) resetFrame();
 
+#ifndef NDEBUG
 	for (auto& pair : showDebugImages) {
 		if (showDebugImages[pair.first]) 
 			Application::viewportImage = gBuffers.getDescriptorSet(pair.first);
 	}
+#endif
 };
 void FzbPathGuidingRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 	NVVK_CHECK(gBuffers.update(cmd, size));

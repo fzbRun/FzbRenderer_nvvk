@@ -12,8 +12,7 @@ struct VSout {
 };
 
 [shader("vertex")]
-VSout vertexMain(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID)
-{
+VSout vertexMain(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID){
     SceneInfo sceneInfo = pushConst.showCameraInfoAddress[0];
     float3 cameraPos = sceneInfo.cameraPosition;
     float3 cameraRight = sceneInfo.viewInvMatrix[0].xyz;
@@ -26,10 +25,17 @@ VSout vertexMain(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID
     float tanHalfFov = pushConst.tanCameraFov_2;
     float aspect = pushConst.aspectRatio;
 
+    /*
     uint3 voxelIndex;
     voxelIndex.z = instanceIndex / (pushConst.frustumGridSize.x * pushConst.frustumGridSize.y);
     voxelIndex.y = (instanceIndex - voxelIndex.z * (pushConst.frustumGridSize.x * pushConst.frustumGridSize.y)) / pushConst.frustumGridSize.x;
     voxelIndex.x = instanceIndex - voxelIndex.z * (pushConst.frustumGridSize.x * pushConst.frustumGridSize.y) - voxelIndex.y * pushConst.frustumGridSize.x;
+
+    VSout output;
+    if (voxelIndex.z > 3) {
+        output.sv_position = float4(2.0f, 2.0f, 2.0f, 1.0f);
+        return output;
+    }
 
     float u = (float(voxelIndex.x) + 0.5f) / float(gridSize.x) * 2.0f - 1.0f;
     float v = (float(voxelIndex.y) + 0.5f) / float(gridSize.y) * 2.0f - 1.0f;
@@ -50,6 +56,23 @@ VSout vertexMain(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID
 
     float3 worldPos = cameraPos + cameraRight * (viewPos.x + dx) + cameraUp * (viewPos.y + dy) + cameraForward * dz;
 
+    output.sv_position = mul(float4(worldPos, 1.0f), pushConst.sceneInfoAddress[0].viewProjMatrix);
+    return output;
+    */
+
+    uint depthIndex = instanceIndex;
+    float depth_near = nearPlane + frustumMap(float(depthIndex) / gridSize.z * (farPlane - nearPlane), pushConst.compressionParams, farPlane - nearPlane);
+    float depth_far = nearPlane + frustumMap(float(depthIndex + 1) / gridSize.z * (farPlane - nearPlane), pushConst.compressionParams, farPlane - nearPlane);
+    float depth = (depth_far + depth_near) * 0.5f;
+
+    float halfHeight = depth * tanHalfFov;
+    float halfWidth = halfHeight * aspect;
+
+    float dx = ((vertexIndex & 3) * 2) % 6 == 0 ? -halfWidth : halfWidth;
+    float dy = (vertexIndex & 3) <= 1 ? -halfHeight : halfHeight;
+    float dz = vertexIndex / 4 == 0 ? depth_near : depth_far;
+
+    float3 worldPos = cameraPos + cameraRight * dx + cameraUp * dy + cameraForward * dz;
     VSout output;
     output.sv_position = mul(float4(worldPos, 1.0f), pushConst.sceneInfoAddress[0].viewProjMatrix);
     return output;

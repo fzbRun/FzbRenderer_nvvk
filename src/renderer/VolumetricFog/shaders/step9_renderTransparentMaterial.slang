@@ -72,7 +72,7 @@ PSout fragmentMain(VSout input) {
 
     float3 worldPos = input.worldPos;
 
-    float3 attenuation = 1.0f, attenuation2 = 1.0f, L = 0.0f;
+    float attenuation = 1.0f, attenuation2 = 1.0f, L = 0.0f;
     uint randomSeed = xxhash32(uint3(pushConst.frameIndex, pushConst.instanceIndex, instance.meshIndex));
     uint sampleCount = pushConst.useAccFog == 1 ? 0 : 10;
     if (pushConst.useAccFog == 1) getPreAccFog(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, L, attenuation, attenuation2);

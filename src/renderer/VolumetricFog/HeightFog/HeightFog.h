@@ -23,6 +23,7 @@ public:
 	void init();
 	void clean();
 	void uiRender();
+	void preRender();
 	void updateDataPerFrame(VkCommandBuffer cmd, bool frist, FzbRenderer::Buffer fogInfoBuffer);
 
 	void addFog(shaderio::HeightFogInfo fogInfo, shaderio::AABB fogRange);

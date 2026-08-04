@@ -23,10 +23,18 @@ void computeMain_getVisibleVolumetricFog(uint threadIndex: SV_DispatchThreadID) 
 
     FrustumPlane planes[6];
     ExtractFrustumPlanes(cameraPV, planes);
-    bool inCameraFrustum = isAABBInsideFrustum(info.aabb, planes);
+    bool inCameraFrustum = true;    //isAABBInsideFrustum(info.aabb, planes);
     uint warpIndex = threadIndex / 32;
     uint warpLane = threadIndex & 31;
     uint warpVisibleFogCount = WaveActiveSum(uint(inCameraFrustum));
+
+    //if (threadIndex == 1) {
+    //    printf("aabb: %f %f %f %f %f %f, inCameraFrustum: %d\n",
+    //        info.aabb.minimum.x, info.aabb.minimum.y, info.aabb.minimum.z,
+    //        info.aabb.maximum.x, info.aabb.maximum.y, info.aabb.maximum.z,
+    //        inCameraFrustum,
+    //    );
+    //}
 
     uint visibleFogOffset;
     if (warpLane == 0) InterlockedAdd(groupVisibleFogCount, warpVisibleFogCount, visibleFogOffset);
@@ -36,12 +44,12 @@ void computeMain_getVisibleVolumetricFog(uint threadIndex: SV_DispatchThreadID) 
     visibleFogOffset += WavePrefixCountBits(inCameraFrustum);
     if (inCameraFrustum) globalInfoBuffer[0].visibleVolumetricFogIndices[visibleFogOffset] = threadIndex;
 
-    if (threadIndex == 0) {
-        VolumetricFogInfo fogInfo = fogInfosBuffer[pushConst.fluidFogIndex];
-        FluidFogInfo fluidFogInfo = fluidFogInfoBuffer[fogInfo.typeFogIndex];
+    if (info.type == VolumetricFogType::Fluid) {
+        FluidFogInfo fluidFogInfo = fluidFogInfoBuffer[info.typeFogIndex];
 
-        globalInfoBuffer[0].visibleVolumetricFogCount = groupVisibleFogCount;
-        globalInfoBuffer[0].fluidAABB = fogInfo.aabb;
-        globalInfoBuffer[0].fluidStartUp = fluidFogInfo.startUp;
+        globalInfoBuffer[0].fluidAABB[info.typeFogIndex] = info.aabb;
+        globalInfoBuffer[0].fluidStartUp[info.typeFogIndex] = fluidFogInfo.startUp;
     }
+
+    if (threadIndex == 0) globalInfoBuffer[0].visibleVolumetricFogCount = groupVisibleFogCount;
 }

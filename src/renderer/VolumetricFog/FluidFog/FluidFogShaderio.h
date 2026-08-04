@@ -20,6 +20,8 @@ struct FluidFogInfo {
 	float FIntensity;
 	float restoreSpeed;
 	float3 fogStartPos_lastTime;
+
+	float3 attenuation;
 };
 
 struct FluidFogVoxelInfo {

@@ -96,7 +96,7 @@ void computeMain_createEnvionmentFog(uint3 voxelIndex: SV_DispatchThreadID, uint
                 extinction = (heightFogInfo.absorption + scattering) * heightAttenuation;
                 phase = heightFogInfo.phase;
                 color = heightFogInfo.color;
-            } else if (fogInfo.type == VolumetricFogType::Fluid && globalInfo.fluidStartUp == 1) {
+            } else if (fogInfo.type == VolumetricFogType::Fluid && globalInfo.fluidStartUp[fogInfo.typeFogIndex] == 1) {
                 FluidFogInfo fluidFogInfo = groupFluidFogInfos[fogInfo.typeFogIndex];
                 float3 uvw = (samplePoint - fogStartPos) / (fluidFogInfo.gridSize * fluidFogInfo.voxelSize);
                 uvw = clamp(uvw, 0.0f, 1.0f - 1e-6f);
@@ -109,15 +109,17 @@ void computeMain_createEnvionmentFog(uint3 voxelIndex: SV_DispatchThreadID, uint
                 envColor = envExtinction * voxelInfo.w; // UnpackFloatToFloat3(voxelInfo.w);
                 break;
             }
-            //else if (fogInfo.type == VolumetricFogType::Noise) {
-            //    NoiseFogInfo noiseFogInfo = groupNoiseFogInfos[fogInfo.typeFogIndex];
-            //    CloudSetting cloudSetting = { noiseFogInfo.cloudScale, noiseFogInfo.cloudFlowSpeed, noiseFogInfo.cloudCoverage, noiseFogInfo.cloudTypePreference, noiseFogInfo.weatherScale };
-            //    float fogDensity = SampleCloudDensity(samplePoint, fogAABB.minimum, fogAABB.maximum, pushConst.time, cloudSetting);
-            //    scattering = fogInfo.scattering;
-            //    extinction = (fogInfo.absorption.x + scattering) * fogDensity;
-            //    phase = fogInfo.phase;
-            //    color = fogInfo.color;
-            //}
+            else if (fogInfo.type == VolumetricFogType::Grid) {
+                GridFogInfo gridFogInfo = gridFogInfoBuffer[fogInfo.typeFogIndex];
+
+                float3 uvw = (samplePoint - fogInfo.aabb.minimum) / (fogInfo.aabb.maximum - fogInfo.aabb.minimum);
+                float4 voxelInfo = gridFogImages[fogInfo.typeFogIndex].SampleLevel(uvw, 0);
+
+                extinction = voxelInfo.x;
+                scattering = voxelInfo.y;
+                phase = voxelInfo.z;
+                color = voxelInfo.w;
+            }
 
             envExtinction += extinction;
             envScattering += extinction * scattering;

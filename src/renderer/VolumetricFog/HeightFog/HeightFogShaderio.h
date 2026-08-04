@@ -18,6 +18,8 @@ struct HeightFogInfo {
     float phase;
 
 	float heightScale;
+
+    float3 attenuation;
 };
 
 NAMESPACE_SHADERIO_END()

@@ -10,6 +10,10 @@
 
 using namespace FzbRenderer;
 
+void testScene_onePlane() {
+
+}
+
 VolumetricFog::VolumetricFog(pugi::xml_node& rendererNode) {
 	derivFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR;
 	derivFeatures.pNext = nullptr;
@@ -25,7 +29,7 @@ VolumetricFog::VolumetricFog(pugi::xml_node& rendererNode) {
 
 	{
 		HeightFogSetCreateInfo heightFogSetCreateInfo = { &this->volumetricFogInfos };
-		heightFogSet = HeightFogSet(heightFogSetCreateInfo);
+		heightFogSet = std::make_unique<HeightFogSet>(heightFogSetCreateInfo);
 
 		shaderio::HeightFogInfo heightFogInfo = {
 			.color = {1.0f, 1.0f, 1.0f},
@@ -40,7 +44,7 @@ VolumetricFog::VolumetricFog(pugi::xml_node& rendererNode) {
 		heightFogAABB.minimum = { 5084.0f, -69.5f, -4486.0f };
 		heightFogAABB.maximum = heightFogAABB.minimum + 16.0f * shaderio::float3(7.0f, 2.0f, 5.0f);
 
-		heightFogSet.addFog(heightFogInfo, heightFogAABB);
+		heightFogSet->addFog(heightFogInfo, heightFogAABB);
 		//--------------------------------------------------------
 		heightFogInfo = {
 			.color = {1.0f, 1.0f, 1.0f},
@@ -54,17 +58,17 @@ VolumetricFog::VolumetricFog(pugi::xml_node& rendererNode) {
 		heightFogAABB.minimum = { 5098.0f, -69.5f, -4470.0f };
 		heightFogAABB.maximum = heightFogAABB.minimum + 16.0f * shaderio::float3(2.0f, 0.1f, 2.0f);
 
-		heightFogSet.addFog(heightFogInfo, heightFogAABB);
+		heightFogSet->addFog(heightFogInfo, heightFogAABB);
 	}
 	{
 		FluidFogSetCreateInfo fluidFogSetCreateInfo = { &this->volumetricFogInfos };
-		fluidFogSet = FluidFogSet(fluidFogSetCreateInfo);
+		fluidFogSet = std::make_unique<FluidFogSet>(fluidFogSetCreateInfo);
 
 		shaderio::FluidFogInfo fluidFogInfo = {
 			.startUp = 0,
 			.gridSize = {32, 32, 32},
-			.voxelSize = {0.4, 0.2, 0.4},
-			.viscosity = 0.01f,
+			.voxelSize = {1.0, 0.2, 1.0},
+			.viscosity = 0.001f,
 			.FIntensity = 10,
 			.restoreSpeed = 10,
 		};
@@ -74,30 +78,60 @@ VolumetricFog::VolumetricFog(pugi::xml_node& rendererNode) {
 			.follow = true,
 			.followInstanceID = "mainCharacter"
 		};
-		fluidFogSet.addFog(fluidFogCreateInfo);
+		fluidFogSet->addFog(fluidFogCreateInfo);
 	}
+	{
+		GridFogSetCreateInfo gridFogSetCreateInfo = { &this->volumetricFogInfos };
+		gridFogSet = std::make_unique<GridFogSet>(gridFogSetCreateInfo);
 
-	volumetricFogNoiseCount = 0;
-	if (volumetricFogNoiseCount > MAX_NOISE_FOG_COUNT) throw std::runtime_error("噪声雾数量超出上限，请扩大上限");
-	pushConstant.noiseFogCount = volumetricFogNoiseCount;
-	volumetricFogNoiseInfos.resize(volumetricFogNoiseCount);
+		shaderio::GridFogInfo gridFogInfo = {
+			.gridSize = {32, 32, 32},
+			.voxelSize = {1, 0.1, 1},
+			.absorption = 0.1f,
+			.scattering = 0.5f,
+			.phase = -0.7f,
+			.ambientIntensity = 0.2f,
+			.color = {1.0f, 1.0f, 1.0f},
+		};
+
+		shaderio::AABB gridFogAABB;
+		gridFogAABB.minimum = { 5094.0f, -69.5f, -4467.0f };
+		gridFogAABB.maximum = gridFogAABB.minimum + gridFogInfo.voxelSize * (shaderio::float3)gridFogInfo.gridSize;
+
+		shaderio::GridFogGenerationInfo generationInfo = {
+			.cloudInfo = {
+				.cloudScale = {0.5f, 0.2f, 0.5f},
+				.cloudFlowSpeed = 0.05f,
+				.cloudCoverage = {0.3f, 0.3f},
+				.cloudTypePreference = {1.0f, 0.0f},
+				.weatherScale = 0.01f,
+			},
+		};
+
+		GridFogCreateInfo gridFogCreateInfo = {
+			.fogInfo = gridFogInfo,
+			.fogRange = gridFogAABB,
+			.generationInfo = generationInfo
+		};
+		//gridFogSet->addFog(gridFogCreateInfo);
+	}
 
 	volumetricFogCount = volumetricFogInfos.size();
 	if (volumetricFogCount > MAX_VOLUMETRIC_FOG_COUNT) throw std::runtime_error("体积雾数量超出上限，请扩大上限");
 	pushConstant.volumetricFogCount = volumetricFogCount;
-	volumetricFogInfos.resize(volumetricFogCount);
 	volumetricFogInfoModified.resize(volumetricFogCount);
 
-	pushConstant.heightFogCount = heightFogSet.fogCount;
-	pushConstant.fluidFogCount = fluidFogSet.fogCount;
-	pushConstant.fluidFogIndex = fluidFogSet.getFogIndexMap(0);
+	pushConstant.heightFogCount = heightFogSet->fogCount;
+	pushConstant.fluidFogCount = fluidFogSet->fogCount;
+	pushConstant.gridFogCount = gridFogSet->fogCount;
 
 	pushConstant.randomStepping = 1;
-	pushConstant.useAccFog = 0;
+	pushConstant.useAccFog = 1;
 	pushConstant.compressionParams = 3.0f;
 	frustumGridSize = { 160, 160, 80 };
 	pushConstant.frustumGridSize = { frustumGridSize.width, frustumGridSize.height, frustumGridSize.depth };
 	pushConstant.time = 0.0f;
+
 
 #ifndef NDEBUG
 	showVolumetricFogVoxelGrids.resize(volumetricFogCount);
@@ -142,8 +176,9 @@ void VolumetricFog::init() {
 #endif
 	shadowMap.init({ 2048, 2048 });
 
-	heightFogSet.init();
-	fluidFogSet.init();
+	heightFogSet->init();
+	fluidFogSet->init();
+	gridFogSet->init();
 
 	createVolumetricFogData();
 	createDescriptorSetLayout();
@@ -157,6 +192,14 @@ void VolumetricFog::init() {
 	pushConstant.cameraFarPlane = 2000.0f;	// Application::sceneResource.cameraManip->getClipPlanes().y * 0.02f;
 	pushConstant.tanCameraFov_2 = glm::tan(glm::radians(Application::sceneResource.cameraManip->getFov() * 0.5f));
 	pushConstant.aspectRatio = Application::sceneResource.cameraManip->getAspectRatio();
+
+	if (fluidFogSet->fogCount > 0) {
+		FzbRenderer::Scene& scene = Application::sceneResource;
+		for (int i = 0; i < scene.meshes.size(); ++i) {
+			int meshSetIndex = scene.meshIndexToMeshSetIndex[i];
+			scene.meshSets[meshSetIndex].getAABB();
+		}
+	}
 }
 void VolumetricFog::clean() {
 	VkDevice device = Application::app->getDevice();
@@ -189,13 +232,12 @@ void VolumetricFog::clean() {
 	GlobalInfoBuffer.clean();
 	volumetricFogInfosBuffer.clean();
 
-	heightFogSet.clean();
-	fluidFogSet.clean();
+	heightFogSet->clean();
+	fluidFogSet->clean();
+	gridFogSet->clean();
 
-	volumetricFogNoiseInfoBuffer.clean();
-
-	volumetricFogAttenuationImage.clean();
-	volumetricFogLImage.clean();
+	fogAccSyncBuffer.clean();
+	volumetricFogAccResultImage.clean();
 	envVolumetricFogInfoImage.clean();
 
 #ifdef USE_SVGF
@@ -237,6 +279,7 @@ void VolumetricFog::uiRender() {
 			ImGui::DragInt("Fog Filter Count", (int*)&FogFilterCount, 1, 1, 10);
 		}
 
+#ifndef NDEBUG
 		if (ImGui::CollapsingHeader("Frustum Setting", ImGuiTreeNodeFlags_DefaultOpen)) {
 			UIModified |= ImGui::DragFloat("Compression Params ", (float*)&pushConstant.compressionParams, 0.1f, 0.0f, 10);
 			if (ImGui::Checkbox("Show Camera Frustum ", (bool*)&showCameraFrustum)) {
@@ -244,6 +287,7 @@ void VolumetricFog::uiRender() {
 				showCameraInfo = Application::sceneResource.sceneInfo;
 			}
 		}
+#endif
 		
 		#ifdef USE_ENVFOG
 		if (ImGui::CollapsingHeader("Environment Fog Setting", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -278,34 +322,14 @@ void VolumetricFog::uiRender() {
 			UIModified |= ImGui::DragFloat("Attenuation Interpolation Jitter Strength", (float*)&interpolationJitterStrength_attenuation, 1, 0, 100);
 			UIModified |= ImGui::DragFloat("L Interpolation Jitter Strength", (float*)&interpolationJitterStrength_L, 1, 0, 100);
 		}
-
-		heightFogSet.uiRender();
-		fluidFogSet.uiRender();
-		for (int i = 0; i < volumetricFogCount; ++i) {
-			volumetricFogInfoModified[i] = false;
-			if (volumetricFogInfos[i].type == shaderio::VolumetricFogType::Height) continue;
-			if (volumetricFogInfos[i].type == shaderio::VolumetricFogType::Fluid) continue;
-
-			if (ImGui::CollapsingHeader(std::string("Volumetric Fog Properties " + std::to_string(i)).c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
-				ImGui::BeginDisabled(true);
-				volumetricFogInfoModified[i] |= ImGui::Combo(std::string("Type " + std::to_string(i)).c_str(), (int*)&volumetricFogInfos[i].type, fogTypeItems, IM_ARRAYSIZE(fogTypeItems));
-				ImGui::EndDisabled();
-
-				 if (volumetricFogInfos[i].type == shaderio::VolumetricFogType::Noise) {
-					if (ImGui::CollapsingHeader(std::string("Noise Properties " + std::to_string(i)).c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
-						volumetricFogInfoModified[i] |= ImGui::DragFloat3(std::string("Cloud Scale " + std::to_string(i)).c_str(), (float*)&volumetricFogNoiseInfos[noiseFogIndex].cloudScale, 0.01f, 0.0f, 2.0f);
-						volumetricFogInfoModified[i] |= ImGui::DragFloat(std::string("Cloud Flow Speed " + std::to_string(i)).c_str(), (float*)&volumetricFogNoiseInfos[noiseFogIndex].cloudFlowSpeed, 0.1f, 0.0f, 10.0f);
-						volumetricFogInfoModified[i] |= ImGui::DragFloat2(std::string("Cloud Coverage " + std::to_string(i)).c_str(), (float*)&volumetricFogNoiseInfos[noiseFogIndex].cloudCoverage, 0.1f, 0.0f, 2.0f);
-						volumetricFogInfoModified[i] |= ImGui::DragFloat(std::string("Cloud Type Preference " + std::to_string(i)).c_str(), (float*)&volumetricFogNoiseInfos[noiseFogIndex].cloudTypePreference, 0.1f, 0.0f, 1.0f);
-						volumetricFogInfoModified[i] |= ImGui::DragFloat(std::string("Weather Scale " + std::to_string(i)).c_str(), (float*)&volumetricFogNoiseInfos[noiseFogIndex].weatherScale, 0.01f, 0.0f, 2.0f);
-					}
-					++noiseFogIndex;
-				}
-
-				volumetricFogInfoModified[i] |= ImGui::Checkbox(std::string("show voxel grid " + std::to_string(i)).c_str(), (bool*)&showVolumetricFogVoxelGrids[i]);
-			}
-			UIModified |= volumetricFogInfoModified[i];
+		if (ImGui::CollapsingHeader("transparent render Setting", ImGuiTreeNodeFlags_DefaultOpen)) {
+			UIModified |= ImGui::DragFloat("Attenuation Interpolation Jitter Strength transparent", (float*)&interpolationJitterStrength_attenuation_transparent, 1, 0, 100);
+			UIModified |= ImGui::DragFloat("L Interpolation Jitter Strength transparent", (float*)&interpolationJitterStrength_L_transparent, 1, 0, 100);
 		}
+
+		heightFogSet->uiRender();
+		fluidFogSet->uiRender();
+		gridFogSet->uiRender();
 	}
 	ImGui::End();
 
@@ -362,19 +386,18 @@ void VolumetricFog::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 	write.append(imageWrite, gBuffers.m_res.gBufferColor[(uint32_t)GBuffers_VolumetricFog::eRendered]);
 
 #ifdef BLUR_FOG
-	imageWrite = staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eRenderedFogImage, 0, 0, 1);
-	write.append(imageWrite, gBuffers.m_res.gBufferColor[(uint32_t)GBuffers_VolumetricFog::eRenderedFog]);
+	imageWrite = staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eRenderedFogResultImage, 0, 0, 1);
+	write.append(imageWrite, gBuffers.m_res.gBufferColor[(uint32_t)GBuffers_VolumetricFog::eRenderedResultFog]);
 
 	imageWrite = staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eDepthGradientImage, 0, 0, 1);
 	write.append(imageWrite, gBuffers.m_res.gBufferColor[(uint32_t)GBuffers_VolumetricFog::eDepthGradient]);
 
-	imageWrite = staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFogVarianceImages, 0, 0, 2);
-	std::vector<nvvk::Image> vairanceImages = { gBuffers.m_res.gBufferColor[(uint32_t)GBuffers_VolumetricFog::eFogVariance0],  gBuffers.m_res.gBufferColor[(uint32_t)GBuffers_VolumetricFog::eFogVariance1] };
-	write.append(imageWrite, vairanceImages.data());
-
 	imageWrite = staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFilterImages, 0, 0, 2);
-	std::vector<nvvk::Image> filterImages = { gBuffers.m_res.gBufferColor[(uint32_t)GBuffers_VolumetricFog::eFilter0],  gBuffers.m_res.gBufferColor[(uint32_t)GBuffers_VolumetricFog::eFilter1] };
-	write.append(imageWrite, filterImages.data());
+	std::vector<nvvk::Image> vairanceImages = { 
+		gBuffers.m_res.gBufferColor[(uint32_t)GBuffers_VolumetricFog::eFilter0],  
+		gBuffers.m_res.gBufferColor[(uint32_t)GBuffers_VolumetricFog::eFilter1],
+	};
+	write.append(imageWrite, vairanceImages.data());
 #endif
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
@@ -420,7 +443,9 @@ void VolumetricFog::preRender() {
 
 	shadowMap.preRender();
 
-	fluidFogSet.preRender();
+	heightFogSet->preRender();
+	fluidFogSet->preRender();
+	gridFogSet->preRender();
 
 	// 计算相机移动方向
 	{
@@ -572,19 +597,26 @@ void VolumetricFog::createVolumetricFogData() {
 		.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT,
 		});
 	vkCmdUpdateBuffer(cmd, volumetricFogInfosBuffer.buffer.buffer, 0, sizeof(shaderio::VolumetricFogInfo) * volumetricFogCount, volumetricFogInfos.data());
-	//-----------------------------------------------------------噪声----------------------------------------------------
-	if (volumetricFogNoiseCount > 0) {
-		volumetricFogNoiseInfoBuffer = FzbRenderer::Buffer("volumetricFogNoiseInfoBuffer", false);
-		volumetricFogNoiseInfoBuffer.init({
-			.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-			.size = sizeof(shaderio::NoiseFogInfo) * volumetricFogNoiseCount,
-			.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT,
-			});
-	}
 	//-------------------------------------------------------------------------------------------------------------------
 	{
-		createVolumetricFogImage(volumetricFogAttenuationImage, { frustumGridSize.width, frustumGridSize.height, frustumGridSize.depth }, true);
-		createVolumetricFogImage(volumetricFogLImage, { frustumGridSize.width, frustumGridSize.height, frustumGridSize.depth }, true);
+		fogAccSyncBuffer = FzbRenderer::Buffer("fogAccSyncBuffer", false);
+		uint32_t threadGroupCount_oneDepth_X = (frustumGridSize.width + FOG_ACC_THREADGROUP_SIZE - 1) / FOG_ACC_THREADGROUP_SIZE;
+		uint32_t threadGroupCount_oneDepth_Y = (frustumGridSize.height + FOG_ACC_THREADGROUP_SIZE - 1) / FOG_ACC_THREADGROUP_SIZE;
+#if defined(FOG_ACC_GPU_GRIVEN)
+		fogAccSyncBuffer.init({
+			.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+			.size = sizeof(shaderio::DispatchIndirectCommand),
+			.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+		});
+#elif defined(FOG_ACC_ONE_DISPATCH)
+		fogAccSyncBuffer.init({
+			.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+			.size = sizeof(int) * threadGroupCount_oneDepth_X * threadGroupCount_oneDepth_Y,
+			.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT,
+		});
+#endif
+
+		createVolumetricFogImage(volumetricFogAccResultImage, { frustumGridSize.width, frustumGridSize.height, frustumGridSize.depth }, true);
 
 #ifdef Uniform_EnvFog_Grid
 		createVolumetricFogImage(envVolumetricFogInfoImage, { envGridSize.x, envGridSize.y, envGridSize.z }, true);
@@ -653,7 +685,7 @@ void VolumetricFog::createDescriptorSetLayout() {
 	}
 	//----------------------------------------------------------------流体-----------------------------------------------------------------------------
 	{
-		uint32_t FluidFogCount = fluidFogSet.fogCount;
+		uint32_t FluidFogCount = fluidFogSet->fogCount;
 
 		bindings.addBinding({
 			.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFluidFogInfoBuffer,
@@ -689,36 +721,36 @@ void VolumetricFog::createDescriptorSetLayout() {
 			.descriptorCount = FluidFogCount,
 			.stageFlags = VK_SHADER_STAGE_ALL });
 	}
-	//----------------------------------------------------------------噪声-----------------------------------------------------------------------------
+	//----------------------------------------------------------------网格-----------------------------------------------------------------------------
 	{
 		bindings.addBinding({
-		.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eNoiseFogInfoBuffer,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = volumetricFogNoiseCount,
-		.stageFlags = VK_SHADER_STAGE_ALL });
+			.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eGridFogInfoBuffer,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = (uint32_t)gridFogSet->fogCount,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eGridFogImages,
+			.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			.descriptorCount = (uint32_t)gridFogSet->fogCount,
+			.stageFlags = VK_SHADER_STAGE_ALL });
 	}
 	//---------------------------------------------------------------------------------------------------------------------------------------------
 	{
 		bindings.addBinding({
-			.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFogAttenuationImage,
+			.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFogAccSyncBuffer,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFogAccResultImage,
 			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
 			.descriptorCount = 1,
 			.stageFlags = VK_SHADER_STAGE_ALL });
 
 		bindings.addBinding({
-			.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFogAttenuationImage_sample,
-			.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-			.descriptorCount = 1,
-			.stageFlags = VK_SHADER_STAGE_ALL });
-
-		bindings.addBinding({
-			.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFogLImage,
-			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-			.descriptorCount = 1,
-			.stageFlags = VK_SHADER_STAGE_ALL });
-
-		bindings.addBinding({
-			.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFogLImage_sample,
+			.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFogAccResultImage_sample,
 			.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 			.descriptorCount = 1,
 			.stageFlags = VK_SHADER_STAGE_ALL });
@@ -739,7 +771,7 @@ void VolumetricFog::createDescriptorSetLayout() {
 #ifdef BLUR_FOG
 	{
 		bindings.addBinding({
-			.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eRenderedFogImage,
+			.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eRenderedFogResultImage,
 			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
 			.descriptorCount = 1,
 			.stageFlags = VK_SHADER_STAGE_ALL });
@@ -748,12 +780,6 @@ void VolumetricFog::createDescriptorSetLayout() {
 			.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eDepthGradientImage,
 			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
 			.descriptorCount = 1,
-			.stageFlags = VK_SHADER_STAGE_ALL });
-
-		bindings.addBinding({
-			.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFogVarianceImages,
-			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-			.descriptorCount = 2,
 			.stageFlags = VK_SHADER_STAGE_ALL });
 
 		bindings.addBinding({
@@ -778,7 +804,7 @@ void VolumetricFog::createDescriptorSetLayout() {
 	staticDescPack.init(bindings, Application::app->getDevice(), 1, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
 		VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT);
 
-	LOGI("Fzb PathGuiding static descriptor layout created\n");
+	LOGI("Volumetric Fog static descriptor layout created\n");
 	NVVK_DBG_NAME(staticDescPack.getLayout());
 	NVVK_DBG_NAME(staticDescPack.getPool());
 	NVVK_DBG_NAME(staticDescPack.getSet(0));
@@ -821,61 +847,62 @@ void VolumetricFog::createDescriptorSet() {
 		write.append(volumetricFogInfoWrite, volumetricFogInfosBuffer.buffer);
 	}
 	//------------------------------------------------------------------高度---------------------------------------------------------------------------
-	if (heightFogSet.fogCount > 0) {
+	if (heightFogSet->fogCount > 0) {
 		VkWriteDescriptorSet	volumetricFogHeightWrite =
 			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eHeightFogInfoBuffer, 0, 0, 1);
-		write.append(volumetricFogHeightWrite, heightFogSet.heightFogInfoBuffer.buffer);
+		write.append(volumetricFogHeightWrite, heightFogSet->heightFogInfoBuffer.buffer);
 	}
 	//------------------------------------------------------------------流体---------------------------------------------------------------------------
-	int FluidFogCount = fluidFogSet.fogCount;
+	int FluidFogCount = fluidFogSet->fogCount;
 	if (FluidFogCount > 0) {
 		VkWriteDescriptorSet	FluidFogWrite =
 			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFluidFogInfoBuffer, 0, 0, 1);
-		write.append(FluidFogWrite, fluidFogSet.fluidFogInfoBuffer.buffer);
+		write.append(FluidFogWrite, fluidFogSet->fluidFogInfoBuffer.buffer);
 
 		FluidFogWrite =
 			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFluidFogVoxelInfoBuffer, 0, 0, FluidFogCount);
-		write.append(FluidFogWrite, fluidFogSet.getfluidFogVoxelInfoBuffersPtr());
+		write.append(FluidFogWrite, fluidFogSet->getfluidFogVoxelInfoBuffersPtr());
 
 		FluidFogWrite =
 			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFluidFogVoxelVelocityImage, 0, 0, FluidFogCount);
-		write.append(FluidFogWrite, fluidFogSet.getfluidFogVoxelVelocityImagesPtr());
+		write.append(FluidFogWrite, fluidFogSet->getfluidFogVoxelVelocityImagesPtr());
 
 		FluidFogWrite =
 			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFluidFogVoxelVelocityImage_sample, 0, 0, FluidFogCount);
-		write.append(FluidFogWrite, fluidFogSet.getfluidFogVoxelVelocityImagesPtr());
+		write.append(FluidFogWrite, fluidFogSet->getfluidFogVoxelVelocityImagesPtr());
 
 		FluidFogWrite =
 			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFluidFogVoxelInfoImages, 0, 0, FluidFogCount);
-		write.append(FluidFogWrite, fluidFogSet.getfluidFogVoxelInfoImagesPtr());
+		write.append(FluidFogWrite, fluidFogSet->getfluidFogVoxelInfoImagesPtr());
 
 		FluidFogWrite =
 			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFluidFogVoxelInfoImages_sampler, 0, 0, FluidFogCount);
-		write.append(FluidFogWrite, fluidFogSet.getfluidFogVoxelInfoImagesPtr());
+		write.append(FluidFogWrite, fluidFogSet->getfluidFogVoxelInfoImagesPtr());
 	}
-	//------------------------------------------------------------------噪声---------------------------------------------------------------------------
-	if (volumetricFogNoiseCount > 0) {
-		VkWriteDescriptorSet	volumetricFogNoiseWrite =
-			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eNoiseFogInfoBuffer, 0, 0, 1);
-		write.append(volumetricFogNoiseWrite, volumetricFogNoiseInfoBuffer.buffer);
+	//------------------------------------------------------------------网格---------------------------------------------------------------------------
+	if (gridFogSet->fogCount > 0) {
+		VkWriteDescriptorSet	volumetricFogGridWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eGridFogInfoBuffer, 0, 0, 1);
+		write.append(volumetricFogGridWrite, gridFogSet->gridFogInfoBuffer.buffer);
+
+		volumetricFogGridWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eGridFogImages, 0, 0, gridFogSet->fogCount);
+		write.append(volumetricFogGridWrite, gridFogSet->getFogGridImagesPtr());
 	}
 	//------------------------------------------------------------------------------------------------------------------------------------------------
 	{
-		VkWriteDescriptorSet	attenuationImageWrite =
-			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFogAttenuationImage, 0, 0, 1);
-		write.append(attenuationImageWrite, volumetricFogAttenuationImage.image);
-
-		attenuationImageWrite =
-			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFogAttenuationImage_sample, 0, 0, 1);
-		write.append(attenuationImageWrite, volumetricFogAttenuationImage.image);
-
-		attenuationImageWrite =
-			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFogLImage, 0, 0, 1);
-		write.append(attenuationImageWrite, volumetricFogLImage.image);
-
-		attenuationImageWrite =
-			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFogLImage_sample, 0, 0, 1);
-		write.append(attenuationImageWrite, volumetricFogLImage.image);
+		VkWriteDescriptorSet	fogAccImageWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFogAccResultImage, 0, 0, 1);
+		write.append(fogAccImageWrite, volumetricFogAccResultImage.image);
+			
+#if defined(FOG_ACC_GPU_GRIVEN) || defined(FOG_ACC_ONE_DISPATCH)
+		fogAccImageWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFogAccSyncBuffer, 0, 0, 1);
+		write.append(fogAccImageWrite, fogAccSyncBuffer.buffer);
+#endif
+		fogAccImageWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFogAccResultImage_sample, 0, 0, 1);
+		write.append(fogAccImageWrite, volumetricFogAccResultImage.image);
 
 		VkWriteDescriptorSet	envCalInfoImageWrite =
 			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eEnvFogInfoImage, 0, 0, 1);
@@ -1040,6 +1067,7 @@ void VolumetricFog::compileAndCreateShaders() {
 		NVVK_DBG_NAME(computeShader_createVolumetricFog_Fluid_S);
 	}
 	//-------------------------------------------Step5-------------------------------------------
+	#ifdef USE_ENVFOG
 	{
 		shaderSource = shaderPath / "step5_createEnvironmentFog.slang";
 		shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
@@ -1053,7 +1081,9 @@ void VolumetricFog::compileAndCreateShaders() {
 		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_createEnvionmentFog);
 		NVVK_DBG_NAME(computeShader_createEnvionmentFog);
 	}
+	#endif
 	//-------------------------------------------Step6-------------------------------------------
+	#ifdef USE_ENVFOG
 	{
 		shaderSource = shaderPath / "step6_createLightAttenuatonEstimator.slang";
 		shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
@@ -1067,6 +1097,7 @@ void VolumetricFog::compileAndCreateShaders() {
 		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_createLightAttenuationEstimator);
 		NVVK_DBG_NAME(computeShader_createLightAttenuationEstimator);
 	}
+	#endif
 	//-------------------------------------------Step7-------------------------------------------
 	{
 		shaderSource = shaderPath / "step7_createFrustumAccFog.slang";
@@ -1076,7 +1107,13 @@ void VolumetricFog::compileAndCreateShaders() {
 		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
 		shaderInfo.nextStage = 0;
 		#ifdef Fog_Acc_Stepping
-		shaderInfo.pName = "computeMain_createFrustumAccFog_Stepping";
+			#if defined(FOG_ACC_GPU_GRIVEN)
+					shaderInfo.pName = "computeMain_createFrustumAccFog_Stepping_GPUGriven";
+			#elif defined(FOG_ACC_ONE_DISPATCH)
+					shaderInfo.pName = "computeMain_createFrustumAccFog_Stepping_oneDispatch";
+			#else
+					shaderInfo.pName = "computeMain_createFrustumAccFog_Stepping";
+			#endif
 		#else
 		shaderInfo.pName = "computeMain_createFrustumAccFog";
 		#endif
@@ -1113,6 +1150,7 @@ void VolumetricFog::compileAndCreateShaders() {
 			vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_getDepthGradient);
 			NVVK_DBG_NAME(computeShader_getDepthGradient);
 
+			/*
 			vkDestroyShaderEXT(device, computeShader_varianceConvolution, nullptr);
 			shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
 			shaderInfo.nextStage = 0;
@@ -1121,6 +1159,7 @@ void VolumetricFog::compileAndCreateShaders() {
 			shaderInfo.pCode = shaderCode.pCode;
 			vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_varianceConvolution);
 			NVVK_DBG_NAME(computeShader_varianceConvolution);
+			*/
 
 			vkDestroyShaderEXT(device, computeShader_blurFog_X, nullptr);
 			shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
@@ -1254,28 +1293,10 @@ void VolumetricFog::updateDataPerFrame(VkCommandBuffer cmd) {
 	#endif
 
 	if (volumetricFogCount > 0) nvvk::cmdBufferMemoryBarrier(cmd, { volumetricFogInfosBuffer.buffer.buffer, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT });
-	heightFogSet.updateDataPerFrame(cmd, pushConstant.time == 0.0f, volumetricFogInfosBuffer);
-	fluidFogSet.updateDataPerFrame(cmd, pushConstant.time == 0.0f, volumetricFogInfosBuffer);
-	if(volumetricFogNoiseCount > 0) nvvk::cmdBufferMemoryBarrier(cmd, { volumetricFogNoiseInfoBuffer.buffer.buffer, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT });
-
-
-	bool noiseModified = false;
-	for (int i = 0; i < volumetricFogCount; ++i) {
-		shaderio::VolumetricFogInfo fogInfo = volumetricFogInfos[i];
-		if (fogInfo.type == shaderio::VolumetricFogType::Height) continue;
-		if (fogInfo.type == shaderio::VolumetricFogType::Fluid) continue;
-
-		if (!volumetricFogInfoModified[i] && pushConstant.time > 0.0f) continue;
-		vkCmdUpdateBuffer(cmd, volumetricFogInfosBuffer.buffer.buffer, sizeof(shaderio::VolumetricFogInfo) * i, sizeof(shaderio::VolumetricFogInfo), &volumetricFogInfos[i]);
-
-		uint32_t typeFogIndex = fogInfo.typeFogIndex;
-		 if (fogInfo.type == shaderio::VolumetricFogType::Noise) {
-			noiseModified = true;
-			vkCmdUpdateBuffer(cmd, volumetricFogNoiseInfoBuffer.buffer.buffer, sizeof(shaderio::NoiseFogInfo) * typeFogIndex, sizeof(shaderio::NoiseFogInfo), &volumetricFogNoiseInfos[typeFogIndex]);
-		}
-	}
+	heightFogSet->updateDataPerFrame(cmd, pushConstant.time == 0.0f, volumetricFogInfosBuffer);
+	fluidFogSet->updateDataPerFrame(cmd, pushConstant.time == 0.0f, volumetricFogInfosBuffer);
+	gridFogSet->updateDataPerFrame(cmd, pushConstant.time == 0.0f, volumetricFogInfosBuffer);
 	if (volumetricFogCount > 0) nvvk::cmdBufferMemoryBarrier(cmd, { volumetricFogInfosBuffer.buffer.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT });
-	if (noiseModified) nvvk::cmdBufferMemoryBarrier(cmd, { volumetricFogNoiseInfoBuffer.buffer.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT });
 
 #ifndef NDEBUG
 	static bool showCameraGetTrue = false;
@@ -1300,22 +1321,22 @@ void VolumetricFog::getVisibleFog(VkCommandBuffer cmd) {
 	vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
 }
 void VolumetricFog::initFluidFog(VkCommandBuffer cmd) {
-	int FluidFogCount = fluidFogSet.fogCount;
+	int FluidFogCount = fluidFogSet->fogCount;
 	if (FluidFogCount == 0) return;
 	NVVK_DBG_SCOPE(cmd);
 
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, staticDescPack.getSetPtr(), 0, nullptr);
 	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
 	for (int i = 0; i < FluidFogCount; ++i) {
-		if (!fluidFogSet.getFogStartUp(i)) continue;
-		shaderio::uint3 gridSize = fluidFogSet.getFogGridSize(i);
+		if (!fluidFogSet->getFogStartUp(i)) continue;
+		shaderio::uint3 gridSize = fluidFogSet->getFogGridSize(i);
 		VkExtent3D groupSize = nvvk::getGroupCounts(VkExtent3D{ gridSize.x, gridSize.y, gridSize.z }, VkExtent3D{ 4, 4, 4 });
 
 		vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_initFluidFog);
 		float time = pushConstant.time;
 
-		if (fluidFogSet.getFogModified(i)) pushConstant.time = 0.0f;
-		pushConstant.instanceIndex = fluidFogSet.getFogIndexMap(i);
+		if (fluidFogSet->getFogModified(i)) pushConstant.time = 0.0f;
+		pushConstant.instanceIndex = fluidFogSet->getFogIndexMap(i);
 		vkCmdPushConstants2(cmd, &pushInfo);
 
 		pushConstant.time = time;
@@ -1383,19 +1404,19 @@ void VolumetricFog::createGBuffers(VkCommandBuffer cmd) {
 		const shaderio::TriangleMesh& triMesh = mesh.triMesh;
 
 		FzbRenderer::InstanceSet* instanceSet;
-		//pushConstant.FluidFogIndex = -1;
 		pushConstant.instanceVelocity = shaderio::float3(0.0f);
 		if (Application::sceneResource.periodInstanceIndexToInstanceSetIndex.count(i)) {
 			uint32_t instanceSetIndex = Application::sceneResource.periodInstanceIndexToInstanceSetIndex[i];
 			instanceSet = &Application::sceneResource.periodInstanceSets[instanceSetIndex];
 
-			//先不考虑旋转带来的力
-			shaderio::float3 pos0 = shaderio::float3(instanceSet->transform * shaderio::float4(1.0f, 1.0f, 1.0f, 1.0f));
-			shaderio::float3 pos1 = shaderio::float3(instanceSet->transform_lastTime * shaderio::float4(1.0f, 1.0f, 1.0f, 1.0f));
+			int meshSetIndex = Application::sceneResource.meshIndexToMeshSetIndex[i];
+			shaderio::AABB meshAABB = Application::sceneResource.meshSets[meshSetIndex].getAABB();
+			shaderio::float3 localCenter = (meshAABB.minimum + meshAABB.maximum) * 0.5f;
+
+			shaderio::float3 pos0 = shaderio::float3(instanceSet->transform * shaderio::float4(localCenter, 1.0f));
+			shaderio::float3 pos1 = shaderio::float3(instanceSet->transform_lastTime * shaderio::float4(localCenter, 1.0f));
 			pushConstant.instanceVelocity = (pos0 - pos1) / pushConstant.dt;
 			//pushConstant.transofrm_lastTime = instanceSet->transform_lastTime;
-
-			//pushConstant.FluidFogIndex = 1;	//表示会与流体进行交互，因此几何需要与流体进行判断
 		}
 		else {		
 			uint32_t instanceSetIndex = Application::sceneResource.staticInstanceIndexToInstanceSetIndex[i];
@@ -1439,6 +1460,8 @@ void VolumetricFog::createGBuffers(VkCommandBuffer cmd) {
 	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getDepthImage(), VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
 }
 void VolumetricFog::fluidSimulation(VkCommandBuffer cmd) {
+	int FluidFogCount = fluidFogSet->fogCount;
+	if (FluidFogCount == 0) return;
 	NVVK_DBG_SCOPE(cmd);
 
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, staticDescPack.getSetPtr(), 0, nullptr);
@@ -1479,21 +1502,21 @@ void VolumetricFog::fluidSimulation(VkCommandBuffer cmd) {
 			};
 
 		auto barrierVolumeAll = [&](int fluidIndex) {
-			barrierImage(fluidFogSet.getfluidFogVoxelVelocityImagesPtr()[fluidIndex].image);
-			barrierBuffer(fluidFogSet.getfluidFogVoxelInfoBuffersPtr()[fluidIndex].buffer);
-			barrierImage(fluidFogSet.getfluidFogVoxelInfoImagesPtr()[fluidIndex].image);
+			barrierImage(fluidFogSet->getfluidFogVoxelVelocityImagesPtr()[fluidIndex].image);
+			barrierBuffer(fluidFogSet->getfluidFogVoxelInfoBuffersPtr()[fluidIndex].buffer);
+			barrierImage(fluidFogSet->getfluidFogVoxelInfoImagesPtr()[fluidIndex].image);
 		};
 
 		auto barrierVolumePingPong = [&](int idx) {
-			barrierBuffer(fluidFogSet.getfluidFogVoxelInfoBuffersPtr()[idx].buffer);
+			barrierBuffer(fluidFogSet->getfluidFogVoxelInfoBuffersPtr()[idx].buffer);
 		};
 
-		int FluidFogCount = fluidFogSet.fogCount;
+		int FluidFogCount = fluidFogSet->fogCount;
 		for (int i = 0; i < FluidFogCount; ++i) {
-			if (!fluidFogSet.getFogStartUp(i)) continue;
-			shaderio::uint3 gridSize = fluidFogSet.getFogGridSize(i);
+			if (!fluidFogSet->getFogStartUp(i)) continue;
+			shaderio::uint3 gridSize = fluidFogSet->getFogGridSize(i);
 			groupSize = nvvk::getGroupCounts(VkExtent3D{ gridSize.x, gridSize.y, gridSize.z }, VkExtent3D{ 4, 4, 4 });
-			pushConstant.instanceIndex = fluidFogSet.getFogIndexMap(i);
+			pushConstant.instanceIndex = fluidFogSet->getFogIndexMap(i);
 
 			// --- Stage A: Advection ---
 			vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createVolumetricFog_Fluid_A);
@@ -1501,26 +1524,38 @@ void VolumetricFog::fluidSimulation(VkCommandBuffer cmd) {
 			vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
 			barrierVolumeAll(i);
 
+			uint32_t iterationStart = 0;
+
 			// --- Stage D: Diffusion (Jacobi) ---
 			vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createVolumetricFog_Fluid_D);
+#ifdef FLUID_SIMPLIFY_VISCOSITY
+			pushConstant.iteration = 0;
+			vkCmdPushConstants2(cmd, &pushInfo);
+			vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
+			barrierVolumePingPong(i);
+#else
 			for (uint32_t iter = 0; iter < Jacobi_Iteration_Count; ++iter) {
 				pushConstant.iteration = iter;
 				vkCmdPushConstants2(cmd, &pushInfo);
 				vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
 				barrierVolumePingPong(i);
 			}
+			iterationStart = Jacobi_Iteration_Count & 1;
+#endif
+			
 
 			// --- Stage F: External forces ---
 			vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createVolumetricFog_Fluid_F);
-			pushConstant.iteration = Jacobi_Iteration_Count & 1;
+			pushConstant.iteration = iterationStart;
 			vkCmdPushConstants2(cmd, &pushInfo);
 			vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
 			barrierVolumeAll(i);
 
+#ifndef FLUID_SIMPLIFY_PRESSURE
 			// --- Stage P: Pressure solve (Jacobi) ---
 			vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createVolumetricFog_Fluid_P);
 			for (uint32_t iter = 0; iter < Jacobi_Iteration_Count; ++iter) {
-				pushConstant.iteration = iter + (Jacobi_Iteration_Count & 1);
+				pushConstant.iteration = iter + iterationStart;
 				vkCmdPushConstants2(cmd, &pushInfo);
 				vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
 				barrierVolumePingPong(i);
@@ -1532,6 +1567,7 @@ void VolumetricFog::fluidSimulation(VkCommandBuffer cmd) {
 			vkCmdPushConstants2(cmd, &pushInfo);
 			vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
 			barrierVolumeAll(i);
+#endif
 		}
 	}
 }
@@ -1554,9 +1590,6 @@ void VolumetricFog::createEnvFog(VkCommandBuffer cmd) {
 	vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
 }
 void VolumetricFog::envFogLightAttenuationEstimate(VkCommandBuffer cmd) {
-#ifndef Uniform_EnvFog_Grid
-	return;
-#endif
 	NVVK_DBG_SCOPE(cmd);
 
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, staticDescPack.getSetPtr(), 0, nullptr);
@@ -1570,24 +1603,14 @@ void VolumetricFog::envFogLightAttenuationEstimate(VkCommandBuffer cmd) {
 }
 void VolumetricFog::createFrustumAccFog(VkCommandBuffer cmd) {
 	if (!pushConstant.useAccFog) return;
-	auto barrierImage = [&](VkImage image) {
-		VkImageMemoryBarrier2 b = nvvk::makeImageMemoryBarrier({
-			.image = image,
-			.oldLayout = VK_IMAGE_LAYOUT_GENERAL,
-			.newLayout = VK_IMAGE_LAYOUT_GENERAL,
-			.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
-			.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-			.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-			.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-			.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-			});
-		VkDependencyInfo depInfo{
-			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-			.imageMemoryBarrierCount = 1,
-			.pImageMemoryBarriers = &b };
-		vkCmdPipelineBarrier2(cmd, &depInfo);
-		};
 	NVVK_DBG_SCOPE(cmd);
+
+#ifdef FOG_ACC_ONE_DISPATCH
+	uint32_t threadGroupCount_oneDepth_X = (frustumGridSize.width + FOG_ACC_THREADGROUP_SIZE - 1) / FOG_ACC_THREADGROUP_SIZE;
+	uint32_t threadGroupCount_oneDepth_Y = (frustumGridSize.height + FOG_ACC_THREADGROUP_SIZE - 1) / FOG_ACC_THREADGROUP_SIZE;
+	vkCmdFillBuffer(cmd, fogAccSyncBuffer.buffer.buffer, 0, sizeof(int) * threadGroupCount_oneDepth_X * threadGroupCount_oneDepth_Y, frustumGridSize.depth + 1);
+	nvvk::cmdBufferMemoryBarrier(cmd, { fogAccSyncBuffer.buffer.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT });
+#endif
 
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, staticDescPack.getSetPtr(), 0, nullptr);
 
@@ -1597,20 +1620,39 @@ void VolumetricFog::createFrustumAccFog(VkCommandBuffer cmd) {
 	pushConstant.useAccFog = 0;
 	pushConstant.sampleCount = rmSampleCountSampleCount_fogAcc;
 	pushConstant.randomStepping = randomStepping_fogAcc;
-	//pushConstant.forwardSampleCount = 0;
 	pushConstant.jitterStrength0 = accJitterStrength;
 	pushConstant.jitterStrength1 = interpolationJitterStrength_fogAcc;
 #ifdef Fog_Acc_Stepping
+#if defined(FOG_ACC_GPU_GRIVEN)
+	uint32_t threadGroupCount_oneDepth_X = (frustumGridSize.width + FOG_ACC_THREADGROUP_SIZE - 1) / FOG_ACC_THREADGROUP_SIZE;
+	uint32_t threadGroupCount_oneDepth_Y = (frustumGridSize.height + FOG_ACC_THREADGROUP_SIZE - 1) / FOG_ACC_THREADGROUP_SIZE;
+
+	pushConstant.instanceIndex = 0;
+	vkCmdPushConstants2(cmd, &pushInfo);
+	vkCmdDispatch(cmd, threadGroupCount_oneDepth_X, threadGroupCount_oneDepth_Y, 1);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+	for (int i = 1; i < frustumGridSize.depth; ++i) {
+		pushConstant.instanceIndex = i;
+		vkCmdPushConstants2(cmd, &pushInfo);
+		vkCmdDispatchIndirect(cmd, fogAccSyncBuffer.buffer.buffer, 0);
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+	}
+#elif defined(FOG_ACC_ONE_DISPATCH)
+	vkCmdPushConstants2(cmd, &pushInfo);
+	VkExtent3D groupSize = nvvk::getGroupCounts(VkExtent3D{ frustumGridSize.width, frustumGridSize.height, frustumGridSize.depth }, VkExtent3D{ FOG_ACC_THREADGROUP_SIZE, FOG_ACC_THREADGROUP_SIZE, 1 });
+	vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+#else
 	for (int i = 0; i < frustumGridSize.depth; ++i) {
 		pushConstant.instanceIndex = i;
 		vkCmdPushConstants2(cmd, &pushInfo);
-
+		
 		VkExtent3D groupSize = nvvk::getGroupCounts(VkExtent3D{ frustumGridSize.width, frustumGridSize.height, 1 }, VkExtent3D{ 32, 32, 1 });
 		vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
-
-		barrierImage(volumetricFogAttenuationImage.image.image);
-		barrierImage(volumetricFogLImage.image.image);
+		
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	}
+#endif
 #else
 	vkCmdPushConstants2(cmd, &pushInfo);
 	VkExtent3D groupSize = nvvk::getGroupCounts(VkExtent3D{ frustumGridSize.width, frustumGridSize.height, frustumGridSize.depth }, VkExtent3D{ 4, 4, 4 });
@@ -1644,6 +1686,8 @@ void VolumetricFog::deferredRenderring(VkCommandBuffer cmd) {
 	//nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getDepthImage(), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
 }
 void VolumetricFog::fogBlur(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
+
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, staticDescPack.getSetPtr(), 0, nullptr);
 
 	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
@@ -1675,13 +1719,12 @@ void VolumetricFog::fogBlur(VkCommandBuffer cmd) {
 		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	}
 
-	//vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_addFog);
-	//vkCmdPushConstants2(cmd, &pushInfo);
-	//VkExtent2D groupSize = nvvk::getGroupCounts(gBuffers.getSize(), VkExtent2D{ 32, 32 });
-	//vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_addFog);
+	vkCmdPushConstants2(cmd, &pushInfo);
+	groupSize = nvvk::getGroupCounts(gBuffers.getSize(), VkExtent2D{ 32, 32 });
+	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
 }
 void VolumetricFog::renderTransparentMaterial(VkCommandBuffer cmd) {
-	return;
 	NVVK_DBG_SCOPE(cmd);
 
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, staticDescPack.getSetPtr(), 0, nullptr);
@@ -1733,6 +1776,8 @@ void VolumetricFog::renderTransparentMaterial(VkCommandBuffer cmd) {
 
 	if (pushConstant.useAccFog) pushConstant.sampleCount = 0;	//no rayMarching
 	else pushConstant.sampleCount = 10;
+	pushConstant.jitterStrength0 = interpolationJitterStrength_attenuation_transparent;
+	pushConstant.jitterStrength1 = interpolationJitterStrength_L_transparent;
 	//pushConstant.forwardSampleCount = 0;
 	for (size_t i = 0; i < Application::sceneResource.instances.size(); ++i){
 		shaderio::Instance instance = Application::sceneResource.instances[i];
@@ -1762,10 +1807,10 @@ void VolumetricFog::renderTransparentMaterial(VkCommandBuffer cmd) {
 
 #ifndef NDEBUG
 void VolumetricFog::renderVolumetricFogVoxelGrid(VkCommandBuffer cmd) {
-	return;
-
-	bool show = showVolumetricFogVoxelGrid;
-	for (int i = 0; i < volumetricFogCount; ++i) show |= showVolumetricFogVoxelGrids[i] == 1;
+	bool show = false;
+	for (int i = 0; i < heightFogSet->fogCount; ++i) show |= heightFogSet->showFogGrid[i] == 1;
+	for (int i = 0; i < fluidFogSet->fogCount; ++i) show |= fluidFogSet->getFogGridShow(i);
+	for (int i = 0; i < gridFogSet->fogCount; ++i) show |= gridFogSet->getFogGridShow(i);
 	show |= showEnvGrid;
 	if (!show) return;
 
@@ -1820,17 +1865,34 @@ void VolumetricFog::renderVolumetricFogVoxelGrid(VkCommandBuffer cmd) {
 
 	vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(mesh.indexType));
 	for (int i = 0; i < volumetricFogCount; ++i) {
-		if (showVolumetricFogVoxelGrids[i] == 1) {
-			pushConstant.instanceIndex = i;
-			vkCmdPushConstants2(cmd, &pushInfo);
-			//vkCmdDrawIndexed(cmd, triMesh.indices.count, volumetricFogInfos[i].fogVoxelGridSize.x * volumetricFogInfos[i].fogVoxelGridSize.y * volumetricFogInfos[i].fogVoxelGridSize.z, 0, 0, 0);
+		pushConstant.instanceIndex = i;
+
+		shaderio::VolumetricFogInfo fogInfo = volumetricFogInfos[i];
+		shaderio::uint3 gridSize;
+		if (fogInfo.type == shaderio::VolumetricFogType::Height) {
+			if (heightFogSet->showFogGrid[fogInfo.typeFogIndex] == 0) continue;
+			gridSize = { 1, 1, 1 };
 		}
+		else if (fogInfo.type == shaderio::VolumetricFogType::Fluid) {
+			if (!fluidFogSet->getFogGridShow(fogInfo.typeFogIndex)) continue;
+			gridSize = fluidFogSet->getFogGridSize(fogInfo.typeFogIndex);
+		}
+		else if (fogInfo.type == shaderio::VolumetricFogType::Grid) {
+			if (!gridFogSet->getFogGridShow(fogInfo.typeFogIndex)) continue;
+			gridSize = gridFogSet->getFogGridSize(fogInfo.typeFogIndex);
+		}
+		else continue;
+
+		vkCmdPushConstants2(cmd, &pushInfo);
+		vkCmdDrawIndexed(cmd, triMesh.indices.count, gridSize.x * gridSize.y * gridSize.z, 0, 0, 0);
 	}
+#ifdef USE_ENVFOG
 	if (showEnvGrid) {
 		pushConstant.instanceIndex = -100;
 		vkCmdPushConstants2(cmd, &pushInfo);
 		vkCmdDrawIndexed(cmd, triMesh.indices.count, envGridSize.x * envGridSize.y * envGridSize.z, 0, 0, 0);
 	}
+#endif
 
 	vkCmdEndRendering(cmd);
 
@@ -1888,7 +1950,8 @@ void VolumetricFog::renderCameraFrustum(VkCommandBuffer cmd) {
 	const nvvk::Buffer& v = scene.bDatas[bufferIndex];
 
 	vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(mesh.indexType));
-	vkCmdDrawIndexed(cmd, triMesh.indices.count, pushConstant.frustumGridSize.x * pushConstant.frustumGridSize.y * pushConstant.frustumGridSize.z, 0, 0, 0);
+	//vkCmdDrawIndexed(cmd, triMesh.indices.count, pushConstant.frustumGridSize.x * pushConstant.frustumGridSize.y * pushConstant.frustumGridSize.z, 0, 0, 0);
+	vkCmdDrawIndexed(cmd, triMesh.indices.count, pushConstant.frustumGridSize.z, 0, 0, 0);
 
 	vkCmdEndRendering(cmd);
 

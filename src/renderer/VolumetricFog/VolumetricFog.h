@@ -5,6 +5,7 @@
 
 #include "renderer/Renderer.h"
 #include <common/Image/Image.h>
+#include <memory>
 #include "./VolumetricFogShaderio.h"
 #include <feature/ShadowMap/ShadowMap.h>
 #include <common/Buffer/Buffer.h>
@@ -12,25 +13,24 @@
 #include <feature/SVGF/SVGF.h>
 #include "HeightFog/HeightFog.h"
 #include "FluidFog/FluidFog.h"
+#include "GridFog/GridFog.h"
 
 namespace FzbRenderer {
-enum class GBuffers_VolumetricFog{
-	eAlbedo = 0,
-	eNormal,
-	eEmissive,
-	eVelocity,
-	eVertexInfo,	//meshID, instanceID, etc
-	eRendered,
+	enum class GBuffers_VolumetricFog {
+		eAlbedo = 0,
+		eNormal,
+		eEmissive,
+		eVelocity,
+		eVertexInfo,	//meshID, instanceID, etc
+		eRendered,
 #ifdef BLUR_FOG
-	eRenderedFog,
-	eDepthGradient,
-	eFogVariance0,
-	eFogVariance1,
-	eFilter0,
-	eFilter1,
+		eRenderedResultFog,
+		eDepthGradient,
+		eFilter0,
+		eFilter1,
 #endif
-	eTonemapping,
-};
+		eTonemapping,
+	};
 
 class VolumetricFog : public Renderer {
 public:
@@ -113,20 +113,16 @@ private:
 	glm::vec3 m_lastCameraPos = glm::vec3(0.0f);
 	shaderio::float4x4 VPMatrix_lastFrame;
 
-	FzbRenderer::Buffer GlobalInfoBuffer;				
+	FzbRenderer::Buffer GlobalInfoBuffer;
 	//--------------------------FogInfo-----------------------------------
-	uint32_t volumetricFogCount = 1;										
-	std::vector<shaderio::VolumetricFogInfo> volumetricFogInfos;			
-	FzbRenderer::Buffer volumetricFogInfosBuffer;							
-	std::vector<int> volumetricFogInfoModified;								
+	uint32_t volumetricFogCount = 1;
+	std::vector<shaderio::VolumetricFogInfo> volumetricFogInfos;
+	FzbRenderer::Buffer volumetricFogInfosBuffer;
+	std::vector<int> volumetricFogInfoModified;
 
-	HeightFogSet heightFogSet;
-	FluidFogSet fluidFogSet;
-
-	uint32_t volumetricFogNoiseCount = 0;
-	std::map<int, int> volumetricFogNoiseIndexMap;							
-	std::vector<shaderio::NoiseFogInfo> volumetricFogNoiseInfos;			
-	FzbRenderer::Buffer volumetricFogNoiseInfoBuffer;	
+	std::unique_ptr<HeightFogSet> heightFogSet;
+	std::unique_ptr<FluidFogSet> fluidFogSet;
+	std::unique_ptr<GridFogSet> gridFogSet;
 	//-------------------------Frustum------------------------------------
 	VkExtent3D frustumGridSize;
 	//-------------------------Environment--------------------------------
@@ -135,16 +131,16 @@ private:
 	bool envChange = false;
 	shaderio::float3 envStartPos = { 5083.0f, -77.5f, -4480.0f };
 	shaderio::uint3 envGridSize = { 128, 128, 128 };
-	shaderio::float3 envVoxelSize = {1.6, 1, 1};
+	shaderio::float3 envVoxelSize = { 1.6, 1, 1 };
 	bool showEnvGrid = false;
 
 	int sampleCount_env = 1;
 	float jitterStrength_env = 0.0f;
 	//-------------------------FogAcc-------------------------------------
-	FzbRenderer::Image volumetricFogAttenuationImage;
-	FzbRenderer::Image volumetricFogLImage;
+	FzbRenderer::Buffer fogAccSyncBuffer;
+	FzbRenderer::Image volumetricFogAccResultImage;
 
-	uint32_t rmSampleCountSampleCount_fogAcc = 4;
+	uint32_t rmSampleCountSampleCount_fogAcc = 10;
 	int randomStepping_fogAcc = true;
 	float accJitterStrength = 0.0f;
 	float interpolationJitterStrength_fogAcc = 0.0f;
@@ -155,6 +151,9 @@ private:
 	uint32_t randomStepping_opaque = true;
 	float interpolationJitterStrength_attenuation = 1.0f;
 	float interpolationJitterStrength_L = 30.0f;
+	//----------------------transparent------------------------------------
+	float interpolationJitterStrength_attenuation_transparent = 0.0f;
+	float interpolationJitterStrength_L_transparent = 0.0f;
 	//-------------------------fogBlur------------------------------------
 	//bool useFogBlur = false;
 	int FogFilterCount = 4;
@@ -169,7 +168,6 @@ private:
 	VkShaderEXT vertexShader_renderCameraFrustum{};
 	VkShaderEXT fragmentShader_renderCameraFrustum{};
 
-	bool showVolumetricFogVoxelGrid = false;
 	std::vector<int> showVolumetricFogVoxelGrids;
 
 	bool showCameraFrustum = false;

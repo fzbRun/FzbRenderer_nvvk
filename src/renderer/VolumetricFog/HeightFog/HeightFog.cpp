@@ -44,8 +44,10 @@ void HeightFogSet::uiRender() {
 		}
 	}
 }
+void HeightFogSet::preRender() {}
 
 void HeightFogSet::updateDataPerFrame(VkCommandBuffer cmd, bool frist, FzbRenderer::Buffer fogInfoBuffer) {
+	if (fogCount == 0) return;
 	nvvk::cmdBufferMemoryBarrier(cmd, { heightFogInfoBuffer.buffer.buffer, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT });
 	for (int i = 0; i < fogCount; ++i) {
 		if (!fogInfoModified[i] && !frist) continue;

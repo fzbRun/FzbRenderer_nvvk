@@ -6,7 +6,7 @@
 void getHeightFogScatter(
     float3 startPos, float3 endPos, inout uint randomSeed, uint sampleCount,
                          VolumetricFogInfo fogInfo, GlobalInfo_VolumetricFog globalInfo,
-    inout float3 L, inout float3 attenuation, inout float3 attenuation2
+    inout float L, inout float attenuation, inout float attenuation2
 ) {
     #ifdef COMPUTE_SHADER
     HeightFogInfo heightFogInfo = groupHeightFogInfos[fogInfo.typeFogIndex];
@@ -35,7 +35,7 @@ void getHeightFogScatter(
     float tTotal = tExit - tEnter;
 
     SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
-    float3 E = 1.0f;
+    float E = 1.0f;
     float tPart = tTotal / sampleCount;
     for (int sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex) {
         float tPartStart = tEnter + sampleIndex * tPart;
@@ -48,39 +48,45 @@ void getHeightFogScatter(
         extinctionCoeff = max(extinctionCoeff, 1e-30f);
 
         float3 indirectL; float a;
-        getFogScatter(samplePoint, dir, tPart, sceneInfo, globalInfo, extinctionCoeff, scattering, phase, color, E, a, indirectL);
+        getFogScatter(samplePoint, dir, tPart, sceneInfo, globalInfo, extinctionCoeff, scattering, phase, color, heightFogInfo.ambientIntensity, E, a, indirectL);
 
         // Soft boundary blending based on distance to fluid AABB
         float fluidBlend = 0.0f;
-        float3 fluidAABBHalfSize = (globalInfo.fluidAABB.maximum - globalInfo.fluidAABB.minimum) * 0.5f;
-        AABB mergeAABB = { globalInfo.fluidAABB.minimum - 0.5f * fluidAABBHalfSize, globalInfo.fluidAABB.maximum + 0.5f * fluidAABBHalfSize };
-        if (globalInfo.fluidStartUp == 1 && checkPointInAABB(samplePoint, mergeAABB)) {
-            float3 d = min(abs(samplePoint - mergeAABB.minimum), abs(mergeAABB.maximum - samplePoint));
-            float3 fluidGridCenter = (mergeAABB.minimum + mergeAABB.maximum) * 0.5f;
-            float3 maxD = min(fluidGridCenter - mergeAABB.minimum, mergeAABB.maximum - fluidGridCenter);
-            fluidBlend = min(min(d.x, d.y), d.z) / min(min(maxD.x, maxD.y), maxD.z);
-        }
+        for (int i = 0; i < pushConst.fluidFogCount; ++i) {
+            if (globalInfo.fluidStartUp[i] == 0) continue;
+            AABB fluidAABB = globalInfo.fluidAABB[i];
 
-        L += indirectL * (1.0f - fluidBlend);
+            float3 fluidAABBHalfSize = (fluidAABB.maximum - fluidAABB.minimum) * 0.5f;
+            AABB mergeAABB = { fluidAABB.minimum - 0.5f * fluidAABBHalfSize, fluidAABB.maximum + 0.5f * fluidAABBHalfSize };
+            if (globalInfo.fluidStartUp[0] == 1 && checkPointInAABB(samplePoint, mergeAABB)) {
+                float3 d = min(abs(samplePoint - mergeAABB.minimum), abs(mergeAABB.maximum - samplePoint));
+                float3 fluidGridCenter = (mergeAABB.minimum + mergeAABB.maximum) * 0.5f;
+                float3 maxD = min(fluidGridCenter - mergeAABB.minimum, mergeAABB.maximum - fluidGridCenter);
+                fluidBlend = min(min(d.x, d.y), d.z) / min(min(maxD.x, maxD.y), maxD.z);
+
+                break;
+            }
+        }
+        
+        L += luminance(indirectL) * (1.0f - fluidBlend);
         E *= lerp(a, 1.0f, fluidBlend);
 
         if (all(E <= 1e-3f)) break;
     }
-    L += heightFogInfo.color * heightFogInfo.ambientIntensity;
     attenuation *= E;
-    attenuation2 *= getAttenuation2(endPos, globalInfo, sceneInfo);
 }
 
 void getFluidFogScatter(
     float3 startPos, float3 endPos, inout uint randomSeed,
     VolumetricFogInfo fogInfo, GlobalInfo_VolumetricFog globalInfo,
-    inout float3 L, inout float3 attenuation
+    inout float L, inout float attenuation
 ) {
     #ifdef COMPUTE_SHADER
         FluidFogInfo fluidFogInfo = groupFluidFogInfos[fogInfo.typeFogIndex];
     #else
         FluidFogInfo fluidFogInfo = fluidFogInfoBuffer[fogInfo.typeFogIndex];
     #endif
+    if(fluidFogInfo.startUp == 0) return;
 
     float3 fogStartPos = fogInfo.aabb.minimum;
     float3 voxelSize = fluidFogInfo.voxelSize;
@@ -135,7 +141,7 @@ void getFluidFogScatter(
     }
 
     SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
-    float3 E = 1.0f;
+    float E = 1.0f;
     float gridLength = length((gridMax - gridMin));
 
     int maxIter = gridSize.x + gridSize.y + gridSize.z;
@@ -160,14 +166,16 @@ void getFluidFogScatter(
             float3 color = voxelInfo.w; // UnpackFloatToFloat3(voxelInfo.w);
 
             float3 fluidL; float a;
-            getFogScatter(samplePoint, dir, dt, sceneInfo, globalInfo, extinctionCoeff, scattering, phase, color, E, a, fluidL);
+            getFogScatter(samplePoint, dir, dt, sceneInfo, globalInfo, extinctionCoeff, scattering, phase, color, 0.0f, E, a, fluidL);
 
-            float3 d = min(samplePoint - globalInfo.fluidAABB.minimum, globalInfo.fluidAABB.maximum - samplePoint);
-            float3 maxD = min(gridCenter - globalInfo.fluidAABB.minimum, globalInfo.fluidAABB.maximum - gridCenter);
+            float3 fluidAABBHalfSize = (fogInfo.aabb.maximum - fogInfo.aabb.minimum) * 0.5f;
+            AABB mergeAABB = { fogInfo.aabb.minimum - 0.5f * fluidAABBHalfSize, fogInfo.aabb.maximum + 0.5f * fluidAABBHalfSize };
+            float3 d = min(samplePoint - mergeAABB.minimum, mergeAABB.maximum - samplePoint);
+            float3 maxD = min(gridCenter - mergeAABB.minimum, mergeAABB.maximum - gridCenter);
             float fluidBlend = min(min(d.x, d.y), d.z) / min(min(maxD.x, maxD.y), maxD.z);
 
             E *= lerp(1.0f, a, fluidBlend);
-            L += lerp(0.0f, fluidL, fluidBlend);
+            L += lerp(0.0f, luminance(fluidL), fluidBlend);
             if (all(E <= 0.0f)) break;
         }
 
@@ -191,24 +199,24 @@ void getFluidFogScatter(
     attenuation *= E;
 }
 
-/*
-void getNoiseFogScatter(
+void getGridFogScatter(
     float3 startPos, float3 endPos, inout uint randomSeed, uint sampleCount,
     VolumetricFogInfo fogInfo, GlobalInfo_VolumetricFog globalInfo,
-    inout float3 L, inout float3 attenuation, inout float3 attenuation2
+    inout float L, inout float attenuation, inout float attenuation2
 ) {
     #ifdef COMPUTE_SHADER
-    NoiseFogInfo noiseFogInfo = groupNoiseFogInfos[fogInfo.typeFogIndex];
+    GridFogInfo gridFogInfo = gridFogInfoBuffer[fogInfo.typeFogIndex];
     #else
-    NoiseFogInfo noiseFogInfo = noiseFogInfoBuffer[fogInfo.typeFogIndex];
+    GridFogInfo gridFogInfo = gridFogInfoBuffer[fogInfo.typeFogIndex];
     #endif
 
-    float3 fogStartPos = fogInfo.fogStartPos;
-    float3 voxelSize = fogInfo.fogVoxelSize;
-    int3 gridSize = fogInfo.fogVoxelGridSize;
+    float3 fogStartPos = fogInfo.aabb.minimum;
+    float3 voxelSize = gridFogInfo.voxelSize;
+    int3 gridSize = gridFogInfo.gridSize;
 
     float3 gridMin = fogStartPos;
     float3 gridMax = fogStartPos + float3(gridSize) * voxelSize;
+    float3 gridCenter = (gridMin + gridMax) * 0.5f;
 
     float3 rayDir = endPos - startPos;
     float maxDist = length(rayDir);
@@ -220,13 +228,13 @@ void getNoiseFogScatter(
     float tTotal = tExit - tEnter;
 
     SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
-    float3 E = 1.0f;
+    float E = 1.0f;
     float gridLength = length((gridMax - gridMin));
 
-    float scattering = fogInfo.scattering;
-    float phase = fogInfo.phase;
-    float phase2 = phase * phase;
-    float3 color = fogInfo.color;
+    //float scattering = gridFogInfo.scattering;
+    //float phase = gridFogInfo.phase;
+    //float phase2 = phase * phase;
+    //float3 color = gridFogInfo.color;
 
     const float distancePower = 2.0f;
     for (int sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex) {
@@ -237,32 +245,42 @@ void getNoiseFogScatter(
         float tSample = tPartStart + tPart * (pushConst.randomStepping == 1 ? rand(randomSeed) : 0.5f);
 
         float3 samplePoint = startPos + dir * tSample;
-        if (checkPointInAABB(samplePoint, globalInfo.fluidAABB) && globalInfo.fluidStartUp == 1) continue;
+        float fluidBlend = 0.0f;
+        for (int i = 0; i < pushConst.fluidFogCount; ++i) {
+            if (globalInfo.fluidStartUp[i] == 0) continue;
+            AABB fluidAABB = globalInfo.fluidAABB[i];
 
-        CloudSetting cloudSetting = { noiseFogInfo.cloudScale, noiseFogInfo.cloudFlowSpeed, noiseFogInfo.cloudCoverage, noiseFogInfo.cloudTypePreference, noiseFogInfo.weatherScale };
-        float density = SampleCloudDensity(samplePoint, gridMin, gridMax, pushConst.time, cloudSetting);
-        // if (pushConst.frameIndex == 0 && rand(randomSeed) < 0.1f) printf("%f\n", density);
-        float extinctionCoeff = (fogInfo.absorption.x + fogInfo.scattering) * density;
-        extinctionCoeff = max(extinctionCoeff, 1e-30f);
+            float3 fluidAABBHalfSize = (fluidAABB.maximum - fluidAABB.minimum) * 0.5f;
+            AABB mergeAABB = { fluidAABB.minimum - 0.5f * fluidAABBHalfSize, fluidAABB.maximum + 0.5f * fluidAABBHalfSize };
+            if (globalInfo.fluidStartUp[0] == 1 && checkPointInAABB(samplePoint, mergeAABB)) {
+                float3 d = min(abs(samplePoint - mergeAABB.minimum), abs(mergeAABB.maximum - samplePoint));
+                float3 fluidGridCenter = (mergeAABB.minimum + mergeAABB.maximum) * 0.5f;
+                float3 maxD = min(fluidGridCenter - mergeAABB.minimum, mergeAABB.maximum - fluidGridCenter);
+                fluidBlend = min(min(d.x, d.y), d.z) / min(min(maxD.x, maxD.y), maxD.z);
+
+                break;
+            }
+        }
+
+        float3 uvw = (samplePoint - fogInfo.aabb.minimum) / (fogInfo.aabb.maximum - fogInfo.aabb.minimum);
+        float4 voxelInfo = gridFogImages[fogInfo.typeFogIndex].SampleLevel(uvw, 0);
+
+        float extinctionCoeff = voxelInfo.x;
+        float scattering = voxelInfo.y;
+        float phase = voxelInfo.z;
+        float3 color = voxelInfo.w;
 
         float3 indirectL; float a;
-        getFogScatter(samplePoint, dir, tPart, sceneInfo, globalInfo, extinctionCoeff, scattering, phase, color, E, a, indirectL);
+        getFogScatter(samplePoint, dir, tPart, sceneInfo, globalInfo, extinctionCoeff, scattering, phase, color, gridFogInfo.ambientIntensity, E, a, indirectL);
 
-        L += indirectL;
-        E *= a;
+        L += luminance(indirectL) * (1.0f - fluidBlend);
+
+        E *= lerp(a, 1.0f, fluidBlend);
         if (all(E <= 1e-3f)) break;
     }
-
-    L += fogInfo.color * fogInfo.ambientIntensity;
     attenuation *= E;
-
-    float tLightEnter, tLightExit;
-    if (isHit(endPos - sceneInfo.lights[0].direction * 10.0f, endPos, gridMin, gridMax, tLightEnter, tLightExit)) {
-        float mainLightDt = tLightExit - tLightEnter;
-        attenuation2 *= pushConst .lightAttenuationStrength; // lerp(1.0f, fogInfo.lightAttenuationEstimator, mainLightDt / gridLength);
-    }
 }
-
+/*
 bool getCameraFrustumFogData(float3 worldPos, inout float3 hitWorldPos, inout float3 uvw) {
     SceneInfo sceneInfo;
     #ifdef COMPUTE_SHADER
@@ -333,10 +351,10 @@ bool getCameraFrustumFogData(float3 worldPos, inout float3 hitWorldPos, inout fl
     return true;
 }
 */
-
+/*
 void getVolumetricFogScatter(
     float3 startPos, float3 endPos, inout uint randomSeed, uint sampleCount,
-    inout float3 L, inout float3 attenuation, inout float3 attenuation2
+    inout float L, inout float attenuation, inout float attenuation2
 ) {
     #ifdef COMPUTE_SHADER
     GlobalInfo_VolumetricFog globalInfo = groupGlobalInfo;
@@ -359,14 +377,115 @@ void getVolumetricFogScatter(
         uint typeFogIndex = fogInfo.typeFogIndex;
         if (fogInfo.type == VolumetricFogType::Height) {
             getHeightFogScatter(startPos, endPos, randomSeed, sampleCount, fogInfo, globalInfo, L, attenuation, attenuation2);
-        } else if (fogInfo.type == VolumetricFogType::Fluid && globalInfo.fluidStartUp == 1) {
+        } else if (fogInfo.type == VolumetricFogType::Fluid) {
             getFluidFogScatter(startPos, endPos, randomSeed, fogInfo, globalInfo, L, attenuation);
         }
-        //else if (fogInfo.type == VolumetricFogType::Noise) {
-        //    NoiseFogInfo noiseFogInfo = noiseFogInfoBuffer[typeFogIndex];
-        //    xgetNoiseFogScatter(startPos, endPos, randomSeed, sampleCount, fogInfo, globalInfo, L, attenuation, attenuation2);
-        //}
+        else if (fogInfo.type == VolumetricFogType::Grid) {
+            GridFogInfo gridFogInfo = gridFogInfoBuffer[typeFogIndex];
+            getGridFogScatter(startPos, endPos, randomSeed, sampleCount, fogInfo, globalInfo, L, attenuation, attenuation2);
+        }
     }
+
+    attenuation2 *= getAttenuation2(endPos, globalInfo, sceneInfo);
+}
+*/
+void getVolumetricFogScatter(
+    float3 startPos, float3 endPos, inout uint randomSeed, uint sampleCount,
+    inout float L, inout float attenuation, inout float attenuation2
+) {
+    #ifdef COMPUTE_SHADER
+    GlobalInfo_VolumetricFog globalInfo = groupGlobalInfo;
+    SceneInfo sceneInfo = groupSceneInfo;
+    #else
+    GlobalInfo_VolumetricFog globalInfo = globalInfoBuffer[0];
+    SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+    #endif
+
+    float3 dir = normalize(endPos - startPos);
+    float tTotal = length(endPos - startPos);
+    const float distancePower = 2.0f;
+    for (int sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex) {
+        float tStart = tTotal * pow(float(sampleIndex) / float(sampleCount), distancePower);
+        float tEnd = tTotal * pow(float(sampleIndex + 1) / float(sampleCount), distancePower);
+        float tPart = tEnd - tStart;
+        float3 partStartPos = startPos + dir * tStart;
+        float3 partEndPos = startPos + dir * tEnd;
+        float3 samplePoint = lerp(partStartPos, partEndPos, pushConst.randomStepping == 1 ? rand(randomSeed) : 0.5f);
+
+        float envExtinction = 0.0f;
+        float envScattering = 0.0f;
+        float envPhase = 0.0f;
+        float3 envColor = 0.0f;
+
+        for (int i = 0; i < globalInfo.visibleVolumetricFogCount; ++i) {
+            uint fogIndex = globalInfo.visibleVolumetricFogIndices[i];
+            VolumetricFogInfo fogInfo = getVolumetricFog(fogIndex);
+            if (!checkPointInAABB(samplePoint, fogInfo.aabb)) continue;
+
+            float3 fogStartPos = fogInfo.aabb.minimum;
+            float extinction = 0.0f, scattering = 0.0f, phase = 0.0f; float3 color = 0.0f;
+            if (fogInfo.type == VolumetricFogType::Height) {
+                HeightFogInfo heightFogInfo = getHeightFog(fogInfo.typeFogIndex);
+
+                float heightScale = heightFogInfo.heightScale;
+                float height = max(samplePoint.y - fogStartPos.y, 0.0f);
+                float heightAttenuation = exp(-heightScale * height);
+                scattering = heightFogInfo.scattering;
+                extinction = (heightFogInfo.absorption + scattering) * heightAttenuation;
+                phase = heightFogInfo.phase;
+                color = heightFogInfo.color * (1.0f + heightFogInfo.ambientIntensity);
+            } else if (fogInfo.type == VolumetricFogType::Fluid && globalInfo.fluidStartUp[fogInfo.typeFogIndex] == 1) {
+                FluidFogInfo fluidFogInfo = getFluidFog(fogInfo.typeFogIndex);
+                float3 uvw = (samplePoint - fogStartPos) / (fluidFogInfo.gridSize * fluidFogInfo.voxelSize);
+                uvw = clamp(uvw, 0.0f, 1.0f - 1e-6f);
+                float4 voxelInfo = FluidFogVoxelInfoImages_sample[fogInfo.typeFogIndex].SampleLevel(uvw, 0);
+
+                // if in fluid, the voxelInfo has include the envionment fog info
+                envExtinction = max(voxelInfo.x, 1e-30f);
+                envScattering = envExtinction * voxelInfo.y;
+                envPhase = envExtinction * voxelInfo.z;
+                envColor = envExtinction * voxelInfo.w; // UnpackFloatToFloat3(voxelInfo.w);
+                break;
+            }
+            else if (fogInfo.type == VolumetricFogType::Grid) {
+                GridFogInfo gridFogInfo = getGridFog(fogInfo.typeFogIndex);
+
+                float3 uvw = (samplePoint - fogInfo.aabb.minimum) / (fogInfo.aabb.maximum - fogInfo.aabb.minimum);
+                float4 voxelInfo = gridFogImages[fogInfo.typeFogIndex].SampleLevel(uvw, 0);
+
+                extinction = voxelInfo.x;
+                scattering = voxelInfo.y;
+                phase = voxelInfo.z;
+                color = voxelInfo.w * (1.0f + gridFogInfo.ambientIntensity);
+            }
+
+            envExtinction += extinction;
+            envScattering += extinction * scattering;
+            envPhase += extinction * phase;
+            envColor += extinction * color;
+        }
+
+        envScattering /= max(envExtinction, 1e-30f);
+        envPhase /= max(envExtinction, 1e-30f);
+        envColor /= max(envExtinction, 1e-30f);
+
+        if (envExtinction <= 1e-30f) continue;
+
+        float3 indirectL; float a;
+        getFogScatter(samplePoint, dir, tPart, sceneInfo, globalInfo, envExtinction, envScattering, envPhase, envColor, 0.0f, attenuation, a, indirectL);
+
+        attenuation *= a;
+        L += luminance(indirectL);
+
+        //if (isnan(L))
+        //    printf("e: %f, s: %f, p: %f, c: %f %f %f\n",
+        //    envExtinction, envScattering, envPhase, envColor.x, envColor.y, envColor.z
+        //);
+
+        if (all(attenuation <= 1e-3f)) break;
+    }
+
+    attenuation2 *= getAttenuation2(endPos, globalInfo, sceneInfo);
 }
 //------------------------------------------------------------------------------------------------------------------------------------------------
 float4 getFrustumImageInfo(float3 worldPos, bool linear, float jitterStrength, Sampler3D<float4> image, inout uint randomSeed) {
@@ -451,7 +570,7 @@ float4 getFrustumImageInfo(float3 worldPos, bool linear, float jitterStrength, S
 
 void getPreAccFog(
     float3 startPos, float3 endPos, inout uint randomSeed,
-    inout float3 L, inout float3 attenuation, inout float3 attenuation2
+    inout float L, inout float attenuation, inout float attenuation2
 ) {
     #ifdef COMPUTE_SHADER
     GlobalInfo_VolumetricFog globalInfo = groupGlobalInfo;
@@ -478,12 +597,12 @@ void getPreAccFog(
     endPos = startPos + tExit * dir;
     startPos = startPos + tEnter * dir;
 
-    attenuation *= getFrustumImageInfo(endPos, true, pushConst.jitterStrength0, volumetricFogAttenuationImage_sample, randomSeed) .xyz;
+    attenuation *= getFrustumImageInfo(endPos, true, pushConst.jitterStrength0, volumetricFogAccResultImage_sample, randomSeed).x;
 
     float3 toPoint = endPos - sceneInfo.cameraPosition;
     float viewZ = clamp(dot(toPoint, cameraForward), nearPlane, 200);
     float jitterStrengthL = pushConst.jitterStrength1 * lerp(0.0f, 1.0f, frustumMap((viewZ - nearPlane) / (200 - nearPlane), compressionParams, 1.0f));
-    L += getFrustumImageInfo(endPos, true, jitterStrengthL, volumetricFogLImage_sample, randomSeed).xyz;
+    L += getFrustumImageInfo(endPos, true, jitterStrengthL, volumetricFogAccResultImage_sample, randomSeed).y;
     attenuation2 *= getAttenuation2(endPos, globalInfo, sceneInfo);
 }
 //------------------------------------------------------------------------------------------------------------------------------------------------

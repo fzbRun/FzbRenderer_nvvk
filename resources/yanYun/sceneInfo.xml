@@ -56,7 +56,7 @@
 
 		<instance type="periodMotion" >
 			<transform name="to_world">
-				<translate value ="5113.5f, -69.0f, -4451.0f" />
+				<translate value ="5115.0f, -69.0f, -4453.0f" />
 				<rotate value = "0, 0, 0" />
 				<scale value = "2.0, 2.0, 2.0" />
 				<period time="100">
@@ -69,11 +69,37 @@
 
 		<instance type="periodMotion" >
 			<transform name="to_world">
-				<translate value ="5110.5f, -69.0f, -4450.0f" />
+				<translate value ="5115.0f, -69.0f, -4457.0f" />
+				<rotate value = "0, 0, 0" />
+				<scale value = "1.0, 1.0, 1.0" />
+				<period time="100">
+					<translate value = "0, 2, 0" />
+				</period>
+			</transform>
+			<meshRef id="custom" type="sphere" />
+			<materialRef id = "T_red" />
+		</instance>
+
+		<instance type="periodMotion" >
+			<transform name="to_world">
+				<translate value ="5106.5f, -69.0f, -4450.0f" />
 				<rotate value = "0, 0, 0" />
 				<scale value = "2.0, 2.0, 2.0" />
 				<period time="100">
 					<rotate value = "0, 140, 0" />
+				</period>
+			</transform>
+			<meshRef id="custom" type="cube" />
+			<materialRef id = "T_green" />
+		</instance>
+
+		<instance type="periodMotion" >
+			<transform name="to_world">
+				<translate value ="5108.5f, -66.0f, -4446.0f" />
+				<rotate value = "0, 0, 0" />
+				<scale value = "1.0, 1.0, 1.0" />
+				<period time="100">
+					<rotate value = "0, 30, 0" />
 				</period>
 			</transform>
 			<meshRef id="custom" type="cube" />

@@ -22,17 +22,9 @@ public:
 	void uiRender(int index);
 	void preRender(shaderio::AABB& fogAABB);
 
-	//void createDescriptorSetLayout();
-	//void createDescriptorSet();
-	//void createPipelineLayout();
-	//void compileAndCreateShaders();
-	//void updateDataPerFrame(VkCommandBuffer cmd, bool frist, FzbRenderer::Buffer fogInfoBuffer);
-
-	void initFluid(VkCommandBuffer cmd);
-	//void fluidSimulation(VkCommandBuffer cmd);
-
 	int fogIndexMap;
 	shaderio::FluidFogInfo fluidFogInfo;
+
 	FzbRenderer::Buffer fluidFogVoxelInfoBuffer;
 	FzbRenderer::Image fluidFogVoxelVelocityImage;
 	FzbRenderer::Image fluidFogVoxelInfoImage;
@@ -70,8 +62,8 @@ public:
 	inline int getFogIndexMap(int i) { return fluidFogs[i].fogIndexMap;};
 	inline bool getFogModified(int i) { return fluidFogs[i].fogInfoModified; };
 	inline shaderio::uint3 getFogGridSize(int i) { return fluidFogs[i].fluidFogInfo.gridSize; };
+	inline bool getFogGridShow(int i) { return fluidFogs[i].showFogGrid; };
 	
-
 	int fogCount = 0;
 	FzbRenderer::Buffer fluidFogInfoBuffer;
 

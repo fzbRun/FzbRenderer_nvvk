@@ -11,7 +11,7 @@
 
 [[vk::binding(StaticBindingPoints_VolumetricFog::eHeightFogInfoBuffer)]] StructuredBuffer<HeightFogInfo, ScalarDataLayout> heightFogInfoBuffer;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eFluidFogInfoBuffer)]] RWStructuredBuffer<FluidFogInfo, ScalarDataLayout> fluidFogInfoBuffer;
-[[vk::binding(StaticBindingPoints_VolumetricFog::eNoiseFogInfoBuffer)]] StructuredBuffer<NoiseFogInfo, ScalarDataLayout> noiseFogInfoBuffer;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eGridFogInfoBuffer)]] StructuredBuffer<GridFogInfo, ScalarDataLayout> gridFogInfoBuffer;
 
 struct VSout {
     float4 sv_position : SV_Position;
@@ -21,10 +21,12 @@ struct VSout {
 VSout vertexMain(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID) {
     float3 voxelSize, startPos; uint3 gridSize;
     if (pushConst.instanceIndex == -100) {
+        #ifdef USE_ENVFOG
         GlobalInfo_VolumetricFog globalInfo = globalInfoBuffer[0];
         gridSize = globalInfo.envGridSize;
         voxelSize = globalInfo.envVoxelSize;
         startPos = globalInfo.envStartPos;
+        #endif
     } else {
         VolumetricFogInfo info = fogInfosBuffer[pushConst.instanceIndex];
         if (info.type == VolumetricFogType::Height) {
@@ -35,6 +37,10 @@ VSout vertexMain(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID
             FluidFogInfo fluidFoginfo = fluidFogInfoBuffer[info.typeFogIndex];
             gridSize = fluidFoginfo.gridSize;
             voxelSize = fluidFoginfo.voxelSize;
+        } else if (info.type == VolumetricFogType::Grid) {
+            GridFogInfo gridFoginfo = gridFogInfoBuffer[info.typeFogIndex];
+            gridSize = gridFoginfo.gridSize;
+            voxelSize = gridFoginfo.voxelSize;
         }
         startPos = info.aabb.minimum;
     }

@@ -5,11 +5,11 @@
 
 using namespace FzbRenderer;
 
-void createVolumetricFogImage(FzbRenderer::Image& image, shaderio::uint3 size, bool linear) {
+void createFluidFogImage(FzbRenderer::Image& image, shaderio::uint3 size, bool linear) {
 	image.clean();
 
 	static int imageCount = 0;
-	image = FzbRenderer::Image("volumetricFog3DTexture" + std::to_string(imageCount));
+	image = FzbRenderer::Image("fluidFog3DTexture" + std::to_string(imageCount));
 	++imageCount;
 
 	FzbRenderer::ImageCreateInfo colorImageCreateInfo = FzbRenderer::createDefaultImageCreateInfo();
@@ -43,7 +43,7 @@ void createVolumetricFogImage(FzbRenderer::Image& image, shaderio::uint3 size, b
 
 void FluidFog::init() {
 	shaderio::uint3 gridSize = fluidFogInfo.gridSize;
-	createVolumetricFogImage(fluidFogVoxelVelocityImage, gridSize, true);
+	createFluidFogImage(fluidFogVoxelVelocityImage, gridSize, true);
 
 	fluidFogVoxelInfoBuffer = FzbRenderer::Buffer("FluidFogVoxelInfoBuffer" + std::to_string(fogIndexMap), false);
 	fluidFogVoxelInfoBuffer.init({
@@ -52,7 +52,7 @@ void FluidFog::init() {
 		.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT,
 	});
 
-	createVolumetricFogImage(fluidFogVoxelInfoImage, gridSize, true);
+	createFluidFogImage(fluidFogVoxelInfoImage, gridSize, true);
 
 	if (follow) {
 		std::pair<uint32_t, uint32_t> instanceSetPair = Application::sceneResource.instanceIDToInstanceSet[followInstanceID];
@@ -77,21 +77,16 @@ void FluidFog::init() {
 		fluidLocalStartPos = (mainCharacterAABB.minimum + mainCharacterAABB.maximum) * 0.5f;
 		fluidLocalStartPos.y = 0.0f;
 	}
-
-	//Feature::init();
 }
 void FluidFog::clean() {
 	fluidFogVoxelInfoBuffer.clean();
 	fluidFogVoxelVelocityImage.clean();
 	fluidFogVoxelInfoImage.clean();
-
-	//Feature::clean();
 }
 void FluidFog::uiRender(int i) {
 	bool& UIModified = Application::UIModified;
 
 	namespace PE = nvgui::PropertyEditor;
-	fogInfoModified = false;
 
 	int fogIndex = fogIndexMap;
 
@@ -103,6 +98,7 @@ void FluidFog::uiRender(int i) {
 	fogInfoModified |= ImGui::DragFloat3(std::string("Fluid Fog Voxel Size " + std::to_string(i)).c_str(), (float*)&fluidFogInfo.voxelSize);
 
 	fogInfoModified |= ImGui::DragFloat(std::string("Fluid Fog Viscosity " + std::to_string(i)).c_str(), (float*)&fluidFogInfo.viscosity, 0.1f, 0.0f, 1.0f);
+
 	fogInfoModified |= ImGui::DragFloat(std::string("Fluid Fog F Intensity " + std::to_string(i)).c_str(), (float*)&fluidFogInfo.FIntensity, 1.0f, 0.0f, 100.0f);
 	fogInfoModified |= ImGui::DragFloat(std::string("Fluid Fog Restore Speed " + std::to_string(i)).c_str(), (float*)&fluidFogInfo.restoreSpeed, 1.0f, 0.0f, 100.0f);
 
@@ -125,12 +121,6 @@ void FluidFog::preRender(shaderio::AABB& fogAABB) {
 		fogStartPos_lastTime -= 3.0f * fluidFogInfo.voxelSize.y;
 		fluidFogInfo.fogStartPos_lastTime = fogStartPos_lastTime;
 	}
-}
-
-
-
-void FluidFog::initFluid(VkCommandBuffer cmd) {
-
 }
 //--------------------------------------------------------------------------------------------------------------------------------
 FluidFogSet::FluidFogSet(FluidFogSetCreateInfo createInfo) {
@@ -188,6 +178,7 @@ void FluidFogSet::preRender() {
 }
 
 void FluidFogSet::updateDataPerFrame(VkCommandBuffer cmd, bool frist, FzbRenderer::Buffer fogInfoBuffer) {
+	if (fogCount == 0) return;
 	nvvk::cmdBufferMemoryBarrier(cmd, { fluidFogInfoBuffer.buffer.buffer, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT });
 	for (int i = 0; i < fogCount; ++i) {
 		FluidFog& fluidFog = fluidFogs[i];

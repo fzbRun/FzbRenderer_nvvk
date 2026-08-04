@@ -57,7 +57,7 @@ void computeMain_createLightAttenuationEstimator(uint threadIndex: SV_DispatchTh
             float tSample = tEntry + tPart * (sampleIndex + 0.5f);
             float3 samplePoint = startPos + mainLightDir * tSample;
 
-            float4 voxelInfo = getFrustumImageInfo(samplePoint, true, false, envVolumetricFogInfoImage_sample, randomSeed);
+            float4 voxelInfo = getFrustumImageInfo(samplePoint, true, 0.0f, envVolumetricFogInfoImage_sample, randomSeed);
             /*
             {
                 float3 worldPos = samplePoint;
@@ -113,7 +113,7 @@ void computeMain_createLightAttenuationEstimator(uint threadIndex: SV_DispatchTh
         }
     }
 #endif
-    //printf("%f %f\n", lightAttenuation, lightAttenuationLength);
+// printf("%f %f\n", lightAttenuation, lightAttenuationLength);
     globalInfoBuffer[0].envFogLightAttenuationEstimator = lightAttenuation;
     globalInfoBuffer[0].envFogLightAttenuationLength = lightAttenuationLength;
 }

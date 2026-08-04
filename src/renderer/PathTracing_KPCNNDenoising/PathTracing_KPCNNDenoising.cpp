@@ -295,7 +295,9 @@ void PathTracing_KPCNNDenoising::render(VkCommandBuffer* cmdPtr) {
 
 void PathTracing_KPCNNDenoising::createDataObject() {
 	uint32_t debugImageCount = IF_DEBUG((uint32_t)GBufferImageIndex_KPCNN::eDebugImageCount - 1, 0);
+#ifndef NDEBUG
 	showImage.resize(debugImageCount);
+#endif
 	Feature::createGBuffer(true, true, debugImageCount, screenSize);
 
 	uint32_t imageSize = screenSize.width * screenSize.height;

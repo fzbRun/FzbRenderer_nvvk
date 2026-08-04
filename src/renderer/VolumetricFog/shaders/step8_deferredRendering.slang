@@ -14,7 +14,7 @@
 
 [[vk::binding(StaticBindingPoints_VolumetricFog::eRenderedImage)]] RWTexture2D<float4> renderedImage;
 #ifdef BLUR_FOG
-[[vk::binding(StaticBindingPoints_VolumetricFog::eRenderedFogImage)]] RWTexture2D<float4> renderedFogImage;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eRenderedFogResultImage)]] RWTexture2D<float4> renderedFogResultImage;
 #endif
 
 [numthreads(16, 16, 1)]
@@ -36,7 +36,7 @@ void computeMain_deferredRendering(uint2 threadIndex: SV_DispatchThreadID, uint2
     float4 worldPos = mul(mul(clipPos, sceneInfo.projInvMatrix), sceneInfo.viewInvMatrix);
     worldPos /= worldPos.w;
 
-    float3 attenuation = 1.0f, attenuation2 = 1.0f, L = 0.0f;
+    float attenuation = 1.0f, attenuation2 = 1.0f, L = 0.0f;
     uint randomSeed = xxhash32(uint3(int(pushConst.time * 1000.0f), threadIndex));
     if (pushConst.useAccFog == 1) getPreAccFog(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, L, attenuation, attenuation2);
     else {
@@ -46,12 +46,12 @@ void computeMain_deferredRendering(uint2 threadIndex: SV_DispatchThreadID, uint2
         getVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, pushConst.sampleCount, L, attenuation, attenuation2);
         #endif
     }
-    //if (all(threadIndex == 0)) printf("visibleFogCount : %d\n", groupGlobalInfo.visibleVolumetricFogCount);
 
     #ifdef BLUR_FOG
     if (pushConst.useFogBlur == 1) {
-        renderedFogImage[threadIndex] = float4(L, 1.0f);
+        renderedFogResultImage[threadIndex] = float4(attenuation, L, 1.0f, 1.0f);
         L = 0.0f;
+        attenuation = 1.0f;
     }
     #endif
 
@@ -86,10 +86,10 @@ void computeMain_deferredRendering(uint2 threadIndex: SV_DispatchThreadID, uint2
     //result = 0.0f;
     //result = voxelIndex & 1;
 
-    //result = attenuation;
-    //if (all(threadIndex > (screenSize / 2 - 10)) && all(threadIndex < (screenSize / 2 + 10))) {
-    //    if (pushConst.frameIndex == 0) printf("voxelIndex: %d, depth: %f\n", voxelIndex, depth);
-    //    result = float3(10.0f, 0.0f, 0.0f);
-    //}
+    // result = attenuation;
+    // if (all(threadIndex > (screenSize / 2 - 10)) && all(threadIndex < (screenSize / 2 + 10))) {
+    //     if (pushConst.frameIndex == 0) printf("L: %f, a: %f\n", L, attenuation);
+    //     result = float3(10.0f, 0.0f, 0.0f);
+    // }
     renderedImage[threadIndex] = float4(result, 1.0f);
 }
