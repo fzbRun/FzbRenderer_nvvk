@@ -476,12 +476,6 @@ void getVolumetricFogScatter(
 
         attenuation *= a;
         L += luminance(indirectL);
-
-        //if (isnan(L))
-        //    printf("e: %f, s: %f, p: %f, c: %f %f %f\n",
-        //    envExtinction, envScattering, envPhase, envColor.x, envColor.y, envColor.z
-        //);
-
         if (all(attenuation <= 1e-3f)) break;
     }
 

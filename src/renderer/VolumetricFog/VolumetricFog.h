@@ -89,6 +89,13 @@ private:
 	VkShaderEXT computeShader_createLightAttenuationEstimator{};
 
 	VkShaderEXT computeShader_createFrustumAccFog{};
+#ifdef FOG_ACC_DELETE_NOFOGVOXEL
+	VkShaderEXT computeShader_getHasFogVoxelInfo{};
+#endif
+#ifdef FOG_ACC_TWO_PASS
+	VkShaderEXT computeShader_createFrustumAccFog_Pass1{};
+	VkShaderEXT computeShader_createFrustumAccFog_Pass2{};
+#endif
 
 	VkShaderEXT computeShader_smoothFog{};
 
@@ -137,10 +144,18 @@ private:
 	int sampleCount_env = 1;
 	float jitterStrength_env = 0.0f;
 	//-------------------------FogAcc-------------------------------------
+#ifdef FOG_ACC_DELETE_NOFOGVOXEL
+	FzbRenderer::Buffer fogAccHasFogVoxelInfoBuffer;
+#endif
+
+#ifdef FOG_ACC_DIVIDE_PART
+	FzbRenderer::Buffer fogAccResultBuffer;
+#elif defined(FOG_ACC_ONE_DISPATCH)
 	FzbRenderer::Buffer fogAccSyncBuffer;
+#endif
 	FzbRenderer::Image volumetricFogAccResultImage;
 
-	uint32_t rmSampleCountSampleCount_fogAcc = 10;
+	uint32_t rmSampleCountSampleCount_fogAcc = 8;
 	int randomStepping_fogAcc = true;
 	float accJitterStrength = 0.0f;
 	float interpolationJitterStrength_fogAcc = 0.0f;

@@ -7,12 +7,106 @@
 #define COMPUTE_SHADER
 #include "renderer/VolumetricFog/shaders/getVolumetricFog.slang"
 
-#if defined(FOG_ACC_GPU_GRIVEN)
-[[vk::binding(StaticBindingPoints_VolumetricFog::eFogAccSyncBuffer)]] RWStructuredBuffer<DispatchIndirectCommand, ScalarDataLayout> fogAccSyncBuffer;
+#ifdef FOG_ACC_DELETE_NOFOGVOXEL
+[[vk::binding(StaticBindingPoints_VolumetricFog::eFogAccHasFogVoxelInfoBuffer)]] RWStructuredBuffer<FogAccHasFogVoxelInfo, ScalarDataLayout> fogAccHasFogVoxelInfoBuffer;
+
+groupshared uint groupHasFogVoxelCount; // 8 * 8 * 8 / 32
+groupshared uint groupHasFogVoxelOffset_inGlobal;
+
+[numthreads(8, 8, 8)]
+[shader("compute")]
+void computeMain_getHasFogVoxelInfo(uint3 threadIndex: SV_DispatchThreadID, uint3 groupThreadIndex: SV_GroupThreadID) {
+    uint groupThreadIndexU = groupThreadIndex.z * 64 + groupThreadIndex.y * 8 + groupThreadIndex.x;
+    getGroupsharedData(groupThreadIndexU);
+    if (groupThreadIndexU == 0) groupHasFogVoxelCount = 0;
+    GroupMemoryBarrierWithGroupSync();
+    if (any(threadIndex >= pushConst.frustumGridSize)) return;
+
+    SceneInfo sceneInfo = groupSceneInfo;
+    GlobalInfo_VolumetricFog globalInfo = groupGlobalInfo;
+
+    int depthIndex = threadIndex.z;
+    uint3 voxelIndex = threadIndex;
+
+    float nearPlane = pushConst.cameraNearPlane;
+    float farPlane = pushConst.cameraFarPlane;
+    float3 compressionParams = max(pushConst.compressionParams, 1e-4f);
+    float tanHalfFov = pushConst.tanCameraFov_2;
+    float aspect = pushConst.aspectRatio;
+    uint3 gridSize = pushConst.frustumGridSize;
+    float3 gridSizeF = float3(gridSize);
+
+    float3 cameraPos = sceneInfo.cameraPosition;
+    float3 cameraRight = sceneInfo.viewInvMatrix[0].xyz;
+    float3 cameraUp = sceneInfo.viewInvMatrix[1].xyz;
+    float3 cameraForward = -sceneInfo.viewInvMatrix[2].xyz;
+
+    float linearDepth = ((float)depthIndex + 0.5f) / gridSize.z * (farPlane - nearPlane);
+    float depth = frustumMap(linearDepth, compressionParams, farPlane - nearPlane);
+
+    float halfHeight = (depth + nearPlane) * tanHalfFov;
+    float halfWidth = halfHeight * aspect;
+
+    float3 voxelCenter = cameraPos;
+    voxelCenter += (depth + nearPlane) * cameraForward;
+    voxelCenter += halfHeight * ((((float)voxelIndex.y + 0.5f) / gridSize.y) * 2.0f - 1.0f) * cameraUp;
+    voxelCenter += halfWidth * ((((float)voxelIndex.x + 0.5f) / gridSize.x) * 2.0f - 1.0f) * cameraRight;
+
+    float3 dir = normalize(voxelCenter - cameraPos);
+
+    float linearDepth_lastVoxel = max((float)depthIndex - 0.5f, 0.0f) / gridSize.z * (farPlane - nearPlane);
+    float depth_lastVoxel = frustumMap(linearDepth_lastVoxel, compressionParams, farPlane - nearPlane);
+
+    float halfHeight_prev = (depth_lastVoxel + nearPlane) * tanHalfFov;
+    float halfWidth_prev = halfHeight_prev * aspect;
+    float3 voxelCenter_lastVoxel = cameraPos;
+    voxelCenter_lastVoxel += (depth_lastVoxel + nearPlane) * cameraForward;
+    voxelCenter_lastVoxel += halfHeight_prev * (((float)voxelIndex.y + 0.5f) / gridSize.y * 2.0f - 1.0f) * cameraUp;
+    voxelCenter_lastVoxel += halfWidth_prev * (((float)voxelIndex.x + 0.5f) / gridSize.x * 2.0f - 1.0f) * cameraRight;
+
+    bool hasFog = false;
+    for (int i = 0; i < globalInfo.visibleVolumetricFogCount; ++i) {
+        uint fogIndex = globalInfo.visibleVolumetricFogIndices[i];
+        VolumetricFogInfo fogInfo = getVolumetricFog(fogIndex);
+        float tEntery, tExit;
+        if (isHit(voxelCenter_lastVoxel, voxelCenter, fogInfo.aabb.minimum, fogInfo.aabb.maximum, tEntery, tExit)) {
+            hasFog = true;
+            break;
+        }
+    }
+
+    uint warpIndex = groupThreadIndexU / 32;
+    uint warpLane = groupThreadIndexU & 31;
+
+    uint warpHasFogCount = WaveActiveCountBits(hasFog);
+    uint hasFogOffset_inWarp = WavePrefixCountBits(hasFog);
+    uint hasFogOffset_inGroup = 0;
+    if (warpLane == 0) InterlockedAdd(groupHasFogVoxelCount, warpHasFogCount, hasFogOffset_inGroup);
+    hasFogOffset_inGroup = WaveReadLaneFirst(hasFogOffset_inGroup);
+    GroupMemoryBarrierWithGroupSync();
+
+    if (groupThreadIndexU == 0) InterlockedAdd(globalInfoBuffer[0].hasFogCount, groupHasFogVoxelCount, groupHasFogVoxelOffset_inGlobal);
+    GroupMemoryBarrierWithGroupSync();
+    uint hasFogOffset_inGlobal = groupHasFogVoxelOffset_inGlobal;
+
+    if (hasFog) {
+        FogAccHasFogVoxelInfo hasFogVoxelInfo;
+        hasFogVoxelInfo.voxelIndex = voxelIndex;
+        hasFogVoxelInfo.voxelCenter = voxelCenter;
+        hasFogVoxelInfo.voxelCenter_lastVoxel = voxelCenter_lastVoxel;
+
+        uint fogOffset = hasFogOffset_inWarp + hasFogOffset_inGroup + groupHasFogVoxelOffset_inGlobal;
+        fogAccHasFogVoxelInfoBuffer[fogOffset] = hasFogVoxelInfo;
+    }
+}
+#endif
+
+#if defined(FOG_ACC_DIVIDE_PART)
+[[vk::binding(StaticBindingPoints_VolumetricFog::eFogAccResultBuffer)]] RWStructuredBuffer<float2> fogAccResultBuffer;
 
 [numthreads(FOG_ACC_THREADGROUP_SIZE, FOG_ACC_THREADGROUP_SIZE, 1)]
 [shader("compute")]
-void computeMain_createFrustumAccFog_Stepping_GPUGriven(uint2 threadIndex: SV_DispatchThreadID, uint2 groupThreadIndex: SV_GroupThreadID, uint3 threadGroupIndex: SV_GroupID) {
+void computeMain_createFrustumAccFog_Stepping_GPUGriven(uint2 threadIndex: SV_DispatchThreadID, uint2 groupThreadIndex: SV_GroupThreadID) {
     uint groupThreadIndexU = groupThreadIndex.y * FOG_ACC_THREADGROUP_SIZE + groupThreadIndex.x;
     getGroupsharedData(groupThreadIndexU);
     GroupMemoryBarrierWithGroupSync();
@@ -63,35 +157,31 @@ void computeMain_createFrustumAccFog_Stepping_GPUGriven(uint2 threadIndex: SV_Di
     voxelCenter_lastVoxel += halfHeight_prev * (((float)voxelIndex.y + 0.5f) / gridSize.y * 2.0f - 1.0f) * cameraUp;
     voxelCenter_lastVoxel += halfWidth_prev * (((float)voxelIndex.x + 0.5f) / gridSize.x * 2.0f - 1.0f) * cameraRight;
 
+    uint partThreadCount = FOG_ACC_THREADGROUP_SIZE * FOG_ACC_THREADGROUP_SIZE;
+    uint partCountX = (gridSize.x + FOG_ACC_THREADGROUP_SIZE - 1) / FOG_ACC_THREADGROUP_SIZE;
+    uint partCountY = (gridSize.y + FOG_ACC_THREADGROUP_SIZE - 1) / FOG_ACC_THREADGROUP_SIZE;
+
+    uint partY = threadIndex.y / FOG_ACC_THREADGROUP_SIZE;
+    uint partX = threadIndex.x / FOG_ACC_THREADGROUP_SIZE;
+    uint threadIndexU = partY * partCountX * partThreadCount + partX * partThreadCount;
+    threadIndexU += (threadIndex.y - partY * FOG_ACC_THREADGROUP_SIZE) * FOG_ACC_THREADGROUP_SIZE + (threadIndex.x - partX * FOG_ACC_THREADGROUP_SIZE);
+
     float attenuation = 1.0f, L = 0.0f, attenuation2 = 1.0f;
     if (depthIndex > 0) {
-        float u = ((float)voxelIndex.x + 0.5f) / gridSize.x + (rand(randomSeed) * 2.0f - 1.0f) / gridSize.x * pushConst.jitterStrength0;
-        float v = ((float)voxelIndex.y + 0.5f) / gridSize.y + (rand(randomSeed) * 2.0f - 1.0f) / gridSize.y * pushConst.jitterStrength0;
-        float w = (voxelIndex.z - 0.5f) / gridSize.z;
-
-        // float3 uvw = (float3(voxelIndex.x, voxelIndex.y, voxelIndex.z - 1) + 0.5f) / gridSize;
-        float3 uvw = { u, v, w };
-        float4 accResult = volumetricFogAccResultImage_sample.SampleLevel(uvw, 0);
+        float2 accResult = fogAccResultBuffer[threadIndexU];
         attenuation = accResult.x;
         L = accResult.y;
     }
 
-#ifdef USE_ENVFOG
+    #ifdef USE_ENVFOG
     getEnvVolumetricFogScatter(voxelCenter_lastVoxel, voxelCenter, randomSeed, true, 1, L, attenuation, attenuation2);
-#else
+    #else
 
     uint sampleCount = pushConst.sampleCount;
     getVolumetricFogScatter(voxelCenter_lastVoxel, voxelCenter, randomSeed, sampleCount, L, attenuation, attenuation2);
-#endif
-
+    #endif
     volumetricFogAccResultImage[voxelIndex] = float4(attenuation, L, 1.0f, 1.0f);
-
-    if (all(groupThreadIndex == 0)) {
-        const uint groupSize = uint(FOG_ACC_THREADGROUP_SIZE);
-        const uint groupsPerRow = (pushConst.frustumGridSize.x + groupSize - 1u) / groupSize;
-        const uint threadGroupIndexU = threadGroupIndex.y * groupsPerRow + threadGroupIndex.x;
-        fogAccSyncBuffer[threadGroupIndexU] = { (pushConst.frustumGridSize.x + groupSize - 1) / groupSize, (pushConst.frustumGridSize.y + groupSize - 1) / groupSize, 1 };
-    }
+    fogAccResultBuffer[threadIndexU] = float2(attenuation, L);
 }
 //-----------------------------------------------------------------------------------------------------------------------------
 #elif defined(FOG_ACC_ONE_DISPATCH)
@@ -188,6 +278,194 @@ void computeMain_createFrustumAccFog_Stepping_oneDispatch(uint2 threadIndex: SV_
         const uint groupsPerRow = (pushConst.frustumGridSize.x + groupSize - 1u) / groupSize;
         const uint threadGroupIndexU = threadGroupIndex.y * groupsPerRow + threadGroupIndex.x;
         InterlockedExchange(fogAccSyncBuffer[threadGroupIndexU], depthIndex);
+    }
+}
+//-----------------------------------------------------------------------------------------------------------------------------
+#elif defined(FOG_ACC_SERIAL)
+[numthreads(FOG_ACC_THREADGROUP_SIZE, FOG_ACC_THREADGROUP_SIZE, 1)]
+[shader("compute")]
+void computeMain_createFrustumAccFog_Stepping_Serial(uint2 threadIndex: SV_DispatchThreadID, uint2 groupThreadIndex: SV_GroupThreadID) {
+    uint groupThreadIndexU = groupThreadIndex.y * FOG_ACC_THREADGROUP_SIZE + groupThreadIndex.x;
+    getGroupsharedData(groupThreadIndexU);
+    GroupMemoryBarrierWithGroupSync();
+    if (any(threadIndex >= pushConst.frustumGridSize.xy)) return;
+
+    SceneInfo sceneInfo = groupSceneInfo;
+    GlobalInfo_VolumetricFog globalInfo = groupGlobalInfo;
+
+    float nearPlane = pushConst.cameraNearPlane;
+    float farPlane = pushConst.cameraFarPlane;
+    float3 compressionParams = max(pushConst.compressionParams, 1e-4f);
+    float tanHalfFov = pushConst.tanCameraFov_2;
+    float aspect = pushConst.aspectRatio;
+    uint3 gridSize = pushConst.frustumGridSize;
+    float3 gridSizeF = float3(gridSize);
+
+    float3 cameraPos = sceneInfo.cameraPosition;
+    float3 cameraRight = sceneInfo.viewInvMatrix[0].xyz;
+    float3 cameraUp = sceneInfo.viewInvMatrix[1].xyz;
+    float3 cameraForward = -sceneInfo.viewInvMatrix[2].xyz;
+    //---------------------------------------------------------------------------------------------
+    float attenuation = 1.0f, L = 0.0f, attenuation2 = 1.0f;
+    for (int depthIndex = 0; depthIndex < gridSize.z; ++depthIndex) {
+        uint3 voxelIndex = uint3(threadIndex, depthIndex);
+
+        uint voxelIndexU = voxelIndex.z * gridSize.x * gridSize.y + voxelIndex.y * gridSize.x + voxelIndex.x;
+        uint randomSeed = xxhash32(uint3(voxelIndexU, pushConst.frameIndex, 1));
+
+        float linearDepth = ((float)depthIndex + 0.5f) / gridSize.z * (farPlane - nearPlane);
+        float depth = frustumMap(linearDepth, compressionParams, farPlane - nearPlane);
+
+        float halfHeight = (depth + nearPlane) * tanHalfFov;
+        float halfWidth = halfHeight * aspect;
+
+        float3 voxelCenter = cameraPos;
+        voxelCenter += (depth + nearPlane) * cameraForward;
+        voxelCenter += halfHeight * ((((float)voxelIndex.y + 0.5f) / gridSize.y) * 2.0f - 1.0f) * cameraUp;
+        voxelCenter += halfWidth * ((((float)voxelIndex.x + 0.5f) / gridSize.x) * 2.0f - 1.0f) * cameraRight;
+
+        float3 dir = normalize(voxelCenter - cameraPos);
+
+        float linearDepth_lastVoxel = max((float)depthIndex - 0.5f, 0.0f) / gridSize.z * (farPlane - nearPlane);
+        float depth_lastVoxel = frustumMap(linearDepth_lastVoxel, compressionParams, farPlane - nearPlane);
+
+        float halfHeight_prev = (depth_lastVoxel + nearPlane) * tanHalfFov;
+        float halfWidth_prev = halfHeight_prev * aspect;
+        float3 voxelCenter_lastVoxel = cameraPos;
+        voxelCenter_lastVoxel += (depth_lastVoxel + nearPlane) * cameraForward;
+        voxelCenter_lastVoxel += halfHeight_prev * (((float)voxelIndex.y + 0.5f) / gridSize.y * 2.0f - 1.0f) * cameraUp;
+        voxelCenter_lastVoxel += halfWidth_prev * (((float)voxelIndex.x + 0.5f) / gridSize.x * 2.0f - 1.0f) * cameraRight;
+
+        #ifdef USE_ENVFOG
+        getEnvVolumetricFogScatter(voxelCenter_lastVoxel, voxelCenter, randomSeed, true, 1, L, attenuation, attenuation2);
+        #else
+        uint sampleCount = pushConst.sampleCount;
+        getVolumetricFogScatter(voxelCenter_lastVoxel, voxelCenter, randomSeed, sampleCount, L, attenuation, attenuation2);
+        #endif
+        volumetricFogAccResultImage[voxelIndex] = float4(attenuation, L, 1.0f, 1.0f);
+    }
+}
+//-----------------------------------------------------------------------------------------------------------------------------
+#elif defined(FOG_ACC_TWO_PASS)
+
+#ifdef FOG_ACC_DELETE_NOFOGVOXEL
+[numthreads(1024, 1, 1)]
+[shader("compute")]
+void computeMain_createFrustumAccFog_Stepping_Pass1(uint threadIndex: SV_DispatchThreadID, uint groupThreadIndex: SV_GroupThreadID) {
+    getGroupsharedData(groupThreadIndex);
+    GroupMemoryBarrierWithGroupSync();
+
+    GlobalInfo_VolumetricFog globalInfo = groupGlobalInfo;
+    if (threadIndex >= globalInfo.hasFogCount) return;
+
+    SceneInfo sceneInfo = groupSceneInfo;
+    FogAccHasFogVoxelInfo voxelInfo = fogAccHasFogVoxelInfoBuffer[threadIndex];
+    uint3 voxelIndex = voxelInfo.voxelIndex;
+    float3 voxelCenter = voxelInfo.voxelCenter;
+    float3 voxelCenter_lastVoxel = voxelInfo.voxelCenter_lastVoxel;
+
+    uint3 gridSize = pushConst.frustumGridSize;
+    uint voxelIndexU = voxelIndex.z * gridSize.x * gridSize.y + voxelIndex.y * gridSize.x + voxelIndex.x;
+    uint randomSeed = xxhash32(uint3(voxelIndexU, pushConst.frameIndex, 1));
+
+    float attenuation = 1.0f, L = 0.0f, attenuation2 = 1.0f;
+    #ifdef USE_ENVFOG
+    getEnvVolumetricFogScatter(voxelCenter_lastVoxel, voxelCenter, randomSeed, true, 1, L, attenuation, attenuation2);
+    #else
+    uint sampleCount = pushConst.sampleCount;
+    getVolumetricFogScatter(voxelCenter_lastVoxel, voxelCenter, randomSeed, sampleCount, L, attenuation, attenuation2);
+    #endif
+    volumetricFogAccResultImage[voxelIndex] = float4(attenuation, L, 1.0f, 1.0f);
+}
+#else
+[numthreads(FOG_ACC_THREADGROUP_SIZE, FOG_ACC_THREADGROUP_SIZE, 1)]
+[shader("compute")]
+void computeMain_createFrustumAccFog_Stepping_Pass1(uint3 threadIndex: SV_DispatchThreadID, uint2 groupThreadIndex: SV_GroupThreadID) {
+    uint groupThreadIndexU = groupThreadIndex.y * FOG_ACC_THREADGROUP_SIZE + groupThreadIndex.x;
+    getGroupsharedData(groupThreadIndexU);
+    GroupMemoryBarrierWithGroupSync();
+    if (any(threadIndex >= pushConst.frustumGridSize)) return;
+
+    SceneInfo sceneInfo = groupSceneInfo;
+    GlobalInfo_VolumetricFog globalInfo = groupGlobalInfo;
+
+    int depthIndex = threadIndex.z;
+    uint3 voxelIndex = threadIndex;
+
+    float nearPlane = pushConst.cameraNearPlane;
+    float farPlane = pushConst.cameraFarPlane;
+    float3 compressionParams = max(pushConst.compressionParams, 1e-4f);
+    float tanHalfFov = pushConst.tanCameraFov_2;
+    float aspect = pushConst.aspectRatio;
+    uint3 gridSize = pushConst.frustumGridSize;
+    float3 gridSizeF = float3(gridSize);
+
+    float3 cameraPos = sceneInfo.cameraPosition;
+    float3 cameraRight = sceneInfo.viewInvMatrix[0].xyz;
+    float3 cameraUp = sceneInfo.viewInvMatrix[1].xyz;
+    float3 cameraForward = -sceneInfo.viewInvMatrix[2].xyz;
+
+    uint voxelIndexU = voxelIndex.z * gridSize.x * gridSize.y + voxelIndex.y * gridSize.x + voxelIndex.x;
+    uint randomSeed = xxhash32(uint3(voxelIndexU, pushConst.frameIndex, 1));
+    //---------------------------------------------------------------------------------------------
+    float linearDepth = ((float)depthIndex + 0.5f) / gridSize.z * (farPlane - nearPlane);
+    float depth = frustumMap(linearDepth, compressionParams, farPlane - nearPlane);
+
+    float halfHeight = (depth + nearPlane) * tanHalfFov;
+    float halfWidth = halfHeight * aspect;
+
+    float3 voxelCenter = cameraPos;
+    voxelCenter += (depth + nearPlane) * cameraForward;
+    voxelCenter += halfHeight * ((((float)voxelIndex.y + 0.5f) / gridSize.y) * 2.0f - 1.0f) * cameraUp;
+    voxelCenter += halfWidth * ((((float)voxelIndex.x + 0.5f) / gridSize.x) * 2.0f - 1.0f) * cameraRight;
+
+    float3 dir = normalize(voxelCenter - cameraPos);
+
+    float linearDepth_lastVoxel = max((float)depthIndex - 0.5f, 0.0f) / gridSize.z * (farPlane - nearPlane);
+    float depth_lastVoxel = frustumMap(linearDepth_lastVoxel, compressionParams, farPlane - nearPlane);
+
+    float halfHeight_prev = (depth_lastVoxel + nearPlane) * tanHalfFov;
+    float halfWidth_prev = halfHeight_prev * aspect;
+    float3 voxelCenter_lastVoxel = cameraPos;
+    voxelCenter_lastVoxel += (depth_lastVoxel + nearPlane) * cameraForward;
+    voxelCenter_lastVoxel += halfHeight_prev * (((float)voxelIndex.y + 0.5f) / gridSize.y * 2.0f - 1.0f) * cameraUp;
+    voxelCenter_lastVoxel += halfWidth_prev * (((float)voxelIndex.x + 0.5f) / gridSize.x * 2.0f - 1.0f) * cameraRight;
+
+    float attenuation = 1.0f, L = 0.0f, attenuation2 = 1.0f;
+    #ifdef USE_ENVFOG
+    getEnvVolumetricFogScatter(voxelCenter_lastVoxel, voxelCenter, randomSeed, true, 1, L, attenuation, attenuation2);
+    #else
+    uint sampleCount = pushConst.sampleCount;
+    getVolumetricFogScatter(voxelCenter_lastVoxel, voxelCenter, randomSeed, sampleCount, L, attenuation, attenuation2);
+    #endif
+    volumetricFogAccResultImage[voxelIndex] = float4(attenuation, L, 1.0f, 1.0f);
+}
+#endif
+[numthreads(FOG_ACC_THREADGROUP_SIZE, FOG_ACC_THREADGROUP_SIZE, 1)]
+[shader("compute")]
+void computeMain_createFrustumAccFog_Stepping_Pass2(uint2 threadIndex: SV_DispatchThreadID, uint2 groupThreadIndex: SV_GroupThreadID){
+    if (any(threadIndex >= pushConst.frustumGridSize.xy)) return;
+
+    float2 voxelInfo = volumetricFogAccResultImage[uint3(threadIndex, 0)].xy;
+    float attenuation = voxelInfo.x, L = voxelInfo.y;
+    for (int depthIndex = 1; depthIndex < pushConst.frustumGridSize.z; ++depthIndex) {
+        float2 curDepthVoxelInfo = volumetricFogAccResultImage[uint3(threadIndex, depthIndex)].xy;
+        /*
+        {
+            float u = ((float)voxelIndex.x + 0.5f) / gridSize.x + (rand(randomSeed) * 2.0f - 1.0f) / gridSize.x * pushConst.jitterStrength0;
+            float v = ((float)voxelIndex.y + 0.5f) / gridSize.y + (rand(randomSeed) * 2.0f - 1.0f) / gridSize.y * pushConst.jitterStrength0;
+            float w = (voxelIndex.z - 0.5f) / gridSize.z;
+
+            // float3 uvw = (float3(voxelIndex.x, voxelIndex.y, voxelIndex.z - 1) + 0.5f) / gridSize;
+            float3 uvw = { u, v, w };
+            float4 accResult = volumetricFogAccResultImage_sample.SampleLevel(uvw, 0);
+            attenuation = accResult.x;
+            L = accResult.y;
+        }
+        */
+        L += attenuation * curDepthVoxelInfo.y;
+        attenuation *= curDepthVoxelInfo.x;
+        volumetricFogAccResultImage[uint3(threadIndex, depthIndex)].xy = float2(attenuation, L);
     }
 }
 #endif

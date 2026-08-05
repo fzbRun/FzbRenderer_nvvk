@@ -26,19 +26,27 @@ NAMESPACE_SHADERIO_BEGIN()
 //#define Uniform_EnvFog_Grid
 
 #define Fog_Acc_Stepping
-#define FOG_ACC_GPU_GRIVEN
-//#define FOG_ACC_ONE_DISPATCH
 
-#ifdef FOG_ACC_GPU_GRIVEN
+#define FOG_ACC_DELETE_NOFOGVOXEL
+
+//#define FOG_ACC_DIVIDE_PART
+//#define FOG_ACC_ONE_DISPATCH
+//#define FOG_ACC_SERIAL
+#define FOG_ACC_TWO_PASS
+
+#ifdef FOG_ACC_DIVIDE_PART
 #define FOG_ACC_THREADGROUP_SIZE 32
 #elif defined(FOG_ACC_ONE_DISPATCH)
 #define FOG_ACC_THREADGROUP_SIZE 8
+#elif defined(FOG_ACC_SERIAL)
+#define FOG_ACC_THREADGROUP_SIZE 32
+#elif defined(FOG_ACC_TWO_PASS)
+#define FOG_ACC_THREADGROUP_SIZE 32
 #endif
 
-
-#define BLUR_FOG_VOXEL
-
 #define BLUR_FOG
+#define BLUR_FOG_VOXEL_PASS1
+//#define BLUR_FOG_VOXEL_PASS2
 
 //#define Interpolation_Manual
 
@@ -101,6 +109,16 @@ struct GlobalInfo_VolumetricFog {
 	uint3 envGridSize;
 	float3 envVoxelSize;
 #endif
+
+#ifdef FOG_ACC_DELETE_NOFOGVOXEL
+	uint hasFogCount;
+#endif
+};
+
+struct FogAccHasFogVoxelInfo {
+	uint3 voxelIndex;
+	float3 voxelCenter;
+	float3 voxelCenter_lastVoxel;
 };
 
 enum class StaticBindingPoints_VolumetricFog {
@@ -125,7 +143,15 @@ enum class StaticBindingPoints_VolumetricFog {
 	eGridFogInfoBuffer,
 	eGridFogImages,
 
+#ifdef FOG_ACC_DELETE_NOFOGVOXEL
+	eFogAccHasFogVoxelInfoBuffer,
+#endif
+
+#ifdef FOG_ACC_DIVIDE_PART
+	eFogAccResultBuffer,
+#elif defined(FOG_ACC_ONE_DISPATCH)
 	eFogAccSyncBuffer,
+#endif
 
 	eFogAccResultImage,
 	eFogAccResultImage_sample,

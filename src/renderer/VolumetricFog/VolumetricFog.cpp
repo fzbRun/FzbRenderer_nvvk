@@ -217,7 +217,16 @@ void VolumetricFog::clean() {
 	vkDestroyShaderEXT(device, computeShader_createEnvionmentFog, nullptr);
 
 	vkDestroyShaderEXT(device, computeShader_createLightAttenuationEstimator, nullptr);
+
 	vkDestroyShaderEXT(device, computeShader_createFrustumAccFog, nullptr);
+#ifdef FOG_ACC_DELETE_NOFOGVOXEL
+	vkDestroyShaderEXT(device, computeShader_getHasFogVoxelInfo, nullptr);
+#endif
+#ifdef FOG_ACC_TWO_PASS
+	vkDestroyShaderEXT(device, computeShader_createFrustumAccFog_Pass1, nullptr);
+	vkDestroyShaderEXT(device, computeShader_createFrustumAccFog_Pass2, nullptr);
+#endif
+
 	vkDestroyShaderEXT(device, computeShader_deferredRenderring, nullptr);
 
 	vkDestroyShaderEXT(device, computeShader_getDepthGradient, nullptr);
@@ -236,7 +245,14 @@ void VolumetricFog::clean() {
 	fluidFogSet->clean();
 	gridFogSet->clean();
 
+#ifdef FOG_ACC_DIVIDE_PART
+	fogAccResultBuffer.clean();
+#elif defined(FOG_ACC_ONE_DISPATCH)
 	fogAccSyncBuffer.clean();
+#endif
+#ifdef FOG_ACC_DELETE_NOFOGVOXEL
+	fogAccHasFogVoxelInfoBuffer.clean();
+#endif
 	volumetricFogAccResultImage.clean();
 	envVolumetricFogInfoImage.clean();
 
@@ -599,16 +615,26 @@ void VolumetricFog::createVolumetricFogData() {
 	vkCmdUpdateBuffer(cmd, volumetricFogInfosBuffer.buffer.buffer, 0, sizeof(shaderio::VolumetricFogInfo) * volumetricFogCount, volumetricFogInfos.data());
 	//-------------------------------------------------------------------------------------------------------------------
 	{
-		fogAccSyncBuffer = FzbRenderer::Buffer("fogAccSyncBuffer", false);
+#ifdef FOG_ACC_DELETE_NOFOGVOXEL
+		fogAccHasFogVoxelInfoBuffer = FzbRenderer::Buffer("fogAccHasFogVoxelInfoBuffer", false);
+		fogAccHasFogVoxelInfoBuffer.init({
+			.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+			.size = sizeof(shaderio::FogAccHasFogVoxelInfo) * frustumGridSize.width * frustumGridSize.height * frustumGridSize.depth,
+			.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT,
+		});
+#endif
+
 		uint32_t threadGroupCount_oneDepth_X = (frustumGridSize.width + FOG_ACC_THREADGROUP_SIZE - 1) / FOG_ACC_THREADGROUP_SIZE;
 		uint32_t threadGroupCount_oneDepth_Y = (frustumGridSize.height + FOG_ACC_THREADGROUP_SIZE - 1) / FOG_ACC_THREADGROUP_SIZE;
-#if defined(FOG_ACC_GPU_GRIVEN)
-		fogAccSyncBuffer.init({
+#if defined(FOG_ACC_DIVIDE_PART)
+		fogAccResultBuffer = FzbRenderer::Buffer("fogAccResultBuffer", false);
+		fogAccResultBuffer.init({
 			.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-			.size = sizeof(shaderio::DispatchIndirectCommand),
-			.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+			.size = sizeof(shaderio::float2) * threadGroupCount_oneDepth_X * FOG_ACC_THREADGROUP_SIZE * threadGroupCount_oneDepth_Y * FOG_ACC_THREADGROUP_SIZE,
+			.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT,
 		});
 #elif defined(FOG_ACC_ONE_DISPATCH)
+		fogAccSyncBuffer = FzbRenderer::Buffer("fogAccSyncBuffer", false);
 		fogAccSyncBuffer.init({
 			.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
 			.size = sizeof(int) * threadGroupCount_oneDepth_X * threadGroupCount_oneDepth_Y,
@@ -737,11 +763,29 @@ void VolumetricFog::createDescriptorSetLayout() {
 	}
 	//---------------------------------------------------------------------------------------------------------------------------------------------
 	{
+#ifdef FOG_ACC_DIVIDE_PART
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFogAccResultBuffer,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+#elif defined(FOG_ACC_ONE_DISPATCH)
 		bindings.addBinding({
 			.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFogAccSyncBuffer,
 			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 			.descriptorCount = 1,
 			.stageFlags = VK_SHADER_STAGE_ALL });
+		.stageFlags = VK_SHADER_STAGE_ALL
+	});
+#endif
+#ifdef FOG_ACC_DELETE_NOFOGVOXEL
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFogAccHasFogVoxelInfoBuffer,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL
+		});
+#endif
 
 		bindings.addBinding({
 			.binding = (uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFogAccResultImage,
@@ -894,12 +938,22 @@ void VolumetricFog::createDescriptorSet() {
 		VkWriteDescriptorSet	fogAccImageWrite =
 			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFogAccResultImage, 0, 0, 1);
 		write.append(fogAccImageWrite, volumetricFogAccResultImage.image);
-			
-#if defined(FOG_ACC_GPU_GRIVEN) || defined(FOG_ACC_ONE_DISPATCH)
+
+#ifdef FOG_ACC_DIVIDE_PART
+		fogAccImageWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFogAccResultBuffer, 0, 0, 1);
+		write.append(fogAccImageWrite, fogAccResultBuffer.buffer);
+#elif defined(FOG_ACC_ONE_DISPATCH)
 		fogAccImageWrite =
 			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFogAccSyncBuffer, 0, 0, 1);
 		write.append(fogAccImageWrite, fogAccSyncBuffer.buffer);
 #endif
+#ifdef FOG_ACC_DELETE_NOFOGVOXEL
+		fogAccImageWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFogAccHasFogVoxelInfoBuffer, 0, 0, 1);
+		write.append(fogAccImageWrite, fogAccHasFogVoxelInfoBuffer.buffer);
+#endif
+
 		fogAccImageWrite =
 			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eFogAccResultImage_sample, 0, 0, 1);
 		write.append(fogAccImageWrite, volumetricFogAccResultImage.image);
@@ -1107,10 +1161,12 @@ void VolumetricFog::compileAndCreateShaders() {
 		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
 		shaderInfo.nextStage = 0;
 		#ifdef Fog_Acc_Stepping
-			#if defined(FOG_ACC_GPU_GRIVEN)
+			#if defined(FOG_ACC_DIVIDE_PART)
 					shaderInfo.pName = "computeMain_createFrustumAccFog_Stepping_GPUGriven";
 			#elif defined(FOG_ACC_ONE_DISPATCH)
 					shaderInfo.pName = "computeMain_createFrustumAccFog_Stepping_oneDispatch";
+			#elif defined(FOG_ACC_SERIAL)
+					shaderInfo.pName = "computeMain_createFrustumAccFog_Stepping_Serial";
 			#else
 					shaderInfo.pName = "computeMain_createFrustumAccFog_Stepping";
 			#endif
@@ -1121,6 +1177,37 @@ void VolumetricFog::compileAndCreateShaders() {
 		shaderInfo.pCode = shaderCode.pCode;
 		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_createFrustumAccFog);
 		NVVK_DBG_NAME(computeShader_createFrustumAccFog);
+
+#ifdef FOG_ACC_DELETE_NOFOGVOXEL
+		vkDestroyShaderEXT(device, computeShader_getHasFogVoxelInfo, nullptr);
+		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		shaderInfo.nextStage = 0;
+		shaderInfo.pName = "computeMain_getHasFogVoxelInfo";
+		shaderInfo.codeSize = shaderCode.codeSize;
+		shaderInfo.pCode = shaderCode.pCode;
+		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_getHasFogVoxelInfo);
+		NVVK_DBG_NAME(computeShader_getHasFogVoxelInfo);
+#endif
+
+#ifdef FOG_ACC_TWO_PASS
+		vkDestroyShaderEXT(device, computeShader_createFrustumAccFog_Pass1, nullptr);
+		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		shaderInfo.nextStage = 0;
+		shaderInfo.pName = "computeMain_createFrustumAccFog_Stepping_Pass1";
+		shaderInfo.codeSize = shaderCode.codeSize;
+		shaderInfo.pCode = shaderCode.pCode;
+		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_createFrustumAccFog_Pass1);
+		NVVK_DBG_NAME(computeShader_createFrustumAccFog_Pass1);
+
+		vkDestroyShaderEXT(device, computeShader_createFrustumAccFog_Pass2, nullptr);
+		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		shaderInfo.nextStage = 0;
+		shaderInfo.pName = "computeMain_createFrustumAccFog_Stepping_Pass2";
+		shaderInfo.codeSize = shaderCode.codeSize;
+		shaderInfo.pCode = shaderCode.pCode;
+		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_createFrustumAccFog_Pass2);
+		NVVK_DBG_NAME(computeShader_createFrustumAccFog_Pass2);
+#endif
 	}
 	//-------------------------------------------Step8-------------------------------------------
 	{
@@ -1605,13 +1692,6 @@ void VolumetricFog::createFrustumAccFog(VkCommandBuffer cmd) {
 	if (!pushConstant.useAccFog) return;
 	NVVK_DBG_SCOPE(cmd);
 
-#ifdef FOG_ACC_ONE_DISPATCH
-	uint32_t threadGroupCount_oneDepth_X = (frustumGridSize.width + FOG_ACC_THREADGROUP_SIZE - 1) / FOG_ACC_THREADGROUP_SIZE;
-	uint32_t threadGroupCount_oneDepth_Y = (frustumGridSize.height + FOG_ACC_THREADGROUP_SIZE - 1) / FOG_ACC_THREADGROUP_SIZE;
-	vkCmdFillBuffer(cmd, fogAccSyncBuffer.buffer.buffer, 0, sizeof(int) * threadGroupCount_oneDepth_X * threadGroupCount_oneDepth_Y, frustumGridSize.depth + 1);
-	nvvk::cmdBufferMemoryBarrier(cmd, { fogAccSyncBuffer.buffer.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT });
-#endif
-
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, staticDescPack.getSetPtr(), 0, nullptr);
 
 	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
@@ -1622,35 +1702,103 @@ void VolumetricFog::createFrustumAccFog(VkCommandBuffer cmd) {
 	pushConstant.randomStepping = randomStepping_fogAcc;
 	pushConstant.jitterStrength0 = accJitterStrength;
 	pushConstant.jitterStrength1 = interpolationJitterStrength_fogAcc;
-#ifdef Fog_Acc_Stepping
-#if defined(FOG_ACC_GPU_GRIVEN)
+
+#ifdef FOG_ACC_DELETE_NOFOGVOXEL
+	vkCmdFillBuffer(cmd, GlobalInfoBuffer.buffer.buffer, offsetof(shaderio::GlobalInfo_VolumetricFog, hasFogCount), sizeof(uint32_t), 0);
+	{
+		VkImageSubresourceRange range = {
+			.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+			.baseMipLevel = 0,
+			.levelCount = VK_REMAINING_MIP_LEVELS,
+			.baseArrayLayer = 0,
+			.layerCount = VK_REMAINING_ARRAY_LAYERS
+		};
+
+		VkClearColorValue clearColor = { .float32 = {1.0f, 0.0f, 0.0f, 0.0f} };
+		vkCmdClearColorImage(cmd, volumetricFogAccResultImage.image.image, VK_IMAGE_LAYOUT_GENERAL, &clearColor, 1, &range);
+	}
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getHasFogVoxelInfo);
+	vkCmdPushConstants2(cmd, &pushInfo);
+	VkExtent3D groupSize = nvvk::getGroupCounts(VkExtent3D{ frustumGridSize.width, frustumGridSize.height, frustumGridSize.depth }, VkExtent3D{ 8, 8, 8 });
+	vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+#endif
+
+#ifdef FOG_ACC_ONE_DISPATCH
 	uint32_t threadGroupCount_oneDepth_X = (frustumGridSize.width + FOG_ACC_THREADGROUP_SIZE - 1) / FOG_ACC_THREADGROUP_SIZE;
 	uint32_t threadGroupCount_oneDepth_Y = (frustumGridSize.height + FOG_ACC_THREADGROUP_SIZE - 1) / FOG_ACC_THREADGROUP_SIZE;
+	vkCmdFillBuffer(cmd, fogAccSyncBuffer.buffer.buffer, 0, sizeof(int) * threadGroupCount_oneDepth_X * threadGroupCount_oneDepth_Y, frustumGridSize.depth + 1);
+	nvvk::cmdBufferMemoryBarrier(cmd, { fogAccSyncBuffer.buffer.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT });
+#endif
 
-	pushConstant.instanceIndex = 0;
-	vkCmdPushConstants2(cmd, &pushInfo);
-	vkCmdDispatch(cmd, threadGroupCount_oneDepth_X, threadGroupCount_oneDepth_Y, 1);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
-	for (int i = 1; i < frustumGridSize.depth; ++i) {
-		pushConstant.instanceIndex = i;
-		vkCmdPushConstants2(cmd, &pushInfo);
-		vkCmdDispatchIndirect(cmd, fogAccSyncBuffer.buffer.buffer, 0);
-		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+#ifdef Fog_Acc_Stepping
+#if defined(FOG_ACC_DIVIDE_PART)
+	{
+		uint32_t groupThreadCount = FOG_ACC_THREADGROUP_SIZE * FOG_ACC_THREADGROUP_SIZE;
+		for (int depthIndex = 0; depthIndex < frustumGridSize.depth; ++depthIndex) {
+			pushConstant.instanceIndex = depthIndex;
+			vkCmdPushConstants2(cmd, &pushInfo);
+			VkExtent3D groupSize = nvvk::getGroupCounts(VkExtent3D{ frustumGridSize.width, frustumGridSize.height, 1 }, VkExtent3D{ FOG_ACC_THREADGROUP_SIZE, FOG_ACC_THREADGROUP_SIZE, 1 });
+			vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
+
+			uint32_t threadGroupCount_oneDepth_X = (frustumGridSize.width + FOG_ACC_THREADGROUP_SIZE - 1) / FOG_ACC_THREADGROUP_SIZE;
+			uint32_t threadGroupCount_oneDepth_Y = (frustumGridSize.height + FOG_ACC_THREADGROUP_SIZE - 1) / FOG_ACC_THREADGROUP_SIZE;
+			for (int offsetX = 0; offsetX < threadGroupCount_oneDepth_X; ++offsetX) {
+				for (int offsetY = 0; offsetY < threadGroupCount_oneDepth_Y; ++offsetY) {
+					uint32_t offset = (offsetY * threadGroupCount_oneDepth_X * groupThreadCount + offsetX * groupThreadCount) * sizeof(shaderio::float2);
+					nvvk::BufferMemoryBarrierParams barrierParams = {
+						.buffer = fogAccResultBuffer.buffer.buffer,
+						.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+						.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+						.offset = offset,
+						.size = groupThreadCount * sizeof(shaderio::float2)
+					};
+					nvvk::cmdBufferMemoryBarrier(cmd, barrierParams);
+				}
+			}
+		}
 	}
 #elif defined(FOG_ACC_ONE_DISPATCH)
 	vkCmdPushConstants2(cmd, &pushInfo);
 	VkExtent3D groupSize = nvvk::getGroupCounts(VkExtent3D{ frustumGridSize.width, frustumGridSize.height, frustumGridSize.depth }, VkExtent3D{ FOG_ACC_THREADGROUP_SIZE, FOG_ACC_THREADGROUP_SIZE, 1 });
 	vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-#else
-	for (int i = 0; i < frustumGridSize.depth; ++i) {
-		pushConstant.instanceIndex = i;
+#elif defined(FOG_ACC_SERIAL)
+	{
 		vkCmdPushConstants2(cmd, &pushInfo);
-		
 		VkExtent3D groupSize = nvvk::getGroupCounts(VkExtent3D{ frustumGridSize.width, frustumGridSize.height, 1 }, VkExtent3D{ 32, 32, 1 });
 		vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
-		
+	}
+#elif defined(FOG_ACC_TWO_PASS)
+	{
+		vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createFrustumAccFog_Pass1);
+		vkCmdPushConstants2(cmd, &pushInfo);
+#ifdef FOG_ACC_DELETE_NOFOGVOXEL
+		groupSize = nvvk::getGroupCounts(VkExtent3D{ frustumGridSize.width * frustumGridSize.height * frustumGridSize.depth, 1, 1 }, VkExtent3D{ 1024, 1, 1 });
+#else
+		groupSize = nvvk::getGroupCounts(VkExtent3D{ frustumGridSize.width, frustumGridSize.height, frustumGridSize.depth }, VkExtent3D{ FOG_ACC_THREADGROUP_SIZE, FOG_ACC_THREADGROUP_SIZE, 1 });
+#endif
+		vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
 		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+
+		vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createFrustumAccFog_Pass2);
+		vkCmdPushConstants2(cmd, &pushInfo);
+		groupSize = nvvk::getGroupCounts(VkExtent3D{ frustumGridSize.width, frustumGridSize.height, 1 }, VkExtent3D{ FOG_ACC_THREADGROUP_SIZE, FOG_ACC_THREADGROUP_SIZE, 1 });
+		vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
+	}
+#else
+	{
+		for (int i = 0; i < frustumGridSize.depth; ++i) {
+			pushConstant.instanceIndex = i;
+			vkCmdPushConstants2(cmd, &pushInfo);
+
+			VkExtent3D groupSize = nvvk::getGroupCounts(VkExtent3D{ frustumGridSize.width, frustumGridSize.height, 1 }, VkExtent3D{ 32, 32, 1 });
+			vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
+
+			nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+		}
 	}
 #endif
 #else
