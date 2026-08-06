@@ -67,7 +67,7 @@ VolumetricFog::VolumetricFog(pugi::xml_node& rendererNode) {
 		shaderio::FluidFogInfo fluidFogInfo = {
 			.startUp = 0,
 			.gridSize = {32, 32, 32},
-			.voxelSize = {1.0, 0.2, 1.0},
+			.voxelSize = {2.0, 0.3, 2.0},
 			.viscosity = 0.001f,
 			.FIntensity = 10,
 			.restoreSpeed = 10,
@@ -127,7 +127,7 @@ VolumetricFog::VolumetricFog(pugi::xml_node& rendererNode) {
 
 	pushConstant.randomStepping = 1;
 	pushConstant.useAccFog = 1;
-	pushConstant.compressionParams = 3.0f;
+	pushConstant.compressionParams = { 0.91945, 0.74255, 6 };
 	frustumGridSize = { 160, 160, 80 };
 	pushConstant.frustumGridSize = { frustumGridSize.width, frustumGridSize.height, frustumGridSize.depth };
 	pushConstant.time = 0.0f;
@@ -189,7 +189,8 @@ void VolumetricFog::init() {
 	Renderer::init();
 
 	pushConstant.cameraNearPlane = Application::sceneResource.cameraManip->getClipPlanes().x;
-	pushConstant.cameraFarPlane = 2000.0f;	// Application::sceneResource.cameraManip->getClipPlanes().y * 0.02f;
+	pushConstant.cameraFarPlane = Application::sceneResource.cameraManip->getClipPlanes().y;
+
 	pushConstant.tanCameraFov_2 = glm::tan(glm::radians(Application::sceneResource.cameraManip->getFov() * 0.5f));
 	pushConstant.aspectRatio = Application::sceneResource.cameraManip->getAspectRatio();
 
@@ -297,7 +298,7 @@ void VolumetricFog::uiRender() {
 
 #ifndef NDEBUG
 		if (ImGui::CollapsingHeader("Frustum Setting", ImGuiTreeNodeFlags_DefaultOpen)) {
-			UIModified |= ImGui::DragFloat("Compression Params ", (float*)&pushConstant.compressionParams, 0.1f, 0.0f, 10);
+			UIModified |= ImGui::DragFloat3("Compression Params ", (float*)&pushConstant.compressionParams, 0.1f, 0.0f, 100);
 			if (ImGui::Checkbox("Show Camera Frustum ", (bool*)&showCameraFrustum)) {
 				UIModified = true;
 				showCameraInfo = Application::sceneResource.sceneInfo;
@@ -1808,6 +1809,11 @@ void VolumetricFog::createFrustumAccFog(VkCommandBuffer cmd) {
 #endif
 	pushConstant.useAccFog = 1;
 }
+void VolumetricFog::fogBlur_Voxel(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
+
+
+}
 void VolumetricFog::deferredRenderring(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
 
@@ -2118,3 +2124,10 @@ void VolumetricFog::test(VkCommandBuffer cmd) {
 	vkCmdDispatch(cmd, 1, 1, 1);
 }
 #endif
+
+void VolumetricFog::saveParams() {
+
+}
+void VolumetricFog::loadParams() {
+
+}

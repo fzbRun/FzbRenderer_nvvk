@@ -63,6 +63,7 @@ private:
 	void createEnvFog(VkCommandBuffer cmd);
 	void envFogLightAttenuationEstimate(VkCommandBuffer cmd);
 	void createFrustumAccFog(VkCommandBuffer cmd);
+	void fogBlur_Voxel(VkCommandBuffer cmd);
 	void deferredRenderring(VkCommandBuffer cmd);
 	void fogBlur(VkCommandBuffer cmd);
 	void renderTransparentMaterial(VkCommandBuffer cmd);
@@ -165,7 +166,7 @@ private:
 	uint32_t rmSampleCount_opaque_FogAcc = 1;
 	uint32_t randomStepping_opaque = true;
 	float interpolationJitterStrength_attenuation = 1.0f;
-	float interpolationJitterStrength_L = 30.0f;
+	float interpolationJitterStrength_L = 0.15f;
 	//----------------------transparent------------------------------------
 	float interpolationJitterStrength_attenuation_transparent = 0.0f;
 	float interpolationJitterStrength_L_transparent = 0.0f;
@@ -174,6 +175,8 @@ private:
 	int FogFilterCount = 4;
 
 #ifndef NDEBUG
+	void saveParams();
+
 	void renderVolumetricFogVoxelGrid(VkCommandBuffer cmd);
 	void renderCameraFrustum(VkCommandBuffer cmd);
 

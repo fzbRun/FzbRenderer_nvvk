@@ -521,11 +521,11 @@ float4 getFrustumImageInfo(float3 worldPos, bool linear, float jitterStrength, S
     float u = saturate(viewX / halfWidth * 0.5f + 0.5f);
     float v = saturate(viewY / halfHeight * 0.5f + 0.5f);
 #ifdef Interpolation_Manual
-    uint voxelZ = clamp(int(frustumInvMap((viewZ - nearPlane) / (farPlane - nearPlane), compressionParams, 1.0f) * gridSize.z), 0, gridSize.z - 1);
+    uint voxelZ = clamp(int(frustumInvMap(viewZ - nearPlane, compressionParams, (farPlane - nearPlane)) * gridSize.z), 0, gridSize.z - 1) / (farPlane - nearPlane);
 
     float depth = viewZ - nearPlane;
-    float depth0 = frustumMap(float(voxelZ) / gridSizeF.z, compressionParams, 1.0f) * (farPlane - nearPlane);
-    float depth1 = frustumMap(float(voxelZ + 1) / gridSizeF.z, compressionParams, 1.0f) * (farPlane - nearPlane);
+    float depth0 = frustumMap(float(voxelZ) / gridSizeF.z * (farPlane - nearPlane), compressionParams, (farPlane - nearPlane));
+    float depth1 = frustumMap(float(voxelZ + 1) / gridSizeF.z * (farPlane - nearPlane), compressionParams, (farPlane - nearPlane));
     float centerZ = (depth0 + depth1) * 0.5f;
     if (!linear || depth == centerZ) {
         float w = (float(voxelZ) + 0.5f) / gridSize.z;
@@ -536,12 +536,12 @@ float4 getFrustumImageInfo(float3 worldPos, bool linear, float jitterStrength, S
     float blendZ = 0.0f;
     if (depth < centerZ && voxelZ > 0) {
         z0 = voxelZ - 1; z1 = voxelZ;
-        float dPrev = frustumMap(float(z0) / gridSizeF.z, compressionParams, 1.0f) * (farPlane - nearPlane);
+        float dPrev = frustumMap(float(z0) / gridSizeF.z * (farPlane - nearPlane), compressionParams, (farPlane - nearPlane));
         float centerPrev = (dPrev + depth0) * 0.5f;
         blendZ = saturate((depth - centerPrev) / (centerZ - centerPrev));
     } else if (depth > centerZ && voxelZ < int(gridSize.z) - 1) {
         z1 = voxelZ + 1;
-        float dNext = frustumMap(float(z1 + 1) / gridSizeF.z, compressionParams, 1.0f) * (farPlane - nearPlane);
+        float dNext = frustumMap(float(z1 + 1) / gridSizeF.z * (farPlane - nearPlane), compressionParams, (farPlane - nearPlane));
         float centerNext = (depth1 + dNext) * 0.5f;
         blendZ = saturate((depth - centerZ) / (centerNext - centerZ));
     }
@@ -554,7 +554,7 @@ float4 getFrustumImageInfo(float3 worldPos, bool linear, float jitterStrength, S
     //return blendZ;
     return lerp(s0, s1, blendZ);
 #else
-    float w = frustumInvMap(viewZ - nearPlane, compressionParams, farPlane - nearPlane) / (farPlane - nearPlane);
+    float w = frustumInvMap(viewZ - nearPlane, compressionParams, farPlane - nearPlane, gridSize.z) / (farPlane - nearPlane);
     float3 uvw = float3(u, v, w);
 
     if (linear) return image.SampleLevel(uvw, 0);
@@ -594,8 +594,8 @@ void getPreAccFog(
     attenuation *= getFrustumImageInfo(endPos, true, pushConst.jitterStrength0, volumetricFogAccResultImage_sample, randomSeed).x;
 
     float3 toPoint = endPos - sceneInfo.cameraPosition;
-    float viewZ = clamp(dot(toPoint, cameraForward), nearPlane, 200);
-    float jitterStrengthL = pushConst.jitterStrength1 * lerp(0.0f, 1.0f, frustumMap((viewZ - nearPlane) / (200 - nearPlane), compressionParams, 1.0f));
+    float viewZ = clamp(dot(toPoint, cameraForward), nearPlane, farPlane);
+    float jitterStrengthL = pushConst.jitterStrength1;// + pushConst.jitterStrength1 * lerp(0.0f, 1.0f, frustumMap(viewZ - nearPlane, compressionParams, farPlane - nearPlane, pushConst.frustumGridSize.z));
     L += getFrustumImageInfo(endPos, true, jitterStrengthL, volumetricFogAccResultImage_sample, randomSeed).y;
     attenuation2 *= getAttenuation2(endPos, globalInfo, sceneInfo);
 }

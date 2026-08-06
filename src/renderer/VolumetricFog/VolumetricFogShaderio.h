@@ -45,6 +45,8 @@ NAMESPACE_SHADERIO_BEGIN()
 #endif
 
 #define BLUR_FOG
+#define LINEAR_DEPTH
+
 #define BLUR_FOG_VOXEL_PASS1
 //#define BLUR_FOG_VOXEL_PASS2
 
@@ -75,7 +77,7 @@ struct VolumetricFogPushConstant{
 	float4x4 lightVP;
 
 	int useAccFog = true;
-	float compressionParams;
+	float3 compressionParams;
 	//int forwardSampleCount;
 	float cameraNearPlane;
 	uint3 frustumGridSize;

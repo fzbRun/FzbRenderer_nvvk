@@ -16,6 +16,10 @@
 
 [[vk::binding(StaticBindingPoints_VolumetricFog::eRenderedImage)]] RWTexture2D<float4> renderedImage;
 
+float getLinearViewDepth(float rawDepth, float nearPlane, float farPlane){
+    return (nearPlane * farPlane) / max(farPlane - rawDepth * (farPlane - nearPlane), 1e-6f);
+}
+
 groupshared float groupDepths[34][34];
 void getGroupDepths(uint2 pixelIndex, uint2 groupThreadIndex) {
     int2 threadGroupStartIndex = pixelIndex - groupThreadIndex;
@@ -76,6 +80,14 @@ void computeMain_getDepthGradient(int2 threadIndex: SV_DispatchThreadID, uint2 g
     float depthRight = groupDepths[groupThreadIndex.y + 1][groupThreadIndex.x + 2];
     float depthDown = groupDepths[groupThreadIndex.y][groupThreadIndex.x + 1];
     float depthUp = groupDepths[groupThreadIndex.y + 2][groupThreadIndex.x + 1];
+
+    #ifdef LINEAR_DEPTH
+    depthLeft = getLinearViewDepth(depthLeft, pushConst.cameraNearPlane, pushConst.cameraFarPlane);
+    depthRight = getLinearViewDepth(depthRight, pushConst.cameraNearPlane, pushConst.cameraFarPlane);
+    depthDown = getLinearViewDepth(depthDown, pushConst.cameraNearPlane, pushConst.cameraFarPlane);
+    depthUp = getLinearViewDepth(depthUp, pushConst.cameraNearPlane, pushConst.cameraFarPlane);
+    #endif
+
     float gradX = (depthRight - depthLeft) * 0.5f;
     float gradY = (depthUp - depthDown) * 0.5f;
 
@@ -171,19 +183,21 @@ static const float G5[SVGF_FILTER_K] = {
     4.0f / 16.0f,
     1.0f / 16.0f
 };
-float getDepthWeight(uint2 uvCenter, uint2 uvNeighbor, float sigmaZ = 60.0f) {
-    float zP = depthImage[uvCenter];
+float getDepthWeight(float zP, float2 gradP, uint2 uvCenter, uint2 uvNeighbor, float sigmaZ = 10.0f) {
     float zQ = depthImage[uvNeighbor];
 
-    float2 gradP = depthGradientImage[uvCenter].xy;
+    #ifdef LINEAR_DEPTH
+    zP = getLinearViewDepth(zP, pushConst.cameraNearPlane, pushConst.cameraFarPlane);
+    zQ = getLinearViewDepth(zQ, pushConst.cameraNearPlane, pushConst.cameraFarPlane);
+    #endif
+
     int2 offset = int2(uvNeighbor) - int2(uvCenter);
     float gradProj = abs(gradP.x * float(offset.x) + gradP.y * float(offset.y));
 
     float eZ = abs(zP - zQ) / (sigmaZ * gradProj + 1e-6f);
     return exp(-eZ);
 }
-float getNormalWeight(uint2 uvCenter, uint2 uvNeighbor, float sigmaN = 128.0f) {
-    float3 normalP = normalImage[uvCenter].xyz;
+float getNormalWeight(float3 normalP, uint2 uvCenter, uint2 uvNeighbor, float sigmaN = 128.0f) {
     float3 normalQ = normalImage[uvNeighbor].xyz;
 
     if (dot(normalP, normalP) < 1e-6f && dot(normalQ, normalQ) < 1e-6f) return 1.0f;
@@ -192,7 +206,7 @@ float getNormalWeight(uint2 uvCenter, uint2 uvNeighbor, float sigmaN = 128.0f) {
     dp = max(0.0f, dp);
     return pow(dp, sigmaN);
 }
-float getIrradianceWeight(float lumP, float lumQ, float lumVariance, float sigmaL = 1.0f) {
+float getIrradianceWeight(float lumP, float lumQ, float lumVariance, float sigmaL = 16.0f) {
     float denom = sigmaL * sqrt(max(0.0f, lumVariance)) + 1e-6f;
     return exp(-abs(lumP - lumQ) / denom);
 }
@@ -204,48 +218,45 @@ void computeMain_blurFog_X(uint2 threadIndex: SV_DispatchThreadID, uint2 groupTh
     int filterIndex = pushConst.instanceIndex;
     int2 pixelIndex = threadIndex;
     float4 fogResult = filterIndex == 0 ? renderedFogResultImage[pixelIndex] : filterImages[0][pixelIndex];
-    float lumP0 = fogResult.x;
-    float lumP1 = fogResult.y;
+    float p_A = fogResult.x;
+    float p_L = fogResult.y;
+
+    float zP = depthImage[pixelIndex];
+    float2 gradP = depthGradientImage[pixelIndex].xy;
+    float3 normalP = normalImage[pixelIndex].xyz;
 
     uint step = 1 << filterIndex;
-    float weightSum0 = 0.0f, weightSum1 = 0.0f;
-    float valueSum0 = 0.0f, valueSum1 = 0.0f;
+    float weightSum_A = 0.0f, weightSum_L = 0.0f;
+    float valueSum_A = 0.0f, valueSum_L = 0.0f;
     for (int i = 0; i < SVGF_FILTER_K; ++i) {
         int offsetX = (i - SVGF_FILTER_K / 2) * step;
         if (pixelIndex.x + offsetX < 0 || pixelIndex.x + offsetX > pushConst.screenSize.x - 1) continue;
         int2 offsetPixelIndex = int2(clamp(pixelIndex.x + offsetX, 0, pushConst.screenSize.x - 1), pixelIndex.y);
 
-        float w0 = G5[i], w1 = G5[i]; float q0 = lumP0, q1 = lumP1;
+        float w_A = G5[i], w_L = G5[i]; float q_A = p_A, q_L = p_L;
         if (offsetX != 0) { // dont consider variance, so weight must = G5[i]
-            float depthWeight = getDepthWeight(pixelIndex, offsetPixelIndex);
-            float normalWeight = getNormalWeight(pixelIndex, offsetPixelIndex);
+            float depthWeight = getDepthWeight(zP, gradP, pixelIndex, offsetPixelIndex);
+            float normalWeight = getNormalWeight(normalP, pixelIndex, offsetPixelIndex);
 
-            float4 offsetFogResult = filterImages[0][offsetPixelIndex];
-            float lumQ1 = luminance(offsetFogResult.y);
-            float irradianceWeight1 = getIrradianceWeight(lumP1, lumQ1, 1.0f);
+            float4 offsetFogResult = filterIndex == 0 ? renderedFogResultImage[offsetPixelIndex] : filterImages[0][offsetPixelIndex];
+            q_A = offsetFogResult.x;
+            q_L = offsetFogResult.y;
+            float irradianceWeight1 = getIrradianceWeight(p_L, q_L, 1.0f);
 
-            //float lumQ1 = luminance(renderedFogAttenuationImage[offsetPixelIndex].xyz);
-            //float irradianceWeight1 = getIrradianceWeight(lumP1, lumQ1, lumVariance);
-
-            w0 *= depthWeight * normalWeight;
-            w1 *= depthWeight * normalWeight * irradianceWeight1;
-            if (filterIndex > 0) {
-                float4 filterResult = filterImages[0][offsetPixelIndex];
-                q0 = filterResult.x;
-                q1 = filterResult.y;
-            }
+            w_A *= depthWeight * normalWeight;
+            w_L *= depthWeight * normalWeight * irradianceWeight1;
         }
 
-        weightSum0 += w0;
-        weightSum1 += w1;
-        valueSum0 += w0 * q0;
-        valueSum1 += w1 * q1;
+        weightSum_A += w_A;
+        weightSum_L += w_L;
+        valueSum_A += w_A * q_A;
+        valueSum_L += w_L * q_L;
     }
 
-    valueSum0 /= max(weightSum0, 1e-6f);
-    valueSum1 /= max(weightSum1, 1e-6f);
+    valueSum_A /= max(weightSum_A, 1e-6f);
+    valueSum_L /= max(weightSum_L, 1e-6f);
 
-    filterImages[1][pixelIndex] = float4(valueSum0, valueSum1, 1.0f, 1.0f);
+    filterImages[1][pixelIndex] = float4(valueSum_A, valueSum_L, 1.0f, 1.0f);
 }
 [numthreads(32, 32, 1)]
 [shader("compute")]
@@ -256,48 +267,52 @@ void computeMain_blurFog_Y(uint2 threadIndex: SV_DispatchThreadID, uint2 groupTh
     if (any(threadIndex >= pushConst.screenSize)) return;
 
     int2 pixelIndex = threadIndex;
-    float4 fogResult = filterImages[1][pixelIndex]; //renderedFogResultImage[pixelIndex];
-    float lumP0 = fogResult.x;
-    float lumP1 = fogResult.y;
+    float4 fogResult = filterImages[1][pixelIndex];
+    float p_A = fogResult.x;
+    float p_L = fogResult.y;
+    float3 normalP = normalImage[pixelIndex].xyz;
+
+    float zP = depthImage[pixelIndex];
+    float2 gradP = depthGradientImage[pixelIndex].xy;
 
     int filterIndex = pushConst.instanceIndex;
 
     uint step = 1 << filterIndex;
-    float weightSum0 = 0.0f, weightSum1 = 0.0f;
-    float valueSum0 = 0.0f, valueSum1 = 0.0f;
+    float weightSum_A = 0.0f, weightSum_L = 0.0f;
+    float valueSum_A = 0.0f, valueSum_L = 0.0f;
     for (int i = 0; i < SVGF_FILTER_K; ++i) {
         int offsetY = (i - SVGF_FILTER_K / 2) * step;
         if (pixelIndex.y + offsetY < 0 || pixelIndex.y + offsetY > pushConst.screenSize.y - 1) continue;
         int2 offsetPixelIndex = int2(pixelIndex.x, clamp(pixelIndex.y + offsetY, 0, pushConst.screenSize.y - 1));
 
-        float w0 = G5[i], w1 = G5[i];
-        float q0 = lumP0, q1 = lumP1;
+        float w_A = G5[i], w_L = G5[i];
+        float q_A = p_A, q_L = p_L;
         if (offsetY != 0) {
-            float depthWeight = getDepthWeight(pixelIndex, offsetPixelIndex);
-            float normalWeight = getNormalWeight(pixelIndex, offsetPixelIndex);
+            float depthWeight = getDepthWeight(zP, gradP, pixelIndex, offsetPixelIndex);
+            float normalWeight = getNormalWeight(normalP, pixelIndex, offsetPixelIndex);
 
             float4 offsetFogResult = filterImages[1][offsetPixelIndex];
-            q0 = offsetFogResult.x;
-            q1 = offsetFogResult.y;
+            q_A = offsetFogResult.x;
+            q_L = offsetFogResult.y;
 
             float lumQ1 = luminance(offsetFogResult.y);
-            float irradianceWeight1 = getIrradianceWeight(lumP1, lumQ1, 1.0f);
+            float irradianceWeight1 = getIrradianceWeight(p_L, lumQ1, 1.0f);
 
-            w0 *= depthWeight * normalWeight;
-            w1 *= depthWeight * normalWeight * irradianceWeight1;
+            w_A *= depthWeight * normalWeight;
+            w_L *= depthWeight * normalWeight * irradianceWeight1;
         }
 
-        weightSum0 += w0;
-        weightSum1 += w1;
-        valueSum0 += w0 * q0;
-        valueSum1 += w1 * q1;
+        weightSum_A += w_A;
+        weightSum_L += w_L;
+        valueSum_A += w_A * q_A;
+        valueSum_L += w_L * q_L;
     }
 
-    valueSum0 /= max(weightSum0, 1e-6f);
-    valueSum1 /= max(weightSum1, 1e-6f);
+    valueSum_A /= max(weightSum_A, 1e-6f);
+    valueSum_L /= max(weightSum_L, 1e-6f);
 
-    if (filterIndex == pushConst.iteration - 1) renderedFogResultImage[pixelIndex] = float4(valueSum0, valueSum1, 1.0f, 1.0f);
-    else filterImages[0][pixelIndex] = float4(valueSum0, valueSum1, 1.0f, 1.0f);
+    if (filterIndex == pushConst.iteration - 1) renderedFogResultImage[pixelIndex] = float4(valueSum_A, valueSum_L, 1.0f, 1.0f);
+    else filterImages[0][pixelIndex] = float4(valueSum_A, valueSum_L, 1.0f, 1.0f);
 }
 //--------------------------------------------------------------------------------------------------------------
 [numthreads(32, 32, 1)]

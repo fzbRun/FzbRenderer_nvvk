@@ -11,6 +11,12 @@ struct VSout {
     float4 sv_position : SV_Position;
 };
 
+uint getFrustumVoxelIndex(float viewZ, float3 CompressParams, float sizeZ, uint gridZ){
+    float increasingD = (sizeZ - gridZ * CompressParams.x) / (gridZ * 0.5f * (1.0f + gridZ));
+    float n = sqrt(2.0f * viewZ / increasingD + (0.5f + CompressParams.x / increasingD) * (0.5f + CompressParams.x / increasingD)) - (0.5f + CompressParams.x / increasingD);
+    return int(n);
+}
+
 [shader("vertex")]
 VSout vertexMain(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID){
     SceneInfo sceneInfo = pushConst.showCameraInfoAddress[0];
@@ -54,15 +60,15 @@ VSout vertexMain(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID
     float dy = (vertexIndex & 3) <= 1 ? -halfHeight / gridSize.y : halfHeight / gridSize.y;
     float dz = vertexIndex / 4 == 0 ? depth_near : depth_far;
 
-    float3 worldPos = cameraPos + cameraRight * (viewPos.x + dx) + cameraUp * (viewPos.y + dy) + cameraForward * dz;
+    float3 worldPos = cameraPos + cameraRight * (viewPos.x + dx) + cameraUp * (viewPos.y + dy) + cameraForward * dz;w
 
     output.sv_position = mul(float4(worldPos, 1.0f), pushConst.sceneInfoAddress[0].viewProjMatrix);
     return output;
     */
 
     uint depthIndex = instanceIndex;
-    float depth_near = nearPlane + frustumMap(float(depthIndex) / gridSize.z * (farPlane - nearPlane), pushConst.compressionParams, farPlane - nearPlane);
-    float depth_far = nearPlane + frustumMap(float(depthIndex + 1) / gridSize.z * (farPlane - nearPlane), pushConst.compressionParams, farPlane - nearPlane);
+    float depth_near = nearPlane + frustumMap(float(depthIndex) / gridSize.z * (farPlane - nearPlane), pushConst.compressionParams, farPlane - nearPlane, gridSize.z);
+    float depth_far = nearPlane + frustumMap(float(depthIndex + 1) / gridSize.z * (farPlane - nearPlane), pushConst.compressionParams, farPlane - nearPlane, gridSize.z);
     float depth = (depth_far + depth_near) * 0.5f;
 
     float halfHeight = depth * tanHalfFov;

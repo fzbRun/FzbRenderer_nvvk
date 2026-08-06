@@ -603,14 +603,57 @@ bool IntersectFrustum(
     return tMin <= tMax;
 }
 
+/*
+float frustumDepthToW(float viewZ, float3 CompressParams, float sizeZ, uint gridZ) {
+    float voxelIndexZ = log2(viewZ * CompressParams.x + CompressParams.y) * CompressParams.z;
+    return clamp(voxelIndexZ / gridZ, 0.0f, 1.0f);
+}
+float frustumWToDepth(float w, float3 CompressParams, float sizeZ, uint gridZ) {
+    float expArg = w * gridZ / CompressParams.z;
+    float pow2 = exp2(expArg);
+    float viewZ = (pow2 - CompressParams.y) / CompressParams.x;
+    return viewZ;
+}
+*/
 // linear to non-linear
-float frustumMap(float viewZ, float3 CompressParams, float sizeZ) {
-    // return (log2(max(((((viewZ) * (CompressParams.x))) + (CompressParams.y)), 1e-06))) * (CompressParams.z) / sizeZ;
-    return pow(viewZ / sizeZ, CompressParams.x) * sizeZ;
+float frustumMap(float viewZ, float3 CompressParams, float sizeZ, uint gridZ) {
+    //return pow(viewZ / sizeZ, CompressParams.x) * sizeZ;
+
+    float expArg = viewZ / sizeZ * gridZ / CompressParams.z;
+    expArg += log2(max(CompressParams.y, 1e-6));
+    float pow2 = exp2(expArg);
+    float viewZ = (pow2 - CompressParams.y) / CompressParams.x;
+    return viewZ;
+
+    //float w = viewZ / sizeZ;
+    //if (w <= 0.01) {
+    //    float part = sizeZ * 0.01f / (gridZ * CompressParams.x);
+    //    w = w * sizeZ / part / gridZ;
+    //} else if (w <= 0.1) {
+    //    w = CompressParams.x + pow(w, CompressParams.y);
+    //} else {
+    //    w = CompressParams.x + pow(0.1f, CompressParams.y) + pow(w, CompressParams.z);
+    //}
+    //return w * sizeZ;
 }
-float frustumInvMap(float viewZ, float3 CompressParams, float sizeZ) {
-    return pow(viewZ / sizeZ, 1.0f / CompressParams.x) * sizeZ;
+float frustumInvMap(float compressed, float3 CompressParams, float sizeZ, uint gridZ) {
+    //return pow(compressed / sizeZ, 1.0f / CompressParams.x) * sizeZ;
+
+    float voxelIndexZ = (log2(max(compressed * CompressParams.x + CompressParams.y, 1e-6)) - log2(max(CompressParams.y, 1e-6))) * CompressParams.z;
+    return clamp(voxelIndexZ / gridZ, 0.0f, 1.0f) * sizeZ;
+
+    //float w = compressed / sizeZ;
+    //if (w < CompressParams.x) {
+    //    float part = sizeZ * 0.01f / (gridZ * CompressParams.x);
+    //    w = w * gridZ * part / sizeZ;
+    //} else if (w < CompressParams.x + pow(0.1f, CompressParams.y)) {
+    //    w = pow(w - CompressParams.x, 1.0f / CompressParams.y);
+    //} else {
+    //    w = pow(w - CompressParams.x - pow(0.1f, CompressParams.y), 1.0f / CompressParams.z);
+    //}
+    //return w * sizeZ;
 }
+
 void getCameraFrustumData(
     float3 worldPos, float3 cameraPos, float4x4 viewInvMatrix, uint3 gridSize, float nearPlane, float farPlane, 
     float tanHalfFov, float aspect, float3 compressionParams, float forwardSampleDistance,
@@ -651,7 +694,7 @@ void getCameraFrustumData(
     float3 uvw;
     uvw.x = (entryViewX / halfWidth + 1.0f) * 0.5f;
     uvw.y = (entryViewY / halfHeight + 1.0f) * 0.5f;
-    uvw.z = frustumInvMap(entryViewZ - nearPlane, compressionParams, farPlane - nearPlane) / (farPlane - nearPlane);
+    uvw.z = frustumMap(entryViewZ - nearPlane, compressionParams, farPlane - nearPlane, gridSize.z) / (farPlane - nearPlane);
     uvw = clamp(uvw, 0.0f, 1.0f - 1e-6f);
 
     voxelIndex = clamp(uint3(uvw * gridSize), 0, gridSize - 1);

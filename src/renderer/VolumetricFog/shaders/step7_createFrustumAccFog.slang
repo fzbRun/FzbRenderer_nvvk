@@ -42,7 +42,7 @@ void computeMain_getHasFogVoxelInfo(uint3 threadIndex: SV_DispatchThreadID, uint
     float3 cameraForward = -sceneInfo.viewInvMatrix[2].xyz;
 
     float linearDepth = ((float)depthIndex + 0.5f) / gridSize.z * (farPlane - nearPlane);
-    float depth = frustumMap(linearDepth, compressionParams, farPlane - nearPlane);
+    float depth = frustumMap(linearDepth, compressionParams, farPlane - nearPlane, gridSize.z);
 
     float halfHeight = (depth + nearPlane) * tanHalfFov;
     float halfWidth = halfHeight * aspect;
@@ -55,7 +55,7 @@ void computeMain_getHasFogVoxelInfo(uint3 threadIndex: SV_DispatchThreadID, uint
     float3 dir = normalize(voxelCenter - cameraPos);
 
     float linearDepth_lastVoxel = max((float)depthIndex - 0.5f, 0.0f) / gridSize.z * (farPlane - nearPlane);
-    float depth_lastVoxel = frustumMap(linearDepth_lastVoxel, compressionParams, farPlane - nearPlane);
+    float depth_lastVoxel = frustumMap(linearDepth_lastVoxel, compressionParams, farPlane - nearPlane, gridSize.z);
 
     float halfHeight_prev = (depth_lastVoxel + nearPlane) * tanHalfFov;
     float halfWidth_prev = halfHeight_prev * aspect;
@@ -449,20 +449,19 @@ void computeMain_createFrustumAccFog_Stepping_Pass2(uint2 threadIndex: SV_Dispat
     float2 voxelInfo = volumetricFogAccResultImage[uint3(threadIndex, 0)].xy;
     float attenuation = voxelInfo.x, L = voxelInfo.y;
     for (int depthIndex = 1; depthIndex < pushConst.frustumGridSize.z; ++depthIndex) {
-        float2 curDepthVoxelInfo = volumetricFogAccResultImage[uint3(threadIndex, depthIndex)].xy;
-        /*
+        float2 curDepthVoxelInfo;// = volumetricFogAccResultImage[uint3(threadIndex, depthIndex)].xy;
         {
+            uint3 voxelIndex = uint3(threadIndex, depthIndex);
+            uint3 gridSize = pushConst.frustumGridSize;
+            uint voxelIndexU = voxelIndex.z * gridSize.x * gridSize.y + voxelIndex.y * gridSize.x + voxelIndex.x;
+            uint randomSeed = xxhash32(uint3(pushConst.frameIndex, voxelIndexU, 0));
             float u = ((float)voxelIndex.x + 0.5f) / gridSize.x + (rand(randomSeed) * 2.0f - 1.0f) / gridSize.x * pushConst.jitterStrength0;
             float v = ((float)voxelIndex.y + 0.5f) / gridSize.y + (rand(randomSeed) * 2.0f - 1.0f) / gridSize.y * pushConst.jitterStrength0;
-            float w = (voxelIndex.z - 0.5f) / gridSize.z;
+            float w = ((float)voxelIndex.z + 0.5f) / gridSize.z;
 
-            // float3 uvw = (float3(voxelIndex.x, voxelIndex.y, voxelIndex.z - 1) + 0.5f) / gridSize;
             float3 uvw = { u, v, w };
-            float4 accResult = volumetricFogAccResultImage_sample.SampleLevel(uvw, 0);
-            attenuation = accResult.x;
-            L = accResult.y;
+            curDepthVoxelInfo = volumetricFogAccResultImage_sample.SampleLevel(uvw, 0).xy;
         }
-        */
         L += attenuation * curDepthVoxelInfo.y;
         attenuation *= curDepthVoxelInfo.x;
         volumetricFogAccResultImage[uint3(threadIndex, depthIndex)].xy = float2(attenuation, L);
@@ -494,10 +493,10 @@ void computeMain_createFrustumAccFog(uint3 voxelIndex: SV_DispatchThreadID, uint
     float3 cameraForward = -sceneInfo.viewInvMatrix[2].xyz;
 
     float depthOrigin_near = float(voxelIndex.z) / gridSize.z * (farPlane - nearPlane);
-    float depthMapping_near = nearPlane + frustumMap(depthOrigin_near, compressionParams, farPlane - nearPlane);
+    float depthMapping_near = nearPlane + frustumMap(depthOrigin_near, compressionParams, farPlane - nearPlane, gridSize.z);
 
     float depthOrigin_far = float(voxelIndex.z + 1) / gridSize.z * (farPlane - nearPlane);
-    float depthMapping_far = nearPlane + frustumMap(depthOrigin_far, compressionParams, farPlane - nearPlane);
+    float depthMapping_far = nearPlane + frustumMap(depthOrigin_far, compressionParams, farPlane - nearPlane, gridSize.z);
 
     float depthMapping_center = (depthMapping_far + depthMapping_near) * 0.5f;
 
@@ -719,7 +718,7 @@ void computeMain_createFrustumAccFog_Stepping(uint2 threadIndex: SV_DispatchThre
     uint randomSeed = xxhash32(uint3(voxelIndexU, pushConst.frameIndex, 1));
     //---------------------------------------------------------------------------------------------
     float linearDepth = ((float)depthIndex + 0.5f) / gridSize.z * (farPlane - nearPlane);
-    float depth = frustumMap(linearDepth, compressionParams, farPlane - nearPlane);
+    float depth = frustumMap(linearDepth, compressionParams, farPlane - nearPlane, gridSize.z);
 
     float halfHeight = (depth + nearPlane) * tanHalfFov;
     float halfWidth = halfHeight * aspect;
@@ -732,7 +731,7 @@ void computeMain_createFrustumAccFog_Stepping(uint2 threadIndex: SV_DispatchThre
     float3 dir = normalize(voxelCenter - cameraPos);
 
     float linearDepth_lastVoxel = max((float)depthIndex - 0.5f, 0.0f) / gridSize.z * (farPlane - nearPlane);
-    float depth_lastVoxel = frustumMap(linearDepth_lastVoxel, compressionParams, farPlane - nearPlane);
+    float depth_lastVoxel = frustumMap(linearDepth_lastVoxel, compressionParams, farPlane - nearPlane, gridSize.z);
 
     float halfHeight_prev = (depth_lastVoxel + nearPlane) * tanHalfFov;
     float halfWidth_prev = halfHeight_prev * aspect;
