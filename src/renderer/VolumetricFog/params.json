@@ -1,0 +1,22 @@
+{
+  "lightAttenuationStrength": 1,
+  "useSVGF": 0,
+  "useFogBlur": 1,
+  "fogFilterCount": 4,
+  "compressionParamsX": 0.91945,
+  "compressionParamsY": 0.74255,
+  "compressionParamsZ": 6,
+  "useAccFog": 1,
+  "randomSteppingFogAcc": 1,
+  "fogAccSampleCount": 8,
+  "accJitterStrength": 0,
+  "fogAccInterpolationJitterStrength": 0,
+  "forwardSampleCount": 0,
+  "opaqueNoFogAccSampleCount": 50,
+  "opaqueFogAccSampleCount": 1,
+  "randomSteppingOpaque": 1,
+  "opaqueAttenuationJitterStrength": 1,
+  "opaqueLJitterStrength": 0.15,
+  "transparentAttenuationJitterStrength": 0,
+  "transparentLJitterStrength": 0
+}

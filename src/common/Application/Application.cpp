@@ -247,6 +247,7 @@ void FzbRenderer::Application::onUIRender() {
 		//PE::end();
 	}
 	ImGui::End();
+	sceneResource.UIRender();
 	renderer->uiRender();
 
 	if (ImGui::Begin("Viewport")) {

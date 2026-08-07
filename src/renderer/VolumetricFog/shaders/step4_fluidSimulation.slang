@@ -64,14 +64,31 @@ void computeMain_createVolumetricFog_Fluid_A(uint3 voxelIndex: SV_DispatchThread
     float3 velocity = fluidFogVoxelVelocityImage_sample[fogInfo.typeFogIndex].SampleLevel(uvw, 0).xyz;
 
     float3 velocity_lastTime = velocity;
+    #ifdef FLUID_SIMULATION_OBJECT_SAVE_FOG
+
+    {
+        float3 worldPos_lastTime = voxelCenter - pushConst.dt * velocity;
+        float3 uvw_lastTime = (worldPos_lastTime - startPos) / (gridSize * voxelSize);
+
+        int3 voxelIdx_lastTime = int3((worldPos_lastTime - startPos) / voxelSize);
+        voxelIdx_lastTime = clamp(voxelIdx_lastTime, int3(0, 0, 0), int3(gridSize) - 1);
+        uint voxelIdxU_lastTime = voxelIdx_lastTime.z * gridSize.x * gridSize.y + voxelIdx_lastTime.y * gridSize.x + voxelIdx_lastTime.x;
+        velocity_lastTime = fluidFogVoxelVelocityImage_sample[fogInfo.typeFogIndex].SampleLevel(uvw_lastTime, 0).xyz;
+        voxelInfo.voxelFogInfo = fluidFogVoxelInfoImages_sample[fogInfo.typeFogIndex].SampleLevel(uvw_lastTime, 0);
+    }
+
+    #else
+
     if (voxelInfo.isBoundary) voxelInfo.voxelFogInfo = 0.0f;
-    else{
+    else {
         float3 worldPos_lastTime = voxelCenter - pushConst.dt * velocity;
         float3 uvw_lastTime = (worldPos_lastTime - startPos) / (gridSize * voxelSize);
         #if BoundaryConditionType != 0
-            uvw_lastTime = clamp(uvw_lastTime, 0.0f, 1.0f);
+
+        uvw_lastTime = clamp(uvw_lastTime, 0.0f, 1.0f);
+
         #endif
-            int3 voxelIdx_lastTime = int3((worldPos_lastTime - startPos) / voxelSize);
+        int3 voxelIdx_lastTime = int3((worldPos_lastTime - startPos) / voxelSize);
         voxelIdx_lastTime = clamp(voxelIdx_lastTime, int3(0, 0, 0), int3(gridSize) - 1);
         uint voxelIdxU_lastTime = voxelIdx_lastTime.z * gridSize.x * gridSize.y + voxelIdx_lastTime.y * gridSize.x + voxelIdx_lastTime.x;
         bool backtrackIntoBoundary = fluidFogVoxelInfoBuffer[fogInfo.typeFogIndex][voxelIdxU_lastTime].isBoundary;
@@ -82,6 +99,8 @@ void computeMain_createVolumetricFog_Fluid_A(uint3 voxelIndex: SV_DispatchThread
             voxelInfo.voxelFogInfo = fluidFogVoxelInfoImages_sample[fogInfo.typeFogIndex].SampleLevel(uvw_lastTime, 0);
         }
     }
+
+    #endif
 
     voxelInfo.dirtyVelocity_pressure[0].xyz = velocity_lastTime;
     voxelInfo.dirtyVelocity_pressure[1].xyz = velocity_lastTime;

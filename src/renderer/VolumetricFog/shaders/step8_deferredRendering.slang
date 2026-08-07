@@ -41,9 +41,9 @@ void computeMain_deferredRendering(uint2 threadIndex: SV_DispatchThreadID, uint2
     if (pushConst.useAccFog == 1) getPreAccFog(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, L, attenuation, attenuation2);
     else {
         #ifdef USE_ENVFOG
-        getEnvVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, true, 1, L, attenuation, attenuation2);
+        getEnvVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, pushConst.sampleCount, L, attenuation, attenuation2);
         #else
-        getVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, pushConst.sampleCount, L, attenuation, attenuation2);
+        getVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, pushConst.sampleCount, true, L, attenuation, attenuation2);
         #endif
     }
 

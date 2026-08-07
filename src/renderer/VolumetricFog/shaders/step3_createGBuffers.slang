@@ -109,6 +109,7 @@ PSout fragmentMain(VSout input){
 
         uint3 voxelIndex = min(uint3((input.worldPos.xyz - fogStartPos) / voxelSize), gridSize - 1);
         uint voxelIndexU = voxelIndex.z * gridSize.x * gridSize.y + voxelIndex.y * gridSize.x + voxelIndex.x;
+
         fluidFogVoxelInfosBuffer[fogInfo.typeFogIndex][voxelIndexU].isBoundary = true;
         fluidFogVoxelVelocityImage[fogInfo.typeFogIndex][voxelIndex].xyz = pushConst.instanceVelocity * fluidFogInfo.FIntensity;
     }

@@ -1,7 +1,7 @@
 <scene>
 	<sensor type="perspective">
 		<fov value="60"/>
-		<plane value="0.1, 10000" />
+		<plane value="1, 10000" />
 		<transform type = "lookAt">
 			<matrix value="-1 0 0 0 0 1 0 1 0 0 -1 4 0 0 0 1"/>
 			<eye value = "5112.308, -61.677, -4441.671" />
@@ -24,6 +24,10 @@
 			<roughness value = "0.2" />
 			<eta value = "1.925, 13.93, 2.618" />
 		</bsdf>
+		
+		<bsdf type="diffuse" id="scene">
+			<albedo value="0.6, 0.1, 0.1, 1.0" />
+		</bsdf>
 	</bsdfs>
 	
 	<meshes>
@@ -38,6 +42,7 @@
 	<instances>
 		<instance>
 			<meshRef id = "yanYun"/>
+			<materialRef id = "scene"/>
 		</instance>
 		
 		<instance type="periodMotion" id="mainCharacter">
@@ -54,7 +59,7 @@
 			</transform>
 		</instance>
 
-		<instance type="periodMotion" >
+		<instance>
 			<transform name="to_world">
 				<translate value ="5115.0f, -69.0f, -4453.0f" />
 				<rotate value = "0, 0, 0" />
@@ -80,7 +85,7 @@
 			<materialRef id = "T_red" />
 		</instance>
 
-		<instance type="periodMotion" >
+		<instance>
 			<transform name="to_world">
 				<translate value ="5106.5f, -69.0f, -4450.0f" />
 				<rotate value = "0, 0, 0" />

@@ -40,6 +40,9 @@ public:
 
 	shaderio::AABB aabb;
 
+	bool isStatic = false;
+	float speed = 1.0f;
+
 	InstanceSet() = default;
 	InstanceSet(pugi::xml_node& instanceNode);
 

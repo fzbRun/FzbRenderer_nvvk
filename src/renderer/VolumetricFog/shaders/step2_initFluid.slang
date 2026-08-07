@@ -5,6 +5,7 @@
 #include "common/Shader/Slang/commonFunction.slang"
 
 [[vk::push_constant]] ConstantBuffer<VolumetricFogPushConstant> pushConst;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eGlobalInfoBuffer)]] RWStructuredBuffer<GlobalInfo_VolumetricFog> globalInfoBuffer;
 [[vk::binding(StaticBindingPoints_VolumetricFog::eFogInfosBuffer)]] RWStructuredBuffer<VolumetricFogInfo, ScalarDataLayout> fogInfosBuffer;
 
 [[vk::binding(StaticBindingPoints_VolumetricFog::eFluidFogInfoBuffer)]] RWStructuredBuffer<FluidFogInfo, ScalarDataLayout> FluidFogInfoBuffer;
@@ -20,11 +21,19 @@
 [[vk::binding(StaticBindingPoints_VolumetricFog::eGridFogImages)]] Sampler3D<float4> gridFogImages[];
 
 groupshared VolumetricFogInfo groupOtherTypeFogInfos[MAX_VOLUMETRIC_FOG_COUNT];
+groupshared bool groupUseGlobalHeightFog;
+groupshared float2 groupGlobalHeightFogY;
+groupshared HeightFogInfo groupGlobalHeightFogInfo;
 [numthreads(4, 4, 4)]
 [shader("compute")]
 void computeMain_initFluidFog(uint3 voxelIndex: SV_DispatchThreadID, uint3 groupThreadIndex: SV_GroupThreadID) {
     uint groupThreadIndexU = groupThreadIndex.z * 16 + groupThreadIndex.y * 4 + groupThreadIndex.x;
     if (groupThreadIndexU < pushConst.volumetricFogCount) groupOtherTypeFogInfos[groupThreadIndexU] = fogInfosBuffer[groupThreadIndexU];
+    if (groupThreadIndexU == 0) {
+        groupUseGlobalHeightFog = globalInfoBuffer[0].useGlobalHeightFog == 1;
+        groupGlobalHeightFogY = globalInfoBuffer[0].globalHeightFogY;
+        groupGlobalHeightFogInfo = globalInfoBuffer[0].globalHeightFogInfo;
+    }
     GroupMemoryBarrierWithGroupSync();
 
     int fogIndex = pushConst.instanceIndex;
@@ -34,14 +43,21 @@ void computeMain_initFluidFog(uint3 voxelIndex: SV_DispatchThreadID, uint3 group
 
     uint3 gridSize = fluidFogInfo.gridSize;
     float3 voxelSize = fluidFogInfo.voxelSize;
-
     float3 voxelCenter = fogInfo.aabb.minimum + (float3(voxelIndex) + 0.5f) * voxelSize;
-    float heightAttenuation = exp(-1.0f * max(voxelCenter.y - (-69.5f), 0.0f));
-    float extinction = (0.01f + 0.03f) * heightAttenuation;
-    float envExtinction = extinction;
-    float envScattering = extinction * 0.03f;
-    float envPhase = extinction * -0.7f;
-    float3 envColor = extinction * 1.0f;
+
+    float envExtinction = 0.0f;
+    float envScattering = 0.0f;
+    float envPhase = 0.0f;
+    float3 envColor = 0.0f;
+    if (groupUseGlobalHeightFog && voxelCenter.y >= groupGlobalHeightFogY.x && voxelCenter.y <= groupGlobalHeightFogY.y) {
+        HeightFogInfo globalHeightFogInfo = groupGlobalHeightFogInfo;
+        float heightAttenuation = exp(-globalHeightFogInfo.heightScale * (voxelCenter.y - groupGlobalHeightFogY.x));
+        float extinction = (globalHeightFogInfo.absorption + globalHeightFogInfo.scattering) * heightAttenuation;
+        envExtinction = extinction;
+        envScattering = extinction * globalHeightFogInfo.scattering;
+        envPhase = extinction * globalHeightFogInfo.phase;
+        envColor = extinction * globalHeightFogInfo.color;
+    }
 
     for (int i = 0; i < pushConst.volumetricFogCount; ++i) {
         if (i == fogIndex) continue;
@@ -49,12 +65,12 @@ void computeMain_initFluidFog(uint3 voxelIndex: SV_DispatchThreadID, uint3 group
         AABB otherFogAABB = otherFogInfo.aabb;
         if (!checkPointInAABB(voxelCenter, otherFogAABB)) continue;
 
-        float scattering = 0.0f, phase = 0.0f; float3 color = 0.0f;
+        float extinction = 0.0f, scattering = 0.0f, phase = 0.0f; float3 color = 0.0f;
         if (otherFogInfo.type == VolumetricFogType::Height) {
             HeightFogInfo heightFogInfo = heightFogInfoBuffer[otherFogInfo.typeFogIndex];
             float heightScale = heightFogInfo.heightScale;
             float height = max(voxelCenter.y - otherFogInfo.aabb.minimum.y, 0.0f);
-            heightAttenuation = exp(-heightScale * height);
+            float heightAttenuation = exp(-heightScale * height);
 
             scattering = heightFogInfo.scattering;
             extinction = (heightFogInfo.absorption + scattering) * heightAttenuation;

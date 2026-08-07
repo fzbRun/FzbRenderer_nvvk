@@ -31,23 +31,31 @@ VSout vertexMain(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID
     float tanHalfFov = pushConst.tanCameraFov_2;
     float aspect = pushConst.aspectRatio;
 
-    /*
     uint3 voxelIndex;
     voxelIndex.z = instanceIndex / (pushConst.frustumGridSize.x * pushConst.frustumGridSize.y);
     voxelIndex.y = (instanceIndex - voxelIndex.z * (pushConst.frustumGridSize.x * pushConst.frustumGridSize.y)) / pushConst.frustumGridSize.x;
     voxelIndex.x = instanceIndex - voxelIndex.z * (pushConst.frustumGridSize.x * pushConst.frustumGridSize.y) - voxelIndex.y * pushConst.frustumGridSize.x;
 
     VSout output;
-    if (voxelIndex.z > 3) {
-        output.sv_position = float4(2.0f, 2.0f, 2.0f, 1.0f);
-        return output;
+    {
+        uint minX = pushConst.volumetricFogCount;
+        uint maxX = pushConst.heightFogCount;
+        uint minY = pushConst.fluidFogCount;
+        uint maxY = pushConst.gridFogCount;
+        uint minZ = pushConst.randomStepping;
+        uint maxZ = pushConst.sampleCount;
+
+        if (voxelIndex.z < minZ || voxelIndex.z > maxZ || voxelIndex.x < minX || voxelIndex.x > maxX || voxelIndex.y < minY || voxelIndex.y > maxY) {
+            output.sv_position = float4(2.0f, 2.0f, 2.0f, 1.0f);
+            return output;
+        }
     }
 
     float u = (float(voxelIndex.x) + 0.5f) / float(gridSize.x) * 2.0f - 1.0f;
     float v = (float(voxelIndex.y) + 0.5f) / float(gridSize.y) * 2.0f - 1.0f;
 
-    float depth_near = nearPlane + frustumMap(float(voxelIndex.z) / gridSize.z * (farPlane - nearPlane), pushConst.compressionParams, farPlane - nearPlane);
-    float depth_far = nearPlane + frustumMap(float(voxelIndex.z + 1) / gridSize.z * (farPlane - nearPlane), pushConst.compressionParams, farPlane - nearPlane);
+    float depth_near = nearPlane + frustumMap(float(voxelIndex.z) / gridSize.z * (farPlane - nearPlane), pushConst.compressionParams, farPlane - nearPlane, gridSize.z);
+    float depth_far = nearPlane + frustumMap(float(voxelIndex.z + 1) / gridSize.z * (farPlane - nearPlane), pushConst.compressionParams, farPlane - nearPlane, gridSize.z);
 
     float depth = (depth_far + depth_near) * 0.5f;
     
@@ -60,12 +68,12 @@ VSout vertexMain(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID
     float dy = (vertexIndex & 3) <= 1 ? -halfHeight / gridSize.y : halfHeight / gridSize.y;
     float dz = vertexIndex / 4 == 0 ? depth_near : depth_far;
 
-    float3 worldPos = cameraPos + cameraRight * (viewPos.x + dx) + cameraUp * (viewPos.y + dy) + cameraForward * dz;w
+    float3 worldPos = cameraPos + cameraRight * (viewPos.x + dx) + cameraUp * (viewPos.y + dy) + cameraForward * dz;
 
     output.sv_position = mul(float4(worldPos, 1.0f), pushConst.sceneInfoAddress[0].viewProjMatrix);
     return output;
-    */
 
+    /*
     uint depthIndex = instanceIndex;
     float depth_near = nearPlane + frustumMap(float(depthIndex) / gridSize.z * (farPlane - nearPlane), pushConst.compressionParams, farPlane - nearPlane, gridSize.z);
     float depth_far = nearPlane + frustumMap(float(depthIndex + 1) / gridSize.z * (farPlane - nearPlane), pushConst.compressionParams, farPlane - nearPlane, gridSize.z);
@@ -82,6 +90,7 @@ VSout vertexMain(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID
     VSout output;
     output.sv_position = mul(float4(worldPos, 1.0f), pushConst.sceneInfoAddress[0].viewProjMatrix);
     return output;
+    */
 }
 
 struct PSout

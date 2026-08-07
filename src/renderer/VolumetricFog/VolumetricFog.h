@@ -47,6 +47,9 @@ public:
 	void render(VkCommandBuffer* cmd) override;
 
 private:
+	void saveParams();
+	void loadParams();
+
 	void createVolumetricFogImage(FzbRenderer::Image& image, shaderio::uint3 size, bool linear = true);
 	void createVolumetricFogData();
 
@@ -98,7 +101,7 @@ private:
 	VkShaderEXT computeShader_createFrustumAccFog_Pass2{};
 #endif
 
-	VkShaderEXT computeShader_smoothFog{};
+	VkShaderEXT computeShader_blurFog_voxel{};
 
 	VkShaderEXT computeShader_deferredRenderring{};
 
@@ -123,6 +126,12 @@ private:
 
 	FzbRenderer::Buffer GlobalInfoBuffer;
 	//--------------------------FogInfo-----------------------------------
+	bool globalHeightFogModified = false;
+	int useGlobalHeightFog = 1;
+	shaderio::float2 globalHeightFogY;
+	shaderio::HeightFogInfo globalHeightFogInfo;
+	//bool showGlobalHeightFog = false;
+
 	uint32_t volumetricFogCount = 1;
 	std::vector<shaderio::VolumetricFogInfo> volumetricFogInfos;
 	FzbRenderer::Buffer volumetricFogInfosBuffer;
@@ -142,7 +151,7 @@ private:
 	shaderio::float3 envVoxelSize = { 1.6, 1, 1 };
 	bool showEnvGrid = false;
 
-	int sampleCount_env = 1;
+	int sampleCount_env = 10;
 	float jitterStrength_env = 0.0f;
 	//-------------------------FogAcc-------------------------------------
 #ifdef FOG_ACC_DELETE_NOFOGVOXEL
@@ -155,6 +164,11 @@ private:
 	FzbRenderer::Buffer fogAccSyncBuffer;
 #endif
 	FzbRenderer::Image volumetricFogAccResultImage;
+
+#ifdef BLUR_FOG_VOXEL
+	FzbRenderer::Image volumetricFogAccResultHistoryImage;
+#endif
+	bool useFogBlurVoxel = false;
 
 	uint32_t rmSampleCountSampleCount_fogAcc = 8;
 	int randomStepping_fogAcc = true;
@@ -171,12 +185,10 @@ private:
 	float interpolationJitterStrength_attenuation_transparent = 0.0f;
 	float interpolationJitterStrength_L_transparent = 0.0f;
 	//-------------------------fogBlur------------------------------------
-	//bool useFogBlur = false;
+	bool useFogBlur = false;
 	int FogFilterCount = 4;
 
 #ifndef NDEBUG
-	void saveParams();
-
 	void renderVolumetricFogVoxelGrid(VkCommandBuffer cmd);
 	void renderCameraFrustum(VkCommandBuffer cmd);
 
@@ -194,6 +206,9 @@ private:
 
 	VkShaderEXT computeShader_test{};
 	void test(VkCommandBuffer cmd);
+
+	shaderio::int3 frustumVoxelShowMin = { 0, 0, 0 };
+	shaderio::int3 frustumVoxelShowMax = { 160, 160, 80 };
 #endif
 };
 }

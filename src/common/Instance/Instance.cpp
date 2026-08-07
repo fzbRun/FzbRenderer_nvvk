@@ -63,7 +63,8 @@ void InstanceSet::getTransformMatrixFromXML(pugi::xml_node& transformNode){
 
 	if (pugi::xml_node periodNode = transformNode.child("period")) {
 		type = InstanceType::PeriodMotion;
-		if (periodNode.attribute("speed")) time = std::stof(periodNode.attribute("time").value());
+		if (periodNode.attribute("time")) time = std::stof(periodNode.attribute("time").value());
+		if (periodNode.attribute("speed")) speed = std::stof(periodNode.attribute("speed").value());
 		if (pugi::xml_node translateNode = periodNode.child("translate")) {
 			glm::vec3 translateValue = FzbRenderer::getRGBFromString(translateNode.attribute("value").value());
 			translateMatrix = glm::translate(translateMatrix, translateValue);
@@ -136,13 +137,16 @@ void InstanceSet::getInstance(std::vector<shaderio::Instance>& instances, int of
 		return;
 	}
 
+	float phase = time * std::max(speed, 0.0f);
+	time = 1.0f - abs(fmod(phase, 2.0f) - 1.0f);
+
 	transform_lastTime = transform;
-	//transform = ((1.0f - time) * glm::mat4(1.0f) + time * translateMatrix) *
-	//	((1.0f - time) * glm::mat4(1.0f) + time * rotateMatrix) *
-	//	((1.0f - time) * glm::mat4(1.0f) + time * scaleMatrix) * baseMatrix;	//interpolateTransforms(startMatrix, endMatrix, time);
-	transform = ((1.0f - time) * baseMatrix_translate + time * translateMatrix * baseMatrix_translate) *
-		((1.0f - time) * baseMatrix_rotate + time * rotateMatrix * baseMatrix_rotate) *
-		((1.0f - time) * baseMatrix_scale + time * scaleMatrix * baseMatrix_scale);
+	if (isStatic == 0) {
+		transform = ((1.0f - time) * baseMatrix_translate + time * translateMatrix * baseMatrix_translate) *
+			((1.0f - time) * baseMatrix_rotate + time * rotateMatrix * baseMatrix_rotate) *
+			((1.0f - time) * baseMatrix_scale + time * scaleMatrix * baseMatrix_scale);
+	}
+
 	for (int i = 0; i < childInstances.size(); ++i) {
 		shaderio::Instance instance;
 		instance.meshIndex = childInstances[i].meshIndex;
@@ -183,6 +187,9 @@ LightInstance::LightInstance(pugi::xml_node& lightNode) {
 }
 shaderio::Light LightInstance::getLight(float time) {
 	if (type != InstanceType::PeriodMotion) return light;
+
+	float phase = time * std::max(speed, 0.0f);
+	time = 1.0f - abs(fmod(phase, 2.0f) - 1.0f);
 
 	shaderio::Light light_transform = light;
 	glm::mat4 transformMatrix = ((1.0f - time) * glm::mat4(1.0f) + time * translateMatrix) *

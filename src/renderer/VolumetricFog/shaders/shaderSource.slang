@@ -118,6 +118,22 @@ void getFogScatter(
     L += color * ambientIntensity * scattering * E * factor;
     a = exp(-extinctionCoeff * sampleLength);
 }
+void getGlobalHeightFogScatter(
+    float3 samplePoint, float3 sampleDir, float sampleLength, SceneInfo sceneInfo, GlobalInfo_VolumetricFog globalInfo,
+    float3 E, inout float a, inout float3 L
+) {
+    float2 globalHeightFogY = globalInfo.globalHeightFogY;
+    if (globalInfo.useGlobalHeightFog == 1 && samplePoint.y >= globalHeightFogY.x && samplePoint.y <= globalHeightFogY.y) {
+        HeightFogInfo globalHeightFogInfo = globalInfo.globalHeightFogInfo;
+        float heightAttenuation = exp(-globalHeightFogInfo.heightScale * max(min(samplePoint.y, globalHeightFogY.y) - globalHeightFogY.x, 0.0f));
+        float extinction = (globalHeightFogInfo.absorption + globalHeightFogInfo.scattering) * heightAttenuation;
+        float scattering = globalHeightFogInfo.scattering;
+        float phase = clamp(globalHeightFogInfo.phase, -0.9999f, 0.9999f);
+        float3 color = globalHeightFogInfo.color;
+
+        getFogScatter(samplePoint, sampleDir, sampleLength, sceneInfo, globalInfo, extinction, scattering, phase, color, globalHeightFogInfo.ambientIntensity, E, a, L);
+    }
+}
 
 VolumetricFogInfo getVolumetricFog(int i) {
     #ifdef COMPUTE_SHADER

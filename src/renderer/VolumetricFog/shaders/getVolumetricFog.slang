@@ -390,7 +390,7 @@ void getVolumetricFogScatter(
 }
 */
 void getVolumetricFogScatter(
-    float3 startPos, float3 endPos, inout uint randomSeed, uint sampleCount,
+    float3 startPos, float3 endPos, inout uint randomSeed, uint sampleCount, bool useGlobalHeight,
     inout float L, inout float attenuation, inout float attenuation2
 ) {
     #ifdef COMPUTE_SHADER
@@ -417,6 +417,16 @@ void getVolumetricFogScatter(
         float envPhase = 0.0f;
         float3 envColor = 0.0f;
 
+        if (useGlobalHeight && globalInfo.useGlobalHeightFog == 1 && samplePoint.y >= globalInfo.globalHeightFogY.x && samplePoint.y <= globalInfo.globalHeightFogY.y) {
+            HeightFogInfo globalHeightFogInfo = globalInfo.globalHeightFogInfo;
+            float heightAttenuation = exp(-globalHeightFogInfo.heightScale * (samplePoint.y - globalInfo.globalHeightFogY.x));
+            float extinction = (globalHeightFogInfo.absorption + globalHeightFogInfo.scattering) * heightAttenuation;
+            envExtinction = extinction;
+            envScattering = extinction * globalHeightFogInfo.scattering;
+            envPhase = extinction * globalHeightFogInfo.phase;
+            envColor = extinction * globalHeightFogInfo.color;
+        }
+
         for (int i = 0; i < globalInfo.visibleVolumetricFogCount; ++i) {
             uint fogIndex = globalInfo.visibleVolumetricFogIndices[i];
             VolumetricFogInfo fogInfo = getVolumetricFog(fogIndex);
@@ -433,7 +443,7 @@ void getVolumetricFogScatter(
                 scattering = heightFogInfo.scattering;
                 extinction = (heightFogInfo.absorption + scattering) * heightAttenuation;
                 phase = heightFogInfo.phase;
-                color = heightFogInfo.color * (1.0f + heightFogInfo.ambientIntensity);
+                color = heightFogInfo.color * (1.0f + heightFogInfo.ambientIntensity) * 2.0f;
             } else if (fogInfo.type == VolumetricFogType::Fluid && globalInfo.fluidStartUp[fogInfo.typeFogIndex] == 1) {
                 FluidFogInfo fluidFogInfo = getFluidFog(fogInfo.typeFogIndex);
                 float3 uvw = (samplePoint - fogStartPos) / (fluidFogInfo.gridSize * fluidFogInfo.voxelSize);
@@ -481,6 +491,11 @@ void getVolumetricFogScatter(
 
     attenuation2 *= getAttenuation2(endPos, globalInfo, sceneInfo);
 }
+void getVolumetricFogScatter_Frustum(
+    AABB startAABB, AABB endAABB, inout uint randomSeed, uint sampleCount,
+    inout float L, inout float attenuation, inout float attenuation2
+){
+}
 //------------------------------------------------------------------------------------------------------------------------------------------------
 float4 getFrustumImageInfo(float3 worldPos, bool linear, float jitterStrength, Sampler3D<float4> image, inout uint randomSeed) {
     #ifdef COMPUTE_SHADER
@@ -508,8 +523,8 @@ float4 getFrustumImageInfo(float3 worldPos, bool linear, float jitterStrength, S
     if (viewZ <= 0.0f) return float4(0, 0, 0, 0);
     {
         viewZ = max(viewZ + (rand(randomSeed) * 2.0f - 1.0f) * jitterStrength, nearPlane);
-        viewX += (rand(randomSeed) * 2.0f - 1.0f) * jitterStrength;
-        viewY += (rand(randomSeed) * 2.0f - 1.0f) * jitterStrength;
+        //viewX += (rand(randomSeed) * 2.0f - 1.0f) * jitterStrength;
+        //viewY += (rand(randomSeed) * 2.0f - 1.0f) * jitterStrength;
     }
 
     float clampedZ = clamp(viewZ, nearPlane, farPlane);
@@ -521,11 +536,11 @@ float4 getFrustumImageInfo(float3 worldPos, bool linear, float jitterStrength, S
     float u = saturate(viewX / halfWidth * 0.5f + 0.5f);
     float v = saturate(viewY / halfHeight * 0.5f + 0.5f);
 #ifdef Interpolation_Manual
-    uint voxelZ = clamp(int(frustumInvMap(viewZ - nearPlane, compressionParams, (farPlane - nearPlane)) * gridSize.z), 0, gridSize.z - 1) / (farPlane - nearPlane);
+    uint voxelZ = clamp(int(frustumInvMap(viewZ - nearPlane, compressionParams, (farPlane - nearPlane), gridSize.z) / (farPlane - nearPlane) * gridSize.z), 0, gridSize.z - 1);
 
     float depth = viewZ - nearPlane;
-    float depth0 = frustumMap(float(voxelZ) / gridSizeF.z * (farPlane - nearPlane), compressionParams, (farPlane - nearPlane));
-    float depth1 = frustumMap(float(voxelZ + 1) / gridSizeF.z * (farPlane - nearPlane), compressionParams, (farPlane - nearPlane));
+    float depth0 = frustumMap(float(voxelZ) / gridSizeF.z * (farPlane - nearPlane), compressionParams, (farPlane - nearPlane), gridSize.z);
+    float depth1 = frustumMap(float(voxelZ + 1) / gridSizeF.z * (farPlane - nearPlane), compressionParams, (farPlane - nearPlane), gridSize.z);
     float centerZ = (depth0 + depth1) * 0.5f;
     if (!linear || depth == centerZ) {
         float w = (float(voxelZ) + 0.5f) / gridSize.z;
@@ -536,12 +551,12 @@ float4 getFrustumImageInfo(float3 worldPos, bool linear, float jitterStrength, S
     float blendZ = 0.0f;
     if (depth < centerZ && voxelZ > 0) {
         z0 = voxelZ - 1; z1 = voxelZ;
-        float dPrev = frustumMap(float(z0) / gridSizeF.z * (farPlane - nearPlane), compressionParams, (farPlane - nearPlane));
+        float dPrev = frustumMap(float(z0) / gridSizeF.z * (farPlane - nearPlane), compressionParams, (farPlane - nearPlane), gridSize.z);
         float centerPrev = (dPrev + depth0) * 0.5f;
         blendZ = saturate((depth - centerPrev) / (centerZ - centerPrev));
     } else if (depth > centerZ && voxelZ < int(gridSize.z) - 1) {
         z1 = voxelZ + 1;
-        float dNext = frustumMap(float(z1 + 1) / gridSizeF.z * (farPlane - nearPlane), compressionParams, (farPlane - nearPlane));
+        float dNext = frustumMap(float(z1 + 1) / gridSizeF.z * (farPlane - nearPlane), compressionParams, (farPlane - nearPlane), gridSize.z);
         float centerNext = (depth1 + dNext) * 0.5f;
         blendZ = saturate((depth - centerZ) / (centerNext - centerZ));
     }
@@ -602,8 +617,8 @@ void getPreAccFog(
 //------------------------------------------------------------------------------------------------------------------------------------------------
 #ifdef USE_ENVFOG
 void getEnvVolumetricFogScatter(
-    float3 startPos, float3 endPos, inout uint randomSeed, bool rayMarching, float stepPower,
-    inout float3 L, inout float3 attenuation, inout float3 attenuation2
+    float3 startPos, float3 endPos, inout uint randomSeed, uint sampleCount,
+    inout float L, inout float attenuation, inout float attenuation2
 ) {
     #ifdef COMPUTE_SHADER
     GlobalInfo_VolumetricFog globalInfo = groupGlobalInfo;
@@ -625,15 +640,6 @@ void getEnvVolumetricFogScatter(
     float aspect = pushConst.aspectRatio;
     float3 compressionPrecision = pushConst.compressionParams;
 
-    float3 hitWorldPos = startPos;
-    if (pushConst.useAccFog == 1) {
-        hitWorldPos = getCameraFrustumInteralPos(endPos, cameraPos, sceneInfo.viewInvMatrix, pushConst.frustumGridSize, nearPlane,
-            farPlane, tanHalfFov, aspect, pushConst.forwardSampleCount);
-        attenuation *= getFrustumImageInfo(hitWorldPos, true, true, volumetricFogAttenuationImage_sample, randomSeed).xyz;
-        L += getFrustumImageInfo(hitWorldPos, true, true, volumetricFogLImage_sample, randomSeed).xyz;
-    }
-    if (length(endPos - hitWorldPos) <= 1e-5f || !rayMarching) return;
-    startPos = hitWorldPos;
 #ifdef Uniform_EnvFog_Grid
     float3 gridMin = globalInfo.envStartPos;
     float3 gridMax = globalInfo.envStartPos + float3(globalInfo.envGridSize) * globalInfo.envVoxelSize;
@@ -642,8 +648,6 @@ void getEnvVolumetricFogScatter(
     if (!isHit(startPos, endPos, gridMin, gridMax, tGridEnter, tGridExit)) return;
     endPos = startPos + tGridExit * dir;
     startPos = startPos + tGridEnter * dir;
-
-    attenuation2 *= getAttenuation2(endPos, globalInfo, sceneInfo);
 
     float tTotal = tGridExit - tGridEnter;
     float3 E = 1.0f;
@@ -691,55 +695,38 @@ void getEnvVolumetricFogScatter(
     endPos = startPos + tExit * dir;
     startPos = startPos + tEnter * dir;
 
-    attenuation2 *= getAttenuation2(endPos, globalInfo, sceneInfo);
-
+    const float distancePower = 2.0f;
     float tTotal = tExit - tEnter;
-    float3 E = 1.0f;
-    //float tPart = tTotal / pushConst.sampleCount;
-    for (int sampleIndex = 0; sampleIndex < pushConst.sampleCount; ++sampleIndex) {
-        float tCurrent = pow((float)sampleIndex / pushConst.sampleCount, stepPower) * tTotal;
-        float tNext = pow((float)(sampleIndex + 1) / pushConst.sampleCount, stepPower) * tTotal;
+    for (int sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex) {
+        float tCurrent = pow((float)sampleIndex / sampleCount, distancePower) * tTotal;
+        float tNext = pow((float)(sampleIndex + 1) / sampleCount, distancePower) * tTotal;
         float tPart = tNext - tCurrent;
 
         float step = pushConst.randomStepping == 1 ? rand(randomSeed) : 0.5f;
-        // float tSample = tPart * ((float)sampleIndex + step);
         float tSample = tCurrent + step * tPart;
         float3 samplePoint = startPos + dir * tSample;
 
-        float4 voxelInfo = getFrustumImageInfo(samplePoint, true, true, envVolumetricFogInfoImage_sample, randomSeed);
-        float extinctionCoeff = max(voxelInfo.x, 1e-30f);
+        float4 voxelInfo = getFrustumImageInfo(samplePoint, true, pushConst.jitterStrength0, envVolumetricFogInfoImage_sample, randomSeed);
+        float extinction = max(voxelInfo.x, 1e-30f);
         float scattering = voxelInfo.y;
         float phase = voxelInfo.z;
-        float phase2 = phase * phase;
         float3 color = voxelInfo.w;
 
-        Light light = sceneInfo.lights[0];
-        float3 lightColor = light.color * light.intensity;
-        float3 lightDirection; float3 lightPos;
-        if (light.type == LightType::Direction) {
-            lightDirection = -light.direction;
-            lightPos = samplePoint + 1000.0f * lightDirection;
-        } else if (light.type == LightType::Point) {
-            lightDirection = normalize(light.pos - samplePoint);
-            lightPos = light.pos;
-        }
+        if (extinction <= 1e-30f) continue;
 
-        float fp = (1.0f - phase2) / (4.0f * M_PI * pow((1 + phase2 - 2.0f * phase * dot(-dir, lightDirection)), 1.5f));
+        float3 indirectL; float a;
+        getFogScatter(samplePoint, dir, tPart, sceneInfo, globalInfo, extinction, scattering, phase, color, 0.0f, attenuation, a, indirectL);
 
-        float3 activeSunColor = lightColor * getAttenuation2(samplePoint, globalInfo, sceneInfo);
-        activeSunColor *= getShadow(float4(samplePoint, 1.0f));
-
-        float x = extinctionCoeff * tPart;
-        float factor = (x < 1e-4) ? tPart * (1.0 - 0.5 * x) : (1.0 - exp(-x)) / extinctionCoeff;
-        L += activeSunColor * fp * scattering * color * E * factor;
-
-        E *= exp(-extinctionCoeff * tPart);
-        if (all(E <= 1e-3f)) break;
+        attenuation *= a;
+        L += luminance(indirectL);
+        if (all(attenuation <= 1e-3f)) break;
     }
-    attenuation *= E;
 #endif
+
+    attenuation2 *= getAttenuation2(endPos, globalInfo, sceneInfo);
 }
 
+/*
 void getEnvVolumetricFogScatter_DDA(
     float3 startPos, float3 endPos, inout uint randomSeed, bool rayMarching,
     inout float3 L, inout float3 attenuation, inout float3 attenuation2
@@ -1065,5 +1052,6 @@ void getEnvVolumetricFogScatter_DDA(
     attenuation *= E;
 #endif
 }
+*/
 #endif
 #endif
