@@ -16,14 +16,14 @@ TAA::TAA() {
 void TAA::init(TAACreateInfo createInfo) {
 	this->setting = createInfo;
 
-    pushConstant.Halton_2_3[0] = { 0.0f, -1.0f / 3.0f };
-    pushConstant.Halton_2_3[1] = { -1.0f / 2.0f, 1.0f / 3.0f };
-    pushConstant.Halton_2_3[2] = { 1.0f / 2.0f, -7.0f / 9.0f };
-    pushConstant.Halton_2_3[3] = { -3.0f / 4.0f, -1.0f / 9.0f };
-    pushConstant.Halton_2_3[4] = { 1.0f / 4.0f, 5.0f / 9.0f };
-    pushConstant.Halton_2_3[5] = { -1.0f / 4.0f, -5.0f / 9.0f };
-    pushConstant.Halton_2_3[6] = { 3.0f / 4.0f, 1.0f / 9.0f };
-    pushConstant.Halton_2_3[7] = { -7.0f / 8.0f, 7.0f / 9.0f };
+    Halton_2_3[0] = { 0.5f, 1.0f / 3 };
+    Halton_2_3[1] = { 0.25f, 2.0f / 3 };
+    Halton_2_3[2] = { 0.75f, 1.0f / 9 };
+    Halton_2_3[3] = { 0.125f, 4.0f / 9 };
+    Halton_2_3[4] = { 0.625f, 7.0f / 9 };
+    Halton_2_3[5] = { 0.375f, 2.0f / 9 };
+    Halton_2_3[6] = { 0.875f, 5.0f / 9 };
+    Halton_2_3[7] = { 0.0625f, 8.0f / 9 };
 
     Feature::createGBuffer(false, false, 2);
 
@@ -33,6 +33,8 @@ void TAA::init(TAACreateInfo createInfo) {
     compileAndCreateShaders();
 
     Feature::init();
+
+    pushConstant.mergeRatio = setting.mergeRatio;
 }
 
 void TAA::clean() {
@@ -42,7 +44,7 @@ void TAA::clean() {
     Feature::clean();
 }
 void TAA::uiRender() {
-
+    ImGui::DragFloat("TAA Merge Ratio", (float*)&pushConstant.mergeRatio, 0.01, 0.0f, 1.0f);
 }
 void TAA::resize(VkCommandBuffer cmd, const VkExtent2D& size, nvvk::Image images[3]){
     NVVK_CHECK(gBuffers.update(cmd, size));
@@ -77,27 +79,23 @@ void TAA::resize(VkCommandBuffer cmd, const VkExtent2D& size, nvvk::Image images
     pushConstant.screenSize = { size.width, size.height };
 }
 void TAA::preRender() {
-    static int frameIndex = 0;
-    pushConstant.frameIndex = frameIndex;
-    ++frameIndex;
-
     Scene& scene = Application::sceneResource;
-    pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
+
+	pushConstant.frameIndex = frameIndex;
+	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 
     nvvk::Buffer& bSceneInfo = Application::sceneResource.bSceneInfo;
     shaderio::SceneInfo& sceneInfo = Application::sceneResource.sceneInfo;
     std::shared_ptr<nvutils::CameraManipulator> cameraManip = Application::sceneResource.cameraManip;
 
-    //glm::mat4 projMatrix = cameraManip->getPerspectiveMatrix();
-    //shaderio::float2 sampleOffset = pushConstant.Halton_2_3[pushConstant.frameIndex % 8];
-    //projMatrix[2][0] += sampleOffset.x / setting.renderTarget.extent.width;
-    //projMatrix[2][1] += sampleOffset.y / setting.renderTarget.extent.height;
-    //
-    //const glm::mat4 viewMatrix = cameraManip->getViewMatrix();
-    //sceneInfo.viewProjMatrix = projMatrix * viewMatrix;
-    //sceneInfo.projInvMatrix = glm::inverse(projMatrix);
+    projMatrix_taaJitter = cameraManip->getPerspectiveMatrix();
+    shaderio::float2 sampleOffset = Halton_2_3[pushConstant.frameIndex % 8];
 
-    pushConstant.mergeRatio = setting.mergeRatio;
+    pushConstant.jitter = { (sampleOffset.x - 0.5f) / setting.renderTarget.extent.width * 2.0f, (sampleOffset.y - 0.5f) / setting.renderTarget.extent.height * 2.0f };
+    projMatrix_taaJitter[0][2] += pushConstant.jitter.x;
+    projMatrix_taaJitter[1][2] += pushConstant.jitter.y;
+
+	++frameIndex;
 }
 
 void TAA::createDescriptorSetLayout() {
@@ -124,7 +122,7 @@ void TAA::createDescriptorSetLayout() {
 
     bindings.addBinding({
         .binding = (uint32_t)shaderio::BindingPoints_TAA::eVelocityImage,
-        .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         .descriptorCount = 1,
         .stageFlags = VK_SHADER_STAGE_ALL });
 
@@ -212,7 +210,6 @@ void TAA::mergeResult(VkCommandBuffer cmd) {
         .size = sizeof(shaderio::TAAPushConstant),
         .pValues = &pushConstant,
     };
-    
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, staticDescPack.getSetPtr(), 0, nullptr);
 
     {
@@ -264,6 +261,6 @@ void TAA::mergeResult(VkCommandBuffer cmd) {
         };
         vkCmdCopyImage2(cmd, &copyInfo);
     }
-    nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+    nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT_KHR, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
 }
 

@@ -51,6 +51,60 @@ void getGroupsharedData(uint groupThreadIndex) {
 #endif
 #endif
 
+//----------------------------------------时域抖动------------------------------------------------
+// 时域超采样只作用在“体素内部的光线步进采样点”上（见 getVolumetricFogScatter 的 layerOffset）：
+// 每帧让采样点落在体素板内的不同分层位置，再由 step7_5 的时域滤波把多帧积起来，
+// 等价于在固定的 160x160x80 分辨率下提高了采样率。
+// 注意：绝不能去抖动体素中心本身。消费端 getFrustumImageInfo 是按未抖动的网格映射
+// 算 uvw 的，它不知道这个偏移；网格一动，每帧读到的雾就横向错开最多半个体素，
+// 那不是超采样，那就是闪烁。
+// 用低差异序列（radical inverse）而不是白噪声，是因为前者收敛快且不引入闪烁。
+float radicalInverse(uint index, uint base) {
+    float result = 0.0f;
+    float invBase = 1.0f / (float)base;
+    float f = invBase;
+    while (index > 0u) {
+        result += f * (float)(index % base);
+        index /= base;
+        f *= invBase;
+    }
+    return result;
+}
+
+// 采样视锥体素时的屏幕空间有序抖动（InterleavedGradientNoise），偏移量以“切片”为单位。
+// 相比原来在世界空间viewZ上加白噪声：IGN在屏幕空间是稳定的低频图案，
+// 时域滤波和TAA可以干净地把它收敛掉；而白噪声在相机移动时表现为逐像素的闪烁，
+// 这正是“波动”的主要来源。参考引擎的做法也是在切片空间做 (dither - 0.5) * 2。
+float getFogSliceDither(float2 ditherPos, uint temporalFrameIndex, float strength) {
+    float dither = InterleavedGradientNoise(ditherPos, (float)(temporalFrameIndex & 63u));
+    return (dither - 0.5f) * 2.0f * strength;
+}
+
+// 逐单元、与帧号无关的有序抖动。用IGN而不是hash白噪声：IGN在空间上是有序图案，
+// 邻域钳制和TAA都能干净地把它收敛掉，白噪声则会留下颗粒。
+float getCellDither(float2 cell, float layer) {
+    return InterleavedGradientNoise(cell, layer);
+}
+
+// 光线步进的“层内偏移”，由两部分合成：
+//   1. spatialDither —— 与帧号无关的逐单元有序抖动。它的作用是打破空间相关性。
+//      原来所有体素/像素共用同一个偏移，于是雾在体素边界、雾体AABB边界上的量化位置
+//      处处相同：fogAcc开时表现为块状伪影，fogAcc关时表现为整片雾逐帧同步跳动。
+//   2. 逐帧推进的低差异序列 —— 时域超采样，由时域滤波/TAA积成更高的有效采样率。
+// 两者用 Cranley-Patterson 旋转合成：每个单元走自己相位的同一条低差异序列，
+// 既保住了序列的分层性质（不会退化成白噪声），又让邻居之间互不相关。
+// advanceTemporal 为 false 时只留空间抖动：没有时域滤波去积分的话，逐帧变化就只是闪烁。
+float getMarchLayerOffset(uint temporalFrameIndex, float spatialDither, bool advanceTemporal) {
+    if (pushConst.randomStepping != 1) return 0.5f;
+#ifdef FOG_LEGACY_LAYER_OFFSET
+    // 仅用于A/B对比：复现修复前的“全局同相位”偏移（所有体素/像素共用一个值）。
+    return radicalInverse(temporalFrameIndex % 16u + 1u, 2u);
+#else
+    if (!advanceTemporal) return frac(spatialDither);
+    return frac(radicalInverse(temporalFrameIndex % 16u + 1u, 2u) + spatialDither);
+#endif
+}
+
 float getShadow(float4 worldPos) {
     float4 lightMapNdcPos = mul(worldPos, pushConst.lightVP);
     if (abs(lightMapNdcPos.w) < 1e-6f) return 1.0f;

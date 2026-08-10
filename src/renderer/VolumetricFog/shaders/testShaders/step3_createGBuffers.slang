@@ -64,19 +64,15 @@ VSout vertexMain(VSin input, uint vertexIndex: SV_VertexID){
 
     float4 pos = mul(float4(posMesh, 1.0), instance.transform);
 
-    float4x4 jitterMat = sceneInfo.projMatrix;
-    float2 jitter = float2(Halton_2_3[pushConst.iteration % 8].x * 1.0f / pushConst.screenSize.x, Halton_2_3[pushConst.iteration % 8].y * 1.0f / pushConst.screenSize.y);
-    jitterMat[2][0] += jitter.x;
-    jitterMat[2][1] += jitter.y;
-
     VSout output;
-    output.sv_position = mul(pos, sceneInfo.viewProjMatrix);
+    output.sv_position = mul(mul(pos, sceneInfo.viewMatrix), globalInfoBuffer[0].projMatrix_taaJitter);
     output.worldPos = pos.xyz;
     output.worldNormal = normalize(mul(normal, float3x3(pushConst.normalMatrix)));
     output.worldTexCoord = texCoord;
 
-    output.screenPos_Current = output.sv_position.xy / output.sv_position.w * 0.5f + 0.5f;
-    float4 clipPos_Last = mul(float4(posMesh, 1.0), pushConst.lightVP * globalInfoBuffer[0].VPMatrix_lastFrame);
+    float4 clipPos_Cur = mul(pos, sceneInfo.viewProjMatrix);
+    output.screenPos_Current = clipPos_Cur.xy / clipPos_Cur.w * 0.5f + 0.5f;
+    float4 clipPos_Last = mul(mul(float4(posMesh, 1.0), pushConst.lightVP), globalInfoBuffer[0].VPMatrix_lastFrame);
     output.screenPos_Last = clipPos_Last.xy / clipPos_Last.w * 0.5f + 0.5f;
 
     return output;

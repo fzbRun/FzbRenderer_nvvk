@@ -9,10 +9,10 @@ NAMESPACE_SHADERIO_BEGIN()
 
 struct TAAPushConstant {
 	float4x4 viewMatrix_lastFrame;
-	float2 Halton_2_3[8];
 	uint2 screenSize;
 	int frameIndex;
 	float mergeRatio;
+	float2 jitter;
 	SceneInfo* sceneInfoAddress;
 };
 

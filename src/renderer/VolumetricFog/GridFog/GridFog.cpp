@@ -6,7 +6,7 @@
 
 using namespace FzbRenderer;
 
-GridFog::GridFog(GridFogCreateInfo createInfo, int index, int indexMap) {
+GridFog::GridFog(GridFogCreateInfo createInfo, int index, int indexMap, int randomSeed) {
 	gridFogInfo = createInfo.fogInfo;
 	fogIndexMap = indexMap;
 	generationInfo = createInfo.generationInfo;
@@ -24,6 +24,8 @@ GridFog::GridFog(GridFogCreateInfo createInfo, int index, int indexMap) {
 	pushConstant.color = gridFogInfo.color;
 
 	pushConstant.generationInfo = generationInfo;
+
+	pushConstant.randomSeed = randomSeed;
 }
 
 void createGridFogImage(FzbRenderer::Image& image, shaderio::uint3 size, bool linear) {
@@ -344,7 +346,7 @@ void GridFogSet::addFog(GridFogCreateInfo createInfo) {
 		.typeFogIndex = fogCount,
 	};
 	setting.fogInfos->push_back(volumetricFogInfo);
-	gridFogs.push_back(GridFog(createInfo, fogCount, setting.fogInfos->size() - 1));
+	gridFogs.push_back(GridFog(createInfo, fogCount, setting.fogInfos->size() - 1, createInfo.randomSeed));
 
 	++fogCount;
 }

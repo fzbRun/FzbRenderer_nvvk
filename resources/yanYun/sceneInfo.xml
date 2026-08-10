@@ -1,11 +1,16 @@
 <scene>
 	<sensor type="perspective">
-		<fov value="60"/>
+		<fov value="45"/>
 		<plane value="1, 10000" />
 		<transform type = "lookAt">
 			<matrix value="-1 0 0 0 0 1 0 1 0 0 -1 4 0 0 0 1"/>
+			<!--
 			<eye value = "5112.308, -61.677, -4441.671" />
 			<center value = "5112.310, -62.111, -4442.556" />
+			<up value = "0.00000, 1.00000, 0.00000" />
+			-->
+			<eye value = "5099.799, -50.642, -4435.321" />
+			<center value = "5100.306, -51.043, -4436.042" />
 			<up value = "0.00000, 1.00000, 0.00000" />
 		</transform>
 	</sensor>

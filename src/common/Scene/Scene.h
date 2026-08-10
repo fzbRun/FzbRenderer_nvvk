@@ -21,6 +21,11 @@ sceneManager主要有三个功能
 #include <common/Instance/Instance.h>
 
 namespace FzbRenderer {
+struct CameraInfo_lastFrame{
+	shaderio::float4x4 viewMatrix;
+	shaderio::float4x4 projMatrix;
+	shaderio::float3 cameraPos;
+};
 
 class Scene {
 public:
@@ -39,6 +44,7 @@ public:
 	std::string name = "scene";
 	std::shared_ptr<nvutils::CameraManipulator> cameraManip{ std::make_shared<nvutils::CameraManipulator>() };
 	bool cameraChange = false;
+	CameraInfo_lastFrame cameraInfo_lastFrame;
 	
 	bool isStaticScene = true;
 	std::vector<FzbRenderer::MeshSet> meshSets;

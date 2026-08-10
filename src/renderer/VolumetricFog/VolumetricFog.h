@@ -10,11 +10,108 @@
 #include <feature/ShadowMap/ShadowMap.h>
 #include <common/Buffer/Buffer.h>
 #include <feature/TAA/TAA.h>
-#include <feature/SVGF/SVGF.h>
 #include "HeightFog/HeightFog.h"
 #include "FluidFog/FluidFog.h"
 #include "GridFog/GridFog.h"
 
+#ifdef FINAL_PROJECT
+namespace FzbRenderer {
+enum class GBuffers_VolumetricFog {
+	eAlbedo = 0,
+	eNormal,
+	eEmissive,
+	eVelocity,
+	eVertexInfo,	//meshID, instanceID, etc
+	eRendered,
+	eTonemapping,
+};
+
+class VolumetricFog : public Renderer {
+public:
+	VolumetricFog() = default;
+	~VolumetricFog() = default;
+
+	VolumetricFog(pugi::xml_node& rendererNode);
+
+	void init() override;
+	void clean() override;
+	void uiRender() override;
+	void resize(VkCommandBuffer cmd, const VkExtent2D& size) override;
+	void preRender() override;
+	void render(VkCommandBuffer* cmd) override;
+private:
+	void createSourceData();
+	void createDescriptorSetLayout() override;
+	void createDescriptorSet();
+	void createPipelineLayout();
+	void compileAndCreateShaders() override;
+	void updateDataPerFrame(VkCommandBuffer cmd) override;
+
+	VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures{};
+	VkPushConstantsInfo pushInfo;
+	//-------------------------------------------------------------------
+	float time = 0.0f;
+	float dt = 0.0f;
+	int temporalFrameIndex = 0;
+	//-----------------------------shadowMap-------------------------------
+	ShadowMap shadowMap;
+	//--------------------------------TAA---------------------------------
+	bool useTAA = true;
+	TAA taa;
+	//-------------------------------GBuffer-------------------------------
+	shaderio::CreateGBuffersPushConstant createGBuffersPushConstant;
+	VkShaderEXT vertexShader_createGBuffer{};
+	VkShaderEXT fragmentShader_createGBuffer{};
+	void createGBuffers(VkCommandBuffer cmd);
+	//---------------------------FogGlobalInfo------------------------------
+	bool globalInfoModified = false;
+	shaderio::FogGlobalInfo fogGlobalInfo;
+	FzbRenderer::Buffer fogGlobalInfoBuffer;
+	//------------------------VolumetricFogInfo------------------------------
+	std::vector<shaderio::VolumetricFogInfo> volumetricFogInfos;
+	FzbRenderer::Buffer volumetricFogInfosBuffer;
+	std::vector<int> volumetricFogInfoModified;
+
+	std::unique_ptr<HeightFogSet> heightFogSet;
+	std::unique_ptr<FluidFogSet> fluidFogSet;
+	std::unique_ptr<GridFogSet> gridFogSet;
+	//-----------------------------FogAcc-----------------------------------
+	bool useFogAcc = true;
+	shaderio::FrustumGlobalInfo frustumInfo;
+	bool blurVoxelFog = true;
+	int sampleCount_fogAcc = 20;
+
+	void createVolumetricFogImage(FzbRenderer::Image& image, shaderio::uint3 size, bool linear);
+	FzbRenderer::Image fogAccImage;
+
+	FzbRenderer::Buffer fogAccHasFogVoxelCountBuffer;
+	FzbRenderer::Buffer fogAccHasFogVoxelInfosBuffer;
+	FzbRenderer::Image fogAccHistoryImage;
+
+	shaderio::FogAccPushConstant fogAccPushConstant;
+	VkShaderEXT computeShader_getHasFogVoxels{};
+	VkShaderEXT computeShader_voxelGetFog{};
+	VkShaderEXT computeShader_voxelBlurFog{};
+	VkShaderEXT computeShader_voxelAccFog{};
+
+	void fogAcc(VkCommandBuffer cmd);
+	//---------------------------renderOpaque-------------------------------
+	shaderio::renderOpaquePushConstant renderOpaquePushConstant;
+	VkShaderEXT computeShader_renderOpaqueMaterial{};
+	void renderOpaqueMaterial(VkCommandBuffer cmd);
+
+	int sampleCount_renderOpaque = 20;
+	float jitterStrength_randerOpaque = 1.0f;
+	//-----------------------renderTransparent-------------------------------
+	shaderio::renderTransparentPushConstant renderTransparentPushConstant;
+	VkShaderEXT vertexShader_renderTransparentMaterial{};
+	VkShaderEXT fragmentShader_renderTransparentMaterial{};
+	void renderTransparentMaterial(VkCommandBuffer cmd);
+};
+
+}
+
+#else
 namespace FzbRenderer {
 	enum class GBuffers_VolumetricFog {
 		eAlbedo = 0,
@@ -116,13 +213,16 @@ private:
 
 	shaderio::VolumetricFogPushConstant pushConstant;
 
+	bool useTAA = true;
+	shaderio::float4x4 invProjMatrix_taaJitter;
 	bool useSVGF = false;
 	SVGF svgf;
 	TAA taa;
 	ShadowMap shadowMap;
 
-	glm::vec3 m_lastCameraPos = glm::vec3(0.0f);
 	shaderio::float4x4 VPMatrix_lastFrame;
+	shaderio::float4x4 invViewMatrix_lastFrame;
+	uint32_t temporalFrameIndex = 0;
 
 	FzbRenderer::Buffer GlobalInfoBuffer;
 	//--------------------------FogInfo-----------------------------------
@@ -168,7 +268,9 @@ private:
 #ifdef BLUR_FOG_VOXEL
 	FzbRenderer::Image volumetricFogAccResultHistoryImage;
 #endif
-	bool useFogBlurVoxel = false;
+	//默认开启：视锥体素的时域滤波是在不改变160x160x80分辨率的前提下
+	//消除相机移动锯齿的唯一手段（每帧亚体素抖动 + 多帧积分 = 超采样）
+	bool useFogBlurVoxel = true;
 
 	uint32_t rmSampleCountSampleCount_fogAcc = 8;
 	int randomStepping_fogAcc = true;
@@ -212,5 +314,5 @@ private:
 #endif
 };
 }
-
+#endif
 #endif

@@ -13,10 +13,11 @@ struct GridFogCreateInfo {
 	shaderio::GridFogInfo fogInfo;
 	shaderio::AABB fogRange;
 	shaderio::GridFogGenerationInfo generationInfo;
+	int randomSeed = 0;
 };
 class GridFog {
 public:
-	GridFog(GridFogCreateInfo createInfo, int index, int indexMap);
+	GridFog(GridFogCreateInfo createInfo, int index, int indexMap, int randomSeed);
 
 	void init();
 	void clean();

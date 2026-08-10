@@ -390,7 +390,8 @@ void getVolumetricFogScatter(
 }
 */
 void getVolumetricFogScatter(
-    float3 startPos, float3 endPos, inout uint randomSeed, uint sampleCount, bool useGlobalHeight,
+    float3 startPos, float3 endPos, inout uint randomSeed, uint sampleCount, float stepPower, bool useGlobalHeight,
+    float spatialDither, bool advanceTemporal,
     inout float L, inout float attenuation, inout float attenuation2
 ) {
     #ifdef COMPUTE_SHADER
@@ -403,14 +404,26 @@ void getVolumetricFogScatter(
 
     float3 dir = normalize(endPos - startPos);
     float tTotal = length(endPos - startPos);
-    const float distancePower = 2.0f;
+    // startPos..endPos 就是一个体素板的厚度，在这么短的一段里再做 pow(i/N, 2) 的非均匀
+    // 分布没有物理依据：它把所有采样点都挤到板的近端，等于系统性地把雾往前拉半个体素，
+    // 而且每个体素的偏移量随深度变化，体素之间就对不齐 —— 相机移动时表现为一层层的错位。
+    // 改成均匀分层，层内偏移 = 逐单元有序抖动（打破空间相关性）+ 逐帧低差异推进（时域超采样）。
+    // spatialDither 这一项是必须的：没有它，全屏/全网格所有单元的采样点落在完全相同的
+    // 相对位置上，雾的量化边界处处对齐 —— fogAcc开时就是块状伪影，关时就是整片雾同步跳动。
+    float layerOffset = getMarchLayerOffset(globalInfo.temporalFrameIndex, spatialDither, advanceTemporal);
+
+    float tPartStart = 0;
+    float tPartEnd = pow(1.0f / sampleCount, stepPower) * tTotal;
     for (int sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex) {
-        float tStart = tTotal * pow(float(sampleIndex) / float(sampleCount), distancePower);
-        float tEnd = tTotal * pow(float(sampleIndex + 1) / float(sampleCount), distancePower);
-        float tPart = tEnd - tStart;
-        float3 partStartPos = startPos + dir * tStart;
-        float3 partEndPos = startPos + dir * tEnd;
-        float3 samplePoint = lerp(partStartPos, partEndPos, pushConst.randomStepping == 1 ? rand(randomSeed) : 0.5f);
+        //float tPart = tTotal / (float)sampleCount;
+        //float tStart = tPart * (float)sampleIndex;
+        //float3 samplePoint = startPos + dir * (tStart + tPart * layerOffset);
+
+        tPartStart = tPartEnd;
+        tPartEnd = pow(float(sampleIndex + 1) / sampleCount, stepPower) * tTotal;
+        float tPart = tPartEnd - tPartStart;
+        float3 samplePoint = startPos + dir * (tPartStart + tPart * layerOffset);
+        
 
         float envExtinction = 0.0f;
         float envScattering = 0.0f;
@@ -497,7 +510,9 @@ void getVolumetricFogScatter_Frustum(
 ){
 }
 //------------------------------------------------------------------------------------------------------------------------------------------------
-float4 getFrustumImageInfo(float3 worldPos, bool linear, float jitterStrength, Sampler3D<float4> image, inout uint randomSeed) {
+// jitterStrength 的单位是“深度切片”，不再是世界空间距离。
+// sliceDither 由调用者算好（屏幕空间IGN），传0表示不抖动。
+float4 getFrustumImageInfo(float3 worldPos, bool linear, float sliceDither, Sampler3D<float4> image, inout uint randomSeed) {
     #ifdef COMPUTE_SHADER
     SceneInfo sceneInfo = groupSceneInfo;
     #else
@@ -506,7 +521,7 @@ float4 getFrustumImageInfo(float3 worldPos, bool linear, float jitterStrength, S
 
     float nearPlane = pushConst.cameraNearPlane;
     float farPlane = pushConst.cameraFarPlane;
-    float3 compressionParams = pushConst.compressionParams;
+    float3 compressionParams = max(pushConst.compressionParams, 1e-4f);
     float tanHalfFov = pushConst.tanCameraFov_2;
     float aspect = pushConst.aspectRatio;
     uint3 gridSize = pushConst.frustumGridSize;
@@ -521,11 +536,6 @@ float4 getFrustumImageInfo(float3 worldPos, bool linear, float jitterStrength, S
     float viewX = dot(toPoint, cameraRight);
     float viewY = dot(toPoint, cameraUp);
     if (viewZ <= 0.0f) return float4(0, 0, 0, 0);
-    {
-        viewZ = max(viewZ + (rand(randomSeed) * 2.0f - 1.0f) * jitterStrength, nearPlane);
-        //viewX += (rand(randomSeed) * 2.0f - 1.0f) * jitterStrength;
-        //viewY += (rand(randomSeed) * 2.0f - 1.0f) * jitterStrength;
-    }
 
     float clampedZ = clamp(viewZ, nearPlane, farPlane);
     float scale = clampedZ / viewZ;
@@ -569,16 +579,22 @@ float4 getFrustumImageInfo(float3 worldPos, bool linear, float jitterStrength, S
     //return blendZ;
     return lerp(s0, s1, blendZ);
 #else
-    float w = frustumInvMap(viewZ - nearPlane, compressionParams, farPlane - nearPlane, gridSize.z) / (farPlane - nearPlane);
+    // 先换算到切片空间，抖动在切片空间加，最后再归一化到[0,1]。
+    // 这样抖动幅度在近处和远处都恰好是“一个体素”，不会像世界空间抖动那样
+    // 近处过强（跨很多体素）远处过弱（完全不起作用）。
+    float zSlice = frustumInvMap(viewZ - nearPlane, compressionParams, farPlane - nearPlane, gridSize.z) / (farPlane - nearPlane) * gridSizeF.z;
+    zSlice += sliceDither;
+    float w = saturate(zSlice / gridSizeF.z);
     float3 uvw = float3(u, v, w);
 
     if (linear) return image.SampleLevel(uvw, 0);
-    else return image[uint3(uvw * gridSize)];
+    else return image[uint3(uvw * gridSizeF)];
 #endif
 }
 
+// ditherPos: 屏幕空间像素坐标，用于IGN有序抖动。传0则不抖动。
 void getPreAccFog(
-    float3 startPos, float3 endPos, inout uint randomSeed,
+    float3 startPos, float3 endPos, inout uint randomSeed, float2 ditherPos,
     inout float L, inout float attenuation, inout float attenuation2
 ) {
     #ifdef COMPUTE_SHADER
@@ -606,18 +622,27 @@ void getPreAccFog(
     endPos = startPos + tExit * dir;
     startPos = startPos + tEnter * dir;
 
-    attenuation *= getFrustumImageInfo(endPos, true, pushConst.jitterStrength0, volumetricFogAccResultImage_sample, randomSeed).x;
+    // 透射率和入射光必须来自同一个体素样本，否则两者在体素边界处的跳变位置不一致，
+    // 会出现“亮边/暗边”的描边式锯齿。原来的实现用两个不同强度、且随机数状态已经推进过的
+    // 抖动分别采样同一张图，等于人为把两者解耦了。
+    float sliceDither = getFogSliceDither(ditherPos, globalInfo.temporalFrameIndex, pushConst.jitterStrength0);
+    float4 fogInfo = getFrustumImageInfo(endPos, true, sliceDither, volumetricFogAccResultImage_sample, randomSeed);
 
-    float3 toPoint = endPos - sceneInfo.cameraPosition;
-    float viewZ = clamp(dot(toPoint, cameraForward), nearPlane, farPlane);
-    float jitterStrengthL = pushConst.jitterStrength1;// + pushConst.jitterStrength1 * lerp(0.0f, 1.0f, frustumMap(viewZ - nearPlane, compressionParams, farPlane - nearPlane, pushConst.frustumGridSize.z));
-    L += getFrustumImageInfo(endPos, true, jitterStrengthL, volumetricFogAccResultImage_sample, randomSeed).y;
+    // 远平面保护：视锥网格在远平面处被硬截断，超出的部分没有数据。
+    // 参考引擎用FarClipProtectRange把最后20%的雾效渐隐掉，避免远处出现一条硬边。
+    float viewZ = dot(endPos - cameraPos, cameraForward);
+    float fadeStart = farPlane * 0.8f;
+    float farClipProtect = 1.0f - saturate((viewZ - fadeStart) / max(farPlane - fadeStart, 1e-4f));
+
+    attenuation *= lerp(1.0f, fogInfo.x, farClipProtect);
+    L += fogInfo.y * farClipProtect;
     attenuation2 *= getAttenuation2(endPos, globalInfo, sceneInfo);
 }
 //------------------------------------------------------------------------------------------------------------------------------------------------
 #ifdef USE_ENVFOG
 void getEnvVolumetricFogScatter(
     float3 startPos, float3 endPos, inout uint randomSeed, uint sampleCount,
+    float spatialDither, bool advanceTemporal,
     inout float L, inout float attenuation, inout float attenuation2
 ) {
     #ifdef COMPUTE_SHADER
@@ -652,9 +677,9 @@ void getEnvVolumetricFogScatter(
     float tTotal = tGridExit - tGridEnter;
     float3 E = 1.0f;
     float tPart = tTotal / pushConst.sampleCount;
+    float layerOffsetUniform = getMarchLayerOffset(globalInfo.temporalFrameIndex, spatialDither, advanceTemporal);
     for (int sampleIndex = 0; sampleIndex < pushConst.sampleCount; ++sampleIndex) {
-        float step = pushConst.randomStepping == 1 ? rand(randomSeed) : 0.5f;
-        float tSample = tPart * ((float)sampleIndex + step);
+        float tSample = tPart * ((float)sampleIndex + layerOffsetUniform);
         float3 samplePoint = startPos + dir * tSample;
 
         float3 uvw = (samplePoint - gridMin + 0.5f) / (gridMax - gridMin);
@@ -695,18 +720,17 @@ void getEnvVolumetricFogScatter(
     endPos = startPos + tExit * dir;
     startPos = startPos + tEnter * dir;
 
-    const float distancePower = 2.0f;
+    // 同 getVolumetricFogScatter：均匀分层 + 逐单元有序抖动 + 逐帧低差异推进，
+    // 取代 pow(i/N, 2) 的非均匀分布和逐样本白噪声。
     float tTotal = tExit - tEnter;
+    float layerOffset = getMarchLayerOffset(globalInfo.temporalFrameIndex, spatialDither, advanceTemporal);
     for (int sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex) {
-        float tCurrent = pow((float)sampleIndex / sampleCount, distancePower) * tTotal;
-        float tNext = pow((float)(sampleIndex + 1) / sampleCount, distancePower) * tTotal;
-        float tPart = tNext - tCurrent;
-
-        float step = pushConst.randomStepping == 1 ? rand(randomSeed) : 0.5f;
-        float tSample = tCurrent + step * tPart;
+        float tPart = tTotal / (float)sampleCount;
+        float tSample = tPart * ((float)sampleIndex + layerOffset);
         float3 samplePoint = startPos + dir * tSample;
 
-        float4 voxelInfo = getFrustumImageInfo(samplePoint, true, pushConst.jitterStrength0, envVolumetricFogInfoImage_sample, randomSeed);
+        // 这里的samplePoint本身已经是抖动过的光线步进点，再叠加切片抖动只会引入额外噪声
+        float4 voxelInfo = getFrustumImageInfo(samplePoint, true, 0.0f, envVolumetricFogInfoImage_sample, randomSeed);
         float extinction = max(voxelInfo.x, 1e-30f);
         float scattering = voxelInfo.y;
         float phase = voxelInfo.z;

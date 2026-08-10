@@ -33,17 +33,25 @@ void computeMain_deferredRendering(uint2 threadIndex: SV_DispatchThreadID, uint2
     float2 uv = (float2(threadIndex) + 0.5f) / float2(screenSize);
     float2 ndc = uv * 2.0f - 1.0f;
     float4 clipPos = float4(ndc, depth, 1.0f);
-    float4 worldPos = mul(mul(clipPos, sceneInfo.projInvMatrix), sceneInfo.viewInvMatrix);
+    float4 worldPos = mul(mul(clipPos, groupGlobalInfo.invProjMatrix_taaJitter), sceneInfo.viewInvMatrix);
     worldPos /= worldPos.w;
 
     float attenuation = 1.0f, attenuation2 = 1.0f, L = 0.0f;
-    uint randomSeed = xxhash32(uint3(int(pushConst.time * 1000.0f), threadIndex));
-    if (pushConst.useAccFog == 1) getPreAccFog(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, L, attenuation, attenuation2);
+    // 用一直递增的帧号做种子，而不是墙上时钟。原来的 time * 1000 会让相机静止时噪声
+    // 也每帧变化，直接表现为画面“波动”；temporalFrameIndex 在相机移动时也不会被清零，
+    // 所以抖动序列始终连续，时域滤波才能收敛。
+    uint randomSeed = xxhash32(uint3(groupGlobalInfo.temporalFrameIndex, threadIndex));
+    if (pushConst.useAccFog == 1) getPreAccFog(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, float2(threadIndex), L, attenuation, attenuation2);
     else {
+        // 不走fogAcc时是逐像素直接步进，没有任何时域滤波在后面收敛（TAA只作用于最终颜色，
+        // 且相机移动时会被clamp住），所以层内偏移只能用“与帧号无关”的逐像素有序抖动：
+        // 空间上打散量化边界，时间上完全静止。原来这里用的是随帧推进的全局偏移，
+        // 所有像素同时跳到下一个偏移量 —— 整片雾逐帧同步明暗变化，就是烟雾抖动的来源。
+        float spatialDither = getCellDither(float2(threadIndex), 0.0f);
         #ifdef USE_ENVFOG
-        getEnvVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, pushConst.sampleCount, L, attenuation, attenuation2);
+        getEnvVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, pushConst.sampleCount, spatialDither, false, L, attenuation, attenuation2);
         #else
-        getVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, pushConst.sampleCount, true, L, attenuation, attenuation2);
+        getVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, pushConst.sampleCount, 3, true, spatialDither, true, L, attenuation, attenuation2);
         #endif
     }
 

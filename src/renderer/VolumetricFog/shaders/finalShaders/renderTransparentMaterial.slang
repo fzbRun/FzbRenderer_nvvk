@@ -4,14 +4,12 @@
 #include "common/Shader/shaderStructType.h"
 #include "common/Shader/Slang/commonFunction.slang"
 
-#include "renderer/VolumetricFog/shaders/getVolumetricFog.slang"
+#include "renderer/VolumetricFog/shaders/finalShaders/FogCommon.slang"
 
-[[vk::binding(StaticBindingPoints_VolumetricFog::eAlbedoImage)]] Texture2D<float4> albedoImage;
-[[vk::binding(StaticBindingPoints_VolumetricFog::eNormalImage)]] Texture2D<float4> normalImage;
-[[vk::binding(StaticBindingPoints_VolumetricFog::eDepthImage)]] Texture2D<float> depthImage;
-[[vk::binding(StaticBindingPoints_VolumetricFog::eEmissiveImage)]] Texture2D<float4> emissiveImage;
+[[vk::push_constant]] ConstantBuffer<renderTransparentPushConstant> pushConst;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eTextures)]] Sampler2D textures[];
 
-__generic<T : IFloat> T getAttribute(uint8_t *dataBufferAddress, BufferView bufferView, uint attributeIndex){
+__generic<T : IFloat> T getAttribute(uint8_t *dataBufferAddress, BufferView bufferView, uint attributeIndex) {
     if (bufferView.count > 0)
     {
         T *ptr = (T *)(dataBufferAddress + bufferView.offset + attributeIndex * bufferView.byteStride);
@@ -21,21 +19,23 @@ __generic<T : IFloat> T getAttribute(uint8_t *dataBufferAddress, BufferView buff
     return T(1); // Error case
 }
 
-struct VSin{
+struct VSin {
     float3 position : POSITION;
     float3 normal : NORMAL;
 };
 
-struct VSout{
+struct VSout {
     float4 sv_position : SV_Position;
     float3 worldPos : POSITION;
     float3 worldNormal : NORMAL;
     float2 worldTexCoord : TEXCOORD0;
-    float3 posMesh;
+
+    float2 screenPos_Current;
+    float2 screenPos_Last;
 };
 
 [shader("vertex")]
-VSout vertexMain(VSin input, uint vertexIndex: SV_VertexID){
+VSout vertexMain(VSin input, uint vertexIndex: SV_VertexID) {
     int instanceIndex = pushConst.instanceIndex;
 
     SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
@@ -50,17 +50,19 @@ VSout vertexMain(VSin input, uint vertexIndex: SV_VertexID){
 
     float4 pos = mul(float4(posMesh, 1.0), instance.transform);
 
+    float4x4 projMatrix = sceneInfo.projMatrix;
+    if (pushConst.useTAA == 1) projMatrix = pushConst.projMatrix_taa;
+
     VSout output;
-    output.sv_position = mul(pos, sceneInfo.viewProjMatrix);
+    output.sv_position = mul(mul(pos, sceneInfo.viewMatrix), projMatrix);
     output.worldPos = pos.xyz;
     output.worldNormal = normalize(mul(normal, float3x3(pushConst.normalMatrix)));
     output.worldTexCoord = texCoord;
-    output.posMesh = posMesh;
 
     return output;
 }
 
-struct PSout{
+struct PSout {
     float4 result : SV_Target;
 };
 
@@ -71,20 +73,15 @@ PSout fragmentMain(VSout input) {
     BSDFMaterial material = sceneInfo.materials[instance.materialIndex];
 
     float3 worldPos = input.worldPos;
+    uint2 pixelPos = uint2(input.sv_position.xy);
 
-    float attenuation = 1.0f, attenuation2 = 1.0f, L = 0.0f;
-    uint randomSeed = xxhash32(uint3(pushConst.frameIndex, pushConst.instanceIndex, instance.meshIndex));
-    uint sampleCount = pushConst.useAccFog == 1 ? 0 : 10;
-    if (pushConst.useAccFog == 1) getPreAccFog(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, L, attenuation, attenuation2);
-    else {
-        #ifdef USE_ENVFOG
-        getEnvVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, sampleCount, L, attenuation, attenuation2);
-        #else
-        getVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, sampleCount, true, L, attenuation, attenuation2);
-        #endif
-    }
+    uint randomSeed = xxhash32(uint3(pushConst.temporalFrameIndex, pixelPos));
+    float attenuation = 1.0f, L = 0.0f, attenuation2 = 1.0f;
+    float spatialDither = getCellDither(float2(pixelPos), 0.0f);
+    float layerOffset = getMarchLayerOffset(pushConst.temporalFrameIndex, spatialDither, true, true);
+    getVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, pushConst.sampleCount, 3, true, layerOffset, pushConst.lightVP, pushConst.sceneInfoAddress, pushConst.fogGlobalInfoAddress, L, attenuation, attenuation2);
 
-    float shadow = getShadow(float4(worldPos, 1.0f));
+    float shadow = getShadow(float4(worldPos, 1.0f), pushConst.lightVP);
 
     float3 albedo = material.albedo;
     float3 normal = input.worldNormal;

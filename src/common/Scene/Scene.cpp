@@ -161,7 +161,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 		staticInstanceSets[i].getInstance(instances, offset, 0);
 
 		for (int j = 0; j < staticInstanceSets[i].childInstances.size(); ++j)
-			staticInstanceIndexToInstanceSetIndex.insert({ offset, i });
+			staticInstanceIndexToInstanceSetIndex.insert({ offset + j, i });
 
 		offset += staticInstanceSets[i].childInstances.size();
 	}
@@ -170,7 +170,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 		instanceSet.getInstance(instances, offset, 0);
 
 		for (int j = 0; j < periodInstanceSets[i].childInstances.size(); ++j)
-			periodInstanceIndexToInstanceSetIndex.insert({ offset, i });
+			periodInstanceIndexToInstanceSetIndex.insert({ offset + j, i });
 
 		offset += instanceSet.childInstances.size();
 	}
@@ -370,6 +370,18 @@ void FzbRenderer::Scene::preRender() {
 		LightInstance lightInstanceInfo = lightInstances[i];		
 		sceneInfo.lights[i] = lightInstanceInfo.getLight(time);
 	}
+
+	if (frameIndex == 0) {
+		cameraInfo_lastFrame.cameraPos = cameraManip->getEye();
+		cameraInfo_lastFrame.viewMatrix = cameraManip->getViewMatrix();
+		cameraInfo_lastFrame.projMatrix = cameraManip->getPerspectiveMatrix();
+	}
+	else {
+		cameraInfo_lastFrame.cameraPos = sceneInfo.cameraPosition;
+		cameraInfo_lastFrame.viewMatrix = sceneInfo.viewMatrix;
+		cameraInfo_lastFrame.projMatrix = sceneInfo.projMatrix;
+	}
+
 
 	const glm::mat4& viewMatrix = cameraManip->getViewMatrix();
 	const glm::mat4& projMatrix = cameraManip->getPerspectiveMatrix();

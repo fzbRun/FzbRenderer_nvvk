@@ -41,7 +41,18 @@ void computeMain_getHasFogVoxelInfo(uint3 threadIndex: SV_DispatchThreadID, uint
     float3 cameraUp = sceneInfo.viewInvMatrix[1].xyz;
     float3 cameraForward = -sceneInfo.viewInvMatrix[2].xyz;
 
-    float linearDepth = ((float)depthIndex + 0.5f) / gridSize.z * (farPlane - nearPlane);
+    // 体素中心必须严格保持在“未抖动”的位置上。
+    // 曾经尝试过在这里给整个网格加一个逐帧的亚体素偏移来做时域超采样，那是错的：
+    // 消费端的 getFrustumImageInfo（step8/step9）是按未抖动的网格映射算uvw的，
+    // 它不知道这个偏移，于是每帧读到的雾都横向错开最多半个体素 —— 直接就是闪烁。
+    // 时域超采样要放在“体素内部的光线步进采样点”上（见 getVolumetricFogScatter 的
+    // layerOffset）：那样只改变体素里积出来的内容，不改变体素本身的几何位置，
+    // 消费端和时域滤波才对得上。
+    float sliceCenter = (float)depthIndex + 0.5f;
+    float jitteredY = ((float)voxelIndex.y + 0.5f) / gridSize.y * 2.0f - 1.0f;
+    float jitteredX = ((float)voxelIndex.x + 0.5f) / gridSize.x * 2.0f - 1.0f;
+
+    float linearDepth = sliceCenter / gridSize.z * (farPlane - nearPlane);
     float depth = frustumMap(linearDepth, compressionParams, farPlane - nearPlane, gridSize.z);
 
     float halfHeight = (depth + nearPlane) * tanHalfFov;
@@ -49,20 +60,20 @@ void computeMain_getHasFogVoxelInfo(uint3 threadIndex: SV_DispatchThreadID, uint
 
     float3 voxelCenter = cameraPos;
     voxelCenter += (depth + nearPlane) * cameraForward;
-    voxelCenter += halfHeight * ((((float)voxelIndex.y + 0.5f) / gridSize.y) * 2.0f - 1.0f) * cameraUp;
-    voxelCenter += halfWidth * ((((float)voxelIndex.x + 0.5f) / gridSize.x) * 2.0f - 1.0f) * cameraRight;
+    voxelCenter += halfHeight * jitteredY * cameraUp;
+    voxelCenter += halfWidth * jitteredX * cameraRight;
 
     float3 dir = normalize(voxelCenter - cameraPos);
 
-    float linearDepth_lastVoxel = max((float)depthIndex - 0.5f, 0.0f) / gridSize.z * (farPlane - nearPlane);
+    float linearDepth_lastVoxel = max(sliceCenter - 1.0f, 0.0f) / gridSize.z * (farPlane - nearPlane);
     float depth_lastVoxel = frustumMap(linearDepth_lastVoxel, compressionParams, farPlane - nearPlane, gridSize.z);
 
     float halfHeight_prev = (depth_lastVoxel + nearPlane) * tanHalfFov;
     float halfWidth_prev = halfHeight_prev * aspect;
     float3 voxelCenter_lastVoxel = cameraPos;
     voxelCenter_lastVoxel += (depth_lastVoxel + nearPlane) * cameraForward;
-    voxelCenter_lastVoxel += halfHeight_prev * (((float)voxelIndex.y + 0.5f) / gridSize.y * 2.0f - 1.0f) * cameraUp;
-    voxelCenter_lastVoxel += halfWidth_prev * (((float)voxelIndex.x + 0.5f) / gridSize.x * 2.0f - 1.0f) * cameraRight;
+    voxelCenter_lastVoxel += halfHeight_prev * jitteredY * cameraUp;
+    voxelCenter_lastVoxel += halfWidth_prev * jitteredX * cameraRight;
 
     /*
     {
@@ -121,9 +132,12 @@ void computeMain_getHasFogVoxelInfo(uint3 threadIndex: SV_DispatchThreadID, uint
         fogAccHasFogVoxelInfoBuffer[fogOffset] = hasFogVoxelInfo;
     }
     //---------------------------------------------------------------------------------------------------------------
+    // 体素中心已经被 Halton 序列抖动过了，这里再叠加一次白噪声只会把有序的低差异采样
+    // 重新打散成白噪声（表现为静态噪点 + 相机移动时的闪烁）。取板厚中点即可，
+    // 亚体素的位置多样性完全交给逐帧的 voxelJitter 提供。
     uint voxelIndexU = voxelIndex.z * gridSize.x * gridSize.y + voxelIndex.y * gridSize.x + voxelIndex.x;
-    uint randomSeed = xxhash32(uint3(voxelIndexU, pushConst.frameIndex, 1));
-    float3 samplePoint = lerp(voxelCenter_lastVoxel, voxelCenter, rand(randomSeed));
+    uint randomSeed = xxhash32(uint3(voxelIndexU, globalInfo.temporalFrameIndex, 1));
+    float3 samplePoint = (voxelCenter_lastVoxel + voxelCenter) * 0.5f;
     float sampleLength = length(voxelCenter_lastVoxel - voxelCenter);
     float3 sampleDir = (voxelCenter - voxelCenter_lastVoxel) / max(sampleLength, 1e-20f);
 
@@ -398,7 +412,9 @@ void computeMain_createFrustumAccFog_Stepping_Pass1(uint threadIndex: SV_Dispatc
 
     uint3 gridSize = pushConst.frustumGridSize;
     uint voxelIndexU = voxelIndex.z * gridSize.x * gridSize.y + voxelIndex.y * gridSize.x + voxelIndex.x;
-    uint randomSeed = xxhash32(uint3(voxelIndexU, pushConst.frameIndex, 1));
+    // 用 temporalFrameIndex：pushConst.frameIndex 在相机移动时被清零，
+    // 于是相机一动，所有体素的随机序列同时跳回起点，整片雾会瞬间变一次 —— 就是“波动”。
+    uint randomSeed = xxhash32(uint3(voxelIndexU, globalInfo.temporalFrameIndex, 1));
 
     float attenuation = 1.0f, L = 0.0f, attenuation2 = 1.0f;
     if (globalInfo.useGlobalHeightFog == 1) {
@@ -408,11 +424,18 @@ void computeMain_createFrustumAccFog_Stepping_Pass1(uint threadIndex: SV_Dispatc
     }
 
     uint sampleCount = pushConst.sampleCount;
+    // 逐体素的空间抖动：以 (x, y) 为IGN坐标、z为层号，得到一张在三个方向上都不相关的
+    // 有序抖动图。原来所有体素共用一个 layerOffset，8个采样点在每个板里落在完全相同的
+    // 相对位置，于是雾体AABB的边界在整个网格上被量化到同一处 —— 这就是块状伪影。
+    // 时域推进只在体素时域滤波（fogBlur_voxel）开着时才做：滤波会把逐帧的偏移积成超采样；
+    // 没有滤波的话逐帧变化就只剩闪烁。
+    float spatialDither = getCellDither(float2(voxelIndex.xy), (float)voxelIndex.z * 0.618f);
+    bool advanceTemporal = pushConst.useFogBlurVoxel == 1;
     // globalHeightFog should affect this, but we pre calc that, so this has a lit bit mistake
     #ifdef USE_ENVFOG
-    getEnvVolumetricFogScatter(voxelCenter_lastVoxel, voxelCenter, randomSeed, sampleCount, L, attenuation, attenuation2);
+    getEnvVolumetricFogScatter(voxelCenter_lastVoxel, voxelCenter, randomSeed, sampleCount, spatialDither, advanceTemporal, L, attenuation, attenuation2);
     #else
-    getVolumetricFogScatter(voxelCenter_lastVoxel, voxelCenter, randomSeed, sampleCount, false, L, attenuation, attenuation2);
+    getVolumetricFogScatter(voxelCenter_lastVoxel, voxelCenter, randomSeed, sampleCount, 1, false, spatialDither, advanceTemporal, L, attenuation, attenuation2);
     #endif
     volumetricFogAccResultImage[voxelIndex] = float4(attenuation, L, 1.0f, 1.0f);
 }
@@ -553,7 +576,8 @@ void computeMain_createFrustumAccFog(uint3 voxelIndex: SV_DispatchThreadID, uint
     float3 samplePoint = voxelCenter;   // + (float3(rand(randomSeed), rand(randomSeed), rand(randomSeed)) * 2.0f - 1.0f) * float3(halfWidth / gridSize.x, halfHeight / gridSize.y, halfDepth);
 
     float L = 0.0f; float attenuation = 1.0f; float attenuation2 = 1.0f;
-    getVolumetricFogScatter(cameraPos, samplePoint, randomSeed, pushConst.sampleCount, true, L, attenuation, attenuation2);
+    float spatialDither = getCellDither(float2(voxelIndex.xy), (float)voxelIndex.z * 0.618f);
+    getVolumetricFogScatter(cameraPos, samplePoint, randomSeed, pushConst.sampleCount, 1, true, spatialDither, pushConst.useFogBlurVoxel == 1, L, attenuation, attenuation2);
 
     volumetricFogAccResultImage[voxelIndex] = float4(attenuation, L, 1.0f, 1.0f);
 }
@@ -794,14 +818,14 @@ void computeMain_createFrustumAccFog_Stepping(uint2 threadIndex: SV_DispatchThre
     }
 
     #ifdef USE_ENVFOG
-    getEnvVolumetricFogScatter(voxelCenter_lastVoxel, voxelCenter, randomSeed, pushConst.sampleCount, L, attenuation, attenuation2);
+    getEnvVolumetricFogScatter(voxelCenter_lastVoxel, voxelCenter, randomSeed, pushConst.sampleCount, getCellDither(float2(voxelIndex.xy), (float)voxelIndex.z * 0.618f), pushConst.useFogBlurVoxel == 1, L, attenuation, attenuation2);
     #else
 
     uint sampleCount = pushConst.sampleCount;
     //if (depthIndex < gridSize.z / 3) sampleCount = 1;
     //else if (depthIndex < gridSize.z / 1.5) sampleCount = pushConst.sampleCount / 2;
 
-    getVolumetricFogScatter(voxelCenter_lastVoxel, voxelCenter, randomSeed, sampleCount, true, L, attenuation, attenuation2);
+    getVolumetricFogScatter(voxelCenter_lastVoxel, voxelCenter, randomSeed, sampleCount, 1, true, getCellDither(float2(voxelIndex.xy), (float)voxelIndex.z * 0.618f), pushConst.useFogBlurVoxel == 1, L, attenuation, attenuation2);
 
     /*
     int sampleCount = pushConst.sampleCount;

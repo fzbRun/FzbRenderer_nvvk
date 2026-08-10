@@ -10,12 +10,152 @@
 #define FZBRENDERER_VOLUMETRIC_FOG_SHADER_IO_H
 NAMESPACE_SHADERIO_BEGIN()
 
+#define MAX_VOLUMETRIC_FOG_COUNT 10
+
+#define FINAL_PROJECT
+#ifdef FINAL_PROJECT
+
+struct TAAGlobalInfo {
+	float4x4 projMatrix;
+	float4x4 projInvMatrix;
+};
+
+struct FogGlobalInfo {
+	float lightAttenuationStrength = 1.0f;
+	uint volumetricFogCount;
+	uint heightFogCount;
+	uint gridFogCount;
+	uint fluidFogCount;
+
+	int useGlobalHeightFog;
+	float2 globalHeightFogY;
+	HeightFogInfo globalHeightFogInfo;
+};
+
+struct FrustumGlobalInfo {
+	float3 compressionParams;
+	float cameraNearPlane;
+	uint3 frustumGridSize;
+	float cameraFarPlane;
+	float tanCameraFov_2;
+	float aspectRatio;
+};
+struct FogAccHasFogVoxelInfo {
+	uint3 voxelIndex;
+	float3 voxelCenter;
+	float3 voxelCenter_lastVoxel;
+};
+
+struct CreateGBuffersPushConstant {
+	float4x4 projMatrix_taa;
+	int useTAA;
+	int frameIndex;
+
+	int instanceIndex;
+	float3x3 normalMatrix;
+	float4x4 tansfromMatrix_lastFrame;
+
+	float4x4 vpMatrix_lastFrame;
+
+	SceneInfo* sceneInfoAddress;
+
+	int padding0;
+};
+struct FogAccPushConstant {
+	FrustumGlobalInfo frustumInfo;
+	int blurVoxelFog;
+	int sampleCount;
+	int temporalFrameIndex;
+	float dt;
+
+	float3 jitterUVW;
+	int isJitterUVW;
+
+	float4x4 lightVP;
+	float4x4 viewInvMatrix_lastFrame;
+
+	SceneInfo* sceneInfoAddress;
+	FogGlobalInfo* fogGlobalInfoAddress;
+	uint* fogAccHasFogVoxelCountAddress;
+
+	float4 padding0;
+	float4 padding1;
+};
+struct renderOpaquePushConstant {
+	FrustumGlobalInfo frustumInfo;
+	uint2 screenSize;
+
+	int temporalFrameIndex;
+	int sampleCount;
+
+	int useFogAcc;
+
+	int useTAA;
+	float4x4 projInvMatrix_taa;
+
+	float4x4 lightVP;
+
+	float jitterStength;
+
+	SceneInfo* sceneInfoAddress;
+	FogGlobalInfo* fogGlobalInfoAddress;
+
+	float4 padding0;
+	float4 padding1;
+	float2 padding2;
+};
+struct renderTransparentPushConstant {
+	int temporalFrameIndex;
+	int sampleCount;
+
+	int instanceIndex;
+	float3x3 normalMatrix;
+
+	float4x4 projMatrix_taa;
+	int useTAA;
+
+	float4x4 lightVP;
+
+	SceneInfo* sceneInfoAddress;
+	FogGlobalInfo* fogGlobalInfoAddress;
+
+	float4 padding0;
+	float4 padding1;
+	float4 padding2;
+	float2 padding3;
+};
+
+enum class StaticBindingPoints_VolumetricFog {
+	eTextures = 0,
+	//-------GBuffers----------
+	eAlbedoImage,
+	eNormalImage,
+	eDepthImage,
+	eEmissiveImage,
+	eVelocityImage,
+	eVertexInfoImage,
+	eRenderedImage,
+	//------shadowMap---------
+	eShadowMap,
+
+	//-------FogInfo--------
+	eVolumetricFogInfosBuffer,
+	eHeightFogInfosBuffer,
+	eGridFogInfosBuffer,
+	eGridFogImages,
+
+	//------FogAcc---------
+	eFogAccImage,
+	eFogAccImage_sample,
+	eFogAccHasFogVoxelInfosBuffer,
+	eFogAccHistoryImage,
+};
+
+#else
 #define USE_TAA
 #define USE_SVGF
 
 #define Jacobi_Iteration_Count 20u
-
-#define MAX_VOLUMETRIC_FOG_COUNT 10
 
 #define FOG_ATTENUATION_ESTIMATION
 
@@ -24,7 +164,7 @@ NAMESPACE_SHADERIO_BEGIN()
 
 #define FLUID_SIMULATION_OBJECT_SAVE_FOG
 
-#define USE_ENVFOG
+//#define USE_ENVFOG
 //#define Uniform_EnvFog_Grid
 
 #define Fog_Acc_Stepping
@@ -54,6 +194,10 @@ NAMESPACE_SHADERIO_BEGIN()
 //#define BLUR_FOG_VOXEL_PASS2
 
 //#define Interpolation_Manual
+
+// 仅用于A/B测量：打开后 getMarchLayerOffset 退回“全局同相位”偏移（修复前的行为）。
+// 正式配置必须保持注释状态。
+//#define FOG_LEGACY_LAYER_OFFSET
 
 struct VolumetricFogPushConstant {
 	float3x3 normalMatrix;
@@ -94,6 +238,9 @@ struct VolumetricFogPushConstant {
 	float jitterStrength1;
 
 	int useFogBlur = true;
+	//是否开启视锥体素的时域滤波。开启后视锥网格会做每帧统一的亚体素抖动，
+	//由时域滤波把多帧积分起来，等价于超采样，用来消除相机移动时的体素锯齿
+	int useFogBlurVoxel = false;
 
 #ifndef NDEBUG
 	SceneInfo* showCameraInfoAddress;
@@ -102,6 +249,15 @@ struct VolumetricFogPushConstant {
 
 struct GlobalInfo_VolumetricFog {
 	float4x4 VPMatrix_lastFrame;
+	//上一帧的 viewInvMatrix（相机到世界），用于视锥体素的时域重投影。
+	//同时补偿相机的平移和旋转；取用方式和 sceneInfo.viewInvMatrix 完全一致：
+	//[0]=right, [1]=up, [2]=-forward, [3]=position
+	float4x4 invViewMatrix_lastFrame;
+	//一直递增的帧号。pushConst.frameIndex在相机移动时会被清零，无法用于时域抖动序列
+	uint temporalFrameIndex;
+
+	float4x4 projMatrix_taaJitter;
+	float4x4 invProjMatrix_taaJitter;
 
 	int useGlobalHeightFog;
 	float2 globalHeightFogY;
@@ -183,7 +339,9 @@ enum class StaticBindingPoints_VolumetricFog {
 #ifndef NDEBUG
 
 #endif
+
 };
+#endif
 
 NAMESPACE_SHADERIO_END()
 #endif

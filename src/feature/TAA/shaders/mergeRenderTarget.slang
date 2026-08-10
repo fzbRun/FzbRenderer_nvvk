@@ -5,11 +5,11 @@
 #include "common/Shader/Slang/commonFunction.slang"
 
 [[vk::push_constant]] ConstantBuffer<TAAPushConstant> pushConst;
-[[vk::binding(BindingPoints_TAA::eRendereTarget_Current)]] Texture2D<float4> rendereTarget_Current;
+[[vk::binding(BindingPoints_TAA::eRendereTarget_Current)]] Sampler2D<float4> rendereTarget_Current;
 [[vk::binding(BindingPoints_TAA::eRenderTarget_Last)]] Sampler2D<float4> rendereTarget_Last;
 [[vk::binding(BindingPoints_TAA::eRenderTarget_Final)]] RWTexture2D<float4> rendereTarget_Final;
 [[vk::binding(BindingPoints_TAA::eDepthImage)]] Texture2D<float> depthImage;
-[[vk::binding(BindingPoints_TAA::eVelocityImage)]] Texture2D<float4> velocityImage;
+[[vk::binding(BindingPoints_TAA::eVelocityImage)]] Sampler2D<float4> velocityImage;
 
 float3 RGB2YCoCgR(float3 rgbColor) {
     float3 YCoCgRColor;
@@ -67,7 +67,8 @@ float3 clipAABB(float3 nowColor, float3 preColor, int2 screenPos) {
     for (int i = -1; i <= 1; ++i){
         for (int j = -1; j <= 1; ++j) {
             uint2 newScreenPos = clamp(screenPos + uint2(i, j), 0, pushConst.screenSize - 1);
-            float3 C = RGB2YCoCgR(ToneMap(rendereTarget_Current[newScreenPos].xyz));
+            float2 uv = (float2(newScreenPos) + 0.5f) * deltaRes;
+            float3 C = RGB2YCoCgR(ToneMap(rendereTarget_Current.SampleLevel(uv, 0).xyz));
             m1 += C;
             m2 += C * C;
         }
@@ -94,23 +95,29 @@ float3 clipAABB(float3 nowColor, float3 preColor, int2 screenPos) {
     else return preColor;
 }
 
-
 [numthreads(32, 32, 1)]
 [shader("compute")]
 void computeMain_mergeRenderTarget(uint2 threadIndex: SV_DispatchThreadID) {
     if (any(threadIndex >= pushConst.screenSize)) return;
 
-    float4 result_Current = rendereTarget_Current[threadIndex];
+    float2 uv = ((float2)threadIndex + 0.5f) / pushConst.screenSize;
+    uv -= pushConst.jitter;
+
+    float4 result_Current = rendereTarget_Current.SampleLevel(uv, 0);
     if (pushConst.frameIndex == 0) {
         rendereTarget_Final[threadIndex] = result_Current;
         return;
     }
 
     uint2 closetScreenPos = getClosestScreenPos(threadIndex);
-    float2 velocity = velocityImage[closetScreenPos].xy;
+    float2 velocity = velocityImage.SampleLevel((float2(closetScreenPos) + 0.5f) / pushConst.screenSize, 0).xy;
 
     float2 screenPos = (float2(threadIndex) + 0.5f) / pushConst.screenSize;
-    float2 offsetScreenPos = clamp(screenPos - velocity, 0.0f, 1.0f);
+    float2 offsetScreenPos = screenPos - velocity;
+    if (any(offsetScreenPos < 0.0f) || any(offsetScreenPos > 1.0f)) {
+        rendereTarget_Final[threadIndex] = result_Current;
+        return;
+    }
     float4 result_Last = rendereTarget_Last.SampleLevel(offsetScreenPos, 0);
 
     float3 color_Current = RGB2YCoCgR(ToneMap(result_Current.xyz));
@@ -121,6 +128,6 @@ void computeMain_mergeRenderTarget(uint2 threadIndex: SV_DispatchThreadID) {
     color_Current = UnToneMap(YCoCgR2RGB(color_Current));
     color_Last = UnToneMap(YCoCgR2RGB(color_Last));
 
-    float4 result = float4(color_Current * pushConst.mergeRatio + color_Last * (1.0f -  pushConst.mergeRatio), 1.0f);
-    rendereTarget_Final[threadIndex] = result;
+    float3 result = lerp(color_Last, color_Current, pushConst.mergeRatio);
+    rendereTarget_Final[threadIndex] = float4(result, 1.0f);
 }

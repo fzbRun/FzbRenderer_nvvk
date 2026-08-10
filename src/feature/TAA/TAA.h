@@ -14,7 +14,7 @@ struct TAACreateInfo{
 	nvvk::Image velocityImage;
 	nvvk::Image renderTarget;
 };
-class TAA : public Feature{
+class TAA : public Feature {
 public:
 	TAA();
 	virtual ~TAA() = default;
@@ -32,8 +32,12 @@ public:
 	void createPipeline();
 	void compileAndCreateShaders();
 
+	shaderio::float4x4 projMatrix_taaJitter;
+
 private:
 	TAACreateInfo setting;
+	shaderio::float2 Halton_2_3[8];
+	uint32_t frameIndex = 0;
 	shaderio::TAAPushConstant pushConstant;
 
 	VkShaderEXT computeShader_mergeRenderTarget{};
