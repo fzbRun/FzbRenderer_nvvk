@@ -600,7 +600,7 @@ void FzbRenderer::MeshSet::processMesh(aiMesh* meshData, const aiScene* sceneDat
 	std::string materialID = "defaultMaterial";
 	shaderio::BSDFMaterial material = FzbRenderer::defaultMaterial;
 	#ifndef USE_DEFAULT_MATERIAL
-	if (sceneData->mNumMaterials > 1) {		//��һ��Ĭ�ϲ���
+	if (sceneData->mNumMaterials > 1) {		
 		aiMaterial* mtlMaterial = sceneData->mMaterials[meshData->mMaterialIndex];
 		materialID = std::string(mtlMaterial->GetName().data);
 		material = loadMtlMaterial(mtlMaterial);
@@ -852,7 +852,7 @@ shaderio::AABB FzbRenderer::MeshSet::getAABB(glm::mat4 transformMatrix) {
 
 	return aabb;
 }
-//-----------------------------------------------------����ͼԪ----------------------------------------------------
+//---------------------------------------------------------------------------------------------------------
 static uint32_t addPos(nvutils::PrimitiveMesh& mesh, glm::vec3 p)
 {
 	nvutils::PrimitiveVertex v{};
@@ -1095,4 +1095,53 @@ nvutils::PrimitiveMesh FzbRenderer::MeshSet::createSphere(bool normal, bool texC
 	}
 
 	return mesh;
+}
+//---------------------------------------------------------------------------------------------------------
+void FzbRenderer::MeshSet::createMeshLets() {
+	//const size_t kMaxVertices = 64;
+	//const size_t kMaxTriangles = 124;
+	//const float kConeWeight = 0.0f;
+	//
+	//for (int childMeshIndex = 0; childMeshIndex < childMeshInfos.size(); ++childMeshIndex) {
+	//	MeshInfo& childMeshInfo = childMeshInfos[childMeshIndex];
+	//	uint32_t indexCount = childMeshInfo.mesh.triMesh.indices.count;
+	//
+	//	const size_t maxMeshlets = meshopt_buildMeshletsBound(indexCount, kMaxVertices, kMaxTriangles);
+	//	meshlets.resize(maxMeshlets);
+	//	meshletVertices.resize(maxMeshlets * kMaxVertices);
+	//	meshletTriangles.resize(maxMeshlets * kMaxTriangles * 3);
+	//
+	//	size_t meshletCount = meshopt_buildMeshlets(
+	//		meshlets.data(),
+	//		meshletVertices.data(),
+	//		meshletTriangles.data(),
+	//		reinterpret_cast<const uint32_t*>(indices->data()),
+	//		indices->size(),
+	//		reinterpret_cast<const float*>(vertices->data()),
+	//		vertices->size(),
+	//		sizeof(T),
+	//		kMaxVertices,
+	//		kMaxTriangles,
+	//		kConeWeight
+	//	);
+	//}
+	//
+	//size_t meshletCount = meshopt_buildMeshlets(
+	//	meshlets.data(),
+	//	meshletVertices.data(),
+	//	meshletTriangles.data(),
+	//	reinterpret_cast<const uint32_t*>(indices->data()),
+	//	indices->size(),
+	//	reinterpret_cast<const float*>(vertices->data()),
+	//	vertices->size(),
+	//	sizeof(T),
+	//	kMaxVertices,
+	//	kMaxTriangles,
+	//	kConeWeight
+	//);
+	//
+	//auto& last = meshlets[meshletCount - 1];
+	//meshletVertices.resize(last.vertex_offset + last.vertex_count);
+	//meshletTriangles.resize(last.triangle_offset + ((last.triangle_count * 3 + 3) & ~3));	//保证一定是4的倍数
+	//meshlets.resize(meshletCount);
 }

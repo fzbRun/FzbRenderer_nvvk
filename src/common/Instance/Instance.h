@@ -33,9 +33,11 @@ public:
 	glm::mat4 transform = glm::mat4(1.0f);
 	glm::mat4 transform_lastTime = glm::mat4(1.0f);
 
+	uint32_t meshSetIndex = 0;
 	bool useCustomMeshSet = false;
 	MeshSet customMeshSet;
 
+	int instanceStartIndex;
 	std::vector<shaderio::Instance> childInstances;
 
 	shaderio::AABB aabb;

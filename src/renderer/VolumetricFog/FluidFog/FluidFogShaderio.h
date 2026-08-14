@@ -16,6 +16,7 @@ struct FluidFogInfo {
 	uint3 gridSize;
 	float3 voxelSize;
 
+	float3 magicNumber;
 	float viscosity;
 	float FIntensity;
 	float restoreSpeed;

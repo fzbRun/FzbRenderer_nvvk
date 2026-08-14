@@ -276,7 +276,9 @@ float AABBDistance2(AABB aabb1, AABB aabb2)
 
     return all(distance == 0) ? 0.0f : length(distance);
 }
-
+bool AABBIntersects(AABB a, AABB b){
+    return all(a.minimum <= b.maximum) && all(a.maximum >= b.minimum);
+}
 float AABBContainmentRatio(inout AABB x, AABB y) {
     float3 origLen = x.maximum - x.minimum;
     float3 yLen = y.maximum - y.minimum;
@@ -432,6 +434,31 @@ bool isAABBInsideFrustum(AABB aabb, FrustumPlane planes[6]) {
         if (s + r < 0.0f) return false;
     }
     return true;
+}
+
+void TransformAABB(inout AABB aabb, float4x4 m){
+    float3 c[8] = {
+        float3(aabb.minimum.x, aabb.minimum.y, aabb.minimum.z),
+        float3(aabb.minimum.x, aabb.minimum.y, aabb.maximum.z),
+        float3(aabb.minimum.x, aabb.maximum.y, aabb.minimum.z),
+        float3(aabb.minimum.x, aabb.maximum.y, aabb.maximum.z),
+        float3(aabb.maximum.x, aabb.minimum.y, aabb.minimum.z),
+        float3(aabb.maximum.x, aabb.minimum.y, aabb.maximum.z),
+        float3(aabb.maximum.x, aabb.maximum.y, aabb.minimum.z),
+        float3(aabb.maximum.x, aabb.maximum.y, aabb.maximum.z)
+    };
+
+    float3 p0 = mul(float4(c[0], 1.0), m).xyz;
+    aabb.minimum = p0;
+    aabb.maximum = p0;
+
+    [unroll]
+    for (int i = 1; i < 8; i++)
+    {
+        float3 p = mul(float4(c[i], 1.0), m).xyz;
+        aabb.minimum = min(aabb.minimum, p);
+        aabb.maximum = max(aabb.maximum, p);
+    }
 }
 //---------------------------------------------------Camera------------------------------------------------------
 void ExtractFrustumPlanes(float4x4 cameraVP, out FrustumPlane planes[6]) {

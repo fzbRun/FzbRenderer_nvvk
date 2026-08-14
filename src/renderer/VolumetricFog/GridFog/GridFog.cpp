@@ -97,6 +97,7 @@ void GridFog::uiRender(int i) {
 	modified |= ImGui::DragFloat(std::string("Grid Fog Extinction Coefficient " + std::to_string(i)).c_str(), (float*)&gridFogInfo.absorption, 0.1f, 0.0f, 100.0f, "%.3f", ImGuiSliderFlags_ClampOnInput);
 	modified |= ImGui::DragFloat(std::string("Grid Fog Scatter Coefficient " + std::to_string(i)).c_str(), (float*)&gridFogInfo.scattering, 0.1f, 0.0f, 1.0f);
 	modified |= ImGui::DragFloat(std::string("Grid Fog Asymmetric Parameters " + std::to_string(i)).c_str(), (float*)&gridFogInfo.phase, 0.1f, -1.0f, 1.0f);
+	modified |= ImGui::DragFloat(std::string("Grid Fog Light Transmittance " + std::to_string(i)).c_str(), (float*)&gridFogInfo.transmittance, 0.1f, 0.0f, 1.0f);
 
 	fogInfoModified |= modified;
 	reGeneration |= modified;

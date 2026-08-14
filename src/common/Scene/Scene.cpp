@@ -191,7 +191,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 				LightInstance lightInstance;
 				lightInstances.push_back(lightInstance);
 
-				shaderio::Light& light = lightInstances[lightInstances.size() - 1].light;
+				shaderio::Light& light = lightInstances[0].light;
 				light.type = shaderio::Direction;
 				light.direction = glm::normalize(-sceneInfo.skySimpleParam.sunDirection);
 				light.pos = shaderio::float3(0.0f) - 10000.0f * light.direction;
@@ -365,6 +365,15 @@ void FzbRenderer::Scene::preRender() {
 	//if (time < periodFrameIndex) time /= periodFrameIndex;
 	//else time = 2.0f - (time / periodFrameIndex);
 	time = float(frameIndex) / float(periodFrameIndex);
+
+	if (sceneInfo.useSky) {
+		LightInstance& sunLightInstance = lightInstances[0];
+		shaderio::Light& sun = sunLightInstance.light;
+		sun.direction = glm::normalize(-sceneInfo.skySimpleParam.sunDirection);
+		sun.pos = shaderio::float3(0.0f) - 10000.0f * sun.direction;
+		sun.color = sceneInfo.skySimpleParam.sunColor;
+		sun.intensity = sceneInfo.skySimpleParam.sunIntensity;
+	}
 
 	for (int i = 0; i < sceneInfo.numLights; ++i) {
 		LightInstance lightInstanceInfo = lightInstances[i];		

@@ -9,6 +9,7 @@
 #include <nvutils/primitives.hpp>
 #include <nvvk/buffer_suballocator.hpp>
 
+#include <meshoptimizer.h>
 
 #ifndef FZBRENDERER_MESH_H
 #define FZBRENDERER_MESH_H
@@ -41,11 +42,18 @@ public:
 	static nvutils::PrimitiveMesh createWireframe(float width = 1.0F, float height = 1.0F, float depth = 1.0F);
 	static nvutils::PrimitiveMesh createSphere(bool normal = false, bool texCoords = false, uint32_t sectorCount = 36, uint32_t stackCount = 18);
 
+	void createMeshLets();
+
 	std::string meshID;
 	uint32_t meshOffset;
 	std::vector<MeshInfo> childMeshInfos;		//当前mesh中的小mesh
 	std::vector<uint8_t> meshByteData;
 	shaderio::AABB aabb = { { FLT_MAX, FLT_MAX, FLT_MAX }, { -FLT_MAX, -FLT_MAX, -FLT_MAX } };
+
+	std::vector<meshopt_Meshlet> meshlets;
+	std::vector<uint32_t> meshletVertices;
+	std::vector<uint8_t> meshletTriangles;
+	std::vector<uint32_t> meshletTrianglesU32;
 private:
 	void loadGltfData(const tinygltf::Model& model, bool importInstance = false);
 	void processMesh(aiMesh* meshData, const aiScene* sceneData);

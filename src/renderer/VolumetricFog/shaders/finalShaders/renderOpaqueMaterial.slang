@@ -34,8 +34,8 @@ void computeMain_renderOpaqueMaterial(uint2 threadIndex: SV_DispatchThreadID, ui
     uint randomSeed = xxhash32(uint3(pushConst.temporalFrameIndex, threadIndex));
 
     float attenuation = 1.0f, L = 0.0f, attenuation2 = 1.0f;
-    if (pushConst.useFogAcc == 1) 
-        getPreAccFog(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, float2(threadIndex), pushConst.temporalFrameIndex, pushConst.jitterStength, pushConst.sceneInfoAddress, pushConst.frustumInfo, groupFogGlobalInfo.lightAttenuationStrength, L, attenuation, attenuation2);
+    if (pushConst.useFogAcc == 1)
+        getPreAccFog(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, float2(threadIndex), pushConst.temporalFrameIndex, pushConst.jitterStrength, pushConst.sceneInfoAddress, pushConst.frustumInfo, L, attenuation, attenuation2);
     else {
         float spatialDither = getCellDither(float2(threadIndex), 0.0f);
         float layerOffset = getMarchLayerOffset(pushConst.temporalFrameIndex, spatialDither, true, true);

@@ -24,7 +24,7 @@ struct GridFogInfo {
 	float ambientIntensity;
 	float3 color;
 
-	float3 attenuation;
+	float transmittance = 1.0f;
 };
 
 struct CloudFogInfo {

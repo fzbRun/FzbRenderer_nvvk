@@ -57,6 +57,20 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/pugixml_setup.cmake")
 target_link_libraries(${PROJECT_NAME} PRIVATE pugixml)
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/assimp_setup.cmake")
+
+find_library(MESHOPTIMIZER_LIB
+    NAMES meshoptimizer
+    PATHS ${meshoptimizer_ROOT}/build/Release
+          ${meshoptimizer_ROOT}/lib
+    REQUIRED
+)
+find_path(MESHOPTIMIZER_INCLUDE_DIR
+    NAMES meshoptimizer.h
+    PATHS ${meshoptimizer_ROOT}/src
+    REQUIRED
+)
+target_link_libraries(${PROJECT_NAME} PRIVATE ${MESHOPTIMIZER_LIB})
+target_include_directories(${PROJECT_NAME} PRIVATE ${MESHOPTIMIZER_INCLUDE_DIR})
 #--------------------------------------------------------------------------------------
 set(COPY_FILES ${NsightAftermath_DLLS})
 list(APPEND COPY_FILES ${EXTRA_COPY_FILES})

@@ -107,10 +107,15 @@ InstanceSet::InstanceSet(pugi::xml_node& instanceNode) {
 		customMeshSet = FzbRenderer::MeshSet(meshSetID, primitive);
 		scene.addMeshSet(customMeshSet);
 		childMeshInfos = customMeshSet.childMeshInfos;
+
+		meshSetIndex = scene.meshSets.size() - 1;
 	}
 	else {
 		if (!scene.meshSetIDToIndex.count(meshSetID)) LOGW("实例没有对应的mesh：%s\n", meshSetID.c_str());
-		FzbRenderer::MeshSet& meshSet = scene.meshSets[scene.meshSetIDToIndex[meshSetID]];
+
+		meshSetIndex = scene.meshSetIDToIndex[meshSetID];
+
+		FzbRenderer::MeshSet& meshSet = scene.meshSets[meshSetIndex];
 		childMeshInfos = meshSet.childMeshInfos;
 	}
 	childInstances.resize(childMeshInfos.size());
@@ -132,6 +137,8 @@ InstanceSet::InstanceSet(pugi::xml_node& instanceNode) {
 }
 
 void InstanceSet::getInstance(std::vector<shaderio::Instance>& instances, int offset, float time) {
+	instanceStartIndex = offset;
+
 	if (type != InstanceType::PeriodMotion) {
 		memcpy(instances.data() + offset, childInstances.data(), sizeof(shaderio::Instance) * childInstances.size());
 		return;

@@ -12,6 +12,10 @@ NAMESPACE_SHADERIO_BEGIN()
 
 #define MAX_VOLUMETRIC_FOG_COUNT 10
 
+#define FLUID_SIMULATION_OBJECT_SAVE_FOG
+
+#define FLUID_GBUFFER_INJECT
+
 #define FINAL_PROJECT
 #ifdef FINAL_PROJECT
 
@@ -28,8 +32,18 @@ struct FogGlobalInfo {
 	uint fluidFogCount;
 
 	int useGlobalHeightFog;
-	float2 globalHeightFogY;
+	AABB globalHeightFogAABB;
 	HeightFogInfo globalHeightFogInfo;
+};
+
+struct InstanceInfo {
+	AABB aabb_local;
+	AABB aabb_lastFrame;
+	int instanceIndex;
+};
+struct InFluidInstanceInfo {
+	AABB aabb;
+	float3 velocity;
 };
 
 struct FrustumGlobalInfo {
@@ -46,10 +60,33 @@ struct FogAccHasFogVoxelInfo {
 	float3 voxelCenter_lastVoxel;
 };
 
+struct InitFluidPushConstant {
+	float time;
+	float dt;
+	int fluidIndex;
+	int fogIndex;
+	float3 fluidStartPos;
+
+	uint instanceCount;
+	int hasFluidStartUp;
+
+	SceneInfo* sceneInfoAddress;
+	FogGlobalInfo* fogGlobalInfoAddress;
+	InstanceInfo* instanceInfoAddress;
+	InFluidInstanceInfo* inFluidInstanceInfoAddress;
+	uint* inFluidInstanceCountAddress;
+
+	float4x4 padding0;
+	float4x4 padding1;
+	float4 padding2;
+	float4 padding3;
+	float4 padding4;
+};
 struct CreateGBuffersPushConstant {
 	float4x4 projMatrix_taa;
 	int useTAA;
-	int frameIndex;
+
+	int fluidFogCount;
 
 	int instanceIndex;
 	float3x3 normalMatrix;
@@ -59,7 +96,24 @@ struct CreateGBuffersPushConstant {
 
 	SceneInfo* sceneInfoAddress;
 
-	int padding0;
+	float dt;
+};
+struct FluidSimulationPushConstant {
+	int fluidIndex;
+	float time;
+	float dt;
+	int iteration;
+
+	float3 fluidStartPos;
+	int useP;
+
+	FogGlobalInfo* fogGlobalInfoAddress;
+
+	float4x4 padding0;
+	float4x4 padding1;
+	float4x4 padding2;
+	float4 padding3;
+	float2 padding4;
 };
 struct FogAccPushConstant {
 	FrustumGlobalInfo frustumInfo;
@@ -95,7 +149,7 @@ struct renderOpaquePushConstant {
 
 	float4x4 lightVP;
 
-	float jitterStength;
+	float jitterStrength;
 
 	SceneInfo* sceneInfoAddress;
 	FogGlobalInfo* fogGlobalInfoAddress;
@@ -105,6 +159,11 @@ struct renderOpaquePushConstant {
 	float2 padding2;
 };
 struct renderTransparentPushConstant {
+	FrustumGlobalInfo frustumInfo;
+	uint2 screenSize;
+
+	float jitterStrength;
+
 	int temporalFrameIndex;
 	int sampleCount;
 
@@ -113,16 +172,32 @@ struct renderTransparentPushConstant {
 
 	float4x4 projMatrix_taa;
 	int useTAA;
+	int useFogAcc;
 
 	float4x4 lightVP;
 
 	SceneInfo* sceneInfoAddress;
 	FogGlobalInfo* fogGlobalInfoAddress;
+};
+
+struct renderCameraFrustumPushConstant {
+	FrustumGlobalInfo frustumInfo;
+	uint3 showVoxelIndexMin;
+	uint3 showVoxelIndexMax;
+	
+	float4x4 vpMatrix;
+	float4x4 viewInvMatrix_showFrustum;
 
 	float4 padding0;
 	float4 padding1;
 	float4 padding2;
-	float2 padding3;
+	float4 padding3;
+};
+struct renderInstanceAABBPushConstant {
+	int instanceIndex;
+	SceneInfo* sceneInfoAddress;
+	InstanceInfo* instanceInfoAddress;
+
 };
 
 enum class StaticBindingPoints_VolumetricFog {
@@ -143,6 +218,14 @@ enum class StaticBindingPoints_VolumetricFog {
 	eHeightFogInfosBuffer,
 	eGridFogInfosBuffer,
 	eGridFogImages,
+	eFluidFogInfosBuffer,
+	eFluidFogImages,
+	eFluidFogImages_sample,
+
+	//----FluidSimulation------
+	eFluidFogVoxelInfoBuffer,
+	eFluidFogVoxelVelocityImage,
+	eFluidFogVoxelVelocityImage_sample,
 
 	//------FogAcc---------
 	eFogAccImage,

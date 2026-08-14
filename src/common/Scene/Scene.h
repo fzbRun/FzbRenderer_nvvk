@@ -51,6 +51,7 @@ public:
 	uint32_t staticInstanceCount = 0;
 	uint32_t staticInstanceSetCount = 0;
 	std::vector<InstanceSet> staticInstanceSets;
+
 	uint32_t periodInstanceCount = 0;
 	uint32_t periodInstanceSetCount = 0;
 	std::vector<InstanceSet> periodInstanceSets;

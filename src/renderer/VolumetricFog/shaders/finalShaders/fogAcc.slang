@@ -40,24 +40,21 @@ void computeMain_getHasFogVoxels(uint3 threadIndex: SV_DispatchThreadID, uint3 g
     float3 cameraUp = sceneInfo.viewInvMatrix[1].xyz;
     float3 cameraForward = -sceneInfo.viewInvMatrix[2].xyz;
 
-    uint voxelIndexU = voxelIndex.z * gridSize.x * gridSize.y + voxelIndex.y * gridSize.x + voxelIndex.x;
-    uint randomSeed = xxhash32(uint3(voxelIndexU, pushConst.temporalFrameIndex, 1));
-
-    float spatialDither1 = getCellDither(float2(voxelIndex.xy), (float)voxelIndex.z * 0.618f);
-    float layerOffset1 = getMarchLayerOffset(pushConst.temporalFrameIndex, spatialDither1, true, pushConst.blurVoxelFog == 1);
-
     float sliceZ = (float)depthIndex;
     float sliceY = (float)voxelIndex.y;
     float sliceX = (float)voxelIndex.x;
 
-    float linearDepth = (sliceZ + pushConst.jitterUVW.z) / gridSize.z * (farPlane - nearPlane);
+    float3 jitter = pushConst.jitterUVW;
+    if (pushConst.blurVoxelFog == 0) jitter = 0.0f;
+
+    float linearDepth = (sliceZ + jitter.z) / gridSize.z * (farPlane - nearPlane);
     float depth = frustumMap(linearDepth, compressionParams, farPlane - nearPlane, gridSize.z);
 
     float halfHeight = (depth + nearPlane) * tanHalfFov;
     float halfWidth = halfHeight * aspect;
 
-    float v = (sliceY + pushConst.jitterUVW.y) / gridSize.y * 2.0f - 1.0f;
-    float u = (sliceX + pushConst.jitterUVW.x) / gridSize.x * 2.0f - 1.0f;
+    float v = (sliceY + jitter.y) / gridSize.y * 2.0f - 1.0f;
+    float u = (sliceX + jitter.x) / gridSize.x * 2.0f - 1.0f;
 
     float3 voxelCenter = cameraPos;
     voxelCenter += (depth + nearPlane) * cameraForward;
@@ -66,7 +63,7 @@ void computeMain_getHasFogVoxels(uint3 threadIndex: SV_DispatchThreadID, uint3 g
 
     float3 dir = normalize(voxelCenter - cameraPos);
 
-    float linearDepth_lastVoxel = max(sliceZ - 1.0f + pushConst.jitterUVW.z, 0.0f) / gridSize.z * (farPlane - nearPlane);
+    float linearDepth_lastVoxel = max(sliceZ - 1.0f + jitter.z, 0.0f) / gridSize.z * (farPlane - nearPlane);
     float depth_lastVoxel = frustumMap(linearDepth_lastVoxel, compressionParams, farPlane - nearPlane, gridSize.z);
 
     float halfHeight_prev = (depth_lastVoxel + nearPlane) * tanHalfFov;
@@ -109,20 +106,38 @@ void computeMain_getHasFogVoxels(uint3 threadIndex: SV_DispatchThreadID, uint3 g
         uint fogOffset = hasFogOffset_inWarp + hasFogOffset_inGroup + groupHasFogVoxelOffset_inGlobal;
         fogAccHasFogVoxelInfoBuffer[fogOffset] = hasFogVoxelInfo;
     }
+
+    //if (all(voxelIndex <= uint3(76, 101, 32)) && all(voxelIndex >= uint3(71, 97, 32))) {
+    //    printf("frameIndex: %d, voxelIndex: %d %d %d, hasFog: %d\n",
+    //        pushConst.temporalFrameIndex, voxelIndex.x, voxelIndex.y, voxelIndex.z, hasFog
+    //    );
+    //}
     //---------------------------------------------------------------------------------------------------------------
-    // 体素中心已经被 Halton 序列抖动过了，这里再叠加一次白噪声只会把有序的低差异采样
-    // 重新打散成白噪声（表现为静态噪点 + 相机移动时的闪烁）。取板厚中点即可，
-    // 亚体素的位置多样性完全交给逐帧的 voxelJitter 提供。
-    float spatialDither = getCellDither(float2(voxelIndex.xy), (float)voxelIndex.z * 0.618f);
-    float layerOffset = getMarchLayerOffset(pushConst.temporalFrameIndex, spatialDither, true, pushConst.blurVoxelFog == 1);
-
-    float sampleLength = length(voxelCenter_lastVoxel - voxelCenter);
-    float3 sampleDir = (voxelCenter - voxelCenter_lastVoxel) / max(sampleLength, 1e-20f);
-    float3 samplePoint = voxelCenter_lastVoxel + sampleDir * sampleLength * layerOffset;
-
     float attenuation = 1.0f; float3 L = 0.0f;
-    getGlobalHeightFogScatter(samplePoint, sampleDir, sampleLength, sceneInfo, globalFogInfo, pushConst.lightVP, 1.0f, attenuation, L);
-    fogAccImage[voxelIndex] = float4(attenuation, luminance(L), 0.0f, 0.0f);
+    if (globalFogInfo.useGlobalHeightFog == 1) {
+        float spatialDither = getCellDither(float2(voxelIndex.xy), (float)voxelIndex.z * 0.618f);
+        float layerOffset = getMarchLayerOffset(pushConst.temporalFrameIndex, spatialDither, true, pushConst.blurVoxelFog == 1);
+
+        uint voxelIndexU = voxelIndex.z * gridSize.x * gridSize.y + voxelIndex.y * gridSize.x + voxelIndex.x;
+        uint randomSeed = xxhash32(uint3(voxelIndexU, pushConst.temporalFrameIndex, 1));
+
+        float sampleLength = length(voxelCenter_lastVoxel - voxelCenter);
+        float3 sampleDir = (voxelCenter - voxelCenter_lastVoxel) / max(sampleLength, 1e-20f);
+        float3 samplePoint = voxelCenter_lastVoxel + sampleDir * sampleLength * rand(randomSeed); // layerOffset;
+
+        // uint sampleCount = 10;
+        // sampleLength /= sampleCount;
+        // for (int i = 0; i < sampleCount; ++i) {
+        //     samplePoint = voxelCenter_lastVoxel + sampleDir * sampleLength * (i + rand(randomSeed));
+        //
+        //     getGlobalHeightFogScatter(samplePoint, sampleDir, sampleLength, sceneInfo, globalFogInfo, pushConst.lightVP, 1.0f, attenuation, L);
+        // }
+
+        getGlobalHeightFogScatter(samplePoint, sampleDir, sampleLength, sceneInfo, globalFogInfo, pushConst.lightVP, 1.0f, attenuation, L);
+
+        // getAnalyticHeightFogDirectionalScatter(voxelCenter_lastVoxel, voxelCenter, globalFogInfo.globalHeightFogAABB, globalFogInfo.globalHeightFogInfo, sceneInfo.lights[0], pushConst.lightVP, attenuation, L);
+    }
+    fogAccImage[voxelIndex] = float4(attenuation, luminance(L), 1.0f, 0.0f);
 }
 
 [numthreads(1024, 1, 1)]
@@ -162,9 +177,14 @@ void computeMain_getFog(uint threadIndex: SV_DispatchThreadID, uint groupThreadI
     // 没有滤波的话逐帧变化就只剩闪烁。
     float spatialDither = getCellDither(float2(voxelIndex.xy), (float)voxelIndex.z * 0.618f);
     float layerOffset = getMarchLayerOffset(pushConst.temporalFrameIndex, spatialDither, true, pushConst.blurVoxelFog == 1);
-    // globalHeightFog should affect this, but we pre calc that, so this has a lit bit mistake
+    // layerOffset = rand(randomSeed);
+    //  globalHeightFog should affect this, but we pre calc that, so this has a lit bit mistake
     getVolumetricFogScatter(voxelCenter_lastVoxel, voxelCenter, randomSeed, sampleCount, 1, false, layerOffset, pushConst.lightVP, pushConst.sceneInfoAddress, pushConst.fogGlobalInfoAddress, L, attenuation, attenuation2);
-    fogAccImage[voxelIndex] = float4(attenuation, L, 1.0f, 1.0f);
+    fogAccImage[voxelIndex] = float4(attenuation, L, attenuation2, 1.0f);
+
+    //if (all(voxelIndex <= uint3(76, 101, 32)) && all(voxelIndex >= uint3(71, 97, 32))) {
+    //    printf("frameIndex: %d, voxelIndex: %d %d %d, L: %f\n", pushConst.temporalFrameIndex, voxelIndex.x, voxelIndex.y, voxelIndex.z, L);
+    //}
 }
 
 groupshared float2 groupRawFog[8 * 8 * 8];
@@ -252,7 +272,10 @@ void computeMain_blurFog(uint3 threadIndex: SV_DispatchThreadID, uint3 groupThre
     // 于是这些体素保留的是上一轮的陈旧数据，相机转动时视锥边缘会出现一圈闪烁的脏值。
     if (!historyValid) return; // curVoxelInfo 本来就已经在图里，不用重写
 
-    float2 lastVoxelInfo = fogAccHistoryImage.SampleLevel(uvw_lastTime, 0).xy;
+    float3 lastVoxelInfo = fogAccHistoryImage.SampleLevel(uvw_lastTime, 0).xyz;
+    if (all(abs(cameraPos_lastTime - cameraPos) < 1e-10f)) {
+        fogAccImage[voxelIndex].xyz = lastVoxelInfo;
+    }
 
     //-------------------------------- 邻域钳制 --------------------------------
     // 把历史值限制在当前体素邻域的取值范围内。重投影再准也会有半个体素的误差，
@@ -261,21 +284,21 @@ void computeMain_blurFog(uint3 threadIndex: SV_DispatchThreadID, uint3 groupThre
     // 前提是这里读到的必须是“逐板”值：这个pass被安排在 Pass1 和 Pass2 之间就是为了这个。
     // 如果放在 Pass2 之后，图里存的是沿Z累积过的量，它沿Z单调平滑，±1邻域的min/max窗口
     // 宽到几乎不构成约束，错位的历史值原样通过 —— 那就是相机移动后的鬼影。
-    float2 nMin = curVoxelInfo.xy;
-    float2 nMax = curVoxelInfo.xy;
-    int3 localIndex = int3(groupThreadIndex);
-    [unroll]
-    for (int axis = 0; axis < 3; ++axis) {
-        [unroll]
-        for (int side = -1; side <= 1; side += 2) {
-            int3 offset = 0;
-            offset[axis] = side;
-            int3 neighbor = clamp(localIndex + offset, int3(0), int3(7)); // 组边界回退到自身
-            float2 n = groupRawFog[neighbor.z * 64 + neighbor.y * 8 + neighbor.x];
-            nMin = min(nMin, n);
-            nMax = max(nMax, n);
-        }
-    }
+    //float2 nMin = curVoxelInfo.xy;
+    //float2 nMax = curVoxelInfo.xy;
+    //int3 localIndex = int3(groupThreadIndex);
+    //[unroll]
+    //for (int axis = 0; axis < 3; ++axis) {
+    //    [unroll]
+    //    for (int side = -1; side <= 1; side += 2) {
+    //        int3 offset = 0;
+    //        offset[axis] = side;
+    //        int3 neighbor = clamp(localIndex + offset, int3(0), int3(7)); // 组边界回退到自身
+    //        float2 n = groupRawFog[neighbor.z * 64 + neighbor.y * 8 + neighbor.x];
+    //        nMin = min(nMin, n);
+    //        nMax = max(nMax, n);
+    //    }
+    //}
     //lastVoxelInfo = clamp(lastVoxelInfo, nMin, nMax);
 
     //-------------------------------- 自适应混合比例 --------------------------------
@@ -287,14 +310,26 @@ void computeMain_blurFog(uint3 threadIndex: SV_DispatchThreadID, uint3 groupThre
     // 朝向变化量：用当前和上一帧 forward 的夹角近似
     float rotationDelta = 1.0f - saturate(dot(cameraForward, cameraForward_lastTime));
 
-    // 运动时的上限只到 0.3（而不是 0.5）：拖影本来是靠上面的邻域钳制挡住的，
-    // 钳制之后历史已经不可能偏离邻域范围，所以这里不必再为了防拖影而丢历史。
-    // 丢历史的代价是直接的——一帧只有 8 个步进采样点，历史留得少就压不住空间高频，
-    // 相机移动时表现为雾里的颗粒/锯齿。实测运动中 0.5 的空间高频明显高于 0.3。
-    float motion = saturate(cameraSpeed * 0.02f + rotationDelta * 20.0f);
-    float mergeRatio = lerp(0.01f, 0.05f, motion); // 当前帧的权重
+    float mergeRatioMin = 0.01f, mergeRatioMax = 0.05f;
+    {
+        FogGlobalInfo fogGlobalInfo = groupFogGlobalInfo;
+        for (int i = 0; i < fogGlobalInfo.fluidFogCount; ++i) {
+            VolumetricFogInfo fogInfo = getVolumetricFog(i);
+            if (!checkPointInAABB(voxelCenter, fogInfo.aabb)) continue;
 
-    curVoxelInfo.xy = lerp(lastVoxelInfo, curVoxelInfo.xy, mergeRatio);
+            FluidFogInfo fluidFogInfo = getFluidFog(fogInfo.typeFogIndex);
+            if (fluidFogInfo.startUp == 0) continue;
+    
+            //mergeRatioMin = 0.4f, mergeRatioMax = 0.7f;
+            break;
+        }
+    }
+
+
+    float motion = saturate(cameraSpeed * 0.02f + rotationDelta * 20.0f);
+    float mergeRatio = lerp(mergeRatioMin, mergeRatioMax, motion); // 当前帧的权重
+
+    curVoxelInfo.xyz = lerp(lastVoxelInfo, curVoxelInfo.xyz, mergeRatio);
 
     fogAccImage[voxelIndex] = curVoxelInfo;
 }

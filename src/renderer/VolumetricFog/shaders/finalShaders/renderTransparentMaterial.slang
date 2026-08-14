@@ -73,13 +73,17 @@ PSout fragmentMain(VSout input) {
     BSDFMaterial material = sceneInfo.materials[instance.materialIndex];
 
     float3 worldPos = input.worldPos;
-    uint2 pixelPos = uint2(input.sv_position.xy);
+    uint2 pixelPos = uint2(input.sv_position.xy * pushConst.screenSize);
 
     uint randomSeed = xxhash32(uint3(pushConst.temporalFrameIndex, pixelPos));
     float attenuation = 1.0f, L = 0.0f, attenuation2 = 1.0f;
-    float spatialDither = getCellDither(float2(pixelPos), 0.0f);
-    float layerOffset = getMarchLayerOffset(pushConst.temporalFrameIndex, spatialDither, true, true);
-    getVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, pushConst.sampleCount, 3, true, layerOffset, pushConst.lightVP, pushConst.sceneInfoAddress, pushConst.fogGlobalInfoAddress, L, attenuation, attenuation2);
+    if (pushConst.useFogAcc == 1)
+        getPreAccFog(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, float2(pixelPos), pushConst.temporalFrameIndex, pushConst.jitterStrength, pushConst.sceneInfoAddress, pushConst.frustumInfo, L, attenuation, attenuation2);
+    else {
+        float spatialDither = getCellDither(float2(pixelPos), 0.0f);
+        float layerOffset = getMarchLayerOffset(pushConst.temporalFrameIndex, spatialDither, true, true);
+        getVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, pushConst.sampleCount, 3, true, layerOffset, pushConst.lightVP, pushConst.sceneInfoAddress, pushConst.fogGlobalInfoAddress, L, attenuation, attenuation2);
+    }
 
     float shadow = getShadow(float4(worldPos, 1.0f), pushConst.lightVP);
 

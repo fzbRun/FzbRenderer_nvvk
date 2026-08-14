@@ -53,6 +53,8 @@ private:
 	float time = 0.0f;
 	float dt = 0.0f;
 	int temporalFrameIndex = 0;
+
+	FzbRenderer::Buffer inDirectDispatchBuffer;
 	//-----------------------------shadowMap-------------------------------
 	ShadowMap shadowMap;
 	//--------------------------------TAA---------------------------------
@@ -75,8 +77,33 @@ private:
 	std::unique_ptr<HeightFogSet> heightFogSet;
 	std::unique_ptr<FluidFogSet> fluidFogSet;
 	std::unique_ptr<GridFogSet> gridFogSet;
+	//--------------------------FluidSimulation-----------------------------
+	VkShaderEXT computeShader_initFluid{};
+	VkShaderEXT computeShader_getInFluidInstanceInfo{};
+	VkShaderEXT computeShader_injectFluidInfo{};
+	FzbRenderer::Buffer instanceInfoBuffer;
+	FzbRenderer::Buffer inFluidInstanceInfoBuffer;
+	FzbRenderer::Buffer inFluidInstanceCountBuffer;
+	shaderio::InitFluidPushConstant initFluidPushConstant;
+	void initFluid(VkCommandBuffer cmd);
+
+	VkShaderEXT computeShader_fluidSimulation_A{};
+	VkShaderEXT computeShader_fluidSimulation_D{};
+	VkShaderEXT computeShader_fluidSimulation_D_Iteration{};
+	VkShaderEXT computeShader_fluidSimulation_F{};
+	VkShaderEXT computeShader_fluidSimulation_P{};
+	VkShaderEXT computeShader_fluidSimulation_P_Iteration{};
+	VkShaderEXT computeShader_fluidSimulation_S{};
+
+	shaderio::FluidSimulationPushConstant fluidSimulationPushConstant;
+	bool fluidSimulation_IterationD = false;
+	int fluidSimulation_IterationD_Count = 20;
+	bool fluidSimulation_IterationP = true;
+	int fluidSimulation_IterationP_Count = 20;
+
+	void fluidSimulation(VkCommandBuffer cmd);
 	//-----------------------------FogAcc-----------------------------------
-	bool useFogAcc = true;
+	bool useFogAcc = false;
 	shaderio::FrustumGlobalInfo frustumInfo;
 	bool blurVoxelFog = true;
 	int sampleCount_fogAcc = 20;
@@ -107,6 +134,19 @@ private:
 	VkShaderEXT vertexShader_renderTransparentMaterial{};
 	VkShaderEXT fragmentShader_renderTransparentMaterial{};
 	void renderTransparentMaterial(VkCommandBuffer cmd);
+	//--------------------------Debug----------------------------------------
+	bool showCameraFrustum = false;
+	shaderio::renderCameraFrustumPushConstant renderCameraFrustumPushConstant;
+	VkShaderEXT vertexShader_renderCameraFrustum{};
+	VkShaderEXT fragmentShader_renderCameraFrustum{};
+	void renderCameraFrustum(VkCommandBuffer cmd);
+
+	bool showInstanceAABB = false;
+	int showInstanceIndex = 0;
+	shaderio::renderInstanceAABBPushConstant renderInstanceAABBPushConstant;
+	VkShaderEXT vertexShader_renderInstanceAABB{};
+	VkShaderEXT fragmentShader_renderInstanceAABB{};
+	void renderInstanceAABB(VkCommandBuffer cmd);
 };
 
 }

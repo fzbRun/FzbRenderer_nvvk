@@ -149,7 +149,8 @@ void ShadowMap::render(VkCommandBuffer cmd) {
 
 	graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
 	graphicsDynamicPipeline.inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_FRONT_BIT;
+	//graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_FRONT_BIT;
+	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
 	graphicsDynamicPipeline.rasterizationState.polygonMode = VK_POLYGON_MODE_FILL;
 	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_TRUE;
 	graphicsDynamicPipeline.depthStencilState.depthWriteEnable = VK_TRUE;
@@ -300,8 +301,8 @@ void ShadowMap::render(VkCommandBuffer cmd) {
 
 		vkCmdBeginRendering(cmd, &renderingInfo);
 
-		//vkCmdSetDepthBias(cmd, 1.5f, 0.0f, 1.0f);
-		//vkCmdSetDepthBiasEnable(cmd, VK_TRUE);
+		vkCmdSetDepthBias(cmd, 1.5f, 0.0f, 1.0f);
+		vkCmdSetDepthBiasEnable(cmd, VK_TRUE);
 		graphicsDynamicPipeline.cmdApplyAllStates(cmd);
 		graphicsDynamicPipeline.cmdBindShaders(cmd, { .vertex = vertexShader, .fragment = fragmentShader });
 
@@ -315,6 +316,8 @@ void ShadowMap::render(VkCommandBuffer cmd) {
 			uint32_t meshIndex = Application::sceneResource.instances[j].meshIndex;
 			const shaderio::Mesh& mesh = Application::sceneResource.meshes[meshIndex];
 			const shaderio::TriangleMesh& triMesh = mesh.triMesh;
+
+			if (Application::sceneResource.materials[Application::sceneResource.instances[j].materialIndex].type == shaderio::MaterialType::RoughDielectric) continue;
 
 			pushConstant.instanceIndex = int(j);
 			vkCmdPushConstants2(cmd, &pushInfo);

@@ -8,6 +8,7 @@
 #include "PathTracing_KPCNNDenoising/PathTracing_KPCNNDenoising.h"
 #include "ZhiHuCode/ZhiHuCode.h"
 #include "VolumetricFog/VolumetricFog.h"
+#include "MeshRenderer/MeshRenderer.h"
 
 enum FzbRendererType {
 	FZB_RENDERER_FORWARD,
@@ -20,6 +21,7 @@ enum FzbRendererType {
 	FZB_RENDERER_FZB_PATH_GUIDING,
 	FZB_RENDERER_PATH_TRACING_KPCNN_DENOISING,
 	FZB_RENDERER_VOLUMETRIC_FOG,
+	FZB_RENDERER_MESH,
 	FZB_ZHIHU_CODE,
 };
 std::map<std::string, FzbRendererType> RendererTypeMap{
@@ -31,6 +33,7 @@ std::map<std::string, FzbRendererType> RendererTypeMap{
 	{ "FzbPathGuiding", FZB_RENDERER_FZB_PATH_GUIDING },
 	{ "PathTracing_KPCNNDenoising", FZB_RENDERER_PATH_TRACING_KPCNN_DENOISING },
 	{ "VolumetricFog", FZB_RENDERER_VOLUMETRIC_FOG },
+	{ "Mesh", FZB_RENDERER_MESH },
 	{ "ZhiHuCode", FZB_ZHIHU_CODE },
 };
 
@@ -45,6 +48,7 @@ std::shared_ptr<FzbRenderer::Renderer> FzbRenderer::createRenderer(RendererCreat
 			//case FZB_RENDERER_NPM_PATH_GUIDING: return std::make_shared<NPMPathGuiding>(createInfo.rendererNode);
 			case FZB_RENDERER_PATH_TRACING_KPCNN_DENOISING: return std::make_shared<PathTracing_KPCNNDenoising>(createInfo.rendererNode);
 			case FZB_RENDERER_VOLUMETRIC_FOG: return std::make_shared<VolumetricFog>(createInfo.rendererNode);
+			case FZB_RENDERER_MESH: return std::make_shared<MeshRenderer>(createInfo.rendererNode);
 			case FZB_ZHIHU_CODE: return std::make_shared<ZhiHuCode>(createInfo.rendererNode);
 		}
 		return nullptr;

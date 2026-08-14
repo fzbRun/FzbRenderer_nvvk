@@ -97,6 +97,7 @@ void FluidFog::uiRender(int i) {
 	ImGui::EndDisabled();
 	fogInfoModified |= ImGui::DragFloat3(std::string("Fluid Fog Voxel Size " + std::to_string(i)).c_str(), (float*)&fluidFogInfo.voxelSize);
 
+	fogInfoModified |= ImGui::DragFloat3(std::string("Fluid Fog Magic Number " + std::to_string(i)).c_str(), (float*)&fluidFogInfo.magicNumber, 0.1f, 0.0f, 100.0f);
 	fogInfoModified |= ImGui::DragFloat(std::string("Fluid Fog Viscosity " + std::to_string(i)).c_str(), (float*)&fluidFogInfo.viscosity, 0.1f, 0.0f, 1.0f);
 
 	fogInfoModified |= ImGui::DragFloat(std::string("Fluid Fog F Intensity " + std::to_string(i)).c_str(), (float*)&fluidFogInfo.FIntensity, 1.0f, 0.0f, 100.0f);
