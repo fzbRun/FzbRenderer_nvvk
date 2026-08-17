@@ -152,7 +152,6 @@ void getFogScatter(
     L += color * ambientIntensity * scattering * E * factor;
     a = exp(-extinctionCoeff * sampleLength);
 }
-
 //---------------------------------------------------------------------------------------------------------------------
 float EiScaled(float x, float logAbsX) {
     const float eulerGamma = 0.5772156649f;
@@ -530,6 +529,8 @@ float4 getFrustumImageInfo(float3 worldPos, bool linear, float sliceDither, Samp
     float halfWidth = halfHeight * aspect;
     float u = saturate(viewX / halfWidth * 0.5f + 0.5f);
     float v = saturate(viewY / halfHeight * 0.5f + 0.5f);
+
+
     #ifdef Interpolation_Manual
     uint voxelZ = clamp(int(frustumInvMap(viewZ - nearPlane, compressionParams, (farPlane - nearPlane), gridSize.z) / (farPlane - nearPlane) * gridSize.z), 0, gridSize.z - 1);
 
@@ -564,9 +565,6 @@ float4 getFrustumImageInfo(float3 worldPos, bool linear, float sliceDither, Samp
     // return blendZ;
     return lerp(s0, s1, blendZ);
     #else
-    // �Ȼ��㵽��Ƭ�ռ䣬��������Ƭ�ռ�ӣ�����ٹ�һ����[0,1]��
-    // �������������ڽ�����Զ����ǡ���ǡ�һ�����ء�������������ռ䶶������
-    // ������ǿ����ܶ����أ�Զ����������ȫ�������ã���
     float zSlice = frustumInvMap(viewZ - nearPlane, compressionParams, farPlane - nearPlane, gridSize.z) / (farPlane - nearPlane) * gridSizeF.z;
     zSlice += sliceDither;
     float w = saturate(zSlice / gridSizeF.z);

@@ -493,5 +493,5 @@ void computeMain_fluidSimulation_S(uint3 voxelIndex: SV_DispatchThreadID, uint3 
         velocity = ((vel_dirty - pg) * vMask) + obstV;
     }
 
-    fluidFogVoxelVelocityImage[pushConst.fluidIndex][voxelIndex].xyz = velocity;
+    fluidFogVoxelVelocityImage[pushConst.fluidIndex][voxelIndex] = float4(velocity, 0.0f);
 }

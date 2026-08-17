@@ -47,6 +47,52 @@ void FzbRenderer::Scene::addMeshSet(MeshSet& meshSet) {
 	meshSetIDToIndex.insert({ meshSet.meshID, meshSets.size() });
 	meshSets.push_back(meshSet);
 }
+void FzbRenderer::Scene::createMeshLowPoly(float ratio) {
+	nvvk::StagingUploader& stagingUploader = Application::stagingUploader;
+	nvvk::ResourceAllocator* allocator = stagingUploader.getResourceAllocator();
+
+	{
+		for (auto& data : bDatas_lowPoly)
+			allocator->destroyBuffer(data);
+		allocator->destroyBuffer(bMeshes_lowPoly);
+		bDatas_lowPoly.clear();
+		meshes_lowPoly.clear();
+	}
+
+	for (int i = 0; i < meshSets.size(); ++i) {
+		MeshSet& meshSet = meshSets[i];
+		meshSet.createLowPoly(ratio);
+
+		nvvk::Buffer bData;
+		NVVK_CHECK(allocator->createBuffer(bData, std::span<const unsigned char>(meshSet.meshByteData_LowPoly).size_bytes(),
+			VK_BUFFER_USAGE_2_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_2_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT
+			| VK_BUFFER_USAGE_2_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR));
+		NVVK_CHECK(Application::stagingUploader.appendBuffer(bData, 0, std::span<const unsigned char>(meshSet.meshByteData_LowPoly)));
+		NVVK_DBG_NAME(bData.buffer);
+		bDatas_lowPoly.push_back(bData);
+
+		for (int j = 0; j < meshSet.childMeshInfos_LowPoly.size(); j++)
+		{
+			MeshInfo& childMeshInfo = meshSet.childMeshInfos_LowPoly[j];
+			childMeshInfo.meshIndex = meshes_lowPoly.size();
+			childMeshInfo.mesh.dataBuffer = (uint8_t*)bData.address;
+
+			meshes_lowPoly.emplace_back(childMeshInfo.mesh);
+		}
+	}
+
+	if (meshes_lowPoly.size() > 0) {
+		NVVK_CHECK(allocator->createBuffer(bMeshes_lowPoly, std::span(meshes_lowPoly).size_bytes(),
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT));
+		NVVK_DBG_NAME(bMeshes_lowPoly.buffer);
+		NVVK_CHECK(stagingUploader.appendBuffer(bMeshes_lowPoly, 0, std::span<const shaderio::Mesh>(meshes_lowPoly)));
+	}
+
+	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
+	Application::stagingUploader.cmdUploadAppended(cmd);
+	Application::app->submitAndWaitTempCmdBuffer(cmd);
+}
+
 void FzbRenderer::Scene::createSceneFromXML() {
 	name = scenePath.filename().string();
 	scenePath = FzbRenderer::getProjectRootDir() / "resources" / scenePath;
@@ -358,6 +404,10 @@ void FzbRenderer::Scene::clean() {
 		allocator.destroyBuffer(data);
 	for (auto& texture : textures)
 		allocator.destroyImage(texture);
+
+	for (auto& data : bDatas_lowPoly)
+		allocator.destroyBuffer(data);
+	allocator.destroyBuffer(bMeshes_lowPoly);
 }
 
 void FzbRenderer::Scene::preRender() {

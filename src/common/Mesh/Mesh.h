@@ -50,10 +50,9 @@ public:
 	std::vector<uint8_t> meshByteData;
 	shaderio::AABB aabb = { { FLT_MAX, FLT_MAX, FLT_MAX }, { -FLT_MAX, -FLT_MAX, -FLT_MAX } };
 
-	std::vector<meshopt_Meshlet> meshlets;
-	std::vector<uint32_t> meshletVertices;
-	std::vector<uint8_t> meshletTriangles;
-	std::vector<uint32_t> meshletTrianglesU32;
+	std::vector<MeshInfo> childMeshInfos_LowPoly;
+	std::vector<uint8_t> meshByteData_LowPoly;	//只有顶点坐标
+	void createLowPoly(float ratio = 0.1f);
 private:
 	void loadGltfData(const tinygltf::Model& model, bool importInstance = false);
 	void processMesh(aiMesh* meshData, const aiScene* sceneData);

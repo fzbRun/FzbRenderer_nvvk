@@ -103,14 +103,33 @@ void computeMain_initFluid(uint3 voxelIndex: SV_DispatchThreadID, uint3 groupThr
     envColor /= max(envExtinction, 1e-30f);
     float4 envVoxelInfo = float4(envExtinction, envScattering, envPhase, luminance(envColor));
     float4 voxelInfo = envVoxelInfo;
+    float3 velocity = 0.0f;
 
-    int3 voxelIndex_lastTime = int3((voxelCenter - fluidFogInfo.fogStartPos_lastTime) / voxelSize);
-    if (any(voxelIndex_lastTime < 0) || any(voxelIndex_lastTime > gridSize - 1) || pushConst.time == 0) {
-        fluidFogVoxelVelocityImage[pushConst.fluidIndex][voxelIndex].xyz = 0.0f;
-    } else {
+    //int3 voxelIndex_lastTime = int3((voxelCenter - fluidFogInfo.fogStartPos_lastTime) / voxelSize);
+    //if (all(voxelIndex_lastTime >= 0) && all(voxelIndex_lastTime <= gridSize - 1) && pushConst.time > 0) {
+    //    voxelInfo = fluidFogImages[pushConst.fluidIndex][voxelIndex_lastTime];
+    //
+    //    velocity = fluidFogVoxelVelocityImage[pushConst.fluidIndex][voxelIndex_lastTime].xyz;
+    //
+    //    float3 halfGrid = float3(gridSize) * 0.5f;
+    //    float3 distToCenter = abs(float3(voxelIndex) - halfGrid);
+    //    float maxPossibleDist = length(halfGrid);
+    //    float centerDist = length(distToCenter) / maxPossibleDist;
+    //
+    //    float edgeFactor = smoothstep(0.0, 1.0, centerDist);
+    //    float restoreRate = 0.5f;
+    //    float restoreWeight = saturate(restoreRate * pushConst.dt) * edgeFactor * fluidFogInfo.restoreSpeed;
+    //
+    //    voxelInfo = lerp(voxelInfo, envVoxelInfo, saturate(restoreWeight));
+    //    velocity = lerp(velocity, 0.0f, saturate(restoreWeight));
+    //}
+
+    if (pushConst.time > 0) {
+        int3 voxelIndex_lastTime = int3((voxelCenter - fluidFogInfo.fogStartPos_lastTime) / voxelSize);
+        voxelIndex_lastTime = clamp(voxelIndex_lastTime, 0, gridSize - 1);
         voxelInfo = fluidFogImages[pushConst.fluidIndex][voxelIndex_lastTime];
 
-        float3 velocity = fluidFogVoxelVelocityImage[pushConst.fluidIndex][voxelIndex_lastTime].xyz;
+        velocity = fluidFogVoxelVelocityImage[pushConst.fluidIndex][voxelIndex_lastTime].xyz;
 
         float3 halfGrid = float3(gridSize) * 0.5f;
         float3 distToCenter = abs(float3(voxelIndex) - halfGrid);
@@ -122,16 +141,20 @@ void computeMain_initFluid(uint3 voxelIndex: SV_DispatchThreadID, uint3 groupThr
         float restoreWeight = saturate(restoreRate * pushConst.dt) * edgeFactor * fluidFogInfo.restoreSpeed;
 
         voxelInfo = lerp(voxelInfo, envVoxelInfo, saturate(restoreWeight));
-
         velocity = lerp(velocity, 0.0f, saturate(restoreWeight));
-        fluidFogVoxelVelocityImage[pushConst.fluidIndex][voxelIndex].xyz = velocity;
     }
+
+    fluidFogVoxelVelocityImage[pushConst.fluidIndex][voxelIndex] = float4(velocity, 0.0f);
     fluidFogImages[pushConst.fluidIndex][voxelIndex] = voxelInfo;
 
     uint voxelIndexU = voxelIndex.z * gridSize.x * gridSize.y + voxelIndex.y * gridSize.x + voxelIndex.x;
     fluidFogVoxelInfoBuffer[pushConst.fluidIndex][voxelIndexU].isBoundary = false;
+
+    pushConst.dynamicMeshInjectedAddress[pushConst.fluidIndex][voxelIndexU] = 0;
 }
-//----------------------------------------------------------------------------------------------------------------------
+
+
+/*
 groupshared SceneInfo groupSceneInfo;
 groupshared AABB groupFluidAABB;
 groupshared uint groupInFluidInstanceCount;
@@ -329,3 +352,4 @@ void computeMain_injectFluidInfo(uint3 voxelIndex: SV_DispatchThreadID, uint3 gr
     //    );
     //}
 }
+*/

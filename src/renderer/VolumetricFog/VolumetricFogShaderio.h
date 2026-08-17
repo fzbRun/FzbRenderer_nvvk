@@ -14,7 +14,7 @@ NAMESPACE_SHADERIO_BEGIN()
 
 #define FLUID_SIMULATION_OBJECT_SAVE_FOG
 
-#define FLUID_GBUFFER_INJECT
+//#define FLUID_GBUFFER_INJECT
 
 #define FINAL_PROJECT
 #ifdef FINAL_PROJECT
@@ -59,7 +59,7 @@ struct FogAccHasFogVoxelInfo {
 	float3 voxelCenter;
 	float3 voxelCenter_lastVoxel;
 };
-
+//---------------------------------------------
 struct InitFluidPushConstant {
 	float time;
 	float dt;
@@ -67,21 +67,29 @@ struct InitFluidPushConstant {
 	int fogIndex;
 	float3 fluidStartPos;
 
-	uint instanceCount;
-	int hasFluidStartUp;
-
 	SceneInfo* sceneInfoAddress;
 	FogGlobalInfo* fogGlobalInfoAddress;
-	InstanceInfo* instanceInfoAddress;
-	InFluidInstanceInfo* inFluidInstanceInfoAddress;
-	uint* inFluidInstanceCountAddress;
+	uint* dynamicMeshInjectedAddress[MAX_FLUID_FOG_COUNT];
 
 	float4x4 padding0;
 	float4x4 padding1;
-	float4 padding2;
-	float4 padding3;
-	float4 padding4;
+	float4x4 padding2;
 };
+struct InjectFluidPushConstant {
+	float dt;
+	int fluidIndex;
+
+	int instanceIndex;
+	//float3x3 normalMatrix;
+
+	float4x4 tansfromMatrix_lastFrame;
+
+	SceneInfo* sceneInfoAddress;
+	Mesh* meshes_lowPoly;
+	float4x4* fluidVPMatrixAddress;
+	uint* dynamicMeshInjectedAddress[MAX_FLUID_FOG_COUNT];
+};
+//---------------------------------------------
 struct CreateGBuffersPushConstant {
 	float4x4 projMatrix_taa;
 	int useTAA;
@@ -98,6 +106,7 @@ struct CreateGBuffersPushConstant {
 
 	float dt;
 };
+//---------------------------------------------
 struct FluidSimulationPushConstant {
 	int fluidIndex;
 	float time;
@@ -115,6 +124,7 @@ struct FluidSimulationPushConstant {
 	float4 padding3;
 	float2 padding4;
 };
+//---------------------------------------------
 struct FogAccPushConstant {
 	FrustumGlobalInfo frustumInfo;
 	int blurVoxelFog;
@@ -125,6 +135,8 @@ struct FogAccPushConstant {
 	float3 jitterUVW;
 	int isJitterUVW;
 
+	float2 fluidMergeRatio = { 0.4f, 0.7f };
+
 	float4x4 lightVP;
 	float4x4 viewInvMatrix_lastFrame;
 
@@ -133,8 +145,9 @@ struct FogAccPushConstant {
 	uint* fogAccHasFogVoxelCountAddress;
 
 	float4 padding0;
-	float4 padding1;
+	float2 padding1;
 };
+//---------------------------------------------
 struct renderOpaquePushConstant {
 	FrustumGlobalInfo frustumInfo;
 	uint2 screenSize;

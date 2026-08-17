@@ -79,12 +79,13 @@ private:
 	std::unique_ptr<GridFogSet> gridFogSet;
 	//--------------------------FluidSimulation-----------------------------
 	VkShaderEXT computeShader_initFluid{};
-	VkShaderEXT computeShader_getInFluidInstanceInfo{};
-	VkShaderEXT computeShader_injectFluidInfo{};
-	FzbRenderer::Buffer instanceInfoBuffer;
-	FzbRenderer::Buffer inFluidInstanceInfoBuffer;
-	FzbRenderer::Buffer inFluidInstanceCountBuffer;
+	VkShaderEXT vertexShader_injectFluidInfo{};
+	VkShaderEXT geometryShader_injectFluidInfo{};
+	VkShaderEXT fragmentShader_injectFluidInfo{};
 	shaderio::InitFluidPushConstant initFluidPushConstant;
+	shaderio::InjectFluidPushConstant injectFluidPushConstant;
+	FzbRenderer::Buffer fluidVPMatrixsBuffer;
+	std::vector<FzbRenderer::Buffer> dynamicMeshInjectedBuffers;
 	void initFluid(VkCommandBuffer cmd);
 
 	VkShaderEXT computeShader_fluidSimulation_A{};
@@ -103,10 +104,11 @@ private:
 
 	void fluidSimulation(VkCommandBuffer cmd);
 	//-----------------------------FogAcc-----------------------------------
-	bool useFogAcc = false;
+	bool useFogAcc = true;
+	int sampleCount_fogAcc = 10;
 	shaderio::FrustumGlobalInfo frustumInfo;
 	bool blurVoxelFog = true;
-	int sampleCount_fogAcc = 20;
+	shaderio::float2 fluidMergeRatio = { 0.1f, 0.3f };
 
 	void createVolumetricFogImage(FzbRenderer::Image& image, shaderio::uint3 size, bool linear);
 	FzbRenderer::Image fogAccImage;
@@ -127,7 +129,7 @@ private:
 	VkShaderEXT computeShader_renderOpaqueMaterial{};
 	void renderOpaqueMaterial(VkCommandBuffer cmd);
 
-	int sampleCount_renderOpaque = 20;
+	int sampleCount_renderOpaque = 50;
 	float jitterStrength_randerOpaque = 1.0f;
 	//-----------------------renderTransparent-------------------------------
 	shaderio::renderTransparentPushConstant renderTransparentPushConstant;
@@ -140,13 +142,6 @@ private:
 	VkShaderEXT vertexShader_renderCameraFrustum{};
 	VkShaderEXT fragmentShader_renderCameraFrustum{};
 	void renderCameraFrustum(VkCommandBuffer cmd);
-
-	bool showInstanceAABB = false;
-	int showInstanceIndex = 0;
-	shaderio::renderInstanceAABBPushConstant renderInstanceAABBPushConstant;
-	VkShaderEXT vertexShader_renderInstanceAABB{};
-	VkShaderEXT fragmentShader_renderInstanceAABB{};
-	void renderInstanceAABB(VkCommandBuffer cmd);
 };
 
 }

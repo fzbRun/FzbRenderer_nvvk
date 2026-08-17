@@ -33,6 +33,9 @@ public:
 	std::string followInstanceID = "mainCharacter";
 	shaderio::float3 fluidLocalStartPos;
 
+	shaderio::AABB fogAABB;
+	shaderio::float4x4 VP[3];
+
 	bool fogInfoModified = false;
 	int showFogGrid = false;
 };
@@ -51,7 +54,7 @@ public:
 	void clean();
 	void uiRender();
 	void preRender();
-	void updateDataPerFrame(VkCommandBuffer cmd, bool frist, FzbRenderer::Buffer fogInfoBuffer);
+	void updateDataPerFrame(VkCommandBuffer cmd, bool frist, FzbRenderer::Buffer fogInfoBuffer, FzbRenderer::Buffer fluidVPMatrixsBuffer);
 
 	void addFog(FluidFogCreateInfo createInfo);
 	inline nvvk::Buffer* getfluidFogVoxelInfoBuffersPtr() { return fluidFogVoxelInfoBuffers.data(); };
@@ -63,6 +66,8 @@ public:
 	inline bool getFogModified(int i) { return fluidFogs[i].fogInfoModified; };
 	inline shaderio::uint3 getFogGridSize(int i) { return fluidFogs[i].fluidFogInfo.gridSize; };
 	inline bool getFogGridShow(int i) { return fluidFogs[i].showFogGrid; };
+
+	inline shaderio::float4x4 getFogVPs(int i, int j) { return fluidFogs[i].VP[j]; };
 	
 	int fogCount = 0;
 	FzbRenderer::Buffer fluidFogInfoBuffer;

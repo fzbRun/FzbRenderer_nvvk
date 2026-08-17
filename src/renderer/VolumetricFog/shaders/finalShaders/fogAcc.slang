@@ -106,12 +106,6 @@ void computeMain_getHasFogVoxels(uint3 threadIndex: SV_DispatchThreadID, uint3 g
         uint fogOffset = hasFogOffset_inWarp + hasFogOffset_inGroup + groupHasFogVoxelOffset_inGlobal;
         fogAccHasFogVoxelInfoBuffer[fogOffset] = hasFogVoxelInfo;
     }
-
-    //if (all(voxelIndex <= uint3(76, 101, 32)) && all(voxelIndex >= uint3(71, 97, 32))) {
-    //    printf("frameIndex: %d, voxelIndex: %d %d %d, hasFog: %d\n",
-    //        pushConst.temporalFrameIndex, voxelIndex.x, voxelIndex.y, voxelIndex.z, hasFog
-    //    );
-    //}
     //---------------------------------------------------------------------------------------------------------------
     float attenuation = 1.0f; float3 L = 0.0f;
     if (globalFogInfo.useGlobalHeightFog == 1) {
@@ -158,8 +152,6 @@ void computeMain_getFog(uint threadIndex: SV_DispatchThreadID, uint groupThreadI
 
     uint3 gridSize = pushConst.frustumInfo.frustumGridSize;
     uint voxelIndexU = voxelIndex.z * gridSize.x * gridSize.y + voxelIndex.y * gridSize.x + voxelIndex.x;
-    // 用 temporalFrameIndex：pushConst.frameIndex 在相机移动时被清零，
-    // 于是相机一动，所有体素的随机序列同时跳回起点，整片雾会瞬间变一次 —— 就是“波动”。
     uint randomSeed = xxhash32(uint3(voxelIndexU, pushConst.temporalFrameIndex, 1));
 
     float attenuation = 1.0f, L = 0.0f, attenuation2 = 1.0f;
@@ -169,12 +161,7 @@ void computeMain_getFog(uint threadIndex: SV_DispatchThreadID, uint groupThreadI
         L = globalHeightFogResult.y;
     }
 
-    uint sampleCount = pushConst.sampleCount;
-    // 逐体素的空间抖动：以 (x, y) 为IGN坐标、z为层号，得到一张在三个方向上都不相关的
-    // 有序抖动图。原来所有体素共用一个 layerOffset，8个采样点在每个板里落在完全相同的
-    // 相对位置，于是雾体AABB的边界在整个网格上被量化到同一处 —— 这就是块状伪影。
-    // 时域推进只在体素时域滤波（fogBlur_voxel）开着时才做：滤波会把逐帧的偏移积成超采样；
-    // 没有滤波的话逐帧变化就只剩闪烁。
+    uint sampleCount = pushConst.sampleCount;   //max(pushConst.sampleCount * lerp(0, 1, saturate(abs(voxelCenter.z - voxelCenter_lastVoxel.z)) / 2), 1);
     float spatialDither = getCellDither(float2(voxelIndex.xy), (float)voxelIndex.z * 0.618f);
     float layerOffset = getMarchLayerOffset(pushConst.temporalFrameIndex, spatialDither, true, pushConst.blurVoxelFog == 1);
     // layerOffset = rand(randomSeed);
@@ -215,7 +202,7 @@ void computeMain_blurFog(uint3 threadIndex: SV_DispatchThreadID, uint3 groupThre
     uint3 gridSize = gridSizeEarly;
     float3 gridSizeF = float3(gridSize);
 
-    float3 cameraPos = sceneInfo.cameraPosition;
+    float3 cameraPos = sceneInfo.viewInvMatrix[3].xyz;  //sceneInfo.cameraPosition;
     float3 cameraRight = sceneInfo.viewInvMatrix[0].xyz;
     float3 cameraUp = sceneInfo.viewInvMatrix[1].xyz;
     float3 cameraForward = -sceneInfo.viewInvMatrix[2].xyz;
@@ -244,6 +231,29 @@ void computeMain_blurFog(uint3 threadIndex: SV_DispatchThreadID, uint3 groupThre
     float3 cameraUp_lastTime = camInfo_last[1].xyz;
     float3 cameraForward_lastTime = -camInfo_last[2].xyz;
 
+    bool inFluid = false;
+    float mergeRatioMin = 0.01f, mergeRatioMax = 0.05f;
+    {
+        FogGlobalInfo fogGlobalInfo = groupFogGlobalInfo;
+        for (int i = 0; i < fogGlobalInfo.fluidFogCount; ++i) {
+            VolumetricFogInfo fogInfo = getVolumetricFog(i);
+            if (!checkPointInAABB(voxelCenter, fogInfo.aabb)) continue;
+    
+            FluidFogInfo fluidFogInfo = getFluidFog(fogInfo.typeFogIndex);
+            if (fluidFogInfo.startUp == 0) continue;
+
+            inFluid = true;
+            mergeRatioMin = pushConst.fluidMergeRatio.x;
+            mergeRatioMax = pushConst.fluidMergeRatio.y;
+            break;
+        }
+    }
+    if (all(abs(cameraPos_lastTime - cameraPos) < 1e-10f) && !inFluid) {
+        fogAccImage[voxelIndex].xyz = fogAccHistoryImage[voxelIndex].xyz;
+        return;
+    }
+    // if (all(voxelIndex == 0)) printf("cameraPos_lastTime: %f %f %f, cameraPos: %f %f %f\n", cameraPos_lastTime.x, cameraPos_lastTime.y, cameraPos_lastTime.z, cameraPos.x, cameraPos.y, cameraPos.z);
+
     float3 toVoxel = voxelCenter - cameraPos_lastTime;
     float viewZ = dot(toVoxel, cameraForward_lastTime);
     float viewX = dot(toVoxel, cameraRight_lastTime);
@@ -271,12 +281,7 @@ void computeMain_blurFog(uint3 threadIndex: SV_DispatchThreadID, uint3 groupThre
     // 原来这里直接 return，可是 fogBlur_Voxel 之后会无条件把结果图拷进历史图，
     // 于是这些体素保留的是上一轮的陈旧数据，相机转动时视锥边缘会出现一圈闪烁的脏值。
     if (!historyValid) return; // curVoxelInfo 本来就已经在图里，不用重写
-
     float3 lastVoxelInfo = fogAccHistoryImage.SampleLevel(uvw_lastTime, 0).xyz;
-    if (all(abs(cameraPos_lastTime - cameraPos) < 1e-10f)) {
-        fogAccImage[voxelIndex].xyz = lastVoxelInfo;
-    }
-
     //-------------------------------- 邻域钳制 --------------------------------
     // 把历史值限制在当前体素邻域的取值范围内。重投影再准也会有半个体素的误差，
     // 在雾的边界处（比如物体遮挡产生的阴影边）会把完全不同的值混进来 —— 表现为拖影。
@@ -309,22 +314,6 @@ void computeMain_blurFog(uint3 threadIndex: SV_DispatchThreadID, uint3 groupThre
     float cameraSpeed = length(cameraMove) / max(pushConst.dt, 1e-4f);
     // 朝向变化量：用当前和上一帧 forward 的夹角近似
     float rotationDelta = 1.0f - saturate(dot(cameraForward, cameraForward_lastTime));
-
-    float mergeRatioMin = 0.01f, mergeRatioMax = 0.05f;
-    {
-        FogGlobalInfo fogGlobalInfo = groupFogGlobalInfo;
-        for (int i = 0; i < fogGlobalInfo.fluidFogCount; ++i) {
-            VolumetricFogInfo fogInfo = getVolumetricFog(i);
-            if (!checkPointInAABB(voxelCenter, fogInfo.aabb)) continue;
-
-            FluidFogInfo fluidFogInfo = getFluidFog(fogInfo.typeFogIndex);
-            if (fluidFogInfo.startUp == 0) continue;
-    
-            //mergeRatioMin = 0.4f, mergeRatioMax = 0.7f;
-            break;
-        }
-    }
-
 
     float motion = saturate(cameraSpeed * 0.02f + rotationDelta * 20.0f);
     float mergeRatio = lerp(mergeRatioMin, mergeRatioMax, motion); // 当前帧的权重

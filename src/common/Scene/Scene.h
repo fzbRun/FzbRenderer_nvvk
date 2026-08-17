@@ -78,9 +78,15 @@ public:
 	nvvk::Buffer bInstances;
 	nvvk::Buffer bMaterials;
 	nvvk::Buffer bSceneInfo;
+
+	std::vector<shaderio::Mesh> meshes_lowPoly;
+	std::vector<nvvk::Buffer> bDatas_lowPoly;
+	nvvk::Buffer bMeshes_lowPoly;
 	//-----------------------------------------------------------------------------------------------------
 	int loadTexture(const std::filesystem::path& texturePath);
 	void addMeshSet(MeshSet& meshSet);
+
+	void createMeshLowPoly(float ratio = 0.1f);
 
 	int getMeshSetIndex(std::string meshSetID) { return meshSetIDToIndex[meshSetID]; };
 	int getMaterialIndex(std::string materialID) { return uniqueMaterialIDToIndex[materialID]; };

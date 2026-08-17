@@ -1145,3 +1145,182 @@ void FzbRenderer::MeshSet::createMeshLets() {
 	//meshletTriangles.resize(last.triangle_offset + ((last.triangle_count * 3 + 3) & ~3));	//保证一定是4的倍数
 	//meshlets.resize(meshletCount);
 }
+//---------------------------------------------------------------------------------------------------------
+void FzbRenderer::MeshSet::createLowPoly(float ratio) {
+	meshByteData_LowPoly.clear();
+	childMeshInfos_LowPoly.clear();
+	if (!(ratio > 0.0f) || meshByteData.empty() || childMeshInfos.empty()) return;
+
+	const float simplificationRatio = std::min(ratio, 1.0f);
+
+	struct ProcessedLowPolyData {
+		std::vector<uint32_t> indices;
+		std::vector<uint8_t> positions;
+	};
+
+	auto processChild = [this, simplificationRatio](const MeshInfo& childMeshInfo) {
+		ProcessedLowPolyData result;
+
+		const shaderio::BufferView& indices = childMeshInfo.mesh.triMesh.indices;
+		const shaderio::BufferView& positions = childMeshInfo.mesh.triMesh.positions;
+		const uint32_t indexCount = indices.count;
+		const uint32_t vertexCount = positions.count;
+
+		if (indexCount < 3 || vertexCount == 0) return result;
+		if (indices.offset == static_cast<uint32_t>(-1) || positions.offset == static_cast<uint32_t>(-1)) return result;
+		if (indices.offset > meshByteData.size() || positions.offset > meshByteData.size()) return result;
+
+		const size_t indexByteStride = indices.byteStride ? indices.byteStride : (childMeshInfo.mesh.indexType == VK_INDEX_TYPE_UINT16 ? sizeof(uint16_t) : sizeof(uint32_t));
+		const size_t indexElementSize = childMeshInfo.mesh.indexType == VK_INDEX_TYPE_UINT16 ? sizeof(uint16_t) : sizeof(uint32_t);
+		if (indexElementSize + indexByteStride * (indexCount - 1) > meshByteData.size() - indices.offset) return result;
+
+		const size_t positionByteStride = positions.byteStride ? positions.byteStride : sizeof(glm::vec3);
+		if (positionByteStride < sizeof(glm::vec3)) return result;
+		if (sizeof(glm::vec3) + positionByteStride * (vertexCount - 1) > meshByteData.size() - positions.offset) return result;
+
+		std::vector<uint32_t> meshIndices(indexCount);
+		const uint8_t* indexData = meshByteData.data() + indices.offset;
+		if (childMeshInfo.mesh.indexType == VK_INDEX_TYPE_UINT16) {
+			for (uint32_t i = 0; i < indexCount; ++i) {
+				const uint16_t* index = reinterpret_cast<const uint16_t*>(indexData + i * indexByteStride);
+				if (*index >= vertexCount) return result;
+				meshIndices[i] = *index;
+			}
+		}
+		else {
+			for (uint32_t i = 0; i < indexCount; ++i) {
+				const uint32_t* index = reinterpret_cast<const uint32_t*>(indexData + i * indexByteStride);
+				if (*index >= vertexCount) return result;
+				meshIndices[i] = *index;
+			}
+		}
+
+		if (indexCount / 3 < 64) {
+			result.indices = meshIndices;
+			result.positions.resize(vertexCount * sizeof(glm::vec3));
+			float* dstPositions = reinterpret_cast<float*>(result.positions.data());
+			const uint8_t* srcPositions = meshByteData.data() + positions.offset;
+			for (uint32_t i = 0; i < vertexCount; ++i) {
+				const float* srcPosition = reinterpret_cast<const float*>(srcPositions + i * positionByteStride);
+				dstPositions[i * 3 + 0] = srcPosition[0];
+				dstPositions[i * 3 + 1] = srcPosition[1];
+				dstPositions[i * 3 + 2] = srcPosition[2];
+			}
+			return result;
+		}
+
+		size_t targetIndexCount = static_cast<size_t>(indexCount * simplificationRatio);
+		targetIndexCount = std::max<size_t>(targetIndexCount, 3);
+		targetIndexCount -= targetIndexCount % 3;
+		targetIndexCount = std::min<size_t>(targetIndexCount, indexCount);
+
+		std::vector<uint32_t> simplifiedIndices(indexCount);
+		const float* vertexPositions = reinterpret_cast<const float*>(meshByteData.data() + positions.offset);
+		size_t simplifiedIndexCount = 0;
+		if (simplificationRatio < 0.25f) {
+			simplifiedIndexCount = meshopt_simplifySloppy(
+				simplifiedIndices.data(),
+				meshIndices.data(),
+				indexCount,
+				vertexPositions,
+				vertexCount,
+				positionByteStride,
+				nullptr,
+				targetIndexCount,
+				1.0f,
+				nullptr
+			);
+		}
+		else {
+			simplifiedIndexCount = meshopt_simplify(
+				simplifiedIndices.data(),
+				meshIndices.data(),
+				indexCount,
+				vertexPositions,
+				vertexCount,
+				positionByteStride,
+				targetIndexCount,
+				0.01f,
+				0,
+				nullptr
+			);
+		}
+		simplifiedIndices.resize(simplifiedIndexCount);
+
+		std::vector<uint32_t> remap(vertexCount, static_cast<uint32_t>(-1));
+		result.indices.resize(simplifiedIndexCount);
+		result.positions.reserve(simplifiedIndexCount * sizeof(glm::vec3));
+
+		const uint8_t* srcPositions = meshByteData.data() + positions.offset;
+
+		for (size_t i = 0; i < simplifiedIndexCount; ++i) {
+			const uint32_t vertexIndex = simplifiedIndices[i];
+			if (vertexIndex >= vertexCount) return ProcessedLowPolyData{};
+
+			uint32_t newIndex = remap[vertexIndex];
+			if (newIndex == static_cast<uint32_t>(-1)) {
+				newIndex = static_cast<uint32_t>(result.positions.size() / sizeof(glm::vec3));
+				remap[vertexIndex] = newIndex;
+
+				const float* srcPosition = reinterpret_cast<const float*>(srcPositions + vertexIndex * positionByteStride);
+				const size_t oldSize = result.positions.size();
+				result.positions.resize(oldSize + sizeof(glm::vec3));
+				float* dstPosition = reinterpret_cast<float*>(result.positions.data() + oldSize);
+				dstPosition[0] = srcPosition[0];
+				dstPosition[1] = srcPosition[1];
+				dstPosition[2] = srcPosition[2];
+			}
+			result.indices[i] = newIndex;
+		}
+
+		return result;
+	};
+
+	size_t reserveSize = 0;
+	for (const auto& childMeshInfo : childMeshInfos) {
+		const auto& indices = childMeshInfo.mesh.triMesh.indices;
+		reserveSize += static_cast<size_t>(indices.count * simplificationRatio) * (sizeof(uint32_t) + sizeof(glm::vec3));
+	}
+	meshByteData_LowPoly.reserve(reserveSize);
+	childMeshInfos_LowPoly.reserve(childMeshInfos.size());
+
+	std::vector<std::future<ProcessedLowPolyData>> futures;
+	futures.reserve(childMeshInfos.size());
+	for (const auto& childMeshInfo : childMeshInfos) {
+		futures.push_back(std::async(std::launch::async, processChild, childMeshInfo));
+	}
+
+	for (size_t i = 0; i < futures.size(); ++i) {
+		ProcessedLowPolyData lowPolyData = futures[i].get();
+
+		const uint32_t indexOffset = static_cast<uint32_t>(meshByteData_LowPoly.size());
+		const size_t indexByteCount = lowPolyData.indices.size() * sizeof(uint32_t);
+		if (indexByteCount > 0) {
+			const uint8_t* indexBytes = reinterpret_cast<const uint8_t*>(lowPolyData.indices.data());
+			meshByteData_LowPoly.insert(meshByteData_LowPoly.end(), indexBytes, indexBytes + indexByteCount);
+		}
+
+		const uint32_t positionOffset = static_cast<uint32_t>(meshByteData_LowPoly.size());
+		const uint32_t positionPadding = (sizeof(glm::vec3) - meshByteData_LowPoly.size() % sizeof(glm::vec3)) % sizeof(glm::vec3);
+		if (positionPadding > 0) meshByteData_LowPoly.insert(meshByteData_LowPoly.end(), positionPadding, 0);
+
+		MeshInfo lowPolyInfo = childMeshInfos[i];
+		lowPolyInfo.mesh = {};
+		lowPolyInfo.mesh.indexType = VK_INDEX_TYPE_UINT32;
+		lowPolyInfo.mesh.triMesh.indices = {
+			.offset = indexOffset,
+			.count = static_cast<uint32_t>(lowPolyData.indices.size()),
+			.byteStride = sizeof(uint32_t)
+		};
+		lowPolyInfo.mesh.triMesh.positions = {
+			.offset = positionOffset + positionPadding,
+			.count = static_cast<uint32_t>(lowPolyData.positions.size() / sizeof(glm::vec3)),
+			.byteStride = sizeof(glm::vec3)
+		};
+		childMeshInfos_LowPoly.push_back(lowPolyInfo);
+
+		if (!lowPolyData.positions.empty()) {
+			meshByteData_LowPoly.insert(meshByteData_LowPoly.end(), lowPolyData.positions.begin(), lowPolyData.positions.end());
+		}
+	}
+}

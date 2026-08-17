@@ -76,6 +76,34 @@ void FluidFog::init() {
 		}
 		fluidLocalStartPos = (mainCharacterAABB.minimum + mainCharacterAABB.maximum) * 0.5f;
 		fluidLocalStartPos.y = 0.0f;
+
+		fogAABB = mainCharacterAABB;
+	}
+
+	{
+		glm::vec3 distance = (fogAABB.maximum - fogAABB.minimum) * 1.1f;
+		glm::vec3 center = (fogAABB.maximum + fogAABB.minimum) * 0.5f;
+		glm::vec3 minimum = center - distance * 0.5f;
+		glm::vec3 maximum = center + distance * 0.5f;
+
+		//前面
+		glm::vec3 viewPoint = glm::vec3(center.x, center.y, maximum.z + 0.1f);	//世界坐标右手螺旋，即+z朝后
+		glm::mat4 viewMatrix = glm::lookAt(viewPoint, viewPoint + glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+		glm::mat4 orthoMatrix = glm::orthoRH_ZO(-0.5f * distance.x, 0.5f * distance.x, -0.5f * distance.y, 0.5f * distance.y, 0.1f, distance.z + 0.1f);
+		orthoMatrix[1][1] *= -1;
+		VP[0] = orthoMatrix * viewMatrix;
+		//左边
+		viewPoint = glm::vec3(minimum.x - 0.1f, center.y, center.z);
+		viewMatrix = glm::lookAt(viewPoint, viewPoint + glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+		orthoMatrix = glm::orthoRH_ZO(-0.5f * distance.z, 0.5f * distance.z, -0.5f * distance.y, 0.5f * distance.y, 0.1f, distance.x + 0.1f);
+		orthoMatrix[1][1] *= -1;
+		VP[1] = orthoMatrix * viewMatrix;
+		//下面
+		viewPoint = glm::vec3(center.x, minimum.y - 0.1f, center.z);
+		viewMatrix = glm::lookAt(viewPoint, viewPoint + glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+		orthoMatrix = glm::orthoRH_ZO(-0.5f * distance.x, 0.5f * distance.x, -0.5f * distance.z, 0.5f * distance.z, 0.1f, distance.y + 0.1f);
+		orthoMatrix[1][1] *= -1;
+		VP[2] = orthoMatrix * viewMatrix;
 	}
 }
 void FluidFog::clean() {
@@ -121,6 +149,32 @@ void FluidFog::preRender(shaderio::AABB& fogAABB) {
 		fogStartPos_lastTime -= shaderio::float3(0.5f, 0.0f, 0.5f) * (shaderio::float3)fluidFogInfo.gridSize * fluidFogInfo.voxelSize;
 		fogStartPos_lastTime -= 3.0f * fluidFogInfo.voxelSize.y;
 		fluidFogInfo.fogStartPos_lastTime = fogStartPos_lastTime;
+
+		this->fogAABB = fogAABB;
+
+		glm::vec3 distance = (fogAABB.maximum - fogAABB.minimum) * 1.1f;
+		glm::vec3 center = (fogAABB.maximum + fogAABB.minimum) * 0.5f;
+		glm::vec3 minimum = center - distance * 0.5f;
+		glm::vec3 maximum = center + distance * 0.5f;
+
+		//前面
+		glm::vec3 viewPoint = glm::vec3(center.x, center.y, maximum.z + 0.1f);	//世界坐标右手螺旋，即+z朝后
+		glm::mat4 viewMatrix = glm::lookAt(viewPoint, viewPoint + glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+		glm::mat4 orthoMatrix = glm::orthoRH_ZO(-0.5f * distance.x, 0.5f * distance.x, -0.5f * distance.y, 0.5f * distance.y, 0.1f, distance.z + 0.1f);
+		orthoMatrix[1][1] *= -1;
+		VP[0] = orthoMatrix * viewMatrix;
+		//左边
+		viewPoint = glm::vec3(minimum.x - 0.1f, center.y, center.z);
+		viewMatrix = glm::lookAt(viewPoint, viewPoint + glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+		orthoMatrix = glm::orthoRH_ZO(-0.5f * distance.z, 0.5f * distance.z, -0.5f * distance.y, 0.5f * distance.y, 0.1f, distance.x + 0.1f);
+		orthoMatrix[1][1] *= -1;
+		VP[1] = orthoMatrix * viewMatrix;
+		//下面
+		viewPoint = glm::vec3(center.x, minimum.y - 0.1f, center.z);
+		viewMatrix = glm::lookAt(viewPoint, viewPoint + glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+		orthoMatrix = glm::orthoRH_ZO(-0.5f * distance.x, 0.5f * distance.x, -0.5f * distance.z, 0.5f * distance.z, 0.1f, distance.y + 0.1f);
+		orthoMatrix[1][1] *= -1;
+		VP[2] = orthoMatrix * viewMatrix;
 	}
 }
 //--------------------------------------------------------------------------------------------------------------------------------
@@ -178,9 +232,10 @@ void FluidFogSet::preRender() {
 	}
 }
 
-void FluidFogSet::updateDataPerFrame(VkCommandBuffer cmd, bool frist, FzbRenderer::Buffer fogInfoBuffer) {
+void FluidFogSet::updateDataPerFrame(VkCommandBuffer cmd, bool frist, FzbRenderer::Buffer fogInfoBuffer, FzbRenderer::Buffer fluidVPMatrixsBuffer) {
 	if (fogCount == 0) return;
 	nvvk::cmdBufferMemoryBarrier(cmd, { fluidFogInfoBuffer.buffer.buffer, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT });
+	nvvk::cmdBufferMemoryBarrier(cmd, { fluidVPMatrixsBuffer.buffer.buffer, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT });
 	for (int i = 0; i < fogCount; ++i) {
 		FluidFog& fluidFog = fluidFogs[i];
 
@@ -189,8 +244,11 @@ void FluidFogSet::updateDataPerFrame(VkCommandBuffer cmd, bool frist, FzbRendere
 
 		int fogIndex = fluidFog.fogIndexMap;
 		vkCmdUpdateBuffer(cmd, fogInfoBuffer.buffer.buffer, sizeof(shaderio::VolumetricFogInfo) * fogIndex, sizeof(shaderio::VolumetricFogInfo), &(*setting.fogInfos)[fogIndex]);
+
+		vkCmdUpdateBuffer(cmd, fluidVPMatrixsBuffer.buffer.buffer, sizeof(glm::mat4) * i * 3, sizeof(glm::mat4) * 3, &fluidFog.VP);
 	}
 	nvvk::cmdBufferMemoryBarrier(cmd, { fluidFogInfoBuffer.buffer.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT });
+	nvvk::cmdBufferMemoryBarrier(cmd, { fluidVPMatrixsBuffer.buffer.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT });
 }
 void FluidFogSet::addFog(FluidFogCreateInfo createInfo) {
 	if (fogCount == MAX_FLUID_FOG_COUNT) {
@@ -210,6 +268,7 @@ void FluidFogSet::addFog(FluidFogCreateInfo createInfo) {
 	fluidFog.fogIndexMap = setting.fogInfos->size() - 1;
 	fluidFog.follow = createInfo.follow;
 	fluidFog.followInstanceID = createInfo.followInstanceID;
+	fluidFog.fogAABB = createInfo.fogRange;
 	fluidFogs.push_back(fluidFog);
 
 	++fogCount;
