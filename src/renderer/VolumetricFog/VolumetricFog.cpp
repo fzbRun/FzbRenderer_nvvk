@@ -122,7 +122,7 @@ void VolumetricFog::uiRender() {
 				globalInfoModified |= ImGui::DragFloat("Global Height Fog Extinction Coefficient ", (float*)&fogInfo.absorption, 0.1f, 0.0f);
 				globalInfoModified |= ImGui::DragFloat("Global Height Fog Scatter Coefficient ", (float*)&fogInfo.scattering, 0.1f, 0.0f, 1.0f);
 				globalInfoModified |= ImGui::DragFloat("Global Height Fog Asymmetric Parameters ", (float*)&fogInfo.phase, 0.1f, -1.0f, 1.0f);
-				globalInfoModified |= ImGui::DragFloat("Global Height Fog Attenuation", (float*)&fogInfo.heightScale, 1.0f, 0.0f, 1000.0f);
+				globalInfoModified |= ImGui::DragFloat("Global Height Fog Scale", (float*)&fogInfo.heightScale, 1.0f, 0.0f, 1000.0f);
 			}
 
 			if (ImGui::CollapsingHeader("Fluid Fog Setting", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -411,7 +411,7 @@ void VolumetricFog::createSourceData() {
 		heightFogSet = std::make_unique<HeightFogSet>(heightFogSetCreateInfo);
 
 		shaderio::HeightFogInfo heightFogInfo = {
-			.color = {1.0f, 1.0f, 1.0f},
+			.color = {1.0f, 10.0f, 1.0f},
 			.ambientIntensity = 0.001f,
 			.absorption = 0.01f,
 			.scattering = 0.7f,
@@ -467,12 +467,12 @@ void VolumetricFog::createSourceData() {
 	//------------------------------------------------------------------------------------
 	{
 		shaderio::HeightFogInfo heightFogInfo = {
-			.color = {1.0f, 1.0f, 1.0f},
+			.color = {1.0f, 2.0f, 1.0f},
 			.ambientIntensity = 0.0f,
 			.absorption = 0.01f,
-			.scattering = 0.03f,
+			.scattering = 0.1f,
 			.phase = -0.7f,
-			.heightScale = 1.0f,
+			.heightScale = 0.5f,
 		};
 
 		shaderio::AABB heightFogAABB;

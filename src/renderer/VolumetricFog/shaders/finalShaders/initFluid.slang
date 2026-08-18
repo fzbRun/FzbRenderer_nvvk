@@ -76,8 +76,8 @@ void computeMain_initFluid(uint3 voxelIndex: SV_DispatchThreadID, uint3 groupThr
             float height = max(voxelCenter.y - otherFogInfo.aabb.minimum.y, 0.0f);
             float heightAttenuation = exp(-heightScale * height);
 
-            scattering = heightFogInfo.scattering;
-            extinction = (heightFogInfo.absorption + scattering) * heightAttenuation;
+            extinction = (heightFogInfo.absorption + heightFogInfo.scattering) * heightAttenuation;
+            scattering = heightFogInfo.scattering * heightAttenuation;
             phase = heightFogInfo.phase;
             color = heightFogInfo.color * (1.0f + heightFogInfo.ambientIntensity);
         } else if (otherFogInfo.type == VolumetricFogType::Fluid) continue;
@@ -125,7 +125,8 @@ void computeMain_initFluid(uint3 voxelIndex: SV_DispatchThreadID, uint3 groupThr
     //}
 
     if (pushConst.time > 0) {
-        int3 voxelIndex_lastTime = int3((voxelCenter - fluidFogInfo.fogStartPos_lastTime) / voxelSize);
+        float3 voxelCenterOffset = voxelCenter - fluidFogInfo.fogStartPos_lastTime;
+        int3 voxelIndex_lastTime = int3(voxelCenterOffset / voxelSize);
         voxelIndex_lastTime = clamp(voxelIndex_lastTime, 0, gridSize - 1);
         voxelInfo = fluidFogImages[pushConst.fluidIndex][voxelIndex_lastTime];
 
@@ -136,9 +137,15 @@ void computeMain_initFluid(uint3 voxelIndex: SV_DispatchThreadID, uint3 groupThr
         float maxPossibleDist = length(halfGrid);
         float centerDist = length(distToCenter) / maxPossibleDist;
 
+        float3 voxelGridSize = float3(gridSize) * voxelSize;
+        float3 newVoxelOffset = max(float3(0.0f), max(-voxelCenterOffset, voxelCenterOffset - voxelGridSize));
+        float3 distNorm = saturate(newVoxelOffset / (3.0f * voxelSize));
+        float distance01 = dot(distNorm, float3(1.0f / 3.0f));
+        float offsetFactor = lerp(2.0f, 1.0f, distance01);
+
         float edgeFactor = smoothstep(0.0, 1.0, centerDist);
         float restoreRate = 0.5f;
-        float restoreWeight = saturate(restoreRate * pushConst.dt) * edgeFactor * fluidFogInfo.restoreSpeed;
+        float restoreWeight = saturate(restoreRate * pushConst.dt) * edgeFactor * offsetFactor * fluidFogInfo.restoreSpeed;
 
         voxelInfo = lerp(voxelInfo, envVoxelInfo, saturate(restoreWeight));
         velocity = lerp(velocity, 0.0f, saturate(restoreWeight));

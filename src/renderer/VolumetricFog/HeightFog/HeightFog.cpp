@@ -39,7 +39,7 @@ void HeightFogSet::uiRender() {
 			fogInfoModified[i] |= ImGui::DragFloat(std::string("Height Fog Scatter Coefficient " + std::to_string(i)).c_str(), (float*)&heightFogInfos[i].scattering, 0.1f, 0.0f, 1.0f);
 			fogInfoModified[i] |= ImGui::DragFloat(std::string("Height Fog Asymmetric Parameters " + std::to_string(i)).c_str(), (float*)&heightFogInfos[i].phase, 0.1f, -1.0f, 1.0f);
 
-			ImGui::DragFloat(std::string("Height Fog Attenuation " + std::to_string(i)).c_str(), (float*)&heightFogInfos[i].heightScale, 1.0f, 0.0f, 1000.0f);
+			ImGui::DragFloat(std::string("Height Fog Scale " + std::to_string(i)).c_str(), (float*)&heightFogInfos[i].heightScale, 0.1f, 0.0f, 20.0f);
 			fogInfoModified[i] |= ImGui::Checkbox(std::string("Height Fog show voxel grid " + std::to_string(i)).c_str(), (bool*)&showFogGrid[i]);
 		}
 	}

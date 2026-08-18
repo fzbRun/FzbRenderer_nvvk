@@ -127,7 +127,7 @@ void computeMain_getHasFogVoxels(uint3 threadIndex: SV_DispatchThreadID, uint3 g
         //     getGlobalHeightFogScatter(samplePoint, sampleDir, sampleLength, sceneInfo, globalFogInfo, pushConst.lightVP, 1.0f, attenuation, L);
         // }
 
-        getGlobalHeightFogScatter(samplePoint, sampleDir, sampleLength, sceneInfo, globalFogInfo, pushConst.lightVP, 1.0f, attenuation, L);
+        getGlobalHeightFogScatter(voxelCenter_lastVoxel, voxelCenter, layerOffset, sceneInfo, globalFogInfo, pushConst.lightVP, 1.0f, attenuation, L);
 
         // getAnalyticHeightFogDirectionalScatter(voxelCenter_lastVoxel, voxelCenter, globalFogInfo.globalHeightFogAABB, globalFogInfo.globalHeightFogInfo, sceneInfo.lights[0], pushConst.lightVP, attenuation, L);
     }
@@ -232,7 +232,7 @@ void computeMain_blurFog(uint3 threadIndex: SV_DispatchThreadID, uint3 groupThre
     float3 cameraForward_lastTime = -camInfo_last[2].xyz;
 
     bool inFluid = false;
-    float mergeRatioMin = 0.01f, mergeRatioMax = 0.05f;
+    float mergeRatioMin = 0.03f, mergeRatioMax = 0.1f;
     {
         FogGlobalInfo fogGlobalInfo = groupFogGlobalInfo;
         for (int i = 0; i < fogGlobalInfo.fluidFogCount; ++i) {
@@ -248,10 +248,10 @@ void computeMain_blurFog(uint3 threadIndex: SV_DispatchThreadID, uint3 groupThre
             break;
         }
     }
-    if (all(abs(cameraPos_lastTime - cameraPos) < 1e-10f) && !inFluid) {
-        fogAccImage[voxelIndex].xyz = fogAccHistoryImage[voxelIndex].xyz;
-        return;
-    }
+    //if (all(abs(cameraPos_lastTime - cameraPos) < 1e-10f) && !inFluid) {
+    //    fogAccImage[voxelIndex].xyz = fogAccHistoryImage[voxelIndex].xyz;
+    //    return;
+    //}
     // if (all(voxelIndex == 0)) printf("cameraPos_lastTime: %f %f %f, cameraPos: %f %f %f\n", cameraPos_lastTime.x, cameraPos_lastTime.y, cameraPos_lastTime.z, cameraPos.x, cameraPos.y, cameraPos.z);
 
     float3 toVoxel = voxelCenter - cameraPos_lastTime;
