@@ -29,7 +29,7 @@ public:
 	FzbRenderer::Image fluidFogVoxelVelocityImage;
 	FzbRenderer::Image fluidFogVoxelInfoImage;
 
-#ifdef FLUID_A_MACCORMACK
+#if defined(FLUID_A_MACCORMACK) || defined(FLUID_SIMULATION_CPF)
 	FzbRenderer::Image fluidFogVoxelInfoImage_temp1;
 	FzbRenderer::Image fluidFogVoxelInfoImage_temp2;
 #endif

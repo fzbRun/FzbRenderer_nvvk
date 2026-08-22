@@ -66,6 +66,11 @@ void VolumetricFog::clean() {
 	vkDestroyShaderEXT(device, computeShader_fluidSimulation_P, nullptr);
 	vkDestroyShaderEXT(device, computeShader_fluidSimulation_P_Iteration, nullptr);
 	vkDestroyShaderEXT(device, computeShader_fluidSimulation_S, nullptr);
+#ifdef FLUID_SIMULATION_CPF
+	vkDestroyShaderEXT(device, computeShader_fluidSimulation_P_Divergence, nullptr);
+	vkDestroyShaderEXT(device, computeShader_fluidSimulation_P_Filter, nullptr);
+	vkDestroyShaderEXT(device, computeShader_fluidSimulation_P_Final, nullptr);
+#endif
 
 	vkDestroyShaderEXT(device, computeShader_getHasFogVoxels, nullptr);
 	vkDestroyShaderEXT(device, computeShader_voxelGetFog, nullptr);
@@ -419,7 +424,7 @@ void VolumetricFog::createSourceData() {
 		shaderio::FluidFogInfo fluidFogInfo = {
 			.startUp = 0,
 			.gridSize = {32, 32, 32},
-			.voxelSize = {1.0, 0.4, 1.0},
+			.voxelSize = {1.0, 1.0, 1.0},
 			.magicNumber = {0.1, 0.2, 0.1},
 			.viscosity = 0.001f,
 			.FIntensity = 10,
@@ -1090,6 +1095,35 @@ void VolumetricFog::compileAndCreateShaders() {
 		shaderInfo.pCode = shaderCode.pCode;
 		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_fluidSimulation_S);
 		NVVK_DBG_NAME(computeShader_fluidSimulation_S);
+
+#ifdef FLUID_SIMULATION_CPF
+		vkDestroyShaderEXT(device, computeShader_fluidSimulation_P_Divergence, nullptr);
+		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		shaderInfo.nextStage = 0;
+		shaderInfo.pName = "computeMain_fluidSimulation_P_Divergence";
+		shaderInfo.codeSize = shaderCode.codeSize;
+		shaderInfo.pCode = shaderCode.pCode;
+		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_fluidSimulation_P_Divergence);
+		NVVK_DBG_NAME(computeShader_fluidSimulation_P_Divergence);
+
+		vkDestroyShaderEXT(device, computeShader_fluidSimulation_P_Filter, nullptr);
+		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		shaderInfo.nextStage = 0;
+		shaderInfo.pName = "computeMain_fluidSimulation_P_Filter";
+		shaderInfo.codeSize = shaderCode.codeSize;
+		shaderInfo.pCode = shaderCode.pCode;
+		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_fluidSimulation_P_Filter);
+		NVVK_DBG_NAME(computeShader_fluidSimulation_P_Filter);
+
+		vkDestroyShaderEXT(device, computeShader_fluidSimulation_P_Final, nullptr);
+		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		shaderInfo.nextStage = 0;
+		shaderInfo.pName = "computeMain_fluidSimulation_P_Final";
+		shaderInfo.codeSize = shaderCode.codeSize;
+		shaderInfo.pCode = shaderCode.pCode;
+		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_fluidSimulation_P_Final);
+		NVVK_DBG_NAME(computeShader_fluidSimulation_P_Final);
+#endif
 	}
 	//---------------------------------------------------------------------------------------------------------------
 	{
@@ -1572,6 +1606,41 @@ void VolumetricFog::fluidSimulation(VkCommandBuffer cmd) {
 
 			// --- Stage P: Projection solve (Jacobi) ---
 			if (fluidSimulation_IterationP) {
+#ifdef FLUID_SIMULATION_CPF
+				// 1) divergence
+				vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_fluidSimulation_P_Divergence);
+				fluidSimulationPushConstant.iteration = iterationStart;
+				vkCmdPushConstants2(cmd, &pushInfo);
+				vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
+				nvvk::cmdImageMemoryBarrier(cmd, { fluidFogSet->getfluidFogVoxelInfoImages_temp1Ptr()[i].image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL });
+
+				// 2) x pass: temp1 -> temp2
+				fluidSimulationPushConstant.iteration = 0;
+				vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_fluidSimulation_P_Filter);
+				vkCmdPushConstants2(cmd, &pushInfo);
+				vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
+				nvvk::cmdImageMemoryBarrier(cmd, { fluidFogSet->getfluidFogVoxelInfoImages_temp2Ptr()[i].image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL });
+
+				// 3) y pass: temp2 -> temp1
+				fluidSimulationPushConstant.iteration = 1;
+				vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_fluidSimulation_P_Filter);
+				vkCmdPushConstants2(cmd, &pushInfo);
+				vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
+				nvvk::cmdImageMemoryBarrier(cmd, { fluidFogSet->getfluidFogVoxelInfoImages_temp1Ptr()[i].image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL });
+
+				// 4) z pass: temp1 -> temp2
+				fluidSimulationPushConstant.iteration = 2;
+				vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_fluidSimulation_P_Filter);
+				vkCmdPushConstants2(cmd, &pushInfo);
+				vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
+				nvvk::cmdImageMemoryBarrier(cmd, { fluidFogSet->getfluidFogVoxelInfoImages_temp2Ptr()[i].image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL });
+
+				// 5) final sum -> pressure
+				vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_fluidSimulation_P_Final);
+				vkCmdPushConstants2(cmd, &pushInfo);
+				vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
+				barrierVolumePingPong(i);
+#else
 				vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_fluidSimulation_P_Iteration);
 				for (uint32_t iter = 0; iter < fluidSimulation_IterationP_Count; ++iter) {
 					fluidSimulationPushConstant.iteration = iter + iterationStart;
@@ -1579,6 +1648,7 @@ void VolumetricFog::fluidSimulation(VkCommandBuffer cmd) {
 					vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
 					barrierVolumePingPong(i);
 				}
+#endif
 			}
 			else {
 				vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_fluidSimulation_P);

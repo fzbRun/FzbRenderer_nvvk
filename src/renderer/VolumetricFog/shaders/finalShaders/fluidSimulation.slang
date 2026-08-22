@@ -14,6 +14,13 @@
 [[vk::binding(StaticBindingPoints_VolumetricFog::eFluidFogVoxelInfoBuffer)]] RWStructuredBuffer<FluidFogVoxelInfo, ScalarDataLayout> fluidFogVoxelInfoBuffer[];
 [[vk::binding(StaticBindingPoints_VolumetricFog::eFluidFogVoxelVelocityImage)]] RWTexture3D<float4> fluidFogVoxelVelocityImage[];
 [[vk::binding(StaticBindingPoints_VolumetricFog::eFluidFogVoxelVelocityImage_sample)]] Sampler3D<float4> fluidFogVoxelVelocityImage_sample[];
+
+#if defined(FLUID_A_MACCORMACK) || defined(FLUID_SIMULATION_CPF)
+[[vk::binding(StaticBindingPoints_VolumetricFog::eFluidFogVoxelInfoImage_temp1)]] RWTexture3D<float4> fluidFogImages_temp1[];
+[[vk::binding(StaticBindingPoints_VolumetricFog::eFluidFogVoxelInfoImage_temp1_sample)]] Sampler3D<float4> fluidFogImages_temp1_sample[];
+[[vk::binding(StaticBindingPoints_VolumetricFog::eFluidFogVoxelInfoImage_temp2)]] RWTexture3D<float4> fluidFogImages_temp2[];
+[[vk::binding(StaticBindingPoints_VolumetricFog::eFluidFogVoxelInfoImage_temp2_sample)]] Sampler3D<float4> fluidFogImages_temp2_sample[];
+#endif
 //--------------------------------------------------------------------------------Fluid-------------------------------------------------------------------------------------
 // BoundaryCondition_Velocity: float3(1.0f, 1.0f, 1.0f): Non; float3(-1.0f, 1.0f, 1.0f): Slip; float3(-1.0f, -1.0f, -1.0f): NoSlip
 // BoundaryCondition_P: 0: Non; 1: Slip or NoSlip;
@@ -35,10 +42,6 @@
 groupshared FluidFogInfo groupFluidFogInfo;
 
 #ifdef FLUID_A_MACCORMACK
-[[vk::binding(StaticBindingPoints_VolumetricFog::eFluidFogVoxelInfoImage_temp1)]] RWTexture3D<float4> fluidFogImages_temp1[];
-[[vk::binding(StaticBindingPoints_VolumetricFog::eFluidFogVoxelInfoImage_temp1_sample)]] Sampler3D<float4> fluidFogImages_temp1_sample[];
-[[vk::binding(StaticBindingPoints_VolumetricFog::eFluidFogVoxelInfoImage_temp2)]] RWTexture3D<float4> fluidFogImages_temp2[];
-[[vk::binding(StaticBindingPoints_VolumetricFog::eFluidFogVoxelInfoImage_temp2_sample)]] Sampler3D<float4> fluidFogImages_temp2_sample[];
 
 #define FLUID_A_PASS_FORWARD 0
 #define FLUID_A_PASS_BACKWARD 1
@@ -486,7 +489,7 @@ void computeMain_fluidSimulation_P(uint3 voxelIndex: SV_DispatchThreadID, uint3 
 [numthreads(4, 4, 4)]
 [shader("compute")]
 void computeMain_fluidSimulation_P_Iteration(uint3 voxelIndex: SV_DispatchThreadID, uint3 groupThreadIndex: SV_GroupThreadID, uint3 threadGroupIndex: SV_GroupID) {
-    if(all(groupThreadIndex == 0)) groupFluidFogInfo = fluidFogInfoBuffer[pushConst.fluidIndex];
+    if (all(groupThreadIndex == 0)) groupFluidFogInfo = fluidFogInfoBuffer[pushConst.fluidIndex];
     GroupMemoryBarrierWithGroupSync();
 
     FluidFogInfo fluidFogInfo = groupFluidFogInfo;
@@ -506,8 +509,8 @@ void computeMain_fluidSimulation_P_Iteration(uint3 voxelIndex: SV_DispatchThread
     float halfDx = 2.0f * cellSize.x;
     float halfDy = halfDx;
     float halfDz = halfDx;
-    //float halfDy = 2.0f * cellSize.y;
-    //float halfDz = 2.0f * cellSize.z;
+    // float halfDy = 2.0f * cellSize.y;
+    // float halfDz = 2.0f * cellSize.z;
 
     float4 selfData = groupVoxelInfos[lIdx.z][lIdx.y][lIdx.x];
 
@@ -530,23 +533,24 @@ void computeMain_fluidSimulation_P_Iteration(uint3 voxelIndex: SV_DispatchThread
     if (groupVoxelBoundary[lIdx.z + 1][lIdx.y][lIdx.x]) nU.w = selfData.w;
 
     float div = (nR.x - nL.x) / halfDx + (nT.y - nB.y) / halfDy + (nU.z - nD.z) / halfDz;
+    fluidFogImages_temp1[pushConst.fluidIndex][voxelIndex] = float4(div, div, div, div);
 
     uint voxelIndexU = voxelIndex.z * gridSize.x * gridSize.y + voxelIndex.y * gridSize.x + voxelIndex.x;
     uint nextIteration = (pushConst.iteration + 1) & 1;
 
-    //float alpha = -cellSize.x * cellSize.x;
-    //float sumP = nL.w + nR.w + nB.w + nT.w + nD.w + nU.w;
-    //fluidFogVoxelInfoBuffer[pushConst.fluidIndex][voxelIndexU].dirtyVelocity_p[nextIteration].w = (sumP + alpha * div) / 6.0f;
+    // float alpha = -cellSize.x * cellSize.x;
+    // float sumP = nL.w + nR.w + nB.w + nT.w + nD.w + nU.w;
+    // fluidFogVoxelInfoBuffer[pushConst.fluidIndex][voxelIndexU].dirtyVelocity_p[nextIteration].w = (sumP + alpha * div) / 6.0f;
 
     float invDx2 = 1.0f / (cellSize.x * cellSize.x);
     float invDy2 = 1.0f / (cellSize.y * cellSize.y);
     float invDz2 = 1.0f / (cellSize.z * cellSize.z);
-    
+
     float weightedPSum =
         (nL.w + nR.w) * invDx2 +
         (nB.w + nT.w) * invDy2 +
         (nD.w + nU.w) * invDz2;
-    
+
     float newP = (weightedPSum - div) / (2.0f * (invDx2 + invDy2 + invDz2));
     fluidFogVoxelInfoBuffer[pushConst.fluidIndex][voxelIndexU].dirtyVelocity_p[nextIteration].w = newP;
 }
@@ -628,3 +632,118 @@ void computeMain_fluidSimulation_S(uint3 voxelIndex: SV_DispatchThreadID, uint3 
 
     fluidFogVoxelVelocityImage[pushConst.fluidIndex][voxelIndex] = float4(velocity, 0.0f);
 }
+
+#ifdef FLUID_SIMULATION_CPF
+#include "renderer/VolumetricFog/shaders/finalShaders/data/convolutionKernel.hlsli"
+[numthreads(4, 4, 4)]
+[shader("compute")]
+void computeMain_fluidSimulation_P_Divergence(uint3 voxelIndex: SV_DispatchThreadID, uint3 groupThreadIndex: SV_GroupThreadID, uint3 threadGroupIndex: SV_GroupID) {
+    if (all(groupThreadIndex == 0)) groupFluidFogInfo = fluidFogInfoBuffer[pushConst.fluidIndex];
+    GroupMemoryBarrierWithGroupSync();
+
+    FluidFogInfo fluidFogInfo = groupFluidFogInfo;
+    uint3 gridSize = fluidFogInfo.gridSize;
+    float3 voxelSize = fluidFogInfo.voxelSize;
+    if (any(voxelIndex >= gridSize)) return;
+
+    fillGroupSharedVoxelInfos(voxelIndex, threadGroupIndex, pushConst.fluidIndex, gridSize);
+    GroupMemoryBarrierWithGroupSync();
+
+    uint3 lIdx = voxelIndex - threadGroupIndex * 4 + 1;
+    if (groupVoxelBoundary[lIdx.z][lIdx.y][lIdx.x]) return;
+
+    float4 selfData = groupVoxelInfos[lIdx.z][lIdx.y][lIdx.x];
+
+    // 下面的邻居读取直接照抄你现在 P_Iteration 的 515-532 行
+    float halfDx = 2.0f * voxelSize.x;
+    float halfDy = 2.0f * voxelSize.y;
+    float halfDz = 2.0f * voxelSize.z;
+
+    float4 nL = groupVoxelInfos[lIdx.z][lIdx.y][lIdx.x - 1];
+    if (groupVoxelBoundary[lIdx.z][lIdx.y][lIdx.x - 1]) nL.w = selfData.w;
+    float4 nR = groupVoxelInfos[lIdx.z][lIdx.y][lIdx.x + 1];
+    if (groupVoxelBoundary[lIdx.z][lIdx.y][lIdx.x + 1]) nR.w = selfData.w;
+
+    float4 nB = groupVoxelInfos[lIdx.z][lIdx.y - 1][lIdx.x];
+    if (groupVoxelBoundary[lIdx.z][lIdx.y - 1][lIdx.x]) nB.w = selfData.w;
+    float4 nT = groupVoxelInfos[lIdx.z][lIdx.y + 1][lIdx.x];
+    if (groupVoxelBoundary[lIdx.z][lIdx.y + 1][lIdx.x]) nT.w = selfData.w;
+
+    float4 nD = groupVoxelInfos[lIdx.z - 1][lIdx.y][lIdx.x];
+    if (groupVoxelBoundary[lIdx.z - 1][lIdx.y][lIdx.x]) nD.w = selfData.w;
+    float4 nU = groupVoxelInfos[lIdx.z + 1][lIdx.y][lIdx.x];
+    if (groupVoxelBoundary[lIdx.z + 1][lIdx.y][lIdx.x]) nU.w = selfData.w;
+
+    float div = (nR.x - nL.x) / halfDx + (nT.y - nB.y) / halfDy + (nU.z - nD.z) / halfDz;
+    fluidFogImages_temp1[pushConst.fluidIndex][voxelIndex] = float4(div, div, div, div);
+}
+
+uint fluidLinearIndex(uint3 idx, uint3 gridSize) {
+    return idx.z * gridSize.x * gridSize.y + idx.y * gridSize.x + idx.x;
+}
+bool fluidIsSolid(int3 idx, uint3 gridSize) {
+    if (any(idx < 0) || any(idx >= int3(gridSize))) return true;
+    uint linear = fluidLinearIndex(uint3(idx), gridSize);
+    return fluidFogVoxelInfoBuffer[pushConst.fluidIndex][linear].isBoundary;
+}
+void poissonConvolveAxis(RWTexture3D<float4> src[], RWTexture3D<float4> dst[], uint3 voxelIndex, int axis, uint3 gridSize) {
+    const int half = INVERSE_Itr_20_Half_Filter_Size; // 19
+
+    int3 stepPos;
+    if (axis == 0) stepPos = int3(1, 0, 0);
+    else if (axis == 1) stepPos = int3(0, 1, 0);
+    else stepPos = int3(0, 0, 1);
+    int3 stepNeg = -stepPos;
+
+    int3 pos = voxelIndex;
+    int3 neg = voxelIndex;
+
+    float4 acc = INVERSE_Itr_20_R14_Filters[half] * src[pushConst.fluidIndex][voxelIndex];
+
+    for (int t = 1; t <= half; ++t) {
+        float4 wp = INVERSE_Itr_20_R14_Filters[half + t];
+        float4 wn = INVERSE_Itr_20_R14_Filters[half - t];
+
+        pos += stepPos;
+        if (fluidIsSolid(pos, gridSize)) { stepPos = -stepPos; pos += stepPos; }
+        acc += wp * src[pushConst.fluidIndex][pos];
+
+        neg += stepNeg;
+        if (fluidIsSolid(neg, gridSize)) { stepNeg = -stepNeg; neg += stepNeg; }
+        acc += wn * src[pushConst.fluidIndex][neg];
+    }
+
+    dst[pushConst.fluidIndex][voxelIndex] = acc;
+}
+[numthreads(4, 4, 4)]
+[shader("compute")]
+void computeMain_fluidSimulation_P_Filter(uint3 voxelIndex: SV_DispatchThreadID, uint3 groupThreadIndex: SV_GroupThreadID) {
+    if (all(groupThreadIndex == 0)) groupFluidFogInfo = fluidFogInfoBuffer[pushConst.fluidIndex];
+    GroupMemoryBarrierWithGroupSync();
+    uint3 gridSize = groupFluidFogInfo.gridSize;
+    if (any(voxelIndex >= gridSize)) return;
+    if (fluidIsSolid(int3(voxelIndex), gridSize)) return;
+
+    if (pushConst.iteration == 0) poissonConvolveAxis(fluidFogImages_temp1, fluidFogImages_temp2, voxelIndex, 0, gridSize);
+    else if (pushConst.iteration == 1) poissonConvolveAxis(fluidFogImages_temp2, fluidFogImages_temp1, voxelIndex, 1, gridSize);
+    else poissonConvolveAxis(fluidFogImages_temp1, fluidFogImages_temp2, voxelIndex, 2, gridSize);
+}
+
+[numthreads(4, 4, 4)]
+[shader("compute")]
+void computeMain_fluidSimulation_P_Final(uint3 voxelIndex: SV_DispatchThreadID, uint3 groupThreadIndex: SV_GroupThreadID) {
+    if (all(groupThreadIndex == 0)) groupFluidFogInfo = fluidFogInfoBuffer[pushConst.fluidIndex];
+    GroupMemoryBarrierWithGroupSync();
+    uint3 gridSize = groupFluidFogInfo.gridSize;
+    if (any(voxelIndex >= gridSize)) return;
+    if (fluidIsSolid(int3(voxelIndex), gridSize)) return;
+
+    uint voxelIndexU = fluidLinearIndex(voxelIndex, gridSize);
+    float4 p = fluidFogImages_temp2[pushConst.fluidIndex][voxelIndex];
+    float pressure = p.x + p.y + p.z + p.w;
+
+    // 两个 slot 都写，避免 Stage S 取错 ping-pong
+    fluidFogVoxelInfoBuffer[pushConst.fluidIndex][voxelIndexU].dirtyVelocity_p[0].w = pressure;
+    fluidFogVoxelInfoBuffer[pushConst.fluidIndex][voxelIndexU].dirtyVelocity_p[1].w = pressure;
+}
+#endif

@@ -108,6 +108,12 @@ private:
 	int fluidSimulation_IterationP_Count = 20;
 
 	void fluidSimulation(VkCommandBuffer cmd);
+
+#ifdef FLUID_SIMULATION_CPF
+	VkShaderEXT computeShader_fluidSimulation_P_Divergence{};
+	VkShaderEXT computeShader_fluidSimulation_P_Filter{};
+	VkShaderEXT computeShader_fluidSimulation_P_Final{};
+#endif
 	//-----------------------------FogAcc-----------------------------------
 	bool useFogAcc = true;
 	int sampleCount_fogAcc = 4;
