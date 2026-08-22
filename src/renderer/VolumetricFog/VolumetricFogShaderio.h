@@ -17,7 +17,8 @@ NAMESPACE_SHADERIO_BEGIN()
 //#define FLUID_GBUFFER_INJECT
 //#define SAMPLE_JITTER_TAA
 //#define MULTI_SCATTERING
-#define FRUSTUM_SAMPLE_PINNING
+
+#define BLUR_FOG_THREADGROUP_SIZE 256
 
 #define FINAL_PROJECT
 #ifdef FINAL_PROJECT
@@ -55,7 +56,8 @@ struct FrustumGlobalInfo {
 	uint3 frustumGridSize;
 	float cameraFarPlane;
 	float tanCameraFov_2;
-	float aspectRatio;
+    float aspectRatio;
+    float sphereFactor;
 };
 struct FogAccHasFogVoxelInfo {
 	uint3 voxelIndex;
@@ -148,7 +150,6 @@ struct FogAccPushConstant {
 	uint* fogAccHasFogVoxelCountAddress;
 
 	float4 padding0;
-	float2 padding1;
 };
 //---------------------------------------------
 struct renderOpaquePushConstant {
@@ -167,13 +168,28 @@ struct renderOpaquePushConstant {
 
 	float jitterStrength;
 
+	int useFogBlur;
+
 	SceneInfo* sceneInfoAddress;
 	FogGlobalInfo* fogGlobalInfoAddress;
 
 	float4 padding0;
 	float4 padding1;
-	float2 padding2;
 };
+//---------------------------------------------
+struct FogBlurPushConstant {
+	int fogBlurCount;
+	int filterIndex;
+	uint2 screenSize;
+
+	float4x4 padding0;
+	float4x4 padding1;
+	float4x4 padding2;
+	float4 padding3;
+	float4 padding4;
+	float4 padding5;
+};
+//---------------------------------------------
 struct renderTransparentPushConstant {
 	FrustumGlobalInfo frustumInfo;
 	uint2 screenSize;
@@ -207,7 +223,7 @@ struct renderCameraFrustumPushConstant {
 	float4 padding0;
 	float4 padding1;
 	float4 padding2;
-	float4 padding3;
+	float3 padding3;
 };
 struct renderInstanceAABBPushConstant {
 	int instanceIndex;
@@ -242,12 +258,23 @@ enum class StaticBindingPoints_VolumetricFog {
 	eFluidFogVoxelInfoBuffer,
 	eFluidFogVoxelVelocityImage,
 	eFluidFogVoxelVelocityImage_sample,
+#ifdef FLUID_A_MACCORMACK
+	eFluidFogVoxelInfoImage_temp1,
+	eFluidFogVoxelInfoImage_temp1_sample,
+	eFluidFogVoxelInfoImage_temp2,
+	eFluidFogVoxelInfoImage_temp2_sample,
+#endif
 
 	//------FogAcc---------
 	eFogAccImage,
 	eFogAccImage_sample,
 	eFogAccHasFogVoxelInfosBuffer,
 	eFogAccHistoryImage,
+
+	//-----FogBlur---------
+	eRenderedFogResultImage,
+	eDepthGradientImage,
+	eFilterImages
 };
 
 #else

@@ -241,7 +241,9 @@ void ShadowMap::render(VkCommandBuffer cmd) {
 			vertexShader = vertexShader_directionLight;
 			fragmentShader = fragmentShader_directionLight;
 
+#ifndef NDEBUG
 			nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(i), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL });
+#endif
 			nvvk::cmdImageMemoryBarrier(cmd, { shadowMaps[i].image.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
 				{ VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
 		}
@@ -342,7 +344,9 @@ void ShadowMap::render(VkCommandBuffer cmd) {
 			vkCmdSetViewportSwizzleNV(cmd, 0, 1, &identitySwizzle);
 		}
 
+#ifndef NDEBUG
 		nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(i), VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
+#endif
 		nvvk::cmdImageMemoryBarrier(cmd, { shadowMaps[i].image.image, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
 			{ VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
 	}

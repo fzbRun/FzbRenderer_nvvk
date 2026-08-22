@@ -53,6 +53,10 @@ void FluidFog::init() {
 	});
 
 	createFluidFogImage(fluidFogVoxelInfoImage, gridSize, true);
+#ifdef FLUID_A_MACCORMACK
+	createFluidFogImage(fluidFogVoxelInfoImage_temp1, gridSize, true);
+	createFluidFogImage(fluidFogVoxelInfoImage_temp2, gridSize, true);
+#endif
 
 	if (follow) {
 		std::pair<uint32_t, uint32_t> instanceSetPair = Application::sceneResource.instanceIDToInstanceSet[followInstanceID];
@@ -79,6 +83,7 @@ void FluidFog::init() {
 
 		fogAABB = mainCharacterAABB;
 	}
+	fluidFogInfo.fogStartPos_lastTime = fogAABB.minimum;
 
 	{
 		glm::vec3 distance = (fogAABB.maximum - fogAABB.minimum) * 1.1f;
@@ -110,6 +115,10 @@ void FluidFog::clean() {
 	fluidFogVoxelInfoBuffer.clean();
 	fluidFogVoxelVelocityImage.clean();
 	fluidFogVoxelInfoImage.clean();
+#ifdef FLUID_A_MACCORMACK
+	fluidFogVoxelInfoImage_temp1.clean();
+	fluidFogVoxelInfoImage_temp2.clean();
+#endif
 }
 void FluidFog::uiRender(int i) {
 	bool& UIModified = Application::UIModified;
@@ -197,6 +206,11 @@ void FluidFogSet::init() {
 		fluidFogVoxelInfoBuffers.push_back(fluidFogs[i].fluidFogVoxelInfoBuffer.buffer);
 		fluidFogVoxelVelocityImages.push_back(fluidFogs[i].fluidFogVoxelVelocityImage.image);
 		fluidFogVoxelInfoImages.push_back(fluidFogs[i].fluidFogVoxelInfoImage.image);
+
+#ifdef FLUID_A_MACCORMACK
+		fluidFogVoxelInfoImages_temp1.push_back(fluidFogs[i].fluidFogVoxelInfoImage_temp1.image);
+		fluidFogVoxelInfoImages_temp2.push_back(fluidFogs[i].fluidFogVoxelInfoImage_temp2.image);
+#endif
 	}
 }
 void FluidFogSet::clean() {

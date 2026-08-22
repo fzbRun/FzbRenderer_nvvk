@@ -94,11 +94,10 @@ void computeMain_initFluid(uint3 voxelIndex: SV_DispatchThreadID, uint3 groupThr
         }
 
         envExtinction += extinction;
-        envScattering += extinction * scattering;
+        envScattering += scattering;
         envPhase += extinction * phase;
         envColor += extinction * color;
     }
-    envScattering /= max(envExtinction, 1e-30f);
     envPhase /= max(envExtinction, 1e-30f);
     envColor /= max(envExtinction, 1e-30f);
     float4 envVoxelInfo = float4(envExtinction, envScattering, envPhase, luminance(envColor));

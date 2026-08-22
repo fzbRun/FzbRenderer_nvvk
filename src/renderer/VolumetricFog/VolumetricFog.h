@@ -23,6 +23,10 @@ enum class GBuffers_VolumetricFog {
 	eVelocity,
 	eVertexInfo,	//meshID, instanceID, etc
 	eRendered,
+	eRenderedFogResult,
+	eDepthGradient,
+	eFogBlur1,
+	eFogBlur2,
 	eTonemapping,
 };
 
@@ -40,6 +44,7 @@ public:
 	void preRender() override;
 	void render(VkCommandBuffer* cmd) override;
 private:
+	void createVolumetricFogImage(FzbRenderer::Image& image, shaderio::uint3 size, bool linear);
 	void createSourceData();
 	void createDescriptorSetLayout() override;
 	void createDescriptorSet();
@@ -105,12 +110,12 @@ private:
 	void fluidSimulation(VkCommandBuffer cmd);
 	//-----------------------------FogAcc-----------------------------------
 	bool useFogAcc = true;
-	int sampleCount_fogAcc = 10;
+	int sampleCount_fogAcc = 4;
 	shaderio::FrustumGlobalInfo frustumInfo;
 	bool blurVoxelFog = true;
+	float sphereFactor = 0.5f;
 	shaderio::float2 fluidMergeRatio = { 0.1f, 0.3f };
 
-	void createVolumetricFogImage(FzbRenderer::Image& image, shaderio::uint3 size, bool linear);
 	FzbRenderer::Image fogAccImage;
 
 	FzbRenderer::Buffer fogAccHasFogVoxelCountBuffer;
@@ -131,6 +136,17 @@ private:
 
 	int sampleCount_renderOpaque = 50;
 	float jitterStrength_randerOpaque = 1.0f;
+	//---------------------------FogBlur-------------------------------
+	bool useFogBlur = false;
+	int FogBlurCount = 1;
+
+	VkShaderEXT computeShader_getDepthGradient{};
+	VkShaderEXT computeShader_blurFog_X{};
+	VkShaderEXT computeShader_blurFog_Y{};
+	VkShaderEXT computeShader_addFog{};
+
+	shaderio::FogBlurPushConstant fogBlurPushConstant;
+	void fogBlur(VkCommandBuffer cmd);
 	//-----------------------renderTransparent-------------------------------
 	shaderio::renderTransparentPushConstant renderTransparentPushConstant;
 	VkShaderEXT vertexShader_renderTransparentMaterial{};

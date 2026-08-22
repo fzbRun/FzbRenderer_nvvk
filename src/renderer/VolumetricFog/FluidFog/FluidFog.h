@@ -29,6 +29,11 @@ public:
 	FzbRenderer::Image fluidFogVoxelVelocityImage;
 	FzbRenderer::Image fluidFogVoxelInfoImage;
 
+#ifdef FLUID_A_MACCORMACK
+	FzbRenderer::Image fluidFogVoxelInfoImage_temp1;
+	FzbRenderer::Image fluidFogVoxelInfoImage_temp2;
+#endif
+
 	bool follow = true;
 	std::string followInstanceID = "mainCharacter";
 	shaderio::float3 fluidLocalStartPos;
@@ -60,6 +65,10 @@ public:
 	inline nvvk::Buffer* getfluidFogVoxelInfoBuffersPtr() { return fluidFogVoxelInfoBuffers.data(); };
 	inline nvvk::Image* getfluidFogVoxelVelocityImagesPtr() { return fluidFogVoxelVelocityImages.data(); };
 	inline nvvk::Image* getfluidFogVoxelInfoImagesPtr() { return fluidFogVoxelInfoImages.data(); };
+#ifdef FLUID_A_MACCORMACK
+	inline nvvk::Image* getfluidFogVoxelInfoImages_temp1Ptr() { return fluidFogVoxelInfoImages_temp1.data(); };
+	inline nvvk::Image* getfluidFogVoxelInfoImages_temp2Ptr() { return fluidFogVoxelInfoImages_temp2.data(); };
+#endif
 
 	inline bool getFogStartUp(int i) { return fluidFogs[i].fluidFogInfo.startUp; };
 	inline int getFogIndexMap(int i) { return fluidFogs[i].fogIndexMap;};
@@ -79,6 +88,11 @@ private:
 	std::vector<nvvk::Buffer> fluidFogVoxelInfoBuffers;
 	std::vector<nvvk::Image> fluidFogVoxelVelocityImages;
 	std::vector<nvvk::Image> fluidFogVoxelInfoImages;
+
+#ifdef FLUID_A_MACCORMACK
+	std::vector<nvvk::Image> fluidFogVoxelInfoImages_temp1;
+	std::vector<nvvk::Image> fluidFogVoxelInfoImages_temp2;
+#endif
 };
 }
 

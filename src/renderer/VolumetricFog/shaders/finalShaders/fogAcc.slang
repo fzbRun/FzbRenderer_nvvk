@@ -49,29 +49,18 @@ void computeMain_getHasFogVoxels(uint3 threadIndex: SV_DispatchThreadID, uint3 g
 
     float linearDepth = (sliceZ + jitter.z) / gridSize.z * (farPlane - nearPlane);
     float depth = frustumMap(linearDepth, compressionParams, farPlane - nearPlane, gridSize.z);
-
-    float halfHeight = (depth + nearPlane) * tanHalfFov;
-    float halfWidth = halfHeight * aspect;
+    float depthWithNear = nearPlane + depth;
 
     float v = (sliceY + jitter.y) / gridSize.y * 2.0f - 1.0f;
     float u = (sliceX + jitter.x) / gridSize.x * 2.0f - 1.0f;
 
-    float3 voxelCenter = cameraPos;
-    voxelCenter += (depth + nearPlane) * cameraForward;
-    voxelCenter += halfHeight * v * cameraUp;
-    voxelCenter += halfWidth * u * cameraRight;
-
-    float3 dir = normalize(voxelCenter - cameraPos);
+    float3 voxelCenter = getMorphedFrustumVoxelCenter(depthWithNear, u, v, cameraPos, cameraForward, cameraRight, cameraUp, pushConst.frustumInfo);
 
     float linearDepth_lastVoxel = max(sliceZ - 1.0f + jitter.z, 0.0f) / gridSize.z * (farPlane - nearPlane);
     float depth_lastVoxel = frustumMap(linearDepth_lastVoxel, compressionParams, farPlane - nearPlane, gridSize.z);
+    float depthWithNear_lastVoxel = nearPlane + depth_lastVoxel;
 
-    float halfHeight_prev = (depth_lastVoxel + nearPlane) * tanHalfFov;
-    float halfWidth_prev = halfHeight_prev * aspect;
-    float3 voxelCenter_lastVoxel = cameraPos;
-    voxelCenter_lastVoxel += (depth_lastVoxel + nearPlane) * cameraForward;
-    voxelCenter_lastVoxel += halfHeight_prev * v * cameraUp;
-    voxelCenter_lastVoxel += halfWidth_prev * u * cameraRight;
+    float3 voxelCenter_lastVoxel = getMorphedFrustumVoxelCenter(depthWithNear_lastVoxel, u, v, cameraPos, cameraForward, cameraRight, cameraUp, pushConst.frustumInfo);
 
     bool hasFog = false;
     for (int i = 0; i < globalFogInfo.volumetricFogCount; ++i) {
@@ -161,12 +150,19 @@ void computeMain_getFog(uint threadIndex: SV_DispatchThreadID, uint groupThreadI
         L = globalHeightFogResult.y;
     }
 
-    uint sampleCount = pushConst.sampleCount;   //max(pushConst.sampleCount * lerp(0, 1, saturate(abs(voxelCenter.z - voxelCenter_lastVoxel.z)) / 2), 1);
+    float sampleLength = distance(voxelCenter_lastVoxel, voxelCenter);
+    uint sampleCount = max(int(float(pushConst.sampleCount) * saturate(sampleLength)), 1);
     float spatialDither = getCellDither(float2(voxelIndex.xy), (float)voxelIndex.z * 0.618f);
     float layerOffset = getMarchLayerOffset(pushConst.temporalFrameIndex, spatialDither, true, pushConst.blurVoxelFog == 1);
     // layerOffset = rand(randomSeed);
     //  globalHeightFog should affect this, but we pre calc that, so this has a lit bit mistake
     getVolumetricFogScatter(voxelCenter_lastVoxel, voxelCenter, randomSeed, sampleCount, 1, false, layerOffset, pushConst.lightVP, pushConst.sceneInfoAddress, pushConst.fogGlobalInfoAddress, L, attenuation, attenuation2);
+    // getVolumetricFogScatter_MonteCarlo(voxelCenter_lastVoxel, voxelCenter, randomSeed, sampleCount, 1, false, layerOffset, pushConst.lightVP, pushConst.sceneInfoAddress, pushConst.fogGlobalInfoAddress, L, attenuation, attenuation2);
+    
+    //float sampleLength = distance(voxelCenter_lastVoxel, voxelCenter);
+    //if (sampleLength > 10.0f) getVolumetricFogScatter_MonteCarlo(voxelCenter_lastVoxel, voxelCenter, randomSeed, sampleCount, 1, false, layerOffset, pushConst.lightVP, pushConst.sceneInfoAddress, pushConst.fogGlobalInfoAddress, L, attenuation, attenuation2);
+    //else getVolumetricFogScatter(voxelCenter_lastVoxel, voxelCenter, randomSeed, sampleCount, 1, false, layerOffset, pushConst.lightVP, pushConst.sceneInfoAddress, pushConst.fogGlobalInfoAddress, L, attenuation, attenuation2);
+    
     fogAccImage[voxelIndex] = float4(attenuation, L, attenuation2, 1.0f);
 
     //if (all(voxelIndex <= uint3(76, 101, 32)) && all(voxelIndex >= uint3(71, 97, 32))) {
@@ -209,22 +205,16 @@ void computeMain_blurFog(uint3 threadIndex: SV_DispatchThreadID, uint3 groupThre
 
     float linearDepth = ((float)depthIndex + 0.5f) / gridSize.z * (farPlane - nearPlane);
     float depth = frustumMap(linearDepth, compressionParams, farPlane - nearPlane, gridSize.z);
+    float depthWithNear = nearPlane + depth;
 
-    float halfHeight = (depth + nearPlane) * tanHalfFov;
-    float halfWidth = halfHeight * aspect;
+    float u = (((float)voxelIndex.x + 0.5f) / gridSize.x) * 2.0f - 1.0f;
+    float v = (((float)voxelIndex.y + 0.5f) / gridSize.y) * 2.0f - 1.0f;
 
-    float3 voxelCenter = cameraPos;
-    voxelCenter += (depth + nearPlane) * cameraForward;
-    voxelCenter += halfHeight * ((((float)voxelIndex.y + 0.5f) / gridSize.y) * 2.0f - 1.0f) * cameraUp;
-    voxelCenter += halfWidth * ((((float)voxelIndex.x + 0.5f) / gridSize.x) * 2.0f - 1.0f) * cameraRight;
+    float3 voxelCenter = getMorphedFrustumVoxelCenter(depthWithNear, u, v, cameraPos, cameraForward, cameraRight, cameraUp, pushConst.frustumInfo);
     //---------------------------------------------------------------------------------------------------------
     if (pushConst.temporalFrameIndex == 0) return; // 第一帧没有历史
 
     //-------------------------------- 时域重投影 --------------------------------
-    // 用上一帧的完整相机位姿（位置 + 朝向）把当前体素中心投影回上一帧的视锥网格。
-    // 原来的实现只用了上一帧的位置，基向量却取的是当前帧的，
-    // 所以相机一旦旋转，重投影就是错的 —— 拿到的是错误体素的历史值，
-    // 混合 90% 之后表现为拖影和逐帧跳变，这正是“相机移动时波动”的主因。
     float4x4 camInfo_last = pushConst.viewInvMatrix_lastFrame;
     float3 cameraPos_lastTime = camInfo_last[3].xyz;
     float3 cameraRight_lastTime = camInfo_last[0].xyz;
@@ -248,20 +238,21 @@ void computeMain_blurFog(uint3 threadIndex: SV_DispatchThreadID, uint3 groupThre
             break;
         }
     }
-    //if (all(abs(cameraPos_lastTime - cameraPos) < 1e-10f) && !inFluid) {
-    //    fogAccImage[voxelIndex].xyz = fogAccHistoryImage[voxelIndex].xyz;
-    //    return;
-    //}
+    if (all(abs(cameraPos_lastTime - cameraPos) < 1e-10f) && !inFluid) {
+        fogAccImage[voxelIndex].xyz = fogAccHistoryImage[voxelIndex].xyz;
+        return;
+    }
     // if (all(voxelIndex == 0)) printf("cameraPos_lastTime: %f %f %f, cameraPos: %f %f %f\n", cameraPos_lastTime.x, cameraPos_lastTime.y, cameraPos_lastTime.z, cameraPos.x, cameraPos.y, cameraPos.z);
 
     float3 toVoxel = voxelCenter - cameraPos_lastTime;
     float viewZ = dot(toVoxel, cameraForward_lastTime);
     float viewX = dot(toVoxel, cameraRight_lastTime);
     float viewY = dot(toVoxel, cameraUp_lastTime);
+    float depthWithNear_lastCamera = getMorphedFrustumDepthWithNear(toVoxel, cameraForward_lastTime, pushConst.frustumInfo);
 
     bool historyValid = true;
     float3 uvw_lastTime = 0.0f;
-    if (viewZ < nearPlane || viewZ > farPlane) historyValid = false;
+    if (depthWithNear_lastCamera < nearPlane || depthWithNear_lastCamera > farPlane) historyValid = false;
     else {
         float halfHeight_lastTime = viewZ * tanHalfFov;
         float halfWidth_lastTime = halfHeight_lastTime * aspect;
@@ -271,24 +262,15 @@ void computeMain_blurFog(uint3 threadIndex: SV_DispatchThreadID, uint3 groupThre
             float3 cellPos;
             cellPos.x = ((viewX / halfWidth_lastTime) * 0.5f + 0.5f) * gridSizeF.x;
             cellPos.y = ((viewY / halfHeight_lastTime) * 0.5f + 0.5f) * gridSizeF.y;
-            cellPos.z = frustumInvMap(viewZ - nearPlane, compressionParams, sizeZ, gridSize.z) / sizeZ * gridSizeF.z;
+            cellPos.z = frustumInvMap(depthWithNear_lastCamera - nearPlane, compressionParams, sizeZ, gridSize.z) / sizeZ * gridSizeF.z;
 
             uvw_lastTime = saturate(cellPos / gridSizeF);
         }
     }
 
-    // 历史无效（体素上一帧在视锥外）时必须把当前值写回去。
-    // 原来这里直接 return，可是 fogBlur_Voxel 之后会无条件把结果图拷进历史图，
-    // 于是这些体素保留的是上一轮的陈旧数据，相机转动时视锥边缘会出现一圈闪烁的脏值。
-    if (!historyValid) return; // curVoxelInfo 本来就已经在图里，不用重写
+    if (!historyValid) return; 
     float3 lastVoxelInfo = fogAccHistoryImage.SampleLevel(uvw_lastTime, 0).xyz;
     //-------------------------------- 邻域钳制 --------------------------------
-    // 把历史值限制在当前体素邻域的取值范围内。重投影再准也会有半个体素的误差，
-    // 在雾的边界处（比如物体遮挡产生的阴影边）会把完全不同的值混进来 —— 表现为拖影。
-    // 钳制之后历史只能在“合理范围”内起作用，既保住了时域超采样的收敛，又不会拖影。
-    // 前提是这里读到的必须是“逐板”值：这个pass被安排在 Pass1 和 Pass2 之间就是为了这个。
-    // 如果放在 Pass2 之后，图里存的是沿Z累积过的量，它沿Z单调平滑，±1邻域的min/max窗口
-    // 宽到几乎不构成约束，错位的历史值原样通过 —— 那就是相机移动后的鬼影。
     //float2 nMin = curVoxelInfo.xy;
     //float2 nMax = curVoxelInfo.xy;
     //int3 localIndex = int3(groupThreadIndex);
@@ -307,13 +289,9 @@ void computeMain_blurFog(uint3 threadIndex: SV_DispatchThreadID, uint3 groupThre
     //lastVoxelInfo = clamp(lastVoxelInfo, nMin, nMax);
 
     //-------------------------------- 自适应混合比例 --------------------------------
-    // 相机静止时多留历史（收敛快、抖动被彻底积掉）；相机快速移动时少留历史
-    // （重投影误差大，留太多就是拖影）。原来固定 0.1 意味着永远保留 90% 的历史，
-    // 相机一动就是十帧的滞后。
     float3 cameraMove = cameraPos - cameraPos_lastTime;
     float cameraSpeed = length(cameraMove) / max(pushConst.dt, 1e-4f);
-    // 朝向变化量：用当前和上一帧 forward 的夹角近似
-    float rotationDelta = 1.0f - saturate(dot(cameraForward, cameraForward_lastTime));
+    float rotationDelta = 1.0f - saturate(dot(cameraForward, cameraForward_lastTime));    // 朝向变化量：用当前和上一帧 forward 的夹角近似
 
     float motion = saturate(cameraSpeed * 0.02f + rotationDelta * 20.0f);
     float mergeRatio = lerp(mergeRatioMin, mergeRatioMax, motion); // 当前帧的权重

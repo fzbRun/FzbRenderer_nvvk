@@ -8,6 +8,7 @@
 #include "renderer/VolumetricFog/shaders/finalShaders/FogCommon.slang"
 
 [[vk::push_constant]] ConstantBuffer<renderOpaquePushConstant> pushConst;
+[[vk::binding(StaticBindingPoints_VolumetricFog::eRenderedFogResultImage)]] RWTexture2D<float4> renderedFogResultImage;
 
 [numthreads(16, 16, 1)]
 [shader("compute")]
@@ -40,6 +41,16 @@ void computeMain_renderOpaqueMaterial(uint2 threadIndex: SV_DispatchThreadID, ui
         float spatialDither = getCellDither(float2(threadIndex), 0.0f);
         float layerOffset = getMarchLayerOffset(pushConst.temporalFrameIndex, spatialDither, true, true);
         getVolumetricFogScatter(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, pushConst.sampleCount, 3, true, layerOffset, pushConst.lightVP, pushConst.sceneInfoAddress, pushConst.fogGlobalInfoAddress, L, attenuation, attenuation2);
+        //if (depth < 1.0f - 1e-30f) {
+        //    //getVolumetricFogScatter_DeltaTracking(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, pushConst.sampleCount, 3, true, layerOffset, pushConst.lightVP, pushConst.sceneInfoAddress, pushConst.fogGlobalInfoAddress, L, attenuation, attenuation2);
+        //    getVolumetricFogScatter_RatioTracking(sceneInfo.cameraPosition, worldPos.xyz, randomSeed, pushConst.sampleCount, 3, true, layerOffset, pushConst.lightVP, pushConst.sceneInfoAddress, pushConst.fogGlobalInfoAddress, L, attenuation, attenuation2);
+        //}
+    }
+
+    if (pushConst.useFogBlur == 1) {
+        renderedFogResultImage[threadIndex] = float4(attenuation, L, 1.0f, 1.0f);
+        L = 0.0f;
+        attenuation = 1.0f;
     }
 
     float3 result = 0.0f;

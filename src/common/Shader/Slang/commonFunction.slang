@@ -772,7 +772,6 @@ float3 getCameraFrustumInteralPos(
     float3 hitWorldPos = cameraPos + cameraRight * entryViewX + cameraUp * entryViewY + cameraForward * entryViewZ;
     return hitWorldPos;
 }
-
 //------------------------------------------------SphericalFibonacci---------------------------------------------
 #define M_PHI 1.618033988749895
 //y axis is up, get worldPos

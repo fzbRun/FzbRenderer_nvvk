@@ -10,6 +10,8 @@ NAMESPACE_SHADERIO_BEGIN()
 
 #define MAX_FLUID_FOG_COUNT 1
 
+#define FLUID_A_MACCORMACK
+
 struct FluidFogInfo {
 	int startUp;
 
@@ -26,7 +28,7 @@ struct FluidFogInfo {
 };
 
 struct FluidFogVoxelInfo {
-	float4 dirtyVelocity_pressure[2];
+	float4 dirtyVelocity_p[2];
 	bool isBoundary;
 	float4 voxelFogInfo;
 };

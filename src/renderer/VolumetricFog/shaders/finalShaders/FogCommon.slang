@@ -152,13 +152,27 @@ void getFogScatter(
     L += color * ambientIntensity * scattering * E * factor;
     a = exp(-extinctionCoeff * sampleLength);
 
-#ifdef MULTI_SCATTERING
+    #ifdef MULTI_SCATTERING
     fp = 0.5f * M_1_PI;
     float3 E1 = lightColor * lightAttenuation * fp * color * scattering * E * factor;
-    float fms = scattering / max(extinctionCoeff, 1e-10f) * (1.0f - exp(-1.0f * extinctionCoeff));
+    float fms = scattering / max(extinctionCoeff, 1e-10f) * (1.0f - exp(-20.0f * extinctionCoeff));
     float3 multiScattering = E1 * fms / max(1.0f - fms, 1e-10f);
     L += multiScattering;
-#endif
+
+    //float a_temp = 0.5f, b = 0.5f, c = 0.5f;
+    //for (int i = 1; i < 8; ++i) {
+    //    float phase_temp = phase * c;
+    //    phase2 = phase_temp * phase_temp;
+    //    fp = (1.0f - phase2) / (4.0f * M_PI * pow((1 + phase2 - 2.0f * phase_temp * dot(-sampleDir, lightDirection)), 1.5f));
+    //
+    //    x = a_temp * extinctionCoeff * sampleLength;
+    //    factor = (x < 1e-4) ? sampleLength * (1.0 - 0.5 * x) : (1.0 - exp(-x)) / extinctionCoeff;
+    //
+    //    L += b * activeSunColor * fp * color * scattering * E * factor;
+    //
+    //    a_temp *= 0.5f; b *= 0.5f; c *= 0.5f;
+    //}
+    #endif
 }
 //---------------------------------------------------------------------------------------------------------------------
 float EiScaled(float x, float logAbsX) {
@@ -346,6 +360,260 @@ float getTransmittance2(float3 pos, FogGlobalInfo fogGlobalInfo, Light light) {
     return lightTransmittance;
 }
 
+void getVolumetricFogScatter_DeltaTracking(
+    float3 startPos, float3 endPos, inout uint randomSeed, uint sampleCount, float stepPower, bool useGlobalHeight, float layerOffset, 
+    float4x4 lightVP, SceneInfo *sceneInfoAddress, FogGlobalInfo *fogGlobalInfoAddress,
+    inout float L, inout float attenuation, inout float attenuation2
+) {
+    #ifdef COMPUTE_SHADER
+    FogGlobalInfo fogGlobalInfo = groupFogGlobalInfo;
+    SceneInfo sceneInfo = groupSceneInfo;
+    #else
+    FogGlobalInfo fogGlobalInfo = fogGlobalInfoAddress[0];
+    SceneInfo sceneInfo = sceneInfoAddress[0];
+    #endif
+
+    float3 dir = normalize(endPos - startPos);
+    float tTotal = length(endPos - startPos);
+
+    Light light = sceneInfo.lights[0];
+    float3 lightColor = light.color * light.intensity;
+    float3 lightDirection = -light.direction;
+
+    const float maxExtinction = 1.0f; // this true, dont't worry
+    float transmittance = 0.0f;
+    float3 L_scattering = 0.0f;
+    for (int i = 0; i < sampleCount; ++i) {
+        float t = 0.0f;
+        int maxIteration = 100;
+        for(int j = 0; j < maxIteration; ++j){
+            float r = rand(randomSeed);
+            t = t - log(r) / maxExtinction;
+            if (t > tTotal) break;
+
+            float3 samplePoint = startPos + t * dir;
+            float envExtinction = 0.0f;
+            float envScattering = 0.0f;
+            float envPhase = 0.0f;
+            float3 envColor = 0.0f;
+            {
+                if (useGlobalHeight && fogGlobalInfo.useGlobalHeightFog == 1 && checkPointInAABB(samplePoint, fogGlobalInfo.globalHeightFogAABB)) {
+                    HeightFogInfo globalHeightFogInfo = fogGlobalInfo.globalHeightFogInfo;
+                    float heightAttenuation = exp(-globalHeightFogInfo.heightScale * (samplePoint.y - fogGlobalInfo.globalHeightFogAABB.minimum.y));
+                    float extinction = (globalHeightFogInfo.absorption + globalHeightFogInfo.scattering) * heightAttenuation;
+                    envExtinction += extinction;
+                    envScattering += globalHeightFogInfo.scattering * heightAttenuation;
+                    envPhase += extinction * globalHeightFogInfo.phase;
+                    envColor += extinction * globalHeightFogInfo.color;
+                }
+
+                bool inFluid = false;
+                for (int i = 0; i < fogGlobalInfo.fluidFogCount; ++i) {
+                    VolumetricFogInfo fogInfo = getVolumetricFog(i);
+                    if (!checkPointInAABB(samplePoint, fogInfo.aabb)) continue;
+
+                    FluidFogInfo fluidFogInfo = getFluidFog(fogInfo.typeFogIndex);
+                    if (fluidFogInfo.startUp == 0) continue;
+
+                    float3 uvw = (samplePoint - fogInfo.aabb.minimum) / (fluidFogInfo.gridSize * fluidFogInfo.voxelSize);
+                    uvw = clamp(uvw, 0.0f, 1.0f - 1e-6f);
+                    float4 voxelInfo = fluidFogImages_sample[fogInfo.typeFogIndex].SampleLevel(uvw, 0);
+
+                    // if in fluid, the voxelInfo has include the envionment fog info
+                    float extinction = max(voxelInfo.x, 1e-30f);
+                    envExtinction += extinction;
+                    envScattering += voxelInfo.y;
+                    envPhase += extinction * voxelInfo.z;
+                    envColor += extinction * voxelInfo.w;
+
+                    inFluid = true;
+                    break;
+                }
+
+                if (!inFluid) {
+                    for (int i = fogGlobalInfo.fluidFogCount; i < fogGlobalInfo.volumetricFogCount; ++i) {
+                        VolumetricFogInfo fogInfo = getVolumetricFog(i);
+                        if (!checkPointInAABB(samplePoint, fogInfo.aabb)) continue;
+
+                        if (fogInfo.type == VolumetricFogType::Height) {
+                            HeightFogInfo heightFogInfo = getHeightFog(fogInfo.typeFogIndex);
+
+                            float heightScale = heightFogInfo.heightScale;
+                            float height = max(samplePoint.y - fogInfo.aabb.minimum.y, 0.0f);
+                            float heightAttenuation = exp(-heightScale * height);
+                            float extinction = (heightFogInfo.absorption + heightFogInfo.scattering) * heightAttenuation;
+                            envExtinction += extinction;
+                            envScattering += heightFogInfo.scattering * heightAttenuation;
+                            envPhase += extinction * heightFogInfo.phase;
+                            envColor += extinction * heightFogInfo.color * (1.0f + heightFogInfo.ambientIntensity);
+                        } else if (fogInfo.type == VolumetricFogType::Grid) {
+                            GridFogInfo gridFogInfo = getGridFog(fogInfo.typeFogIndex);
+
+                            float3 uvw = (samplePoint - fogInfo.aabb.minimum) / (fogInfo.aabb.maximum - fogInfo.aabb.minimum);
+                            float4 voxelInfo = gridFogImages[fogInfo.typeFogIndex].SampleLevel(uvw, 0);
+
+                            float extinction = voxelInfo.x;
+                            envExtinction += extinction;
+                            envScattering += voxelInfo.y;
+                            envPhase += extinction * voxelInfo.z;
+                            envColor += extinction * voxelInfo.w * (1.0f + gridFogInfo.ambientIntensity);
+                        }
+                    }
+                }
+                envPhase /= max(envExtinction, 1e-30f);
+                envColor /= max(envExtinction, 1e-30f);
+            }
+            envExtinction = max(envExtinction, 1e-10f);
+
+            float k = rand(randomSeed);
+            if (k <= envExtinction / maxExtinction) {
+                envPhase = clamp(envPhase, -0.999f, 0.999f);
+                float phase2 = envPhase * envPhase;
+                float fp = (1.0f - phase2) / (4.0f * M_PI * pow((1 + phase2 - 2.0f * envPhase * dot(-dir, lightDirection)), 1.5f));
+
+                float3 activeSunColor = lightColor * 1.0f;
+                activeSunColor *= getShadow(float4(samplePoint, 1.0f), lightVP);
+
+                float3 L_scattering_temp = activeSunColor * fp * envColor;
+                //L_scattering_temp += envColor;
+                L_scattering += envScattering / envExtinction * luminance(L_scattering_temp);
+
+                break;
+            }
+        }
+        transmittance += t > tTotal ? 1.0f : 0.0f;
+    }
+    L += luminance(L_scattering / sampleCount);
+    attenuation *= transmittance / sampleCount;
+    attenuation2 *= 1.0f;
+}
+void getVolumetricFogScatter_RatioTracking(
+    float3 startPos, float3 endPos, inout uint randomSeed, uint sampleCount, float stepPower, bool useGlobalHeight, float layerOffset, 
+    float4x4 lightVP, SceneInfo *sceneInfoAddress, FogGlobalInfo *fogGlobalInfoAddress,
+                                           inout float L, inout float attenuation, inout float attenuation2
+) {
+    #ifdef COMPUTE_SHADER
+    FogGlobalInfo fogGlobalInfo = groupFogGlobalInfo;
+    SceneInfo sceneInfo = groupSceneInfo;
+    #else
+    FogGlobalInfo fogGlobalInfo = fogGlobalInfoAddress[0];
+    SceneInfo sceneInfo = sceneInfoAddress[0];
+    #endif
+
+    float3 dir = normalize(endPos - startPos);
+    float tTotal = length(endPos - startPos);
+
+    Light light = sceneInfo.lights[0];
+    float3 lightColor = light.color * light.intensity;
+    float3 lightDirection = -light.direction;
+
+    const float maxExtinction = 1.0f; // must be an upper bound of sigma_t along the ray
+    float transmittance = 0.0f;
+    float3 L_scattering = 0.0f;
+    float segmentStartTransmittance = attenuation;
+    for (uint sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex) {
+        float t = 0.0f;
+        float throughput = 1.0f;
+        while (true) {
+            float r = rand(randomSeed);
+            t = t - log(r) / maxExtinction;
+            if (t > tTotal) break;
+
+            float3 samplePoint = startPos + t * dir;
+            float envExtinction = 0.0f;
+            float envScattering = 0.0f;
+            float envPhase = 0.0f;
+            float3 envColor = 0.0f;
+            {
+                if (useGlobalHeight && fogGlobalInfo.useGlobalHeightFog == 1 && checkPointInAABB(samplePoint, fogGlobalInfo.globalHeightFogAABB)) {
+                    HeightFogInfo globalHeightFogInfo = fogGlobalInfo.globalHeightFogInfo;
+                    float heightAttenuation = exp(-globalHeightFogInfo.heightScale * (samplePoint.y - fogGlobalInfo.globalHeightFogAABB.minimum.y));
+                    float extinction = (globalHeightFogInfo.absorption + globalHeightFogInfo.scattering) * heightAttenuation;
+                    envExtinction += extinction;
+                    envScattering += globalHeightFogInfo.scattering * heightAttenuation;
+                    envPhase += extinction * globalHeightFogInfo.phase;
+                    envColor += extinction * globalHeightFogInfo.color;
+                }
+
+                bool inFluid = false;
+                for (int i = 0; i < fogGlobalInfo.fluidFogCount; ++i) {
+                    VolumetricFogInfo fogInfo = getVolumetricFog(i);
+                    if (!checkPointInAABB(samplePoint, fogInfo.aabb)) continue;
+
+                    FluidFogInfo fluidFogInfo = getFluidFog(fogInfo.typeFogIndex);
+                    if (fluidFogInfo.startUp == 0) continue;
+
+                    float3 uvw = (samplePoint - fogInfo.aabb.minimum) / (fluidFogInfo.gridSize * fluidFogInfo.voxelSize);
+                    uvw = clamp(uvw, 0.0f, 1.0f - 1e-6f);
+                    float4 voxelInfo = fluidFogImages_sample[fogInfo.typeFogIndex].SampleLevel(uvw, 0);
+
+                    // if in fluid, the voxelInfo has include the envionment fog info
+                    float extinction = max(voxelInfo.x, 1e-30f);
+                    envExtinction += extinction;
+                    envScattering += voxelInfo.y;
+                    envPhase += extinction * voxelInfo.z;
+                    envColor += extinction * voxelInfo.w;
+
+                    inFluid = true;
+                    break;
+                }
+
+                if (!inFluid) {
+                    for (int i = fogGlobalInfo.fluidFogCount; i < fogGlobalInfo.volumetricFogCount; ++i) {
+                        VolumetricFogInfo fogInfo = getVolumetricFog(i);
+                        if (!checkPointInAABB(samplePoint, fogInfo.aabb)) continue;
+
+                        if (fogInfo.type == VolumetricFogType::Height) {
+                            HeightFogInfo heightFogInfo = getHeightFog(fogInfo.typeFogIndex);
+
+                            float heightScale = heightFogInfo.heightScale;
+                            float height = max(samplePoint.y - fogInfo.aabb.minimum.y, 0.0f);
+                            float heightAttenuation = exp(-heightScale * height);
+                            float extinction = (heightFogInfo.absorption + heightFogInfo.scattering) * heightAttenuation;
+                            envExtinction += extinction;
+                            envScattering += heightFogInfo.scattering * heightAttenuation;
+                            envPhase += extinction * heightFogInfo.phase;
+                            envColor += extinction * heightFogInfo.color * (1.0f + heightFogInfo.ambientIntensity);
+                        } else if (fogInfo.type == VolumetricFogType::Grid) {
+                            GridFogInfo gridFogInfo = getGridFog(fogInfo.typeFogIndex);
+
+                            float3 uvw = (samplePoint - fogInfo.aabb.minimum) / (fogInfo.aabb.maximum - fogInfo.aabb.minimum);
+                            float4 voxelInfo = gridFogImages[fogInfo.typeFogIndex].SampleLevel(uvw, 0);
+
+                            float extinction = voxelInfo.x;
+                            envExtinction += extinction;
+                            envScattering += voxelInfo.y;
+                            envPhase += extinction * voxelInfo.z;
+                            envColor += extinction * voxelInfo.w * (1.0f + gridFogInfo.ambientIntensity);
+                        }
+                    }
+                }
+                envPhase /= max(envExtinction, 1e-30f);
+                envColor /= max(envExtinction, 1e-30f);
+            }
+            envExtinction = max(envExtinction, 1e-10f);
+
+            if (envExtinction > 1e-10f) {
+                envPhase = clamp(envPhase, -0.999f, 0.999f);
+                float phase2 = envPhase * envPhase;
+                float fp = (1.0f - phase2) / (4.0f * M_PI * pow((1 + phase2 - 2.0f * envPhase * dot(-dir, lightDirection)), 1.5f));
+
+                float3 activeSunColor = lightColor * 1.0f;
+                activeSunColor *= getShadow(float4(samplePoint, 1.0f), lightVP);
+
+                float3 source = activeSunColor * fp * envColor;
+                L_scattering += segmentStartTransmittance * throughput * envScattering * luminance(source) / maxExtinction;
+            }
+
+            throughput *= max(0.0f, 1.0f - envExtinction / maxExtinction);
+        }
+
+        transmittance += throughput;
+    }
+    L += luminance(L_scattering / sampleCount);
+    attenuation *= transmittance / sampleCount;
+    attenuation2 *= 1.0f;
+}
 void getVolumetricFogScatter(
     float3 startPos, float3 endPos, inout uint randomSeed, uint sampleCount, float stepPower, bool useGlobalHeight, float layerOffset, 
     float4x4 lightVP, SceneInfo* sceneInfoAddress, FogGlobalInfo* fogGlobalInfoAddress,
@@ -361,6 +629,33 @@ void getVolumetricFogScatter(
 
     float3 dir = normalize(endPos - startPos);
     float tTotal = length(endPos - startPos);
+
+    /*
+    {
+        float tEntry, tExit;
+        if (!isHit(startPos, endPos, fogGlobalInfo.globalHeightFogAABB.minimum, fogGlobalInfo.globalHeightFogAABB.maximum, tEntry, tExit)) return;
+        float3 sampleDir = normalize(endPos - startPos);
+        endPos = startPos + tExit * sampleDir;
+        startPos = startPos + tEntry * sampleDir;
+        float sampleLength = distance(startPos, endPos);
+
+        float3 L0 = 0.0f;
+        getAnalyticHeightFogDirectionalScatter(startPos, endPos, fogGlobalInfo.globalHeightFogAABB, fogGlobalInfo.globalHeightFogInfo, sceneInfo.lights[0], lightVP, attenuation, L0);
+        L = luminance(L0);
+        return;
+    }
+    */
+
+    for (int i = 0; i < fogGlobalInfo.fluidFogCount; ++i) {
+        VolumetricFogInfo fogInfo = getVolumetricFog(i);
+        FluidFogInfo fluidFogInfo = getFluidFog(fogInfo.typeFogIndex);
+        if (fluidFogInfo.startUp == 0) continue;
+
+        float tEntry, tExit;
+        if (!isHit(startPos, endPos, fogInfo.aabb.minimum, fogInfo.aabb.maximum, tEntry, tExit)) continue;
+        sampleCount *= 2;
+        break;
+    }
 
     float tPartStart = 0;
     float tPartEnd = pow(1.0f / sampleCount, stepPower) * tTotal;
@@ -383,7 +678,7 @@ void getVolumetricFogScatter(
             float heightAttenuation = exp(-globalHeightFogInfo.heightScale * (samplePoint.y - fogGlobalInfo.globalHeightFogAABB.minimum.y));
             float extinction = (globalHeightFogInfo.absorption + globalHeightFogInfo.scattering) * heightAttenuation;
             envExtinction = extinction;
-            envScattering = extinction * globalHeightFogInfo.scattering * heightAttenuation;
+            envScattering = globalHeightFogInfo.scattering * heightAttenuation;
             envPhase = extinction * globalHeightFogInfo.phase;
             envColor = extinction * globalHeightFogInfo.color;
 
@@ -406,7 +701,7 @@ void getVolumetricFogScatter(
 
             // if in fluid, the voxelInfo has include the envionment fog info
             envExtinction = max(voxelInfo.x, 1e-30f);
-            envScattering = envExtinction * voxelInfo.y;
+            envScattering = voxelInfo.y;
             envPhase = envExtinction * voxelInfo.z;
             envColor = envExtinction * voxelInfo.w; // UnpackFloatToFloat3(voxelInfo.w);
 
@@ -455,12 +750,11 @@ void getVolumetricFogScatter(
             }
 
             envExtinction += extinction;
-            envScattering += extinction * scattering;
+            envScattering += scattering;
             envPhase += extinction * phase;
             envColor += extinction * color;
         }
 
-        envScattering /= max(envExtinction, 1e-30f);
         envPhase /= max(envExtinction, 1e-30f);
         envColor /= max(envExtinction, 1e-30f);
 
@@ -513,6 +807,26 @@ void getGlobalHeightFogScatter(
 /*
 sliceDither in [-0.5f, 0.5f]
 */
+float3 getMorphedFrustumVoxelCenter(
+    float depthWithNear, float u, float v,
+    float3 cameraPos, float3 cameraForward, float3 cameraRight, float3 cameraUp,
+    FrustumGlobalInfo frustumInfo
+) {
+    float3 D = cameraForward
+             + (v * frustumInfo.tanCameraFov_2) * cameraUp
+             + (u * frustumInfo.tanCameraFov_2 * frustumInfo.aspectRatio) * cameraRight;
+    float scale = lerp(1.0f, 1.0f / length(D), frustumInfo.sphereFactor);
+    return cameraPos + D * (depthWithNear * scale);
+}
+
+float getMorphedFrustumDepthWithNear(float3 toVoxel, float3 cameraForward, FrustumGlobalInfo frustumInfo) {
+    float viewZ = dot(toVoxel, cameraForward);
+    if (viewZ <= 0.0f) return -1.0f;
+    float radius = length(toVoxel);
+    float radialScale = lerp(radius / viewZ, 1.0f, frustumInfo.sphereFactor);
+    return radius / radialScale;
+}
+
 float4 getFrustumImageInfo(float3 worldPos, bool linear, float3 sliceDither, Sampler3D<float4> image, inout uint randomSeed, SceneInfo *sceneInfoAddress, FrustumGlobalInfo frustumInfo) {
     #ifdef COMPUTE_SHADER
     SceneInfo sceneInfo = groupSceneInfo;
@@ -533,14 +847,15 @@ float4 getFrustumImageInfo(float3 worldPos, bool linear, float3 sliceDither, Sam
     float3 cameraForward = -sceneInfo.viewInvMatrix[2].xyz;
 
     float3 toPoint = worldPos - sceneInfo.cameraPosition;
-    float viewZ = dot(toPoint, cameraForward);
-    float viewX = dot(toPoint, cameraRight);
-    float viewY = dot(toPoint, cameraUp);
-    if (viewZ <= 0.0f) return float4(0, 0, 0, 0);
+    float depthWithNear = getMorphedFrustumDepthWithNear(toPoint, cameraForward, frustumInfo);
+    if (depthWithNear <= 0.0f) return float4(0, 0, 0, 0);
 
-    float clampedZ = clamp(viewZ, nearPlane, farPlane);
-    float scale = clampedZ / viewZ;
-    viewX *= scale; viewY *= scale; viewZ = clampedZ;
+    float clampedDepthWithNear = clamp(depthWithNear, nearPlane, farPlane);
+    float scale = clampedDepthWithNear / depthWithNear;
+    float3 toClamped = toPoint * scale;
+    float viewZ = dot(toClamped, cameraForward);
+    float viewX = dot(toClamped, cameraRight);
+    float viewY = dot(toClamped, cameraUp);
 
     float halfHeight = viewZ * tanHalfFov;
     float halfWidth = halfHeight * aspect;
@@ -553,9 +868,9 @@ float4 getFrustumImageInfo(float3 worldPos, bool linear, float3 sliceDither, Sam
     #endif
 
     #ifdef Interpolation_Manual
-    uint voxelZ = clamp(int(frustumInvMap(viewZ - nearPlane, compressionParams, (farPlane - nearPlane), gridSize.z) / (farPlane - nearPlane) * gridSize.z), 0, gridSize.z - 1);
+    uint voxelZ = clamp(int(frustumInvMap(clampedDepthWithNear - nearPlane, compressionParams, (farPlane - nearPlane), gridSize.z) / (farPlane - nearPlane) * gridSize.z), 0, gridSize.z - 1);
 
-    float depth = viewZ - nearPlane;
+    float depth = clampedDepthWithNear - nearPlane;
     float depth0 = frustumMap(float(voxelZ) / gridSizeF.z * (farPlane - nearPlane), compressionParams, (farPlane - nearPlane), gridSize.z);
     float depth1 = frustumMap(float(voxelZ + 1) / gridSizeF.z * (farPlane - nearPlane), compressionParams, (farPlane - nearPlane), gridSize.z);
     float centerZ = (depth0 + depth1) * 0.5f;
@@ -586,7 +901,7 @@ float4 getFrustumImageInfo(float3 worldPos, bool linear, float3 sliceDither, Sam
     // return blendZ;
     return lerp(s0, s1, blendZ);
     #else
-    float zSlice = frustumInvMap(viewZ - nearPlane, compressionParams, farPlane - nearPlane, gridSize.z) / (farPlane - nearPlane) * gridSizeF.z;
+    float zSlice = frustumInvMap(clampedDepthWithNear - nearPlane, compressionParams, farPlane - nearPlane, gridSize.z) / (farPlane - nearPlane) * gridSizeF.z;
     #ifdef SAMPLE_JITTER_TAA
     float w = saturate(zSlice / gridSizeF.z + sliceDither.z / gridSizeF.z);
     #else
