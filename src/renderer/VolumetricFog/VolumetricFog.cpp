@@ -1604,6 +1604,7 @@ void VolumetricFog::fluidSimulation(VkCommandBuffer cmd) {
 			vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
 			barrierVolumeAll(i);
 
+			NVVK_DBG_SCOPE(cmd);
 			// --- Stage P: Projection solve (Jacobi) ---
 			if (fluidSimulation_IterationP) {
 #ifdef FLUID_SIMULATION_CPF
@@ -1615,24 +1616,25 @@ void VolumetricFog::fluidSimulation(VkCommandBuffer cmd) {
 				nvvk::cmdImageMemoryBarrier(cmd, { fluidFogSet->getfluidFogVoxelInfoImages_temp1Ptr()[i].image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL });
 
 				// 2) x pass: temp1 -> temp2
+				VkExtent3D filterGroupSize = nvvk::getGroupCounts(VkExtent3D{ gridSize.x, gridSize.y, gridSize.z }, VkExtent3D{ 32, 1, 1 });
 				fluidSimulationPushConstant.iteration = 0;
 				vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_fluidSimulation_P_Filter);
 				vkCmdPushConstants2(cmd, &pushInfo);
-				vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
+				vkCmdDispatch(cmd, filterGroupSize.width, filterGroupSize.height, filterGroupSize.depth);
 				nvvk::cmdImageMemoryBarrier(cmd, { fluidFogSet->getfluidFogVoxelInfoImages_temp2Ptr()[i].image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL });
 
 				// 3) y pass: temp2 -> temp1
 				fluidSimulationPushConstant.iteration = 1;
 				vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_fluidSimulation_P_Filter);
 				vkCmdPushConstants2(cmd, &pushInfo);
-				vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
+				vkCmdDispatch(cmd, filterGroupSize.width, filterGroupSize.height, filterGroupSize.depth);
 				nvvk::cmdImageMemoryBarrier(cmd, { fluidFogSet->getfluidFogVoxelInfoImages_temp1Ptr()[i].image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL });
 
 				// 4) z pass: temp1 -> temp2
 				fluidSimulationPushConstant.iteration = 2;
 				vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_fluidSimulation_P_Filter);
 				vkCmdPushConstants2(cmd, &pushInfo);
-				vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
+				vkCmdDispatch(cmd, filterGroupSize.width, filterGroupSize.height, filterGroupSize.depth);
 				nvvk::cmdImageMemoryBarrier(cmd, { fluidFogSet->getfluidFogVoxelInfoImages_temp2Ptr()[i].image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL });
 
 				// 5) final sum -> pressure

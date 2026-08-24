@@ -143,8 +143,8 @@ private:
 	int sampleCount_renderOpaque = 50;
 	float jitterStrength_randerOpaque = 1.0f;
 	//---------------------------FogBlur-------------------------------
-	bool useFogBlur = false;
-	int FogBlurCount = 1;
+	bool useFogBlur = true;
+	int FogBlurCount = 2;
 
 	VkShaderEXT computeShader_getDepthGradient{};
 	VkShaderEXT computeShader_blurFog_X{};

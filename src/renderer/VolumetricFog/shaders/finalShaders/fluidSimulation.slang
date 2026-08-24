@@ -654,10 +654,9 @@ void computeMain_fluidSimulation_P_Divergence(uint3 voxelIndex: SV_DispatchThrea
 
     float4 selfData = groupVoxelInfos[lIdx.z][lIdx.y][lIdx.x];
 
-    // 下面的邻居读取直接照抄你现在 P_Iteration 的 515-532 行
     float halfDx = 2.0f * voxelSize.x;
-    float halfDy = 2.0f * voxelSize.y;
-    float halfDz = 2.0f * voxelSize.z;
+    float halfDy = halfDx;  //2.0f * voxelSize.y;
+    float halfDz = halfDx;  //2.0f * voxelSize.z;
 
     float4 nL = groupVoxelInfos[lIdx.z][lIdx.y][lIdx.x - 1];
     if (groupVoxelBoundary[lIdx.z][lIdx.y][lIdx.x - 1]) nL.w = selfData.w;
@@ -678,12 +677,9 @@ void computeMain_fluidSimulation_P_Divergence(uint3 voxelIndex: SV_DispatchThrea
     fluidFogImages_temp1[pushConst.fluidIndex][voxelIndex] = float4(div, div, div, div);
 }
 
-uint fluidLinearIndex(uint3 idx, uint3 gridSize) {
-    return idx.z * gridSize.x * gridSize.y + idx.y * gridSize.x + idx.x;
-}
 bool fluidIsSolid(int3 idx, uint3 gridSize) {
     if (any(idx < 0) || any(idx >= int3(gridSize))) return true;
-    uint linear = fluidLinearIndex(uint3(idx), gridSize);
+    uint linear = idx.z * gridSize.x * gridSize.y + idx.y * gridSize.x + idx.x;
     return fluidFogVoxelInfoBuffer[pushConst.fluidIndex][linear].isBoundary;
 }
 void poissonConvolveAxis(RWTexture3D<float4> src[], RWTexture3D<float4> dst[], uint3 voxelIndex, int axis, uint3 gridSize) {
@@ -715,12 +711,13 @@ void poissonConvolveAxis(RWTexture3D<float4> src[], RWTexture3D<float4> dst[], u
 
     dst[pushConst.fluidIndex][voxelIndex] = acc;
 }
-[numthreads(4, 4, 4)]
+[numthreads(32, 1, 1)]
 [shader("compute")]
 void computeMain_fluidSimulation_P_Filter(uint3 voxelIndex: SV_DispatchThreadID, uint3 groupThreadIndex: SV_GroupThreadID) {
     if (all(groupThreadIndex == 0)) groupFluidFogInfo = fluidFogInfoBuffer[pushConst.fluidIndex];
     GroupMemoryBarrierWithGroupSync();
     uint3 gridSize = groupFluidFogInfo.gridSize;
+
     if (any(voxelIndex >= gridSize)) return;
     if (fluidIsSolid(int3(voxelIndex), gridSize)) return;
 
@@ -738,11 +735,10 @@ void computeMain_fluidSimulation_P_Final(uint3 voxelIndex: SV_DispatchThreadID, 
     if (any(voxelIndex >= gridSize)) return;
     if (fluidIsSolid(int3(voxelIndex), gridSize)) return;
 
-    uint voxelIndexU = fluidLinearIndex(voxelIndex, gridSize);
+    uint voxelIndexU = voxelIndex.z * gridSize.x * gridSize.y + voxelIndex.y * gridSize.x + voxelIndex.x;
     float4 p = fluidFogImages_temp2[pushConst.fluidIndex][voxelIndex];
     float pressure = p.x + p.y + p.z + p.w;
 
-    // 两个 slot 都写，避免 Stage S 取错 ping-pong
     fluidFogVoxelInfoBuffer[pushConst.fluidIndex][voxelIndexU].dirtyVelocity_p[0].w = pressure;
     fluidFogVoxelInfoBuffer[pushConst.fluidIndex][voxelIndexU].dirtyVelocity_p[1].w = pressure;
 }
