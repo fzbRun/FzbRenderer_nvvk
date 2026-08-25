@@ -63,8 +63,8 @@ struct FrustumGlobalInfo {
 };
 struct FogAccHasFogVoxelInfo {
 	uint3 voxelIndex;
-	float3 voxelCenter;
-	float3 voxelCenter_lastVoxel;
+	float3 voxelCenter;				//当前voxel的采样点
+	float3 voxelCenter_lastVoxel;	//上一层voxel的对应点
 };
 //---------------------------------------------
 struct InitFluidPushConstant {

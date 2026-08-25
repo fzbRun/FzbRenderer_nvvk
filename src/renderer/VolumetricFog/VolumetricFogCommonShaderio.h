@@ -14,10 +14,10 @@ enum class VolumetricFogType {
 };
 
 struct VolumetricFogInfo {
-    AABB aabb;
+    AABB aabb;                  //范围
 
-    VolumetricFogType type;
-    int typeFogIndex;
+    VolumetricFogType type;     //类型
+    int typeFogIndex;           //在相应类型的体积雾中的索引
 };
 
 NAMESPACE_SHADERIO_END()

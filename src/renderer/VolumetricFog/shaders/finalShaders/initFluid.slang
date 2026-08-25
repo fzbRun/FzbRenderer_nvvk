@@ -104,25 +104,6 @@ void computeMain_initFluid(uint3 voxelIndex: SV_DispatchThreadID, uint3 groupThr
     float4 voxelInfo = envVoxelInfo;
     float3 velocity = 0.0f;
 
-    //int3 voxelIndex_lastTime = int3((voxelCenter - fluidFogInfo.fogStartPos_lastTime) / voxelSize);
-    //if (all(voxelIndex_lastTime >= 0) && all(voxelIndex_lastTime <= gridSize - 1) && pushConst.time > 0) {
-    //    voxelInfo = fluidFogImages[pushConst.fluidIndex][voxelIndex_lastTime];
-    //
-    //    velocity = fluidFogVoxelVelocityImage[pushConst.fluidIndex][voxelIndex_lastTime].xyz;
-    //
-    //    float3 halfGrid = float3(gridSize) * 0.5f;
-    //    float3 distToCenter = abs(float3(voxelIndex) - halfGrid);
-    //    float maxPossibleDist = length(halfGrid);
-    //    float centerDist = length(distToCenter) / maxPossibleDist;
-    //
-    //    float edgeFactor = smoothstep(0.0, 1.0, centerDist);
-    //    float restoreRate = 0.5f;
-    //    float restoreWeight = saturate(restoreRate * pushConst.dt) * edgeFactor * fluidFogInfo.restoreSpeed;
-    //
-    //    voxelInfo = lerp(voxelInfo, envVoxelInfo, saturate(restoreWeight));
-    //    velocity = lerp(velocity, 0.0f, saturate(restoreWeight));
-    //}
-
     if (pushConst.time > 0) {
         float3 voxelCenterOffset = voxelCenter - fluidFogInfo.fogStartPos_lastTime;
         int3 voxelIndex_lastTime = int3(voxelCenterOffset / voxelSize);

@@ -184,7 +184,7 @@ void FluidFog::preRender(shaderio::AABB& fogAABB) {
 		orthoMatrix = glm::orthoRH_ZO(-0.5f * distance.x, 0.5f * distance.x, -0.5f * distance.z, 0.5f * distance.z, 0.1f, distance.y + 0.1f);
 		orthoMatrix[1][1] *= -1;
 		VP[2] = orthoMatrix * viewMatrix;
-	}
+	}else fluidFogInfo.fogStartPos_lastTime = fogAABB.minimum;
 }
 //--------------------------------------------------------------------------------------------------------------------------------
 FluidFogSet::FluidFogSet(FluidFogSetCreateInfo createInfo) {

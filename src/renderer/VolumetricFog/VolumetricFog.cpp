@@ -9,23 +9,39 @@
 #include <iostream>
 using namespace FzbRenderer;
 
+/*
+调用顺序
+1. 构造函数
+2. init()
+3. resize()
+渲染循环：
+4. 如果窗口发生变化，则调用resize()
+5. preRender()：执行一些与命令缓冲区无关的操作，比如更新视锥数据等
+6. uiRender()：渲染UI
+7. render()：渲染程序主逻辑
+渲染循环结束
+8. clean()：清理资源
+*/
+
 #ifdef FINAL_PROJECT
 VolumetricFog::VolumetricFog(pugi::xml_node& rendererNode) {
 	{
+		//添加能在片元着色器中使用浮点数原子运算的设备扩展
 		Application::vkContext->getPhysicalDeviceFeatures_notConst().fragmentStoresAndAtomics = VK_TRUE;
 		atomicFloatFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
 		atomicFloatFeatures.shaderBufferFloat32AtomicAdd = VK_TRUE;
 		atomicFloatFeatures.shaderImageFloat32AtomicAdd = VK_TRUE;
 		Application::vkContextInitInfo.deviceExtensions.push_back({ VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME, &atomicFloatFeatures });
 	}
+	//除此之外还可以根据rendererNode中传入的数据，从rendererInfo.xml中获取数据，目前不需要
 }
 
 void VolumetricFog::init() {
-	createSourceData();
-	createDescriptorSetLayout();
-	createDescriptorSet();
-	createPipelineLayout();
-	compileAndCreateShaders();
+	createSourceData();				//创建所有资源
+	createDescriptorSetLayout();	//创建描述符集合布局
+	createDescriptorSet();			//创建描述符集合
+	createPipelineLayout();			//创建管线布局
+	compileAndCreateShaders();		//创建并编译着色器
 }
 void VolumetricFog::clean() {
 	shadowMap.clean();
@@ -93,10 +109,10 @@ void VolumetricFog::clean() {
 	Renderer::clean();
 }
 void VolumetricFog::uiRender() {
-	bool& UIModified = Application::UIModified;
+	bool& UIModified = Application::UIModified;		// 全局修改标志
 
 	namespace PE = nvgui::PropertyEditor;
-	Application::viewportImage = gBuffers.getDescriptorSet((uint32_t)GBuffers_VolumetricFog::eTonemapping);
+	Application::viewportImage = gBuffers.getDescriptorSet((uint32_t)GBuffers_VolumetricFog::eTonemapping);		//最终展示图像
 
 	const char* fogTypeItems[] = { "Height", "Fluid", "Noise" };
 
@@ -111,51 +127,51 @@ void VolumetricFog::uiRender() {
 		if (ImGui::CollapsingHeader("Global Setting", ImGuiTreeNodeFlags_DefaultOpen)) {
 			ImGui::Indent(20.0f); // 子项缩进，层级更明显
 
-			ImGui::Checkbox("Use TAA", (bool*)&useTAA);
+			ImGui::Checkbox("Use TAA", (bool*)&useTAA);			//是否使用TAA
 			taa.uiRender();
 
-			ImGui::Checkbox("Use Fog Blur", (bool*)&useFogBlur);
-			ImGui::DragInt("Fog Blur Count", (int*)&FogBlurCount, 1, 1, 10);
+			ImGui::Checkbox("Use Fog Blur", (bool*)&useFogBlur);	//是否开启空间雾效模糊
+			ImGui::DragInt("Fog Blur Count", (int*)&FogBlurCount, 1, 1, 10);	//模糊次数
 
-			if (ImGui::Checkbox("Show Frustum", (bool*)&showCameraFrustum)) {
-				renderCameraFrustumPushConstant.viewInvMatrix_showFrustum = glm::inverse(Application::sceneResource.cameraManip->getViewMatrix());
-			}
-			ImGui::DragInt3("Show Frustum Voxel Min ", (int*)&renderCameraFrustumPushConstant.showVoxelIndexMin, 1, 0, frustumInfo.frustumGridSize.x);
-			ImGui::DragInt3("Show Frustum Voxel max ", (int*)&renderCameraFrustumPushConstant.showVoxelIndexMax, 1, 0, frustumInfo.frustumGridSize.x);
+			if (ImGui::Checkbox("Show Frustum", (bool*)&showCameraFrustum))			//是否可视化相机视锥体
+				renderCameraFrustumPushConstant.viewInvMatrix_showFrustum = glm::inverse(Application::sceneResource.cameraManip->getViewMatrix());		//存储点击时的相机view逆矩阵
+			ImGui::DragInt3("Show Frustum Voxel Min ", (int*)&renderCameraFrustumPushConstant.showVoxelIndexMin, 1, 0, frustumInfo.frustumGridSize.x);	//可视化相机视锥体的最小体素索引
+			ImGui::DragInt3("Show Frustum Voxel max ", (int*)&renderCameraFrustumPushConstant.showVoxelIndexMax, 1, 0, frustumInfo.frustumGridSize.x);	//可视化相机视锥体的最大体素索引
 
+			//全局高度雾设置
 			if (ImGui::CollapsingHeader("Global Height Fog Setting", ImGuiTreeNodeFlags_DefaultOpen)) {
 				globalInfoModified = false;
-				globalInfoModified |= ImGui::Checkbox("Use Global Height Fog", (bool*)&fogGlobalInfo.useGlobalHeightFog);
-				globalInfoModified |= ImGui::DragFloat3("Global Height Fog Start ", (float*)&fogGlobalInfo.globalHeightFogAABB.minimum);
-				globalInfoModified |= ImGui::DragFloat3("Global Height Fog Range ", (float*)&fogGlobalInfo.globalHeightFogAABB.maximum);
+				globalInfoModified |= ImGui::Checkbox("Use Global Height Fog", (bool*)&fogGlobalInfo.useGlobalHeightFog);					//是否使用全局高度雾
+				globalInfoModified |= ImGui::DragFloat3("Global Height Fog Start ", (float*)&fogGlobalInfo.globalHeightFogAABB.minimum);	//全局高度雾的起始位置
+				globalInfoModified |= ImGui::DragFloat3("Global Height Fog Range ", (float*)&fogGlobalInfo.globalHeightFogAABB.maximum);	//全局高度雾的范围
 
 				shaderio::HeightFogInfo& fogInfo = fogGlobalInfo.globalHeightFogInfo;
-				globalInfoModified |= ImGui::DragFloat3("Global Height Fog Color ", (float*)&fogInfo.color);
-				globalInfoModified |= ImGui::DragFloat("Global Height Fog Ambient Intensity ", (float*)&fogInfo.ambientIntensity, 0.1f, 0.0f, 10.0f);
-				globalInfoModified |= ImGui::DragFloat("Global Height Fog Extinction Coefficient ", (float*)&fogInfo.absorption, 0.1f, 0.0f);
-				globalInfoModified |= ImGui::DragFloat("Global Height Fog Scatter Coefficient ", (float*)&fogInfo.scattering, 0.1f, 0.0f, 1.0f);
-				globalInfoModified |= ImGui::DragFloat("Global Height Fog Asymmetric Parameters ", (float*)&fogInfo.phase, 0.1f, -1.0f, 1.0f);
-				globalInfoModified |= ImGui::DragFloat("Global Height Fog Scale", (float*)&fogInfo.heightScale, 1.0f, 0.0f, 1000.0f);
+				globalInfoModified |= ImGui::DragFloat3("Global Height Fog Color ", (float*)&fogInfo.color);											//全局高度雾的颜色
+				globalInfoModified |= ImGui::DragFloat("Global Height Fog Ambient Intensity ", (float*)&fogInfo.ambientIntensity, 0.1f, 0.0f, 10.0f);	//全局高度雾的环境光强度
+				globalInfoModified |= ImGui::DragFloat("Global Height Fog Extinction Coefficient ", (float*)&fogInfo.absorption, 0.1f, 0.0f);			//全局高度雾的衰减系数
+				globalInfoModified |= ImGui::DragFloat("Global Height Fog Scatter Coefficient ", (float*)&fogInfo.scattering, 0.1f, 0.0f, 1.0f);		//全局高度雾的散射系数
+				globalInfoModified |= ImGui::DragFloat("Global Height Fog Asymmetric Parameters ", (float*)&fogInfo.phase, 0.1f, -1.0f, 1.0f);			//全局高度雾的不对称参数
+				globalInfoModified |= ImGui::DragFloat("Global Height Fog Scale", (float*)&fogInfo.heightScale, 1.0f, 0.0f, 1000.0f);					//全局高度雾的缩放系数
 			}
 
 			if (ImGui::CollapsingHeader("Fluid Fog Setting", ImGuiTreeNodeFlags_DefaultOpen)) {
-				ImGui::Checkbox("Iteration Solve D", (bool*)&fluidSimulation_IterationD);
-				ImGui::DragInt("Iteration Count D", (int*)&fluidSimulation_IterationD_Count, 1, 1, 100);
-				ImGui::Checkbox("Iteration Solve P", (bool*)&fluidSimulation_IterationP);
-				ImGui::DragInt("Iteration Count P", (int*)&fluidSimulation_IterationP_Count, 1, 1, 100);
+				ImGui::Checkbox("Iteration Solve D", (bool*)&fluidSimulation_IterationD);					//是否迭代求解粘性泊松方程
+				ImGui::DragInt("Iteration Count D", (int*)&fluidSimulation_IterationD_Count, 1, 1, 100);	//粘性泊松方程的雅可比迭代次数
+				ImGui::Checkbox("Iteration Solve P", (bool*)&fluidSimulation_IterationP);					//是否迭代求解压力泊松方程
+				ImGui::DragInt("Iteration Count P", (int*)&fluidSimulation_IterationP_Count, 1, 1, 100);	//压力泊松方程的雅可比迭代次数
 			}
 
 			if (ImGui::CollapsingHeader("Fog Acc Setting", ImGuiTreeNodeFlags_DefaultOpen)) {
-				ImGui::Checkbox("Use Fog Acc", (bool*)&useFogAcc);
-				ImGui::DragInt("Sample Count Fog Acc ", &sampleCount_fogAcc, 1, 1, 200);
-				ImGui::Checkbox("Blur Voxel Fog", (bool*)&blurVoxelFog);
-				ImGui::DragFloat("Sphere Factor", &sphereFactor, 0.01f, 0.0f, 1.0f);
-				ImGui::DragFloat2("Fluid Temporal Merge Ratio ", (float*)&fluidMergeRatio, 0.01, 0.0, 1.0);
+				ImGui::Checkbox("Use Fog Acc", (bool*)&useFogAcc);											//是否使用视锥划分网格预计算雾效
+				ImGui::DragInt("Sample Count Fog Acc ", &sampleCount_fogAcc, 1, 1, 200);					//视锥划分网格预计算雾效时每个voxel的rayMarching采样次数
+				ImGui::Checkbox("Blur Voxel Fog", (bool*)&blurVoxelFog);									//是否开启时域抖动混合
+				ImGui::DragFloat("Sphere Factor", &sphereFactor, 0.01f, 0.0f, 1.0f);						//视锥划分是平面还是球面的比例，0为平面，1为球面
+				ImGui::DragFloat2("Fluid Temporal Merge Ratio ", (float*)&fluidMergeRatio, 0.01, 0.0, 1.0);	//开启时域抖动混合时，流体区域的混合比例
 			}
 
 			if (ImGui::CollapsingHeader("Render Opaque Setting", ImGuiTreeNodeFlags_DefaultOpen)) {
-				ImGui::DragInt("sampleCount RayMarching Opaque ", &sampleCount_renderOpaque, 1, 1, 1000);
-				ImGui::DragFloat("Jitter Strength RayMarching Opaque ", &jitterStrength_randerOpaque, 0.1, 0.0, 20);
+				ImGui::DragInt("sampleCount RayMarching Opaque ", &sampleCount_renderOpaque, 1, 1, 1000);				//不开启视锥划分预计算时，每个着色点rayMarching的采样次数
+				ImGui::DragFloat("Jitter Strength RayMarching Opaque ", &jitterStrength_randerOpaque, 0.1, 0.0, 20);	//开启视锥划分预计算时，着色点采样视锥划分网格的z方向的uvw的抖动强度
 			}
 
 			ImGui::Unindent(20.0f);
@@ -168,9 +184,9 @@ void VolumetricFog::uiRender() {
 		if (ImGui::CollapsingHeader("Volumetric Fog", ImGuiTreeNodeFlags_DefaultOpen)) {
 			ImGui::Indent(20.0f);
 
-			heightFogSet->uiRender();
-			gridFogSet->uiRender();
-			fluidFogSet->uiRender();
+			heightFogSet->uiRender();		//所有高度雾的UI设置
+			gridFogSet->uiRender();			//所有网格雾的UI设置
+			fluidFogSet->uiRender();		//所有流体雾的UI设置
 		}
 
 	}
@@ -179,8 +195,9 @@ void VolumetricFog::uiRender() {
 	shadowMap.uiRender();
 }
 void VolumetricFog::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
-	NVVK_CHECK(gBuffers.update(cmd, size));
+	NVVK_CHECK(gBuffers.update(cmd, size));			//更新GBuffer的分辨率
 
+	//清理深度纹理
 	{
 		VkSamplerCreateInfo samplerInfo = DEFAULT_VkSamplerCreateInfo;
 		samplerInfo.magFilter = VK_FILTER_NEAREST;
@@ -212,6 +229,7 @@ void VolumetricFog::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 		vkCmdPipelineBarrier2(cmd, &depInfo);
 	}
 
+	//重新绑定所有与窗口分辨率相关的纹理
 	nvvk::WriteSetContainer write{};
 
 	VkWriteDescriptorSet    imageWrite = staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VolumetricFog::eAlbedoImage, 0, 0, 1);
@@ -264,20 +282,21 @@ void VolumetricFog::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 }
 void VolumetricFog::preRender() {
 	Scene& scene = Application::sceneResource;
-	if (scene.cameraChange) Application::frameIndex = 0;
+	if (scene.cameraChange) Application::frameIndex = 0;		//相机变化时重置帧索引，随机数为伪随机，所以重置方便debug; 对于不需要debug的则使用temporalFrameIndex
 	//pushConstant.frameIndex = Application::frameIndex;
 	//pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 
 	shadowMap.preRender();
 	taa.preRender();
 
-	dt = ImGui::GetIO().DeltaTime;
-	time += dt;
+	dt = ImGui::GetIO().DeltaTime;		//每帧的时间间隔
+	time += dt;							//总时间
 
 	heightFogSet->preRender();
 	gridFogSet->preRender();
 	fluidFogSet->preRender();
 
+	//修改视锥信息
 	{
 		//frustumInfo.compressionParams = { 0.91945, 0.74255, 6 };
 		frustumInfo.cameraNearPlane = Application::sceneResource.cameraManip->getClipPlanes().x;
@@ -292,6 +311,7 @@ void VolumetricFog::render(VkCommandBuffer* cmdPtr) {
 	VkCommandBuffer cmd = cmdPtr[0];
 	NVVK_DBG_SCOPE(cmd);
 
+	//处理一些更新uniformBuffer相关的操作
 	updateDataPerFrame(cmd);
 
 	pushInfo = {
@@ -324,13 +344,14 @@ void VolumetricFog::render(VkCommandBuffer* cmdPtr) {
 	}
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
+	//预计算雾效
 	if (useFogAcc) {
 		fogAcc(cmd);
 		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	}
 
 	renderOpaqueMaterial(cmd);
-	if (useFogBlur) {
+	if (useFogBlur) {	//模糊雾效
 		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 		fogBlur(cmd);
 	}
@@ -406,7 +427,7 @@ void VolumetricFog::createSourceData() {
 		};
 		taa.init(taaCreateInfo);
 	}
-	//-------------------------------------------------------------------------------------------
+	//---------------------------------------GPU Driven CommandBuffer--------------------------------------
 	{
 		inDirectDispatchBuffer = FzbRenderer::Buffer("inDirectDispatchBuffer", false);
 		inDirectDispatchBuffer.init({
@@ -415,7 +436,7 @@ void VolumetricFog::createSourceData() {
 			.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT,
 		});
 	}
-	//------------------------------------------------------------------------------------
+	//----------------------------------------------流体雾集合---------------------------------------------
 	{
 		//让流体信息放在volumetricFogInfos的前面
 		FluidFogSetCreateInfo fluidFogSetCreateInfo = { &this->volumetricFogInfos };
@@ -431,19 +452,19 @@ void VolumetricFog::createSourceData() {
 			.restoreSpeed = 2,
 		};
 		shaderio::AABB fluidFogAABB;
-		fluidFogAABB.minimum = shaderio::float3(5096.8, -71, -4468.2);
+		fluidFogAABB.minimum = shaderio::float3(5096.8, -74, -4468.2);
 		fluidFogAABB.maximum = fluidFogAABB.minimum + (shaderio::float3)fluidFogInfo.gridSize * fluidFogInfo.voxelSize;
 
 		FluidFogCreateInfo fluidFogCreateInfo = {
 			.fogInfo = fluidFogInfo,
 			.fogRange = fluidFogAABB,
-			.follow = false,
-			.followInstanceID = "mainCharacter"
+			.follow = false,							//是否跟随实例
+			.followInstanceID = "mainCharacter"			//跟随的实例名
 		};
 		fluidFogSet->addFog(fluidFogCreateInfo);
 		fluidFogSet->init();
 	}
-	//--------------------------------------------------------------------------------------------
+	//----------------------------------------------高度雾集合---------------------------------------------
 	{
 		HeightFogSetCreateInfo heightFogSetCreateInfo = { &this->volumetricFogInfos };
 		heightFogSet = std::make_unique<HeightFogSet>(heightFogSetCreateInfo);
@@ -464,7 +485,7 @@ void VolumetricFog::createSourceData() {
 		heightFogSet->addFog(heightFogInfo, heightFogAABB);
 		heightFogSet->init();
 	}
-	//------------------------------------------------------------------------------------
+	//----------------------------------------------网格雾信息--------------------------------------------
 	{
 		GridFogSetCreateInfo gridFogSetCreateInfo = { &this->volumetricFogInfos };
 		gridFogSet = std::make_unique<GridFogSet>(gridFogSetCreateInfo);
@@ -502,7 +523,7 @@ void VolumetricFog::createSourceData() {
 		gridFogSet->addFog(gridFogCreateInfo);
 		gridFogSet->init();
 	}
-	//------------------------------------------------------------------------------------
+	//----------------------------------------------雾全局信息------------------------------------------
 	{
 		shaderio::HeightFogInfo heightFogInfo = {
 			.color = {1.0f, 2.0f, 1.0f},
@@ -526,14 +547,14 @@ void VolumetricFog::createSourceData() {
 		fogGlobalInfo.gridFogCount = gridFogSet->fogCount;
 		fogGlobalInfo.fluidFogCount = fluidFogSet->fogCount;
 
-		fogGlobalInfoBuffer = FzbRenderer::Buffer("fogGlobalInfoBuffer", false);
+		fogGlobalInfoBuffer = FzbRenderer::Buffer("fogGlobalInfoBuffer", false);			//雾全局信息Buffer
 		fogGlobalInfoBuffer.init({
 			.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
 			.size = sizeof(shaderio::FogGlobalInfo),
 			.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT,
 		});
 	}
-	//------------------------------------------------------------------------------------------
+	//------------------------------------------体积雾范围信息------------------------------------------
 	{
 		volumetricFogInfosBuffer = FzbRenderer::Buffer("volumetricFogInfosBuffer", false);
 		volumetricFogInfosBuffer.init({
@@ -542,9 +563,9 @@ void VolumetricFog::createSourceData() {
 			.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT,
 			});
 	}
-	//------------------------------------------------------------------------------------------
+	//---------------------------------------------流体注入信息------------------------------------------
 	{
-		fluidVPMatrixsBuffer = FzbRenderer::Buffer("fluidVPMatrixsBuffer", false);
+		fluidVPMatrixsBuffer = FzbRenderer::Buffer("fluidVPMatrixsBuffer", false);			//三视图流体VP矩阵Buffer
 		fluidVPMatrixsBuffer.init({
 			.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
 			.size = sizeof(shaderio::float4x4) * fluidFogSet->fogCount * 3,
@@ -553,7 +574,7 @@ void VolumetricFog::createSourceData() {
 
 		dynamicMeshInjectedBuffers.resize(fluidFogSet->fogCount);
 		for (int i = 0; i < fluidFogSet->fogCount; ++i) {
-			dynamicMeshInjectedBuffers[i] = FzbRenderer::Buffer("dynamicMeshInjectedBuffer" + std::to_string(i), false);
+			dynamicMeshInjectedBuffers[i] = FzbRenderer::Buffer("dynamicMeshInjectedBuffer" + std::to_string(i), false);		//流体每个voxel原子抢占的整数buffer
 
 			shaderio::uint3 gridSize = fluidFogSet->getFogGridSize(i);
 			uint32_t voxelCount = gridSize.x * gridSize.y * gridSize.z;
@@ -564,7 +585,7 @@ void VolumetricFog::createSourceData() {
 			});
 		}
 	}
-	//------------------------------------------------------------------------------------------
+	//----------------------------------------------预计算雾效-----------------------------------------
 	{
 		frustumInfo.compressionParams = { 0.91945, 0.74255, 6 };
 		frustumInfo.cameraNearPlane = Application::sceneResource.cameraManip->getClipPlanes().x;
@@ -574,36 +595,36 @@ void VolumetricFog::createSourceData() {
 		frustumInfo.sphereFactor = sphereFactor;
 		frustumInfo.frustumGridSize = { 160, 160, 80 };
 
-		createVolumetricFogImage(fogAccImage, frustumInfo.frustumGridSize, true);
+		createVolumetricFogImage(fogAccImage, frustumInfo.frustumGridSize, true);				//雾效累积Image，x为voxel到相机的透射率，y为中间散射光，z为voxel所在位置入射光透射率
 
-		fogAccHasFogVoxelCountBuffer = FzbRenderer::Buffer("fogAccHasFogVoxelCountBuffer", false);
+		fogAccHasFogVoxelCountBuffer = FzbRenderer::Buffer("fogAccHasFogVoxelCountBuffer", false);		//有雾voxel的数量Buffer
 		fogAccHasFogVoxelCountBuffer.init({
 			.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
 			.size = sizeof(uint32_t),
 			.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT,
 		});
 
-		fogAccHasFogVoxelInfosBuffer = FzbRenderer::Buffer("fogAccHasFogVoxelInfosBuffer", false);
+		fogAccHasFogVoxelInfosBuffer = FzbRenderer::Buffer("fogAccHasFogVoxelInfosBuffer", false);		//有雾voxel的信息Buffer
 		fogAccHasFogVoxelInfosBuffer.init({
 			.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
 			.size = sizeof(shaderio::FogAccHasFogVoxelInfo) * frustumInfo.frustumGridSize.x * frustumInfo.frustumGridSize.y * frustumInfo.frustumGridSize.z,
 			.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT,
 			});
 
-		createVolumetricFogImage(fogAccHistoryImage, frustumInfo.frustumGridSize, true);
+		createVolumetricFogImage(fogAccHistoryImage, frustumInfo.frustumGridSize, true);				//历史累积雾效的Image
 
 		renderCameraFrustumPushConstant.showVoxelIndexMin = { 0, 0, 0 };
 		renderCameraFrustumPushConstant.showVoxelIndexMax = { 160, 160, 80 };
 	}
-	//--------------------------------------------------------------------------------------
+	//-----------------------------------------------场景数据------------------------------------
 	{
-		nvutils::PrimitiveMesh primitive = FzbRenderer::MeshSet::createWireframe();
+		nvutils::PrimitiveMesh primitive = FzbRenderer::MeshSet::createWireframe();				//线框几何数据
 		FzbRenderer::MeshSet mesh = FzbRenderer::MeshSet("Wireframe", primitive);
 		scene.addMeshSet(mesh);
 
 		scene.createSceneInfoBuffer();
 
-		Application::sceneResource.createMeshLowPoly(0.15f);
+		Application::sceneResource.createMeshLowPoly(0.15f);									//创建场景低模
 	}
 }
 void VolumetricFog::createDescriptorSetLayout() {
@@ -1288,6 +1309,7 @@ void VolumetricFog::updateDataPerFrame(VkCommandBuffer cmd) {
 }
 
 void VolumetricFog::createGBuffers(VkCommandBuffer cmd) {
+	//所有FLUID_GBUFFER_INJECT相关代码可以不用理会
 	NVVK_DBG_SCOPE(cmd);
 
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, staticDescPack.getSetPtr(), 0, nullptr);
@@ -1385,6 +1407,7 @@ void VolumetricFog::createGBuffers(VkCommandBuffer cmd) {
 	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getDepthImage(), VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
 }
 void VolumetricFog::initFluid(VkCommandBuffer cmd) {
+	//没有流体开启则直接返回
 	int FluidFogCount = fluidFogSet->fogCount;
 	if (FluidFogCount == 0) return;
 	bool hasFluidStartUp = false;
@@ -1413,7 +1436,7 @@ void VolumetricFog::initFluid(VkCommandBuffer cmd) {
 
 		vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_initFluid);
 		{
-			initFluidPushConstant.time = fluidFogSet->getFogModified(i) || temporalFrameIndex == 0 ? 0.0f : time;
+			initFluidPushConstant.time = fluidFogSet->getFogModified(i) || temporalFrameIndex == 0 ? 0.0f : time;		//如果参数变化，则从新模拟
 			initFluidPushConstant.fluidIndex = i;
 			initFluidPushConstant.fogIndex = fluidFogSet->getFogIndexMap(i);
 			initFluidPushConstant.fluidStartPos = volumetricFogInfos[initFluidPushConstant.fogIndex].aabb.minimum;
@@ -1431,11 +1454,12 @@ void VolumetricFog::initFluid(VkCommandBuffer cmd) {
 	return;
 #endif
 
+	//---------------------------------------------注入几何信息------------------------------------------------------
 	{
 		injectFluidPushConstant.dt = std::max(dt, 1e-10f);
 		injectFluidPushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
-		injectFluidPushConstant.meshes_lowPoly = (shaderio::Mesh*)Application::sceneResource.bMeshes_lowPoly.address;
-		injectFluidPushConstant.fluidVPMatrixAddress = (shaderio::float4x4*)fluidVPMatrixsBuffer.buffer.address;
+		injectFluidPushConstant.meshes_lowPoly = (shaderio::Mesh*)Application::sceneResource.bMeshes_lowPoly.address;		//低模meshBuffer地址
+		injectFluidPushConstant.fluidVPMatrixAddress = (shaderio::float4x4*)fluidVPMatrixsBuffer.buffer.address;			//流体三视图VP矩阵Buffer地址
 		pushInfo.pValues = &injectFluidPushConstant;
 	}
 	for (int i = 0; i < FluidFogCount; ++i) {
@@ -1468,14 +1492,12 @@ void VolumetricFog::initFluid(VkCommandBuffer cmd) {
 			vkCmdSetVertexInputEXT(cmd, 0, nullptr, 0, nullptr);
 
 			for (int i = 0; i < Application::sceneResource.instances.size(); ++i){
-				//if (Application::sceneResource.staticInstanceIndexToInstanceSetIndex.count(i)) continue;
-
 				const FzbRenderer::InstanceSet* instanceSet = nullptr;
-				if (Application::sceneResource.periodInstanceIndexToInstanceSetIndex.count(i)) {
+				if (Application::sceneResource.periodInstanceIndexToInstanceSetIndex.count(i)) {					//静态实例
 					uint32_t instanceSetIndex = Application::sceneResource.periodInstanceIndexToInstanceSetIndex[i];
 					instanceSet = &Application::sceneResource.periodInstanceSets[instanceSetIndex];
 				}
-				else if (Application::sceneResource.staticInstanceIndexToInstanceSetIndex.count(i)) {
+				else if (Application::sceneResource.staticInstanceIndexToInstanceSetIndex.count(i)) {				//动态实例
 					uint32_t instanceSetIndex = Application::sceneResource.staticInstanceIndexToInstanceSetIndex[i];
 					instanceSet = &Application::sceneResource.staticInstanceSets[instanceSetIndex];
 				}
@@ -1550,15 +1572,16 @@ void VolumetricFog::fluidSimulation(VkCommandBuffer cmd) {
 				pushInfo.pValues = &fluidSimulationPushConstant;
 			}
 
-			// --- Stage A: Advection ---
+			// ------------------------------------------平流--------------------------------------------
 #ifdef FLUID_A_MACCORMACK
+			//----Forward----
 			fluidSimulationPushConstant.iteration = 0;
 			vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_fluidSimulation_A);
 			vkCmdPushConstants2(cmd, &pushInfo);
 			vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
 			nvvk::cmdImageMemoryBarrier(cmd, { fluidFogSet->getfluidFogVoxelInfoImages_temp1Ptr()[i].image,
 											   VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL });
-
+			//----Back----
 			fluidSimulationPushConstant.iteration = 1;
 			vkCmdPushConstants2(cmd, &pushInfo);
 			vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
@@ -1578,7 +1601,7 @@ void VolumetricFog::fluidSimulation(VkCommandBuffer cmd) {
 
 			uint32_t iterationStart = 0;
 
-			// --- Stage D: Diffusion (Jacobi) ---
+			// ------------------------------------------粘性扩散--------------------------------------------
 			if (fluidSimulation_IterationD) {
 				vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_fluidSimulation_D_Iteration);
 				for (uint32_t iter = 0; iter < fluidSimulation_IterationD_Count; ++iter) {
@@ -1597,7 +1620,7 @@ void VolumetricFog::fluidSimulation(VkCommandBuffer cmd) {
 				barrierVolumePingPong(i);
 			}
 
-			// --- Stage F: External forces ---
+			// ------------------------------------------施力--------------------------------------------
 			vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_fluidSimulation_F);
 			fluidSimulationPushConstant.iteration = iterationStart;
 			vkCmdPushConstants2(cmd, &pushInfo);
@@ -1605,17 +1628,17 @@ void VolumetricFog::fluidSimulation(VkCommandBuffer cmd) {
 			barrierVolumeAll(i);
 
 			NVVK_DBG_SCOPE(cmd);
-			// --- Stage P: Projection solve (Jacobi) ---
+			// ------------------------------------------标量场求解--------------------------------------------
 			if (fluidSimulation_IterationP) {
 #ifdef FLUID_SIMULATION_CPF
-				// 1) divergence
+				//---计算散度（现在只取前4个秩，所以当作一个float4计算即可）----
 				vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_fluidSimulation_P_Divergence);
 				fluidSimulationPushConstant.iteration = iterationStart;
 				vkCmdPushConstants2(cmd, &pushInfo);
 				vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
 				nvvk::cmdImageMemoryBarrier(cmd, { fluidFogSet->getfluidFogVoxelInfoImages_temp1Ptr()[i].image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL });
 
-				// 2) x pass: temp1 -> temp2
+				//---计算x方向卷积结果----
 				VkExtent3D filterGroupSize = nvvk::getGroupCounts(VkExtent3D{ gridSize.x, gridSize.y, gridSize.z }, VkExtent3D{ 32, 1, 1 });
 				fluidSimulationPushConstant.iteration = 0;
 				vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_fluidSimulation_P_Filter);
@@ -1623,21 +1646,21 @@ void VolumetricFog::fluidSimulation(VkCommandBuffer cmd) {
 				vkCmdDispatch(cmd, filterGroupSize.width, filterGroupSize.height, filterGroupSize.depth);
 				nvvk::cmdImageMemoryBarrier(cmd, { fluidFogSet->getfluidFogVoxelInfoImages_temp2Ptr()[i].image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL });
 
-				// 3) y pass: temp2 -> temp1
+				//---计算y方向卷积结果----
 				fluidSimulationPushConstant.iteration = 1;
 				vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_fluidSimulation_P_Filter);
 				vkCmdPushConstants2(cmd, &pushInfo);
 				vkCmdDispatch(cmd, filterGroupSize.width, filterGroupSize.height, filterGroupSize.depth);
 				nvvk::cmdImageMemoryBarrier(cmd, { fluidFogSet->getfluidFogVoxelInfoImages_temp1Ptr()[i].image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL });
 
-				// 4) z pass: temp1 -> temp2
+				//---计算z方向卷积结果----
 				fluidSimulationPushConstant.iteration = 2;
 				vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_fluidSimulation_P_Filter);
 				vkCmdPushConstants2(cmd, &pushInfo);
 				vkCmdDispatch(cmd, filterGroupSize.width, filterGroupSize.height, filterGroupSize.depth);
 				nvvk::cmdImageMemoryBarrier(cmd, { fluidFogSet->getfluidFogVoxelInfoImages_temp2Ptr()[i].image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL });
 
-				// 5) final sum -> pressure
+				//累加各秩结果
 				vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_fluidSimulation_P_Final);
 				vkCmdPushConstants2(cmd, &pushInfo);
 				vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
@@ -1659,7 +1682,7 @@ void VolumetricFog::fluidSimulation(VkCommandBuffer cmd) {
 				barrierVolumePingPong(i);
 			}
 
-			// --- Stage S: Subtract Scalar gradient ---
+			// ------------------------------------------计算最终速度--------------------------------------------
 			vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_fluidSimulation_S);
 			fluidSimulationPushConstant.iteration = fluidSimulation_IterationP ? (fluidSimulation_IterationP_Count + iterationStart) : 0;
 			vkCmdPushConstants2(cmd, &pushInfo);
@@ -1690,20 +1713,20 @@ void VolumetricFog::fogAcc(VkCommandBuffer cmd) {
 		fogAccPushConstant.jitterUVW = Halton_2_3_5[temporalFrameIndex % 8];
 	}
 
-	fogAccPushConstant.frustumInfo = frustumInfo;
-	fogAccPushConstant.blurVoxelFog = blurVoxelFog;
-	fogAccPushConstant.sampleCount = sampleCount_fogAcc;
-	fogAccPushConstant.temporalFrameIndex = temporalFrameIndex;
-	fogAccPushConstant.dt = dt;
-	fogAccPushConstant.fluidMergeRatio = fluidMergeRatio;
-	fogAccPushConstant.lightVP = shadowMap.pushConstant.lightVP;
-	fogAccPushConstant.viewInvMatrix_lastFrame = glm::inverse(Application::sceneResource.cameraInfo_lastFrame.viewMatrix);
-	fogAccPushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
-	fogAccPushConstant.fogGlobalInfoAddress = (shaderio::FogGlobalInfo*)fogGlobalInfoBuffer.buffer.address;
-	fogAccPushConstant.fogAccHasFogVoxelCountAddress = (uint32_t*)fogAccHasFogVoxelCountBuffer.buffer.address;
+	fogAccPushConstant.frustumInfo = frustumInfo;																			//视锥体信息
+	fogAccPushConstant.blurVoxelFog = blurVoxelFog;																			//是否开启时域抖动混合
+	fogAccPushConstant.sampleCount = sampleCount_fogAcc;																	//每个voxel的rayMarching采样数
+	fogAccPushConstant.temporalFrameIndex = temporalFrameIndex;																//当前帧索引
+	fogAccPushConstant.dt = dt;																								//每帧的时间间隔
+	fogAccPushConstant.fluidMergeRatio = fluidMergeRatio;																	//流体区域的历史数据混合比例
+	fogAccPushConstant.lightVP = shadowMap.pushConstant.lightVP;															//主光源的视图投影矩阵
+	fogAccPushConstant.viewInvMatrix_lastFrame = glm::inverse(Application::sceneResource.cameraInfo_lastFrame.viewMatrix);	//上一帧的视图矩阵逆，用来获取上一帧相机数据
+	fogAccPushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;				//场景信息buffer
+	fogAccPushConstant.fogGlobalInfoAddress = (shaderio::FogGlobalInfo*)fogGlobalInfoBuffer.buffer.address;					//雾全局信息buffer
+	fogAccPushConstant.fogAccHasFogVoxelCountAddress = (uint32_t*)fogAccHasFogVoxelCountBuffer.buffer.address;				//有雾voxel数量buffer
 	pushInfo.pValues = &fogAccPushConstant;
 	//--------------------------------------------------------------------------------------------------------------
-	vkCmdFillBuffer(cmd, fogAccHasFogVoxelCountBuffer.buffer.buffer, 0, sizeof(uint32_t), 0);
+	vkCmdFillBuffer(cmd, fogAccHasFogVoxelCountBuffer.buffer.buffer, 0, sizeof(uint32_t), 0);								//将有雾voxel数量buffer每帧清零
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	//--------------------------------------------------------------------------------------------------------------
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getHasFogVoxels);
@@ -1718,10 +1741,6 @@ void VolumetricFog::fogAcc(VkCommandBuffer cmd) {
 	vkCmdDispatch(cmd, groupSize.width, groupSize.height, groupSize.depth);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	//--------------------------------------------------------------------------------------------------------------
-	// 时域滤波必须夹在 Pass1（逐板散射/透射）和 Pass2（沿Z前向累积）之间。
-	// 放在 Pass2 之后是错的：累积量沿Z是单调平滑的，±1 邻域的取值范围极宽，
-	// 钳制窗口大到几乎放行任何重投影错位的历史值 —— 相机一动就是鬼影。
-	// 对逐板值做钳制时，邻域范围就是雾密度的真实局部范围，错位的历史会被直接切掉。
 	static bool reBlur = false;
 	if (!reBlur && blurVoxelFog && temporalFrameIndex > 0) {
 		VkImageSubresourceRange range = {
@@ -1733,7 +1752,7 @@ void VolumetricFog::fogAcc(VkCommandBuffer cmd) {
 		};
 		
 		VkClearColorValue clearColor = { .float32 = {1.0f, 0.0f, 1.0f, 0.0f} };
-		vkCmdClearColorImage(cmd, fogAccHistoryImage.image.image, VK_IMAGE_LAYOUT_GENERAL, &clearColor, 1, &range);
+		vkCmdClearColorImage(cmd, fogAccHistoryImage.image.image, VK_IMAGE_LAYOUT_GENERAL, &clearColor, 1, &range);						//每次开启都要清一下，否则会有残留
 		nvvk::cmdImageMemoryBarrier(cmd, { fogAccHistoryImage.image.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL });
 	}
 	reBlur = blurVoxelFog;
@@ -1772,7 +1791,6 @@ void VolumetricFog::fogAcc(VkCommandBuffer cmd) {
 			copyInfo.pRegions = &copyRegion;
 
 			vkCmdCopyImage2(cmd, &copyInfo);
-			//不需要同步，后续没有任务需要用到; 下一帧会等待这一帧全部完成，所以不需要帧间同步
 		}
 		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	}

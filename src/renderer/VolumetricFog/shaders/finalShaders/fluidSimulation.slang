@@ -56,12 +56,9 @@ float4 clampToFluidFogNodeRange(float4 value, float3 sourceWorldPos, uint fluidI
     float4 minValue = float4(1e30f, 1e30f, 1e30f, 1e30f);
     float4 maxValue = -minValue;
 
-    [unroll]
-    for (int z = 0; z <= 1; ++z) {
-        [unroll]
-        for (int y = 0; y <= 1; ++y) {
-            [unroll]
-            for (int x = 0; x <= 1; ++x) {
+    [unroll]for (int z = 0; z <= 1; ++z) {
+        [unroll]for (int y = 0; y <= 1; ++y) {
+            [unroll]for (int x = 0; x <= 1; ++x) {
                 int3 offset = int3(x, y, z);
                 uint3 nodeIndex = uint3(clamp(base + offset, int3(0, 0, 0), int3(gridSize) - 1));
                 float3 uvw = (float3(nodeIndex) + 0.5f) / float3(gridSize);
@@ -71,7 +68,6 @@ float4 clampToFluidFogNodeRange(float4 value, float3 sourceWorldPos, uint fluidI
             }
         }
     }
-
     return clamp(value, minValue, maxValue);
 }
 

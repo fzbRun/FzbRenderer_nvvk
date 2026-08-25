@@ -17,17 +17,17 @@
 #ifdef FINAL_PROJECT
 namespace FzbRenderer {
 enum class GBuffers_VolumetricFog {
-	eAlbedo = 0,
-	eNormal,
-	eEmissive,
-	eVelocity,
-	eVertexInfo,	//meshID, instanceID, etc
-	eRendered,
-	eRenderedFogResult,
-	eDepthGradient,
-	eFogBlur1,
-	eFogBlur2,
-	eTonemapping,
+	eAlbedo = 0,			//反射率纹理
+	eNormal,				//法线纹理
+	eEmissive,				//自发光纹理
+	eVelocity,				//像素矢量纹理
+	eVertexInfo,			//像素的meshID, instanceID, etc
+	eRendered,				//渲染结果纹理
+	eRenderedFogResult,		//不透明着色点雾效纹理，x为透射率，y为散射光，zw为空
+	eDepthGradient,			//深度梯度纹理
+	eFogBlur1,				//雾效模糊中间纹理1
+	eFogBlur2,				//雾效模糊中间纹理2
+	eTonemapping,			//色调映射后纹理
 };
 
 class VolumetricFog : public Renderer {

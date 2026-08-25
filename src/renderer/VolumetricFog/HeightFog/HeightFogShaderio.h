@@ -17,7 +17,7 @@ struct HeightFogInfo {
     float scattering;
     float phase;
 
-	float heightScale;
+	float heightScale;          //指数衰减系数
 
     float3 attenuation;
 };
