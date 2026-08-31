@@ -93,25 +93,9 @@ torch.backends.cudnn.benchmark = True
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print(device)
 
-trainSetPath = 'C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/src/renderer/PathTracing_KPCNNDenoising/models_libtorch/train/'
-sampleFolders = [
-   trainSetPath + 'staircase_32_1', 
-   trainSetPath + 'staircase_32_2', 
-   trainSetPath + 'staircase_32_3',
-   trainSetPath + 'staircase_32_4',
-   trainSetPath + 'staircase_32_5',
-   trainSetPath + 'staircase_32_6',
-   trainSetPath + 'staircase_32_7',
-   ]
-gtFolders = [
-   trainSetPath + 'staircase_8192_1', 
-   trainSetPath + 'staircase_8192_2', 
-   trainSetPath + 'staircase_8192_3',
-   trainSetPath + 'staircase_8192_4',
-   trainSetPath + 'staircase_8192_5',
-   trainSetPath + 'staircase_8192_6',
-   trainSetPath + 'staircase_8192_7',
-   ]
+trainSetPath = 'C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/src/renderer/PathTracing_KPCNNDenoising/vulkanDataSet/'
+sampleFolders = [trainSetPath + f'staircase_32_{i}_{j}' for i in range(0, 8) for j in range(0, 5)]
+gtFolders = [trainSetPath + f'staircase_8192_{i}_0' for i in range(0, 8) for _ in range(0, 5)]
 trainDataSet = KPCNNDataset(sampleFolders, gtFolders)
 #trainDataSet = KPCNNDataset("dataSet/train")
 dataloader = torch.utils.data.DataLoader(trainDataSet, batch_size=10, shuffle=True, num_workers=0)
@@ -176,8 +160,10 @@ for epoch in range(200):
           f'Spec: {total_loss_spec/len(dataloader):.4f} Final: {avg_loss_final:.4f}')
     if avg_loss_final < best_loss:
         best_loss = avg_loss_final
-        torch.save(diffuseNet.state_dict(), save_path_diff)
-        torch.save(specularNet.state_dict(), save_path_spec)
+        #torch.save(diffuseNet.state_dict(), save_path_diff)
+        #torch.save(specularNet.state_dict(), save_path_spec)
+    torch.save(diffuseNet.state_dict(), save_path_diff)
+    torch.save(specularNet.state_dict(), save_path_spec)
 
     #print()
     #print(time.perf_counter() - t1)

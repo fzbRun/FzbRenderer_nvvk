@@ -195,35 +195,35 @@ void computeMain_PathTracing(uint2 threadIndex: SV_DispatchThreadID, uint2 group
                 break;
             }
 
-            if (notHitDiffuse) {
-                if (payload.material.roughness > 0.1f) {    // diffuse
-                    notHitDiffuse = false;
-                    isDiffuse = bounceDepth == 0;
-            
-                    accNormal += payload.hitNormal;
-                    accNormal2 += payload.hitNormal * payload.hitNormal;
-            
-                    float depth = length(payload.hitPos - sceneInfo.cameraPosition);
-                    accDepth += depth;
-                    accDepth2 += depth * depth;
-            
-                    accAlbedo += payload.material.albedo;
-                    accAlbedo2 += payload.material.albedo * payload.material.albedo;
-                }
-            }
-            //if (bounceDepth == 0) {
-            //    isDiffuse = payload.material.roughness > 0.1f;
+            //if (notHitDiffuse) {
+            //    if (payload.material.roughness > 0.1f) {    // diffuse
+            //        notHitDiffuse = false;
+            //        isDiffuse = bounceDepth == 0;
             //
-            //    accNormal += payload.hitNormal;
-            //    accNormal2 += payload.hitNormal * payload.hitNormal;
+            //        accNormal += payload.hitNormal;
+            //        accNormal2 += payload.hitNormal * payload.hitNormal;
             //
-            //    float depth = length(payload.hitPos - sceneInfo.cameraPosition);
-            //    accDepth += depth;
-            //    accDepth2 += depth * depth;
-            //    
-            //    accAlbedo += payload.material.albedo;
-            //    accAlbedo2 += payload.material.albedo * payload.material.albedo;
+            //        float depth = length(payload.hitPos - sceneInfo.cameraPosition);
+            //        accDepth += depth;
+            //        accDepth2 += depth * depth;
+            //
+            //        accAlbedo += payload.material.albedo;
+            //        accAlbedo2 += payload.material.albedo * payload.material.albedo;
+            //    }
             //}
+            if (bounceDepth == 0) {
+                isDiffuse = payload.material.roughness > 0.1f;
+            
+                accNormal += payload.hitNormal;
+                accNormal2 += payload.hitNormal * payload.hitNormal;
+            
+                float depth = length(payload.hitPos - sceneInfo.cameraPosition);
+                accDepth += depth;
+                accDepth2 += depth * depth;
+                
+                accAlbedo += payload.material.albedo;
+                accAlbedo2 += payload.material.albedo * payload.material.albedo;
+            }
 
             getDirectionLight(payload, sceneInfo);
             BSDF_SAMPLE(payload);
@@ -416,7 +416,7 @@ void computeMain_createGradBuffers(uint2 threadIndex: SV_DispatchThreadID, uint2
             leftNormal = float3(NormalBuffer[leftPixelIndex], NormalBuffer[leftPixelIndex + imageSize], NormalBuffer[leftPixelIndex + imageSize * 2]);
             leftDepth = DepthBuffer[leftPixelIndex];
             // leftAlbedo = float3(AlbedoBuffer[leftPixelIndex], AlbedoBuffer[leftPixelIndex + imageSize], AlbedoBuffer[leftPixelIndex + imageSize * 2]);
-            leftAlbedo = AlbedoBuffer[pixelIndex];
+            leftAlbedo = AlbedoBuffer[leftPixelIndex];
         }
 
         groupNormals[warpLane + 1][0] = leftNormal;
@@ -523,8 +523,8 @@ void computeMain_createGradBuffers(uint2 threadIndex: SV_DispatchThreadID, uint2
         } else {
             uint leftPixelIndex = (groupPixelStartIndex.y + warpLane) * pushConst.screenSize.x + (groupPixelStartIndex.x - 1);
 
-            leftDiff = InputBuffer_irradiance[leftPixelIndex];
-            leftSpec = InputBuffer_spec[leftPixelIndex];
+            leftDiff = float3(InputBuffer_irradiance[leftPixelIndex], InputBuffer_irradiance[leftPixelIndex + imageSize], InputBuffer_irradiance[leftPixelIndex + imageSize * 2]);
+            leftSpec = float3(InputBuffer_spec[leftPixelIndex], InputBuffer_spec[leftPixelIndex + imageSize], InputBuffer_spec[leftPixelIndex + imageSize * 2]);
         }
 
         groupNormals[warpLane + 1][0] = leftDiff;
@@ -540,8 +540,8 @@ void computeMain_createGradBuffers(uint2 threadIndex: SV_DispatchThreadID, uint2
         } else {
             uint upPixelIndex = (groupPixelStartIndex.y - 1) * pushConst.screenSize.x + groupPixelStartIndex.x + warpLane;
 
-            upDiff = InputBuffer_irradiance[upPixelIndex];
-            upSpec = InputBuffer_spec[upPixelIndex];
+            upDiff = float3(InputBuffer_irradiance[upPixelIndex], InputBuffer_irradiance[upPixelIndex + imageSize], InputBuffer_irradiance[upPixelIndex + imageSize * 2]);
+            upSpec = float3(InputBuffer_spec[upPixelIndex], InputBuffer_spec[upPixelIndex + imageSize], InputBuffer_spec[upPixelIndex + imageSize * 2]);
         }
 
         groupNormals[0][warpLane + 1] = upDiff;

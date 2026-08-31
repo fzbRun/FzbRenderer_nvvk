@@ -215,8 +215,8 @@ def show_data2(data, figsize=(15, 15), normalize=False, ax=None, show=True):
         plt.show()
 
 '''
-path = "C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/src/renderer/PathTracing_KPCNNDenoising/models_libtorch/train"
-data = preprocess_input(path + "/staircase_32_7", path + "/staircase_8192_7", debug=True)
+path = "C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/src/renderer/PathTracing_KPCNNDenoising/vulkanDataSet"
+data = preprocess_input(path + "/staircase_32_3_1", path + "/staircase_8192_3_0", debug=True)
 
 for k, v in data.items():
   print(k, "has nans:", np.isnan(v).any())
@@ -226,7 +226,6 @@ show_data(np.clip(data['gtColor'], 0, 1)**0.45454545)
 #show_data(np.clip(data['input_diff'][:,:, :3], 0, 1)**0.45454545)
 #show_data(data['input_diff'][4:7, :, :].transpose(1, 2, 0), normalize=False)
 '''
-
 
 #---------------------------------------------------makePatchs-----------------------------------------------------------
 patch_size = 64 # patches are 64x64
@@ -472,7 +471,12 @@ class KPCNNDataset(torch.utils.data.Dataset):
     return len(self.samples)
 
   def __getitem__(self, idx):
-    return self.samples[idx]
+    sample = self.samples[idx]
+    # 遍历每个键，如果是 NumPy 数组且不可写，就复制
+    for key, value in sample.items():
+        if isinstance(value, np.ndarray) and not value.flags.writeable:
+            sample[key] = value.copy()
+    return sample
   
 '''
 dataset = KPCNNDataset("dataSet/train")

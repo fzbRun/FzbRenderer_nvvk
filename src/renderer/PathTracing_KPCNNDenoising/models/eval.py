@@ -109,17 +109,28 @@ def denoise(diffuseNet, specularNet, data, debug=False):
             print("LossDiff:", lossDiff)
             print("LossSpec:", lossSpec)
             print("LossFinal:", lossFinal)
+        
+        print(kernel_spec[0, :, 256, 256])
+        print(filtered_spec[0, :3, 256, 256])
+
 def main():
-    trainSetPath = 'C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/src/renderer/PathTracing_KPCNNDenoising/models_libtorch/train/'
-    samplePath = trainSetPath + 'staircase_32_7'
-    gtPath = trainSetPath + 'staircase_8192_7'
+    trainSetPath = 'C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/src/renderer/PathTracing_KPCNNDenoising/vulkanDataSet/'
+    samplePath = trainSetPath + 'staircase_32_0_0'
+    gtPath = trainSetPath + 'staircase_8192_0_0'
     eval_data = dataSet.preprocess_input(samplePath, gtPath)
     #eval_data = dataSet.preprocess_input("dataSet/eval/eval3.exr", "dataSet/eval/evalRef3.exr")
     #eval_data = dataSet.crop(eval_data, (1280//2, 720//2), 300)
 
     diffuseNet = model.KPCNN(eval_data['input_diff'].shape[-1]).to(device)
+    diffuseNet.eval()
     specularNet = model.KPCNN(eval_data['input_spec'].shape[-1]).to(device)
+    specularNet.eval()
 
+    checkpoint = torch.load("checkpoint.pth", map_location='cpu')  # 若在GPU上保存想在CPU加载，或反之
+    diffuseNet.load_state_dict(checkpoint['model_diff'])
+    specularNet.load_state_dict(checkpoint['model_spec'])
+
+    '''
     weights_path = "weights/KPCNN_diff_Weights"
     assert os.path.exists(weights_path), "file: '{}' dose not exist.".format(weights_path)
     diffuseNet.load_state_dict(torch.load(weights_path))
@@ -129,6 +140,8 @@ def main():
     assert os.path.exists(weights_path), "file: '{}' dose not exist.".format(weights_path)
     specularNet.load_state_dict(torch.load(weights_path))
     specularNet.eval()
+    '''
+
 
     denoise(diffuseNet, specularNet, eval_data, debug=True)
 

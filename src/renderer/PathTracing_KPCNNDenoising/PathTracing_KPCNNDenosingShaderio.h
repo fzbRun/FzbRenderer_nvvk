@@ -11,7 +11,7 @@
 #define IF_TRAIN_SAMPLE(train, eval) (eval)
 #endif
 
-#define SAVE_SAMPLE_BUFFERS
+//#define SAVE_SAMPLE_BUFFERS
 //#define SAVE_GROUNDTRUTH_BUFFERS
 
 #if defined(SAVE_SAMPLE_BUFFERS) && defined(SAVE_TRAIN_BUFFERS)

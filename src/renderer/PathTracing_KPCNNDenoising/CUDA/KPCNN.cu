@@ -54,7 +54,7 @@ __global__ void denoisingCuda(
 	float* inputBuffer_diff, float* inputBuffer_spec,
 	float* kernel_diff, float* kernel_spec,
 	float3* albedoBuffer,
-	cudaSurfaceObject_t outputImage
+	cudaSurfaceObject_t outputImage, uint32_t frameIndex
 ) {
 	extern __shared__ float3 groupImageDatas[];	//16KB
 
@@ -134,8 +134,18 @@ __global__ void denoisingCuda(
 
 			pixelIrradiance += neighborPixelIrradiance * kernelValue_diff;
 			pixelSpecular += neighborPixelSpecular * kernelValue_spec;
+
+			//#ifndef NDEBUG
+			//if (frameIndex == 0 && threadIndex.x == 256 && threadIndex.y == 256) {
+			//	printf("specular Kernel Index: %d %d, value: %f\n", x, y, kernelValue_spec);
+			//	//printf("neighborPixelSpecular: Index: %d %d, value: %f %f %f\n", x, y, neighborPixelSpecular.x, neighborPixelSpecular.y, neighborPixelSpecular.z);
+			//}
+			//#endif
 		}
 	}
+	//if (frameIndex == 0 && threadIndex.x == 256 && threadIndex.y == 256) {
+	//	printf("\npixelSpecular: %f %f %f\n", pixelSpecular.x, pixelSpecular.y, pixelSpecular.z);
+	//}
 
 	float3 pixelAlbedo = albedoBuffer[pixelIndex];
 	float3 filteredPixelColor = pixelIrradiance * (pixelAlbedo + eps_kpcnn) + make_float3(exp(pixelSpecular.x), exp(pixelSpecular.y), exp(pixelSpecular.z)) - 1.0f;
@@ -169,13 +179,15 @@ void KPCNNDenoiser::denoising(uint64_t waitTimeline) {
 
 	uint groupSharedMemorySize = (blockSize.x + kernelSize / 2 * 2) * (blockSize.y + kernelSize / 2 * 2) * sizeof(float3) * 2;
 
+	static uint frameIndex = 0;
 	denoisingCuda << <gridSize, blockSize, groupSharedMemorySize, stream >> > (
 		setting.imageSize.width, setting.imageSize.height, KERNEL_SIZE,
 		inputBuffer_diff, inputBuffer_spec,
 		kernel_diff, kernel_spec,
 		albedoBuffer,
-		imageObject
+		imageObject, frameIndex
 		);
+	++frameIndex;
 
 	CHECK(signalExternalSemaphore(endSemaphore, stream, waitTimeline));
 }
@@ -189,7 +201,7 @@ void KPCNNDenoiser::clean() {
 	CHECK(cudaFree(albedoBuffer));
 	CHECK(cudaDestroyExternalMemory(albedoBufferExtMem_diff));
 
-	CHECK(cudaDestroyTextureObject(imageObject));
+	CHECK(cudaDestroySurfaceObject(imageObject));
 	CHECK(cudaFreeMipmappedArray(imageMipmap));
 	CHECK(cudaDestroyExternalMemory(imageExtMem));
 

@@ -196,6 +196,51 @@ void PathTracing_KPCNNDenoising::preRender() {
 	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
 	asManager.updateToplevelAS(cmd);
 	Application::app->submitAndWaitTempCmdBuffer(cmd);
+
+#ifdef SAVE_TRAIN_BUFFERS
+	if (sceneBufferIndex >= SceneBufferCount) return;
+	static shaderio::float3 cameraEye[SceneBufferCount] = {
+		{0.104, 1.373, 4.737},
+		{0.196, 1.309, 1.733},
+		{-2.850, 7.003, 0.690},
+		//{1.872, 4.040, -4.204},
+		//{-2.862, 6.405, 0.044},
+		//{1.400, 4.126, -0.455},
+		//{1.281, 6.536, -3.303},
+		//{1.137, 1.425, 1.443},
+		//{-3.304, 2.048, -2.967},
+		//{1.565, 4.897, -2.262},
+		//{-2.013, 2.740, -0.234},
+		//{-0.716, 1.881, 4.112},
+		//{-0.162, 1.484, 1.620},
+		//{-2.381, 6.940, -4.260},
+		//{1.973, 4.031, -1.767},
+	};
+	static shaderio::float3 cameraCenter[SceneBufferCount] = {
+		{0.118, 1.387, 3.767},
+		{0.290, 1.844, 0.929},
+		{-2.518, 6.239, 0.193},
+		//{1.175, 3.820, -3.565},
+		//{-2.301, 6.035, -0.656},
+		//{0.677, 3.748, -0.979},
+		//{1.072, 5.655, -2.954},
+		//{0.681, 2.077, 0.888},
+		//{-2.388, 1.839, -2.727},
+		//{-1.618, 2.321, -1.014},
+		//{-0.103, 1.965, 3.364},
+		//{-0.195, 2.314, 1.620},
+		//{-1.887, 6.107, -4.204},
+		//{1.271, 4.305, -1.155},
+	};
+	Application::sceneResource.cameraManip->setLookat(cameraEye[sceneBufferIndex], cameraCenter[sceneBufferIndex], { 0.000, 1.000, 0.000 }, true);
+
+	const glm::mat4& viewMatrix = Application::sceneResource.cameraManip->getViewMatrix();
+	const glm::mat4& projMatrix = Application::sceneResource.cameraManip->getPerspectiveMatrix();
+	Application::sceneResource.sceneInfo.viewProjMatrix = projMatrix * viewMatrix;
+	Application::sceneResource.sceneInfo.projInvMatrix = glm::inverse(projMatrix);
+	Application::sceneResource.sceneInfo.viewInvMatrix = glm::inverse(viewMatrix);
+	Application::sceneResource.sceneInfo.cameraPosition = Application::sceneResource.cameraManip->getEye();
+#endif
 }
 void PathTracing_KPCNNDenoising::render(VkCommandBuffer* cmdPtr) {
 	static uint64_t timeline = 1;
@@ -214,6 +259,16 @@ void PathTracing_KPCNNDenoising::render(VkCommandBuffer* cmdPtr) {
 		return;
 	}
 
+	//if (timeline >= 2) {
+	//	cmd = cmdPtr[1];
+	//	const VkCommandBufferBeginInfo beginInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+	//				 .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
+	//	NVVK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
+	//
+	//	++timeline;
+	//	return;
+	//}
+
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1,
 		staticDescPack.getSetPtr(), 0, nullptr);
 
@@ -231,16 +286,38 @@ void PathTracing_KPCNNDenoising::render(VkCommandBuffer* cmdPtr) {
 	};
 
 #ifdef SAVE_TRAIN_BUFFERS
-	if (timeline == 1) {
-		pathTracing(cmd);
-		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-		IF_SAVE_SAMPLE(createInputBuffers(cmd), (void)0);
+	//if (timeline == 1) {
+	//	pathTracing(cmd);
+	//	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	//	IF_SAVE_SAMPLE(createInputBuffers(cmd), (void)0);
+	//
+	//	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
+	//}
+	//else if (timeline == 2) {
+	//	vkDeviceWaitIdle(Application::app->getDevice());	//after first frame end
+	//	saveSampleBuffers("_7");
+	//}
 
-		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
-	}
-	else if (timeline == 2) {
-		vkDeviceWaitIdle(Application::app->getDevice());	//after first frame end
-		saveSampleBuffers("_7");
+	if (sceneBufferIndex < SceneBufferCount) {
+		if ((timeline & 1) == 1) {
+			pushConstant.frameIndex = std::rand();
+			pathTracing(cmd);
+			nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+			IF_SAVE_SAMPLE(createInputBuffers(cmd), (void)0);
+		}
+		else if(timeline > 1) {
+			vkDeviceWaitIdle(Application::app->getDevice());	//after first frame end
+			saveSampleBuffers("_" + std::to_string(sceneBufferIndex) + "_" + std::to_string(sceneBufferRandomIndex));
+			#ifdef SAVE_GROUNDTRUTH_BUFFERS
+			++sceneBufferIndex;
+			#else
+			++sceneBufferRandomIndex;
+			if (sceneBufferRandomIndex == sceneBufferRandomCount) {
+				++sceneBufferIndex;
+				sceneBufferRandomIndex = 0;
+			}
+			#endif
+		}
 	}
 
 	++timeline;
@@ -286,8 +363,9 @@ void PathTracing_KPCNNDenoising::render(VkCommandBuffer* cmdPtr) {
 
 	//Renderer::postProcess(cmd, &colorImage.image.descriptor);
 	Application::tonemapper.runCompute(cmd, gBuffers.getSize(), Application::tonemapperData, colorImage.image.descriptor, gBuffers.getDescriptorImageInfo((uint32_t)GBufferImageIndex_KPCNN::eTonemapImage));
-	//Application::tonemapper.runCompute(cmd, gBuffers.getSize(), Application::tonemapperData, 
-	//	gBuffers.getDescriptorImageInfo((uint32_t)GBufferImageIndex_KPCNN::eColorDebugImage), gBuffers.getDescriptorImageInfo((uint32_t)GBufferImageIndex_KPCNN::eTonemapImage));
+	
+	Application::tonemapper.runCompute(cmd, gBuffers.getSize(), Application::tonemapperData, gBuffers.getDescriptorImageInfo((uint32_t)GBufferImageIndex_KPCNN::eColorDebugImage), gBuffers.getDescriptorImageInfo((uint32_t)GBufferImageIndex_KPCNN::eColorDebugImage));
+
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
 
 	++timeline;
@@ -884,12 +962,14 @@ void PathTracing_KPCNNDenoising::createInputBuffers(VkCommandBuffer cmd) {
 }
 
 void PathTracing_KPCNNDenoising::saveSampleBuffers(std::string filename) {
-	std::string samplePath = FzbRenderer::getProjectRootDir().string() + "src/renderer/PathTracing_KPCNNDenoising/models_libtorch/train/" + Application::sceneResource.name + "_" + std::to_string(pushConstant.spp) + filename;
+	std::string samplePath = FzbRenderer::getProjectRootDir().string() + "src/renderer/PathTracing_KPCNNDenoising/vulkanDataSet/" + Application::sceneResource.name + "_" + std::to_string(pushConstant.spp) + filename;
 	inputBuffer_diff.save(samplePath + "/diff.bin");
 	inputBuffer_spec.save(samplePath + "/spec.bin");
+#ifndef SAVE_GROUNDTRUTH_BUFFERS
 	normalBuffer.save(samplePath + "/normal.bin");
 	albedoBuffer.save(samplePath + "/albedo.bin");
-	depthBuffer.save(samplePath + "/depth.bin");
+	//depthBuffer.save(samplePath + "/depth.bin");
+#endif
 }
 void PathTracing_KPCNNDenoising::loadSampleBuffers() {
 	std::string samplePath = FzbRenderer::getProjectRootDir().string() + "src/renderer/PathTracing_KPCNNDenoising/models_libtorch/train/" + Application::sceneResource.name + "_" + std::to_string(pushConstant.spp);

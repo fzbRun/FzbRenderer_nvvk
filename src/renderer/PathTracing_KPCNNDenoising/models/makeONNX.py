@@ -10,31 +10,41 @@ import os
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-trainSetPath = 'C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/src/renderer/PathTracing_KPCNNDenoising/models_libtorch/train/'
-samplePath = trainSetPath + 'staircase_32_1'
-gtPath = trainSetPath + 'staircase_8192_1'
+trainSetPath = 'C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/src/renderer/PathTracing_KPCNNDenoising/vulkanDataSet/'
+samplePath = trainSetPath + 'staircase_32_0_0'
+gtPath = trainSetPath + 'staircase_8192_0_0'
 eval_data = dataSet.preprocess_input(samplePath, gtPath)
 #eval_data = dataSet.preprocess_input("dataSet/eval/eval1.exr", "dataSet/eval/evalRef1.exr")
 input_channelCount = eval_data['input_diff'].shape[-1]
 diffuseNet = model.KPCNN(input_channelCount).to(device)
 specularNet = model.KPCNN(input_channelCount).to(device)
 
-weights_path = "weights/KPCNN_diff_Weights"
+weights_path = "weights/vulkanTrainResult_random2/KPCNN_diff_Weights"
 assert os.path.exists(weights_path), "file: '{}' dose not exist.".format(weights_path)
 diffuseNet.load_state_dict(torch.load(weights_path))
 diffuseNet.eval()
 
-weights_path = "weights/KPCNN_spec_Weights"
+weights_path = "weights/vulkanTrainResult_random2/KPCNN_spec_Weights"
 assert os.path.exists(weights_path), "file: '{}' dose not exist.".format(weights_path)
 specularNet.load_state_dict(torch.load(weights_path))
 specularNet.eval()
+
+
+'''
+checkpoint = torch.load("checkpoint.pth", map_location='cpu')  # 若在GPU上保存想在CPU加载，或反之
+diffuseNet.load_state_dict(checkpoint['model_diff'])
+diffuseNet.eval()
+specularNet.load_state_dict(checkpoint['model_spec'])
+specularNet.eval()
+'''
+
 
 dummy_diff = torch.randn(1, input_channelCount, 512, 512, device=device)
 dummy_spec = torch.randn(1, input_channelCount, 512, 512, device=device)
 
 dynamic_axes = {
     'input':  {0: 'batch', 2: 'height', 3: 'width'},
-    'output': {0: 'batch', 2: 'height', 3: 'width'}
+    'kernel_weights': {0: 'batch', 2: 'height', 3: 'width'}
 }
 
 torch.onnx.export(

@@ -83,6 +83,14 @@ private:
 
 	KPCNNDenoiser kpcnDenoiser;
 
+#ifdef SAVE_TRAIN_BUFFERS
+	#define SceneBufferCount 3
+	int sceneBufferIndex = 0;
+
+	uint32_t sceneBufferRandomCount = 10;
+	uint32_t sceneBufferRandomIndex = 0;
+#endif
+
 #ifndef NDEBUG
 	std::vector<bool> showImage;
 #endif
