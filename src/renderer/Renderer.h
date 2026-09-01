@@ -30,7 +30,7 @@ public:
 	void clean() override;
 	virtual void onLastHeadlessFrame();
 
-	virtual void postProcess(VkCommandBuffer cmd);
+	virtual void postProcess(VkCommandBuffer cmd, VkDescriptorImageInfo* inImage = nullptr);
 };
 
 std::shared_ptr<Renderer> createRenderer(RendererCreateInfo& createInfo);

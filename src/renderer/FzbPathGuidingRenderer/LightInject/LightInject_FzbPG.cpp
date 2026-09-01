@@ -88,6 +88,37 @@ void LightInject_FzbPG::uiRender() {
 }
 void LightInject_FzbPG::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 	NVVK_CHECK(gBuffers.update(cmd, size));
+	//清理深度纹理
+	{
+		VkSamplerCreateInfo samplerInfo = DEFAULT_VkSamplerCreateInfo;
+		samplerInfo.magFilter = VK_FILTER_NEAREST;
+		samplerInfo.minFilter = VK_FILTER_NEAREST;
+		samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+		Application::samplerPool.acquireSampler(gBuffers.m_res.gBufferDepth.descriptor.sampler, samplerInfo);
+
+		const VkImageLayout layout{ VK_IMAGE_LAYOUT_GENERAL };
+		VkImageMemoryBarrier2 barrier = nvvk::makeImageMemoryBarrier({ .image = gBuffers.m_res.gBufferDepth.image,
+														.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+														.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+														.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
+		const VkDependencyInfo depInfo{ .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+									   .imageMemoryBarrierCount = 1,
+									   .pImageMemoryBarriers = &barrier };
+
+		vkCmdPipelineBarrier2(cmd, &depInfo);
+
+		VkClearDepthStencilValue clearDepth = { 1.0f, 0 };
+		VkImageSubresourceRange range = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 };
+		vkCmdClearDepthStencilImage(cmd, gBuffers.m_res.gBufferDepth.image,
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearDepth, 1, &range);
+
+		// Setting the layout to the final one
+		barrier = nvvk::makeImageMemoryBarrier(
+			{ .image = gBuffers.m_res.gBufferDepth.image, .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			.newLayout = layout, .subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
+		gBuffers.m_res.gBufferDepth.descriptor.imageLayout = layout;
+		vkCmdPipelineBarrier2(cmd, &depInfo);
+	}
 };
 void LightInject_FzbPG::preRender() {
 	if (Application::sceneResource.cameraChange) Application::frameIndex = 0;

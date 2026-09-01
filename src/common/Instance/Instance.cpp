@@ -43,26 +43,28 @@ glm::mat4 interpolateTransforms(const glm::mat4& a, const glm::mat4& b, float t)
 }
 
 void InstanceSet::getTransformMatrixFromXML(pugi::xml_node& transformNode){
-	if (pugi::xml_node matrixNode = transformNode.child("matrix"))
-		baseMatrix = FzbRenderer::getMat4FromString(matrixNode.attribute("value").value());
 	if (pugi::xml_node translateNode = transformNode.select_node("translate").node()) {
 		glm::vec3 translateValue = FzbRenderer::getRGBFromString(translateNode.attribute("value").value());
-		baseMatrix = glm::translate(baseMatrix, translateValue);
+		baseMatrix_translate = glm::translate(baseMatrix_translate, translateValue);
 	}
 	if (pugi::xml_node rotateNode = transformNode.child("rotate")) {
 		glm::vec3 rotateAngle = glm::radians(FzbRenderer::getRGBFromString(rotateNode.attribute("value").value()));
-		if (rotateAngle.x != 0.0f) baseMatrix = glm::rotate(baseMatrix, rotateAngle.x, glm::vec3(1, 0, 0));
-		if (rotateAngle.y != 0.0f) baseMatrix = glm::rotate(baseMatrix, rotateAngle.y, glm::vec3(0, 1, 0));
-		if (rotateAngle.z != 0.0f) baseMatrix = glm::rotate(baseMatrix, rotateAngle.z, glm::vec3(0, 0, 1));
+		if (rotateAngle.x != 0.0f) baseMatrix_rotate = glm::rotate(baseMatrix_rotate, rotateAngle.x, glm::vec3(1, 0, 0));
+		if (rotateAngle.y != 0.0f) baseMatrix_rotate = glm::rotate(baseMatrix_rotate, rotateAngle.y, glm::vec3(0, 1, 0));
+		if (rotateAngle.z != 0.0f) baseMatrix_rotate = glm::rotate(baseMatrix_rotate, rotateAngle.z, glm::vec3(0, 0, 1));
 	}
 	if (pugi::xml_node scaleNode = transformNode.child("scale")) {
 		glm::vec3 scaleValue = FzbRenderer::getRGBFromString(scaleNode.attribute("value").value());
-		baseMatrix = glm::scale(baseMatrix, scaleValue);
+		baseMatrix_scale = glm::scale(baseMatrix_scale, scaleValue);
 	}
+	baseMatrix = baseMatrix_translate * baseMatrix_rotate * baseMatrix_scale;
+	if (pugi::xml_node matrixNode = transformNode.child("matrix"))
+		baseMatrix = FzbRenderer::getMat4FromString(matrixNode.attribute("value").value());
 
 	if (pugi::xml_node periodNode = transformNode.child("period")) {
 		type = InstanceType::PeriodMotion;
-		if (periodNode.attribute("speed")) time = std::stof(periodNode.attribute("time").value());
+		if (periodNode.attribute("time")) time = std::stof(periodNode.attribute("time").value());
+		if (periodNode.attribute("speed")) speed = std::stof(periodNode.attribute("speed").value());
 		if (pugi::xml_node translateNode = periodNode.child("translate")) {
 			glm::vec3 translateValue = FzbRenderer::getRGBFromString(translateNode.attribute("value").value());
 			translateMatrix = glm::translate(translateMatrix, translateValue);
@@ -78,6 +80,9 @@ void InstanceSet::getTransformMatrixFromXML(pugi::xml_node& transformNode){
 			scaleMatrix = glm::scale(scaleMatrix, scaleValue);
 		}
 	}
+
+	transform = baseMatrix;
+	transform_lastTime = transform;
 }
 InstanceSet::InstanceSet(pugi::xml_node& instanceNode) {
 	static int customMeshSetCount = 0;
@@ -102,10 +107,15 @@ InstanceSet::InstanceSet(pugi::xml_node& instanceNode) {
 		customMeshSet = FzbRenderer::MeshSet(meshSetID, primitive);
 		scene.addMeshSet(customMeshSet);
 		childMeshInfos = customMeshSet.childMeshInfos;
+
+		meshSetIndex = scene.meshSets.size() - 1;
 	}
 	else {
 		if (!scene.meshSetIDToIndex.count(meshSetID)) LOGW("实例没有对应的mesh：%s\n", meshSetID.c_str());
-		FzbRenderer::MeshSet& meshSet = scene.meshSets[scene.meshSetIDToIndex[meshSetID]];
+
+		meshSetIndex = scene.meshSetIDToIndex[meshSetID];
+
+		FzbRenderer::MeshSet& meshSet = scene.meshSets[meshSetIndex];
 		childMeshInfos = meshSet.childMeshInfos;
 	}
 	childInstances.resize(childMeshInfos.size());
@@ -127,18 +137,28 @@ InstanceSet::InstanceSet(pugi::xml_node& instanceNode) {
 }
 
 void InstanceSet::getInstance(std::vector<shaderio::Instance>& instances, int offset, float time) {
+	instanceStartIndex = offset;
+
 	if (type != InstanceType::PeriodMotion) {
 		memcpy(instances.data() + offset, childInstances.data(), sizeof(shaderio::Instance) * childInstances.size());
 		return;
+	}
+
+	float phase = time * std::max(speed, 0.0f);
+	time = 1.0f - abs(fmod(phase, 2.0f) - 1.0f);
+
+	transform_lastTime = transform;
+	if (isStatic == 0) {
+		transform = ((1.0f - time) * baseMatrix_translate + time * translateMatrix * baseMatrix_translate) *
+			((1.0f - time) * baseMatrix_rotate + time * rotateMatrix * baseMatrix_rotate) *
+			((1.0f - time) * baseMatrix_scale + time * scaleMatrix * baseMatrix_scale);
 	}
 
 	for (int i = 0; i < childInstances.size(); ++i) {
 		shaderio::Instance instance;
 		instance.meshIndex = childInstances[i].meshIndex;
 		instance.materialIndex = childInstances[i].materialIndex;
-		instance.transform = ((1.0f - time) * glm::mat4(1.0f) + time * translateMatrix) * 
-			((1.0f - time) * glm::mat4(1.0f) + time * rotateMatrix) * 
-			((1.0f - time) * glm::mat4(1.0f) + time * scaleMatrix) *  baseMatrix;	//interpolateTransforms(startMatrix, endMatrix, time);
+		instance.transform = transform;
 		instances[offset + i] = instance;
 	}
 }
@@ -147,6 +167,9 @@ void LightInstance::copyInstanceInfo(const InstanceSet& instance) {
 	this->instanceID = instance.instanceID;
 	this->type = instance.type;
 	this->baseMatrix = instance.baseMatrix;
+	this->baseMatrix_translate = instance.baseMatrix_translate;
+	this->baseMatrix_rotate = instance.baseMatrix_rotate;
+	this->baseMatrix_scale = instance.baseMatrix_scale;
 	this->time = instance.time;
 	this->translateMatrix = instance.translateMatrix;
 	this->rotateMatrix = instance.rotateMatrix;
@@ -159,8 +182,8 @@ LightInstance::LightInstance(pugi::xml_node& lightNode) {
 
 	if (pugi::xml_node instanceRefNode = lightNode.child("instanceRef")) {
 		std::string instanceID = instanceRefNode.attribute("id").value();
-		if (scene.instanceIDToInstance.count(instanceID)) {
-			std::pair<uint32_t, uint32_t> instanceTypeAndIndex = scene.instanceIDToInstance[instanceID];
+		if (scene.instanceIDToInstanceSet.count(instanceID)) {
+			std::pair<uint32_t, uint32_t> instanceTypeAndIndex = scene.instanceIDToInstanceSet[instanceID];
 			type = (InstanceType)instanceTypeAndIndex.first;
 			InstanceSet instanceSet = scene.getInstanceSet(type, instanceTypeAndIndex.second);
 			copyInstanceInfo(instanceSet);
@@ -171,6 +194,9 @@ LightInstance::LightInstance(pugi::xml_node& lightNode) {
 }
 shaderio::Light LightInstance::getLight(float time) {
 	if (type != InstanceType::PeriodMotion) return light;
+
+	float phase = time * std::max(speed, 0.0f);
+	time = 1.0f - abs(fmod(phase, 2.0f) - 1.0f);
 
 	shaderio::Light light_transform = light;
 	glm::mat4 transformMatrix = ((1.0f - time) * glm::mat4(1.0f) + time * translateMatrix) *

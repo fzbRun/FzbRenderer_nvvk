@@ -1,9 +1,16 @@
-cmake_minimum_required(VERSION 3.22)
+cmake_minimum_required(VERSION 3.26)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+set(CMAKE_CUDA_ARCHITECTURES native)
 
 get_filename_component(PROJECT_NAME ${CMAKE_CURRENT_SOURCE_DIR} NAME)
 project(
     ${PROJECT_NAME}
     VERSION 1.0.0
+    LANGUAGES CXX CUDA
 )
 #--------------------------------------------------------------------------------------
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -50,6 +57,20 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/pugixml_setup.cmake")
 target_link_libraries(${PROJECT_NAME} PRIVATE pugixml)
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/assimp_setup.cmake")
+
+find_library(MESHOPTIMIZER_LIB
+    NAMES meshoptimizer
+    PATHS ${meshoptimizer_ROOT}/build/Release
+          ${meshoptimizer_ROOT}/lib
+    REQUIRED
+)
+find_path(MESHOPTIMIZER_INCLUDE_DIR
+    NAMES meshoptimizer.h
+    PATHS ${meshoptimizer_ROOT}/src
+    REQUIRED
+)
+target_link_libraries(${PROJECT_NAME} PRIVATE ${MESHOPTIMIZER_LIB})
+target_include_directories(${PROJECT_NAME} PRIVATE ${MESHOPTIMIZER_INCLUDE_DIR})
 #--------------------------------------------------------------------------------------
 set(COPY_FILES ${NsightAftermath_DLLS})
 list(APPEND COPY_FILES ${EXTRA_COPY_FILES})
@@ -81,5 +102,39 @@ source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/resources" PREFIX "resources" FIL
 source_group("rendererInfo" FILES ${RENDERERINFO_XML_FILES})
 set_source_files_properties(${RESOURCES_XML_FILES} PROPERTIES HEADER_FILE_ONLY ON)
 set_source_files_properties(${RENDERERINFO_XML_FILES} PROPERTIES HEADER_FILE_ONLY ON)
-
 #--------------------------------------------------------------------------------------
+find_package(CUDAToolkit REQUIRED)
+if(CUDAToolkit_FOUND)
+    message(STATUS "CUDAToolkit found successfully")
+endif()
+
+target_include_directories(${PROJECT_NAME} PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+
+#target_link_libraries(${PROJECT_NAME} PRIVATE
+    #CUDA::cudart
+    #CUDA::cublas
+    #CUDA::cufft
+    #CUDA::cusolver
+    #CUDA::cusparse
+#)
+
+set_target_properties(${PROJECT_NAME} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+#--------------------------------------------------------------------------------------
+target_include_directories(${PROJECT_NAME} PRIVATE ${TensorRTPath}/include)
+target_link_directories(${PROJECT_NAME} PRIVATE ${TensorRTPath}/lib)
+message(STATUS "TensorRT path: ${TensorRTPath}")
+target_link_libraries(${PROJECT_NAME} PRIVATE
+    nvinfer_10
+    nvinfer_plugin_10
+    nvonnxparser_10
+    #nvinfer_dispatch_10
+    #nvinfer_lean_10
+    #nvinfer_vc_plugin_10
+)
+#--------------------------------------------------------------------------------------
+#set(CUDNN_INCLUDE_PATH ${CUDNN_PATH}/include/12.9)
+#set(CUDNN_LIBRARY_PATH ${CUDNN_PATH}/lib/12.9)
+
+#find_package(Torch REQUIRED PATHS ${LibtorchPath})
+#target_include_directories(${PROJECT_NAME} PRIVATE ${LibtorchPath}/include)
+#target_link_libraries(${PROJECT_NAME} PRIVATE ${TORCH_LIBRARIES})

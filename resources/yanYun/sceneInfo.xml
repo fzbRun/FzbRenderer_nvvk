@@ -1,0 +1,132 @@
+<scene>
+	<sensor type="perspective">
+		<fov value="45"/>
+		<plane value="1, 10000" />
+		<transform type = "lookAt">
+			<matrix value="-1 0 0 0 0 1 0 1 0 0 -1 4 0 0 0 1"/>
+			<!--
+			<eye value = "5112.308, -61.677, -4441.671" />
+			<center value = "5112.310, -62.111, -4442.556" />
+			<up value = "0.00000, 1.00000, 0.00000" />
+			-->
+			<eye value = "5099.799, -50.642, -4435.321" />
+			<center value = "5100.306, -51.043, -4436.042" />
+			<up value = "0.00000, 1.00000, 0.00000" />
+		</transform>
+	</sensor>
+	
+	<lights>
+		<useSky value = "true" />
+		<backgroundColor value = "0.0, 0.0, 0.0" />
+	</lights>
+
+	<bsdfs>
+		<bsdf type = "roughDielectric" id = "T_red">
+			<roughness value = "0.2" />
+			<eta value = "78.0, 11.24, 13.93" />
+		</bsdf>
+		<bsdf type = "roughDielectric" id = "T_green">
+			<roughness value = "0.2" />
+			<eta value = "1.925, 13.93, 2.618" />
+		</bsdf>
+		
+		<bsdf type="diffuse" id="scene">
+			<albedo value="0.6, 0.1, 0.1, 1.0" />
+		</bsdf>
+	</bsdfs>
+	
+	<meshes>
+		<mesh type="obj" id="yanYun">
+			<filename value="models/jb_demo.obj" />
+		</mesh>
+		<mesh type="obj" id="dragon">
+			<filename value="models/dragon.obj" />
+		</mesh>
+	</meshes>
+
+	<instances>
+		<instance>
+			<meshRef id = "yanYun"/>
+			<materialRef id = "scene"/>
+		</instance>
+		
+		<instance type="periodMotion" id="mainCharacter">
+			<meshRef id = "dragon"/>
+			
+			<transform name="to_world">
+				<translate value ="5114.0f, -69.8f, -4451.0f" />
+				<rotate value = "0, 0, 0" />
+				<scale value = "0.4, 0.4, 0.4" />
+				<period time="100">
+					<translate value = "-10, 0, 0" />
+					<rotate value="0, 90, 0" />
+				</period>
+			</transform>
+		</instance>
+
+		<instance>
+			<transform name="to_world">
+				<translate value ="5115.0f, -69.0f, -4453.0f" />
+				<rotate value = "0, 0, 0" />
+				<scale value = "2.0, 2.0, 2.0" />
+				<period time="100">
+					<translate value = "0, 2, 0" />
+				</period>
+			</transform>
+			<meshRef id="custom" type="sphere" />
+			<materialRef id = "T_red" />
+		</instance>
+
+		<instance type="periodMotion" >
+			<transform name="to_world">
+				<translate value ="5115.0f, -69.0f, -4457.0f" />
+				<rotate value = "0, 0, 0" />
+				<scale value = "1.0, 1.0, 1.0" />
+				<period time="100">
+					<translate value = "0, 2, 0" />
+				</period>
+			</transform>
+			<meshRef id="custom" type="sphere" />
+			<materialRef id = "T_red" />
+		</instance>
+
+		<instance>
+			<transform name="to_world">
+				<translate value ="5106.5f, -69.0f, -4450.0f" />
+				<rotate value = "0, 0, 0" />
+				<scale value = "2.0, 2.0, 2.0" />
+				<period time="100">
+					<rotate value = "0, 140, 0" />
+				</period>
+			</transform>
+			<meshRef id="custom" type="cube" />
+			<materialRef id = "T_green" />
+		</instance>
+
+		<instance type="periodMotion" >
+			<transform name="to_world">
+				<translate value ="5108.5f, -66.0f, -4446.0f" />
+				<rotate value = "0, 0, 0" />
+				<scale value = "1.0, 1.0, 1.0" />
+				<period time="100">
+					<rotate value = "0, 30, 0" />
+				</period>
+			</transform>
+			<meshRef id="custom" type="cube" />
+			<materialRef id = "T_green" />
+		</instance>
+		
+		<instance type="periodMotion" >
+			<transform name="to_world">
+				<translate value ="5105.5f, -69.0f, -4455.0f" />
+				<rotate value = "-90, 0, 0" />
+				<scale value = "4.0, 4.0, 4.0" />
+				<period time="100">
+					<translate value = "0, 2, 0" />
+				</period>
+			</transform>
+			<meshRef id="custom" type="plane" />
+		</instance>
+		
+	</instances>
+</scene>

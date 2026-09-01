@@ -149,4 +149,12 @@ namespace FzbRenderer {
 
 		return stagingBuffer;
 	}
+
+	void GetMemoryWin32HandleKHR(VkMemoryGetWin32HandleInfoKHR* handleInfo, HANDLE* handle) {
+		VkDevice device = FzbRenderer::Application::app->getDevice();
+		auto func = (PFN_vkGetMemoryWin32HandleKHR)vkGetDeviceProcAddr(device, "vkGetMemoryWin32HandleKHR");
+		if (func != nullptr) {
+			func(device, handleInfo, handle);
+		}
+	}
 }

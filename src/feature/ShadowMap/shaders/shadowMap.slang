@@ -41,34 +41,60 @@ VSout vertexMain_directionLight(uint vertexIndex: SV_VertexID)
     #endif
     return output;
 }
-#ifndef NDEBUG
-struct PSout
-{
-    float4 color0 : SV_Target0;
-};
-[shader("pixel")]
-PSout fragmentMain_directionLight(VSout input) {
-    float3 edge0 = ddx(input.worldPos);
-    float3 edge1 = ddy(input.worldPos);
-    float3 normal = normalize(cross(edge0, edge1));
-
-    Light light = pushConst.sceneInfoAddress.lights[pushConst.lightIndex];
-    float3 ambient = 0.1f * input.albedo;
-
-    float3 o = normalize(pushConst.sceneInfoAddress.cameraPosition - input.worldPos);
-    float3 i = -light.direction;
-    float3 h = normalize(o + i);
-    float3 diffuse = input.albedo * max(dot(normal, h), 0.0f);
-
-    float3 reflectDir = reflect(i, normal);
-    float3 specular = 0.0f; //pow(max(dot(o, reflectDir), 0.0), 8.0);
-
-    return { float4(ambient + diffuse + specular, 1.0f) };
-}
-#else
 [shader("pixel")]
 void fragmentMain_directionLight() {}
-#endif
+
+//#ifndef NDEBUG
+//struct PSout
+//{
+//    float4 color0 : SV_Target0;
+//};
+//[shader("pixel")]
+//PSout fragmentMain_directionLight(VSout input) {
+//    float3 edge0 = ddx(input.worldPos);
+//    float3 edge1 = ddy(input.worldPos);
+//    float3 normal = normalize(cross(edge0, edge1));
+//
+//    Light light = pushConst.sceneInfoAddress.lights[pushConst.lightIndex];
+//    float3 ambient = 0.1f * input.albedo;
+//
+//    float3 o = normalize(pushConst.sceneInfoAddress.cameraPosition - input.worldPos);
+//    float3 i = -light.direction;
+//    float3 h = normalize(o + i);
+//    float3 diffuse = input.albedo * max(dot(normal, h), 0.0f);
+//
+//    float3 reflectDir = reflect(i, normal);
+//    float3 specular = 0.0f; //pow(max(dot(o, reflectDir), 0.0), 8.0);
+//
+//    return { float4(ambient + diffuse + specular, 1.0f) };
+//}
+//#else
+//[shader("pixel")]
+//void fragmentMain_directionLight() {}
+//#endif
+//----------------------------------------------PointLight-------------------------------------------
+struct VSout_swizzle{
+    float4 pos : SV_Position;
+};
+
+[shader("vertex")]
+VSout_swizzle vertexMain_pointLight(uint vertexIndex: SV_VertexID) {
+    VSout_swizzle output;
+
+    SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+    Instance instance = sceneInfo.instances[pushConst.instanceIndex];
+    Mesh mesh = sceneInfo.meshes[instance.meshIndex];
+
+    // Retrieve the data
+    float3 posMesh = getAttribute<float3>(mesh.dataBuffer, mesh.triMesh.positions, vertexIndex);
+    float4 worldPos = mul(float4(posMesh, 1.0), instance.transform);
+
+    output.pos = mul(worldPos, pushConst.lightVP);
+
+    return output;
+}
+[shader("pixel")]
+void fragmentMain_pointLight(VSout_swizzle input) {}
 //----------------------------------------------Debug-------------------------------------------
 #ifndef NDEBUG
 [[vk::binding(BindingPoints_ShadowMap::eShadowMaps, 0)]] Sampler2D<float> shadowMaps[];

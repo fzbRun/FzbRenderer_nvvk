@@ -17,13 +17,13 @@ void FzbRenderer::Feature::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 	NVVK_CHECK(gBuffers.update(cmd, size));
 };
 void FzbRenderer::Feature::preRender() {};
-void FzbRenderer::Feature::render(VkCommandBuffer cmd) {};
+void FzbRenderer::Feature::render(VkCommandBuffer* cmd) {};
 void FzbRenderer::Feature::postProcess(VkCommandBuffer cmd) {};
 
-void FzbRenderer::Feature::createGBuffer(bool useDepth, bool postProcess, uint32_t colorAttachmentCount, VkExtent2D resolution) {
-	VkSampler linearSampler{};
-	NVVK_CHECK(Application::samplerPool.acquireSampler(linearSampler));
-	NVVK_DBG_NAME(linearSampler);
+void FzbRenderer::Feature::createGBuffer(bool useDepth, bool postProcess, uint32_t colorAttachmentCount, VkExtent2D resolution, VkSamplerCreateInfo samplerCreateInfo) {
+	VkSampler sampler{};
+	NVVK_CHECK(Application::samplerPool.acquireSampler(sampler, samplerCreateInfo));
+	NVVK_DBG_NAME(sampler);
 
 	std::vector<VkFormat> colorAttachmentFormat(colorAttachmentCount);
 	for (int i = 0; i < colorAttachmentCount; ++i) colorAttachmentFormat[i] = VK_FORMAT_R32G32B32A32_SFLOAT;
@@ -31,7 +31,7 @@ void FzbRenderer::Feature::createGBuffer(bool useDepth, bool postProcess, uint32
 	nvvk::GBufferInitInfo gBufferInit{
 		.allocator = &Application::allocator,
 		.colorFormats = colorAttachmentFormat,
-		.imageSampler = linearSampler,
+		.imageSampler = sampler,
 		.descriptorPool = Application::app->getTextureDescriptorPool(),
 	};
 	if (useDepth) gBufferInit.depthFormat = nvvk::findDepthFormat(Application::app->getPhysicalDevice());

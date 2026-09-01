@@ -21,16 +21,29 @@ public:
 	std::string instanceID = "defaultInstanceID";
 	InstanceType type = Static;
 	glm::mat4 baseMatrix = glm::mat4(1.0f);
+	glm::mat4 baseMatrix_translate = glm::mat4(1.0f);
+	glm::mat4 baseMatrix_rotate = glm::mat4(1.0f);
+	glm::mat4 baseMatrix_scale = glm::mat4(1.0f);
 
 	uint32_t time = 100;
 	glm::mat4 translateMatrix = glm::mat4(1.0f);
 	glm::mat4 rotateMatrix = glm::mat4(1.0f);
 	glm::mat4 scaleMatrix = glm::mat4(1.0f);
 
+	glm::mat4 transform = glm::mat4(1.0f);
+	glm::mat4 transform_lastTime = glm::mat4(1.0f);
+
+	uint32_t meshSetIndex = 0;
 	bool useCustomMeshSet = false;
 	MeshSet customMeshSet;
 
+	int instanceStartIndex;
 	std::vector<shaderio::Instance> childInstances;
+
+	shaderio::AABB aabb;
+
+	bool isStatic = false;
+	float speed = 1.0f;
 
 	InstanceSet() = default;
 	InstanceSet(pugi::xml_node& instanceNode);
@@ -41,6 +54,7 @@ public:
 
 class LightInstance : public InstanceSet {
 public:
+	LightInstance() = default;
 	LightInstance(pugi::xml_node& lightNode);
 	void copyInstanceInfo(const InstanceSet& instance);
 	shaderio::Light getLight(float time);

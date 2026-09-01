@@ -23,7 +23,9 @@ void SparseVoxelOctree::init(SVOSetting setting) {
 	Feature::createPipelineLayout(sizeof(shaderio::SVOPushConstant));
 	compileAndCreateShaders();
 
+#ifndef NDEBUG
 	IF_DEBUG(debugPrepare(), );
+#endif
 }
 
 void SparseVoxelOctree::clean() {

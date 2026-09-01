@@ -466,6 +466,56 @@ float getPdf_directionLightSample(float3 pos, float3 sampleDir, Light light) {
     else return 1;
 }
 
+bool hitTestTraceRay(RayDesc ray, inout HitTestPayload payload) {
+    RayQuery<RAY_FLAG_NONE> q;
+    q.TraceRayInline(topLevelAS, RAY_FLAG_NONE, 0xFF, ray);
+
+    while (q.Proceed())
+    {
+        // For non-opaque triangles, force them to be opaque (simplified alpha handling)
+        if (q.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE)
+            q.CommitNonOpaqueTriangleHit(); // Accept all intersections as solid
+    }
+
+    if (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT) {
+        payload.distance = q.CommittedRayT();
+        return true;
+    }
+
+    return false;
+}
+void getDirectionLight(inout CallablePayload payload, SceneInfo sceneInfo) {
+    payload.directionLightRadiance = 0.0f;
+
+    bool isDielectric = payload.material.type == uint(MaterialType::Dielectric) ||
+                        payload.material.type == uint(MaterialType::RoughDielectric);
+    uint lightNum = min(sceneInfo.numLights, NEE_MAX_SAMPLE_NUM);
+    for (int lightIndex = 0; lightIndex < lightNum; ++lightIndex) {
+        Light light = sceneInfo.lights[lightIndex];
+        if (light.type == uint(LightType::Direction)) {
+            float3 sampleDir = -light.direction;
+            float cosine = dot(sampleDir, payload.hitNormal);
+            if (!isDielectric && cosine <= 0.001f) continue;
+
+            const uint rayFlags = 0;
+            RayDesc tempRay;
+            tempRay.Direction = normalize(sampleDir);
+            tempRay.Origin = payload.hitPos + 0.00001f * tempRay.Direction;
+            tempRay.TMin = 0.001f;
+            tempRay.TMax = INFINITE;
+            HitTestPayload tempPayload;
+            tempPayload.distance = MISS_DISTANCE;
+
+            hitTestTraceRay(tempRay, tempPayload);
+
+            if (tempPayload.distance != MISS_DISTANCE) continue;
+            payload.directionLightDir = light.direction;
+            payload.directionLightRadiance = light.color * light.intensity * cosine;
+            break;
+        }
+    }
+}
+
 //------------------------------------------Material BSDF---------------------------------------------------
 float GTR2_NDF(float cosineNH, float roughness) {
     const float alpha = roughness * roughness;

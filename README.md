@@ -18,15 +18,22 @@
   - 反射、折射
   - BSDF 重要性采样
   - NEE（均匀采样和球面矩形采样）
+  - 动态视力：利用 rayTracing pipeline 的运动模糊扩展加速周期运动的实例的 AS 创建与更新(nvida 显卡 30 系列及以上)
   <img src="./result/cover2.png" alt="FzbRenderer_nvvk" style="width:80%; border-radius:6px; display:block;" />
-- **光栅体素化**
-  - 三视图、体素结果以及线框结果可视化（如图）
+- **GPU构建SVO**
+  - 三视图、体素结果以及线框结果可视化
+  - 0.5ms内构建SVO
     <img src="./result/rasterVoxelization_dragon.png" alt="FzbRenderer_nvvk" style="width:80%; border-radius:6px; display:block;" />
-- **动态实例**
-  - 利用 rayTracing pipeline 的运动模糊扩展加速周期运动的实例的 AS 创建与更新(nvida 显卡 30 系列及以上)
+<!--
 - **Stochastic Lightcuts PathGuiding**
   - 利用随机光切简化空间结构，实现实时，多bounces的pathGuiding
     <img src="./result/result.png" alt="FzbRenderer_nvvk" style="width:80%; border-radius:6px; display:block;" />
+-->
+- **KPCN 卷积神经网络降噪器**
+  - <img src="./result/KPCN.png" alt="FzbRenderer_nvvk" style="width:80%; border-radius:6px; display:block;" />
+- **体积雾以及流体模拟(实习项目，无法公开)**
+- **Octree ReSTIR Path Guiding**
+
 
 ## 快速开始
 
@@ -41,13 +48,11 @@
 ### 注意事项
 
 如果没有指定地址，Cmake 编译时会自动下载 nvpro_core2 和 pugixml 到 thrid-party 文件夹下。（建议使用我上传的库，因为我对其可能有细微修改）
-但是 vulkan SDK 和 assimp （我未修改过）需要手动下载并在 CMake 编译时指定地址。
+但是 vulkan SDK 和 assimp 需要手动下载并在 CMake 编译时指定地址。
 推荐使用 VSCode 的 CMake Tool 插件。
 编译文件将会在\_bin 文件夹下。
 
 ## 未来计划
 
-- **Stochastic Lightcuts PathGuiding**
-- **[Neural Parametric Mixtures for Path Guiding](https://dl.acm.org/doi/10.1145/3588432.3591533)（正在进行）**
-- **[ReSTIR](https://research.nvidia.com/publication/2021-06_restir-gi-path-resampling-real-time-path-tracing)**
+- **[ReSTIR](https://research.nvidia.com/publication/2021-06_restir-gi-path-resampling-real-time-path-tracing)（正在进行）**
 - **……**

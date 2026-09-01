@@ -29,6 +29,38 @@ float OrderedIntToFloat(int orderedInt)
         : ~ordered;
     return asfloat(bits);
 }
+
+float PackFloat4ToFloat(float4 unpacked){
+    uint4 u = uint4(round(saturate(unpacked) * 255.0));
+    uint packed = (u.x << 24) | (u.y << 16) | (u.z << 8) | u.w;
+    return asfloat(packed);
+}
+float4 UnpackFloatToFloat4(float packed){
+    uint u = asuint(packed);
+    float4 unpacked;
+    unpacked.x = float((u >> 24) & 0xFF) / 255.0;
+    unpacked.y = float((u >> 16) & 0xFF) / 255.0;
+    unpacked.z = float((u >> 8) & 0xFF) / 255.0;
+    unpacked.w = float(u & 0xFF) / 255.0;
+    return unpacked;
+}
+
+float PackFloat3ToFloat(float3 unpacked) {
+    uint ix = (uint)round(saturate(unpacked.x) * 1023.0);
+    uint iy = (uint)round(saturate(unpacked.y) * 2047.0);
+    uint iz = (uint)round(saturate(unpacked.z) * 2047.0);
+
+    uint packed = (ix << 22) | (iy << 11) | iz;
+    return asfloat(packed);
+}
+float3 UnpackFloatToFloat3(float packed) {
+    uint u = asuint(packed);
+    float3 unpacked;
+    unpacked.x = float((u >> 22) & 0x3FF) / 1023.0;
+    unpacked.y = float((u >> 11) & 0x7FF) / 2047.0;
+    unpacked.z = float(u & 0x7FF) / 2047.0;
+    return unpacked;
+}
 //---------------------------------------------------Matrix---------------------------------------------------
 float3x3 Inverse3x3(float3x3 m) {
 	float3 c0 = m[0];
@@ -50,18 +82,72 @@ float3x3 Inverse3x3(float3x3 m) {
     return transpose(float3x3(r0, r1, r2));
 }
 float2x2 Inverse2x2(float2x2 m) {
-    // ¼ÆËãÐÐÁÐÊ½£ºdet = a*d - b*c
     float det = m[0][0] * m[1][1] - m[0][1] * m[1][0];
 
-    // ¼ÙÉè det != 0£¨Êµ¼ÊÊ¹ÓÃÊ±Ðè±£Ö¤£©
     float invDet = 1.0f / det;
 
-    // Ê¹ÓÃÏòÁ¿ÔËËãÒ»´ÎÐÔ¹¹ÔìÁ½ÐÐ
     float2x2 result;
     result[0] = float2(m[1][1], -m[0][1]) * invDet;
     result[1] = float2(-m[1][0], m[0][0]) * invDet;
 
     return result;
+}
+
+void boxMuller(float u0, float u1, out float n0, out float n1) {
+    float r = sqrt(-2.0f * log(max(u0, 1e-10f)));
+    float theta = 2.0f * 3.14159265f * u1;
+    n0 = r * cos(theta);
+    n1 = r * sin(theta);
+}
+float3x3 randomRotationMatrix3x3(inout uint seed) {
+    float u0 = rand(seed), u1 = rand(seed);
+    float u2 = rand(seed), u3 = rand(seed);
+    float u4 = rand(seed), u5 = rand(seed);
+    float u6 = rand(seed), u7 = rand(seed);
+
+    float g0, g1, g2, g3;
+    float a, b, c, d;
+    boxMuller(u0, u1, a, b);
+    boxMuller(u2, u3, c, d);
+    boxMuller(u4, u5, g0, g1);
+    boxMuller(u6, u7, g2, g3);
+
+    float qx = a;
+    float qy = b;
+    float qz = c;
+    float qw = d;
+
+    float invLen = rsqrt(qx * qx + qy * qy + qz * qz + qw * qw);
+    qx *= invLen; qy *= invLen; qz *= invLen; qw *= invLen;
+
+    float3x3 rot;
+    rot[0] = float3(1.0f - 2.0f * (qy * qy + qz * qz), 2.0f * (qx * qy + qw * qz), 2.0f * (qx * qz - qw * qy));
+    rot[1] = float3(2.0f * (qx * qy - qw * qz), 1.0f - 2.0f * (qx * qx + qz * qz), 2.0f * (qy * qz + qw * qx));
+    rot[2] = float3(2.0f * (qx * qz + qw * qy), 2.0f * (qy * qz - qw * qx), 1.0f - 2.0f * (qx * qx + qy * qy));
+    return rot;
+}
+
+float3x3 randomRotationMatrixUniform(inout uint seed) {
+    float z = rand(seed) * 2.0f - 1.0f;
+    float theta = rand(seed) * 2.0f * 3.14159265f;
+    float r = sqrt(1.0f - z * z);
+    float3 axis = float3(r * cos(theta), r * sin(theta), z);
+
+    float cosAngle = rand(seed) * 2.0f - 1.0f;
+    float angle = acos(cosAngle);
+    float sinAngle = sin(angle);
+
+    float3x3 K = float3x3(
+        0.0f, -axis.z, axis.y,
+        axis.z, 0.0f, -axis.x,
+       -axis.y, axis.x, 0.0f
+    );
+    float3x3 I = float3x3(1, 0, 0, 0, 1, 0, 0, 0, 1);
+    return I + sinAngle * K + (1.0f - cosAngle) * mul(K, K);
+}
+float3x3 RandomRotationY(float r) {
+    r *= 6.2831853;
+    return float3x3(float3(cos(r), 0, sin(r)), float3(0, 1, 0), float3(-sin(r), 0, cos(r)));
 }
 //---------------------------------------------------AABB---------------------------------------------------
 inline bool checkPointInAABB(float3 pos, AABB aabb) {
@@ -129,6 +215,40 @@ float3 getAABBPoint(AABB aabb, float3 x, float3 sampleDir) {
 
     return x + sampleDir * tExit;
 }
+float3 getFirstPointAtAABB(AABB aabb, float3 x, float3 sampleDir) {
+    if (x.x >= aabb.minimum.x && x.x <= aabb.maximum.x &&
+        x.y >= aabb.minimum.y && x.y <= aabb.maximum.y &&
+        x.z >= aabb.minimum.z && x.z <= aabb.maximum.z) {
+        return x;
+    }
+
+    float tEnter = -1e30;
+    float tExit = 1e30;
+
+    for (int i = 0; i < 3; ++i)
+    {
+        float d = sampleDir[i];
+        float o = x[i];
+
+        if (abs(d) < 1e-12)
+        {
+            if (o < aabb.minimum[i] || o > aabb.maximum[i]) return x;
+            continue;
+        }
+
+        float t0 = (aabb.minimum[i] - o) / d;
+        float t1 = (aabb.maximum[i] - o) / d;
+        float tMin = min(t0, t1);
+        float tMax = max(t0, t1);
+
+        tEnter = max(tEnter, tMin);
+        tExit = min(tExit, tMax);
+
+        if (tEnter > tExit) return x;
+    }
+
+    return x + sampleDir * tEnter;
+}
 float PointToAABBDistance(float3 pos, AABB aabb)
 {
     float dx = max(aabb.minimum.x - pos.x, max(0.0f, pos.x - aabb.maximum.x));
@@ -156,7 +276,9 @@ float AABBDistance2(AABB aabb1, AABB aabb2)
 
     return all(distance == 0) ? 0.0f : length(distance);
 }
-
+bool AABBIntersects(AABB a, AABB b){
+    return all(a.minimum <= b.maximum) && all(a.maximum >= b.minimum);
+}
 float AABBContainmentRatio(inout AABB x, AABB y) {
     float3 origLen = x.maximum - x.minimum;
     float3 yLen = y.maximum - y.minimum;
@@ -228,13 +350,427 @@ float3 RandomPointOnAABBSurface(inout uint seed, AABB aabb)
 
 float3 AABBSeparationVector(AABB a, AABB b)
 {
-    float3 posGap = b.minimum - a.maximum; // b ÔÚ a µÄÕý·½ÏòÊ±£¬ÕâÀïÎªÕý
-    float3 negGap = a.minimum - b.maximum; // b ÔÚ a µÄ¸º·½ÏòÊ±£¬ÕâÀïÎªÕý
+    float3 posGap = b.minimum - a.maximum; // b ï¿½ï¿½ a ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Îªï¿½ï¿½
+    float3 negGap = a.minimum - b.maximum; // b ï¿½ï¿½ a ï¿½Ä¸ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Îªï¿½ï¿½
 
-    float3 posMask = max(sign(posGap), 0.0f); // Õý²Å±£Áô
-    float3 negMask = max(sign(negGap), 0.0f); // Õý²Å±£Áô
+    float3 posMask = max(sign(posGap), 0.0f); // ï¿½ï¿½ï¿½Å±ï¿½ï¿½ï¿½
+    float3 negMask = max(sign(negGap), 0.0f); // ï¿½ï¿½ï¿½Å±ï¿½ï¿½ï¿½
 
     return posGap * posMask - negGap * negMask;
+}
+
+float hitAABB(float3 rayOrigin, float3 rayDirection, AABB box)
+{
+    float tEnter = 0.0;
+    float tExit = 1.0e38;
+
+    [unroll]
+    for (int i = 0; i < 3; ++i)
+    {
+        float dir = rayDirection[i];
+        float orig = rayOrigin[i];
+        float bMin = box.minimum[i];
+        float bMax = box.maximum[i];
+
+        if (abs(dir) < 1e-8)
+        {
+            if (orig < bMin || orig > bMax) return 0.0;
+        }
+        else
+        {
+            float t0 = (bMin - orig) / dir;
+            float t1 = (bMax - orig) / dir;
+            if (t0 > t1) { float tmp = t0; t0 = t1; t1 = tmp; }
+
+            tEnter = max(tEnter, t0);
+            tExit = min(tExit, t1);
+
+            if (tEnter > tExit)
+                return 0.0;
+        }
+    }
+
+    if (tExit < 0.0) return 0.0;
+
+    float startT = max(tEnter, 0.0);
+    return tExit - startT;
+}
+
+bool isHit(float3 startPos, float3 endPos, float3 gridMin, float3 gridMax, inout float tEnter, inout float tExit) {
+    tEnter = 1.0f;
+    tExit = 1.0f;
+
+    float3 rayDir = endPos - startPos;
+    float maxDist = length(rayDir);
+    if (maxDist < 1e-8) return false;
+    float3 dir = rayDir / maxDist;
+
+    float3 invDir;
+    invDir.x = (abs(dir.x) > 1e-8) ? rcp(dir.x) : 1e30;
+    invDir.y = (abs(dir.y) > 1e-8) ? rcp(dir.y) : 1e30;
+    invDir.z = (abs(dir.z) > 1e-8) ? rcp(dir.z) : 1e30;
+
+    float3 t0s = (gridMin - startPos) * invDir;
+    float3 t1s = (gridMax - startPos) * invDir;
+    float3 tmin3 = min(t0s, t1s);
+    float3 tmax3 = max(t0s, t1s);
+    tEnter = max(max(tmin3.x, tmin3.y), tmin3.z);
+    tExit = min(min(tmax3.x, tmax3.y), tmax3.z);
+    tEnter = max(tEnter, 0.0);
+    tExit = min(tExit, maxDist);
+    if (tEnter >= tExit) return false;
+
+    return true;
+}
+
+bool isAABBInsideFrustum(AABB aabb, FrustumPlane planes[6]) {
+    [unroll]
+    for (int p = 0; p < 6; ++p) {
+        float3 extent = (aabb.maximum - aabb.minimum) * 0.5f;
+        float3 center = (aabb.minimum + aabb.maximum) * 0.5f;
+        float r = dot(abs(planes[p].normal), extent);
+        float s = dot(planes[p].normal, center) - planes[p].distance;
+
+        if (s + r < 0.0f) return false;
+    }
+    return true;
+}
+
+void TransformAABB(inout AABB aabb, float4x4 m){
+    float3 c[8] = {
+        float3(aabb.minimum.x, aabb.minimum.y, aabb.minimum.z),
+        float3(aabb.minimum.x, aabb.minimum.y, aabb.maximum.z),
+        float3(aabb.minimum.x, aabb.maximum.y, aabb.minimum.z),
+        float3(aabb.minimum.x, aabb.maximum.y, aabb.maximum.z),
+        float3(aabb.maximum.x, aabb.minimum.y, aabb.minimum.z),
+        float3(aabb.maximum.x, aabb.minimum.y, aabb.maximum.z),
+        float3(aabb.maximum.x, aabb.maximum.y, aabb.minimum.z),
+        float3(aabb.maximum.x, aabb.maximum.y, aabb.maximum.z)
+    };
+
+    float3 p0 = mul(float4(c[0], 1.0), m).xyz;
+    aabb.minimum = p0;
+    aabb.maximum = p0;
+
+    [unroll]
+    for (int i = 1; i < 8; i++)
+    {
+        float3 p = mul(float4(c[i], 1.0), m).xyz;
+        aabb.minimum = min(aabb.minimum, p);
+        aabb.maximum = max(aabb.maximum, p);
+    }
+}
+//---------------------------------------------------Camera------------------------------------------------------
+void ExtractFrustumPlanes(float4x4 cameraVP, out FrustumPlane planes[6]) {
+    float4 row0 = { cameraVP[0][0], cameraVP[1][0], cameraVP[2][0], cameraVP[3][0] };
+    float4 row1 = { cameraVP[0][1], cameraVP[1][1], cameraVP[2][1], cameraVP[3][1] };
+    float4 row2 = { cameraVP[0][2], cameraVP[1][2], cameraVP[2][2], cameraVP[3][2] };
+    float4 row3 = { cameraVP[0][3], cameraVP[1][3], cameraVP[2][3], cameraVP[3][3] };
+
+    float4 p[6];
+    p[0] = row3 + row0; // Left
+    p[1] = row3 - row0; // Right
+    p[2] = row3 + row1; // Bottom
+    p[3] = row3 - row1; // Top
+    p[4] = row2;        // Near (Vulkan/D3D)
+    p[5] = row3 - row2; // Far
+
+    for (int i = 0; i < 6; ++i) {
+        float invLen = 1.0f / length(p[i].xyz);
+        planes[i].normal = p[i].xyz * invLen;
+        planes[i].distance = -p[i].w * invLen;
+    }
+}
+
+bool rayFrustumIntersection(
+    float3 rayOrigin, float3 rayDir,
+    float3 cameraPos, float3 cameraForward, float3 cameraRight, float3 cameraUp,
+    float tanHalfFov, float aspect, float nearPlane, float farPlane,
+                            out float tEntry, out float tExit)
+{
+    tEntry = 0.0;
+    tExit = 0.0;
+
+    float3 origin = rayOrigin;
+    float3 dir = rayDir;
+    float dirLen = length(dir);
+    if (dirLen > 1e-10 && dot(origin - cameraPos, origin - cameraPos) < 1e-10)
+        origin += (dir / dirLen) * 1e-4;
+
+    float halfWidth = aspect * tanHalfFov;
+    float halfHeight = tanHalfFov;
+
+    float3 nNear = cameraForward;
+    float dNear = dot(cameraForward, cameraPos) + nearPlane;
+
+    float3 nFar = -cameraForward;
+    float dFar = -dot(cameraForward, cameraPos) - farPlane;
+
+    float3 nLeft = cameraRight + halfWidth * cameraForward;
+    float dLeft = dot(nLeft, cameraPos);
+
+    float3 nRight = -cameraRight + halfWidth * cameraForward;
+    float dRight = dot(nRight, cameraPos);
+
+    float3 nBottom = cameraUp + halfHeight * cameraForward;
+    float dBottom = dot(nBottom, cameraPos);
+
+    float3 nTop = -cameraUp + halfHeight * cameraForward;
+    float dTop = dot(nTop, cameraPos);
+
+    float tmin = 0.0;
+    float tmax = 1e10;
+    float denom, dist;
+
+    denom = dot(nNear, dir); dist = dNear - dot(nNear, origin);
+    if (abs(denom) < 1e-6) { if (dist > 0) return false; }
+    else { float t = dist / denom; if (denom > 0) tmin = max(tmin, t); else tmax = min(tmax, t); }
+
+    denom = dot(nFar, dir); dist = dFar - dot(nFar, origin);
+    if (abs(denom) < 1e-6) { if (dist > 0) return false; }
+    else { float t = dist / denom; if (denom > 0) tmin = max(tmin, t); else tmax = min(tmax, t); }
+
+    denom = dot(nLeft, dir); dist = dLeft - dot(nLeft, origin);
+    if (abs(denom) < 1e-6) { if (dist > 0) return false; }
+    else { float t = dist / denom; if (denom > 0) tmin = max(tmin, t); else tmax = min(tmax, t); }
+
+    denom = dot(nRight, dir); dist = dRight - dot(nRight, origin);
+    if (abs(denom) < 1e-6) { if (dist > 0) return false; }
+    else { float t = dist / denom; if (denom > 0) tmin = max(tmin, t); else tmax = min(tmax, t); }
+
+    denom = dot(nBottom, dir); dist = dBottom - dot(nBottom, origin);
+    if (abs(denom) < 1e-6) { if (dist > 0) return false; }
+    else { float t = dist / denom; if (denom > 0) tmin = max(tmin, t); else tmax = min(tmax, t); }
+
+    denom = dot(nTop, dir); dist = dTop - dot(nTop, origin);
+    if (abs(denom) < 1e-6) { if (dist > 0) return false; }
+    else { float t = dist / denom; if (denom > 0) tmin = max(tmin, t); else tmax = min(tmax, t); }
+
+    if (tmin <= tmax) {
+        tEntry = tmin;
+        tExit = tmax;
+        return true;
+    }
+    return false;
+}
+bool IntersectFrustum(
+    float3 start, float3 end,
+    float3 cameraPos, float3 cameraForward, float3 cameraRight, float3 cameraUp,
+    float tanHalfFov, float aspect, float nearPlane, float farPlane,
+    out float dMin, out float dMax)
+{
+    // Fix: When the ray origin coincides with cameraPos, all 4 frustum side planes
+    // pass through it (P[i] = cameraPos), giving dist == 0 for every side plane.
+    // With denom â‰ˆ 0 near frustum edges, floating-point error can flip tMax to 0,
+    // causing the intersection test to false-negative. Offset start slightly along
+    // the actual ray direction into the frustum interior.
+    float3 rayOrigin = start;
+    float3 D = end - rayOrigin;
+    float len2 = dot(D, D);
+    if (len2 > 1e-16f && dot(start - cameraPos, start - cameraPos) < 1e-10f) {
+        float3 rayDir = D * rsqrt(len2);
+        rayOrigin = start + rayDir * 1e-4f;
+        D = end - rayOrigin;
+    }
+    float len = length(D);
+    float tMin = 0.0, tMax = 1.0;
+    float tH = tanHalfFov * aspect;
+    float tV = tanHalfFov;
+
+    float3 N[6] = {
+        cameraForward,
+                    -cameraForward,
+                    cameraRight + tH * cameraForward,
+                    -cameraRight + tH * cameraForward,
+                    cameraUp + tV * cameraForward,
+                    -cameraUp + tV * cameraForward
+    };
+    float3 P[6] = {
+        cameraPos + nearPlane * cameraForward,
+                    cameraPos + farPlane * cameraForward,
+                    cameraPos, cameraPos, cameraPos, cameraPos
+    };
+
+    if (len == 0.0){
+        [unroll]
+        for (int i = 0; i < 6; i++)
+        {
+            if (dot(rayOrigin - P[i], N[i]) < 0.0)
+            {
+                dMin = dMax = 0.0;
+                return false;
+            }
+        }
+        dMin = dMax = 0.0;
+        return true;
+    }
+
+    [unroll]
+    for (int i = 0; i < 6; i++){
+        float dist = dot(rayOrigin - P[i], N[i]);
+        float denom = dot(D, N[i]);
+        if (abs(denom) < 1e-6f)
+        {
+            if (dist < 0.0)
+            {
+                dMin = dMax = 0.0;
+                return false;
+            }
+        }
+        else
+        {
+            float t = -dist / denom;
+            if (denom > 0.0) tMin = max(tMin, t);
+            else tMax = min(tMax, t);
+        }
+    }
+
+    dMin = tMin * len;
+    dMax = tMax * len;
+    return tMin <= tMax;
+}
+bool pointInFrustum(float3 pos, float3 cameraPos, float3 cameraForward, float3 cameraRight, float3 cameraUp, float tanHalfFov, float aspect, float nearPlane, float farPlane){
+    float3 rel = pos - cameraPos;
+    float d = dot(cameraForward, rel);
+    if (d < nearPlane || d > farPlane) return false;
+    float hw = d * aspect * tanHalfFov;
+    if (abs(dot(cameraRight, rel)) > hw) return false;
+    float hh = d * tanHalfFov;
+    if (abs(dot(cameraUp, rel)) > hh) return false;
+    return true;
+}
+
+/*
+float frustumDepthToW(float viewZ, float3 CompressParams, float sizeZ, uint gridZ) {
+    float voxelIndexZ = log2(viewZ * CompressParams.x + CompressParams.y) * CompressParams.z;
+    return clamp(voxelIndexZ / gridZ, 0.0f, 1.0f);
+}
+float frustumWToDepth(float w, float3 CompressParams, float sizeZ, uint gridZ) {
+    float expArg = w * gridZ / CompressParams.z;
+    float pow2 = exp2(expArg);
+    float viewZ = (pow2 - CompressParams.y) / CompressParams.x;
+    return viewZ;
+}
+*/
+// linear to non-linear
+float frustumMap(float viewZ, float3 CompressParams, float sizeZ, uint gridZ) {
+    //return pow(viewZ / sizeZ, CompressParams.x) * sizeZ;
+
+    float expArg = viewZ / sizeZ * gridZ / CompressParams.z;
+    expArg += log2(max(CompressParams.y, 1e-6));
+    float pow2 = exp2(expArg);
+    float viewZ = (pow2 - CompressParams.y) / CompressParams.x;
+    return viewZ;
+}
+float frustumInvMap(float compressed, float3 CompressParams, float sizeZ, uint gridZ) {
+    //return pow(compressed / sizeZ, 1.0f / CompressParams.x) * sizeZ;
+
+    float voxelIndexZ = (log2(max(compressed * CompressParams.x + CompressParams.y, 1e-6)) - log2(max(CompressParams.y, 1e-6))) * CompressParams.z;
+    return clamp(voxelIndexZ / gridZ, 0.0f, 1.0f) * sizeZ;
+}
+
+float3 getFrustumVoxelPos(
+    float3 uvw, float3 CompressParams, uint gridZ, float nearPlane, float farPlane, float tanHalfFov, float aspect,
+    float3 cameraPos, float3 cameraForward, float3 cameraUp, float3 cameraRight
+) {
+    float sizeZ = farPlane - nearPlane;
+    float linearDepth = uvw.z * sizeZ;
+    float depth = frustumMap(linearDepth, CompressParams, sizeZ, gridZ);
+
+    float halfHeight = (depth + nearPlane) * tanHalfFov;
+    float halfWidth = halfHeight * aspect;
+    float3 voxelPos = cameraPos;
+    voxelPos += (depth + nearPlane) * cameraForward;
+    voxelPos += halfHeight * (uvw.y * 2.0f - 1.0f) * cameraUp;
+    voxelPos += halfWidth * (uvw.x * 2.0f - 1.0f) * cameraRight;
+    return voxelPos;
+}
+
+void getCameraFrustumData(
+    float3 worldPos, float3 cameraPos, float4x4 viewInvMatrix, uint3 gridSize, float nearPlane, float farPlane, 
+    float tanHalfFov, float aspect, float3 compressionParams, float forwardSampleDistance,
+    inout float3 hitWorldPos, inout uint3 voxelIndex
+) {
+    float3 cameraRight = viewInvMatrix[0].xyz;
+    float3 cameraUp = viewInvMatrix[1].xyz;
+    float3 cameraForward = -viewInvMatrix[2].xyz;
+
+    float3 toPoint = worldPos - cameraPos;
+    float viewZ = dot(toPoint, cameraForward);
+    float viewX = dot(toPoint, cameraRight);
+    float viewY = dot(toPoint, cameraUp);
+
+    bool clampToFrustum = viewZ > farPlane;
+    if (clampToFrustum) {
+        float scale = farPlane / viewZ;
+        viewX = viewX * scale;
+        viewY = viewY * scale;
+        viewZ = farPlane;
+    }
+    // if (viewZ < nearPlane) never appear this condition
+
+    float vertexRatio = (viewZ - nearPlane) / (farPlane - nearPlane);
+    float adaptiveStart = 0.0f;
+    float adaptiveEnd = 0.35f;
+    float adaptiveScale = smoothstep(adaptiveStart, adaptiveEnd, vertexRatio);
+    float entryViewZ = viewZ - adaptiveScale * forwardSampleDistance;
+    entryViewZ = max(entryViewZ, nearPlane);
+
+    float halfHeight = entryViewZ * tanHalfFov;
+    float halfWidth = halfHeight * aspect;
+
+    float scale = entryViewZ / max(viewZ, 1e-8f);
+    float entryViewX = viewX * scale;
+    float entryViewY = viewY * scale;
+
+    float3 uvw;
+    uvw.x = (entryViewX / halfWidth + 1.0f) * 0.5f;
+    uvw.y = (entryViewY / halfHeight + 1.0f) * 0.5f;
+    uvw.z = frustumMap(entryViewZ - nearPlane, compressionParams, farPlane - nearPlane, gridSize.z) / (farPlane - nearPlane);
+    uvw = clamp(uvw, 0.0f, 1.0f - 1e-6f);
+
+    voxelIndex = clamp(uint3(uvw * gridSize), 0, gridSize - 1);
+    hitWorldPos = worldPos;
+    if (clampToFrustum || forwardSampleDistance > 0)
+        hitWorldPos = cameraPos + cameraRight * entryViewX + cameraUp * entryViewY + cameraForward * entryViewZ;
+}
+float3 getCameraFrustumInteralPos(
+    float3 worldPos, float3 cameraPos, float4x4 viewInvMatrix, uint3 gridSize, float nearPlane, float farPlane, 
+    float tanHalfFov, float aspect, float forwardSampleDistance
+) {
+    float3 cameraRight = viewInvMatrix[0].xyz;
+    float3 cameraUp = viewInvMatrix[1].xyz;
+    float3 cameraForward = -viewInvMatrix[2].xyz;
+
+    float3 toPoint = worldPos - cameraPos;
+    float viewZ = dot(toPoint, cameraForward);
+    float viewX = dot(toPoint, cameraRight);
+    float viewY = dot(toPoint, cameraUp);
+
+    if (viewZ > farPlane) {
+        float scale = farPlane / viewZ;
+        viewX = viewX * scale;
+        viewY = viewY * scale;
+        viewZ = farPlane;
+    }
+    // if (viewZ < nearPlane) never appear this condition
+
+    float vertexRatio = (viewZ - nearPlane) / (farPlane - nearPlane);
+    float adaptiveStart = 0.0f;
+    float adaptiveEnd = 0.35f;
+    float adaptiveScale = smoothstep(adaptiveStart, adaptiveEnd, vertexRatio);
+    float entryViewZ = viewZ - adaptiveScale * forwardSampleDistance;
+    entryViewZ = max(entryViewZ, nearPlane);
+
+    float halfHeight = entryViewZ * tanHalfFov;
+    float halfWidth = halfHeight * aspect;
+
+    float scale = entryViewZ / max(viewZ, 1e-8f);
+    float entryViewX = viewX * scale;
+    float entryViewY = viewY * scale;
+
+    float3 hitWorldPos = cameraPos + cameraRight * entryViewX + cameraUp * entryViewY + cameraForward * entryViewZ;
+    return hitWorldPos;
 }
 //------------------------------------------------SphericalFibonacci---------------------------------------------
 #define M_PHI 1.618033988749895
@@ -691,7 +1227,7 @@ float3 sphereRectangleSample(Quadrilateral quad, float3 hitPos, float u, float v
     float3 v11 = float3(x1, y1, z0);
 
     float3 n0 = float3(0.0f, z0, -y0); // normalize(cross(v00, v10));
-    n0.z /= sqrt(z0sq + y0sq);         // ºóÐøÖ»ÓÐzÐèÒª±»ÓÃµ½£¬x£¬y»á³ËÒÔ0£¬²»ÓÃ¹Ü
+    n0.z /= sqrt(z0sq + y0sq);         // ï¿½ï¿½ï¿½ï¿½Ö»ï¿½ï¿½zï¿½ï¿½Òªï¿½ï¿½ï¿½Ãµï¿½ï¿½ï¿½xï¿½ï¿½yï¿½ï¿½ï¿½ï¿½ï¿½0ï¿½ï¿½ï¿½ï¿½ï¿½Ã¹ï¿½
     float3 n1 = float3(-z0, 0.0f, x1); // normalize(cross(v10, v11));
     n1.z /= sqrt(z0sq + x1 * x1);
     float3 n2 = float3(0.0f, -z0, y1); // normalize(cross(v11, v01));
@@ -726,16 +1262,16 @@ float3 sphereRectangleSample(Quadrilateral quad, float3 hitPos, float u, float v
     float hv2 = hv * hv;
     float yv = hv2 < 1 - 1e-6 ? (hv * dl) / sqrt(1.0f - hv2) : y1;
 
-    return xu * axisX + yv * axisY + z0 * axisZ; // Î´¹éÒ»»¯
+    return xu * axisX + yv * axisY + z0 * axisZ; // Î´ï¿½ï¿½Ò»ï¿½ï¿½
 }
 
 struct Quadrilateral_initialization { // For a surface that needs to be sampled multiple times, it can be initialized once and reused
     float3 o, x, y, z;
     float z0, z0sq;
-    float x0, y0, y0sq;    // rectangle coords in ¡¯R¡¯
+    float x0, y0, y0sq;    // rectangle coords in ï¿½ï¿½Rï¿½ï¿½
     float x1, y1, y1sq;    //
     float b0, b1, b0sq, k; // misc precomputed constants
-    float S;               // solid angle of ¡¯Q¡¯
+    float S;               // solid angle of ï¿½ï¿½Qï¿½ï¿½
 };
 Quadrilateral_initialization initQuadrilateral(float3 hitPos, float3 quadRangleStartPos, float3 ex, float3 ey) {
     Quadrilateral_initialization quadrangle;
@@ -767,7 +1303,7 @@ Quadrilateral_initialization initQuadrilateral(float3 hitPos, float3 quadRangleS
     float3 v11 = float3(quadrangle.x1, quadrangle.y1, quadrangle.z0);
 
     float3 n0 = float3(0.0f, quadrangle.z0, -quadrangle.y0); // glm::normalize(cross(v00, v10));
-    n0.z /= sqrt(quadrangle.z0sq + quadrangle.y0sq);         // ºóÐøÖ»ÓÐzÐèÒª±»ÓÃµ½£¬x£¬y»á³ËÒÔ0£¬²»ÓÃ¹Ü
+    n0.z /= sqrt(quadrangle.z0sq + quadrangle.y0sq);         // ï¿½ï¿½ï¿½ï¿½Ö»ï¿½ï¿½zï¿½ï¿½Òªï¿½ï¿½ï¿½Ãµï¿½ï¿½ï¿½xï¿½ï¿½yï¿½ï¿½ï¿½ï¿½ï¿½0ï¿½ï¿½ï¿½ï¿½ï¿½Ã¹ï¿½
     float3 n1 = float3(-quadrangle.z0, 0.0f, quadrangle.x1); // glm::normalize(cross(v10, v11));
     n1.z /= sqrt(quadrangle.z0sq + quadrangle.x1 * quadrangle.x1);
     float3 n2 = float3(0.0f, -quadrangle.z0, quadrangle.y1); // glm::normalize(cross(v11, v01));
@@ -805,6 +1341,9 @@ float3 sphericalRectangleSample(Quadrilateral_initialization quadrangle, float u
     float hv2 = hv * hv;
     float yv = hv2 < 1 - 1e-6 ? (hv * dl) / sqrt(1.0f - hv2) : quadrangle.y1;
 
-    return xu * quadrangle.x + yv * quadrangle.y + quadrangle.z0 * quadrangle.z; // Î´¹éÒ»»¯
+    return xu * quadrangle.x + yv * quadrangle.y + quadrangle.z0 * quadrangle.z; // Î´ï¿½ï¿½Ò»ï¿½ï¿½
 }
+//------------------------------------------------noise---------------------------------------------
+#include "common/Shader/Slang/noise.slang"
+
 #endif

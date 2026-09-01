@@ -5,7 +5,7 @@
 #include <nvapp/elem_camera.hpp>
 #include <nvapp/elem_default_title.hpp>
 #include <nvapp/elem_default_menu.hpp>
-
+#include "common/CUDA/GPUInfo.cuh"
 
 int main(int argc, char** argv) {
     nvutils::ParameterParser cli(nvutils::getExecutablePath().stem().string());   //将可执行文件名作为参数传入
@@ -13,6 +13,8 @@ int main(int argc, char** argv) {
     //reg.add({ "headless", "Run in headless mode" }, &appInfo.headless, true);   //headless表示是否不要窗口
     //cli.add(reg);
     cli.parse(argc, argv);
+
+    getGPUInfo();
 
     nvapp::ApplicationCreateInfo appInfo{};
     nvvk::Context vkContext;

@@ -47,20 +47,67 @@ void FzbRenderer::Scene::addMeshSet(MeshSet& meshSet) {
 	meshSetIDToIndex.insert({ meshSet.meshID, meshSets.size() });
 	meshSets.push_back(meshSet);
 }
+void FzbRenderer::Scene::createMeshLowPoly(float ratio) {
+	nvvk::StagingUploader& stagingUploader = Application::stagingUploader;
+	nvvk::ResourceAllocator* allocator = stagingUploader.getResourceAllocator();
+
+	{
+		for (auto& data : bDatas_lowPoly)
+			allocator->destroyBuffer(data);
+		allocator->destroyBuffer(bMeshes_lowPoly);
+		bDatas_lowPoly.clear();
+		meshes_lowPoly.clear();
+	}
+
+	for (int i = 0; i < meshSets.size(); ++i) {
+		MeshSet& meshSet = meshSets[i];
+		meshSet.createLowPoly(ratio);
+
+		nvvk::Buffer bData;
+		NVVK_CHECK(allocator->createBuffer(bData, std::span<const unsigned char>(meshSet.meshByteData_LowPoly).size_bytes(),
+			VK_BUFFER_USAGE_2_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_2_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT
+			| VK_BUFFER_USAGE_2_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR));
+		NVVK_CHECK(Application::stagingUploader.appendBuffer(bData, 0, std::span<const unsigned char>(meshSet.meshByteData_LowPoly)));
+		NVVK_DBG_NAME(bData.buffer);
+		bDatas_lowPoly.push_back(bData);
+
+		for (int j = 0; j < meshSet.childMeshInfos_LowPoly.size(); j++)
+		{
+			MeshInfo& childMeshInfo = meshSet.childMeshInfos_LowPoly[j];
+			childMeshInfo.meshIndex = meshes_lowPoly.size();
+			childMeshInfo.mesh.dataBuffer = (uint8_t*)bData.address;
+
+			meshes_lowPoly.emplace_back(childMeshInfo.mesh);
+		}
+	}
+
+	if (meshes_lowPoly.size() > 0) {
+		NVVK_CHECK(allocator->createBuffer(bMeshes_lowPoly, std::span(meshes_lowPoly).size_bytes(),
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT));
+		NVVK_DBG_NAME(bMeshes_lowPoly.buffer);
+		NVVK_CHECK(stagingUploader.appendBuffer(bMeshes_lowPoly, 0, std::span<const shaderio::Mesh>(meshes_lowPoly)));
+	}
+
+	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
+	Application::stagingUploader.cmdUploadAppended(cmd);
+	Application::app->submitAndWaitTempCmdBuffer(cmd);
+}
+
 void FzbRenderer::Scene::createSceneFromXML() {
+	name = scenePath.filename().string();
 	scenePath = FzbRenderer::getProjectRootDir() / "resources" / scenePath;
 	std::filesystem::path sceneInfoXMLPath = scenePath / "sceneInfo.xml";
-	if(sceneInfoXMLPath.empty()) LOGW("\nsceneInfoÂ·¾¶Îª¿Õ\n");
+	if(sceneInfoXMLPath.empty()) LOGW("\nsceneInfoè·¯å¾„ä¸ºç©º\n");
 	
 	pugi::xml_document doc;
 	auto result = doc.load_file(sceneInfoXMLPath.c_str());
-	if (!result) LOGW("\nsceneInfoXML²»´æÔÚ\n");
+	if (!result) LOGW("\nsceneInfoXMLä¸å­˜åœ¨\n");
 	pugi::xml_node sceneInfoNode = doc.document_element();
-	//----------------------------------------------Ïà»ú²ÎÊı-------------------------------------------------------------
+	//----------------------------------------------ç›¸æœºå‚æ•°-------------------------------------------------------------
 	for (pugi::xml_node cameraNode : sceneInfoNode.children("sensor")) {
 		//float fov = glm::radians(std::stof(cameraNode.select_node(".//float[@name='fov']").node().attribute("value").value()));
 		//float aspect = (float)resolution.width / resolution.height;
-		//fov = 2.0f * atanf(tanf(fov * 0.5f) / aspect);	//ÈıÒ¶²İÖĞ¸øµÄfovÊÇË®Æ½·½ÏòµÄ£¬¶øglmÖĞÒªµÄÊÇ´¹Ö±·½ÏòµÄ
+		//fov = 2.0f * atanf(tanf(fov * 0.5f) / aspect);	//ä¸‰å¶è‰ä¸­ç»™çš„fovæ˜¯æ°´å¹³æ–¹å‘çš„ï¼Œè€Œglmä¸­è¦çš„æ˜¯å‚ç›´æ–¹å‘çš„
 		float fov = std::stof(cameraNode.child("fov").attribute("value").value());
 		cameraManip->setFov(fov);
 
@@ -83,14 +130,17 @@ void FzbRenderer::Scene::createSceneFromXML() {
 		VkExtent2D resolution = Application::app->getWindowSize();
 		cameraManip->setWindowSize(glm::uvec2(resolution.width, resolution.height));
 
-		cameraManip->setClipPlanes(glm::vec2(0.1f, 100.0f));		
+		glm::vec2 plane = glm::vec2(0.1f, 100.0f);
+		if (cameraNode.child("plane")) plane = FzbRenderer::getfloat2FromString(cameraNode.child("plane").attribute("value").value());
+		cameraManip->setClipPlanes(plane);
+		cameraManip->setMode(nvutils::CameraManipulator::Fly);
 	}
-	//------------------------------------------------²ÄÖÊ---------------------------------------------------------------
+	//------------------------------------------------æè´¨---------------------------------------------------------------
 	materials.resize(0);
 	uniqueMaterialIDToIndex.clear();
 	texturePathToIndex.clear();
 
-	//Ä¬ÈÏ²ÄÖÊ
+	//é»˜è®¤æè´¨
 	shaderio::BSDFMaterial defaultMaterial = FzbRenderer::defaultMaterial;
 	materials.push_back(defaultMaterial);
 	uniqueMaterialIDToIndex.insert({ "defaultMaterial" , 0});
@@ -99,7 +149,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 	for (pugi::xml_node bsdfNode : bsdfsNode.children("bsdf")) {
 		std::string materialID = bsdfNode.attribute("id").value();
 		if (uniqueMaterialIDToIndex.count(materialID)) {
-			printf("ÖØ¸´material¶ÁÈ¡: %s\n", materialID);
+			printf("é‡å¤materialè¯»å–: %s\n", materialID);
 			continue;
 		}
 		shaderio::BSDFMaterial material = FzbRenderer::getMaterialInfoFromSceneInfoXML(bsdfNode);
@@ -116,33 +166,49 @@ void FzbRenderer::Scene::createSceneFromXML() {
 		std::string meshID = meshNode.attribute("id").value();
 
 		std::filesystem::path meshPath = scenePath / meshNode.child("filename").attribute("value").value();
-		FzbRenderer::MeshSet meshSet(meshID, meshType, meshPath);	//´´½¨MeshSet
+		FzbRenderer::MeshSet meshSet(meshID, meshType, meshPath);	//åˆ›å»ºMeshSet
 		addMeshSet(meshSet);
 	}
 	//------------------------------------------------Instance---------------------------------------------------------------
 	/*
-	Á÷³ÌÊÇ
-	1. ¸ù¾İinstanceXMLµÄmeshRefµÄidÔÚmeshSetIDToIndexcÖĞÕÒµ½Ë÷Òı£¬¸ù¾İË÷ÒıÕÒµ½meshSet
-	2. ÎªmeshSetµÄÃ¿Ò»¸öchildMesh´´½¨Ò»¸öinstance£¬¸ù¾İchildMeshµÄmeshIDÖªµÀmeshesµÄË÷Òı
-	3. ¸ù¾İmaterialIDÔÚuniqueMaterialIDToIndexÕÒµ½Ë÷Òı
-	4. ¼ÇÂ¼meshesºÍmaterialsµÄË÷Òı
+	æµç¨‹æ˜¯
+	1. æ ¹æ®instanceXMLçš„meshRefçš„idåœ¨meshSetIDToIndexcä¸­æ‰¾åˆ°ç´¢å¼•ï¼Œæ ¹æ®ç´¢å¼•æ‰¾åˆ°meshSet
+	2. ä¸ºmeshSetçš„æ¯ä¸€ä¸ªchildMeshåˆ›å»ºä¸€ä¸ªinstanceï¼Œæ ¹æ®childMeshçš„meshIDçŸ¥é“meshesçš„ç´¢å¼•
+	3. æ ¹æ®materialIDåœ¨uniqueMaterialIDToIndexæ‰¾åˆ°ç´¢å¼•
+	4. è®°å½•mesheså’Œmaterialsçš„ç´¢å¼•
 	*/
 	staticInstanceSets.resize(0); periodInstanceSets.resize(0); randomInstanceSets.resize(0);
 	pugi::xml_node instancesNode = sceneInfoNode.child("instances");
 	for (pugi::xml_node instanceNode : instancesNode.children("instance")) {
 		InstanceSet instanceSet = InstanceSet(instanceNode);
-		if(instanceSet.instanceID != "defaultInstanceID")
-			instanceIDToInstance.insert({ instanceSet.instanceID, {instanceSet.type, getInstanceSetSize(instanceSet.type)}});
+		if (instanceSet.instanceID != "defaultInstanceID") {
+			//instanceIDToInstance.insert({ instanceSet.instanceID, {instanceSet.type, getInstanceSetSize(instanceSet.type)} });
+			instanceIDToInstanceSet.insert({ instanceSet.instanceID, {instanceSet.type, getInstanceSetSize(instanceSet.type)} });
+		}
+			
 		addInstanceSet(instanceSet);
-		if(instanceSet.type == Static) staticInstanceCount += instanceSet.childInstances.size();
-		else if(instanceSet.type == PeriodMotion) periodInstanceCount += instanceSet.childInstances.size();
-		else if(instanceSet.type == RandomMotion) randomInstanceCount += instanceSet.childInstances.size();
+		if (instanceSet.type == Static) {
+			staticInstanceCount += instanceSet.childInstances.size();
+			++staticInstanceSetCount;
+		}
+		else if (instanceSet.type == PeriodMotion) {
+			periodInstanceCount += instanceSet.childInstances.size();
+			++periodInstanceSetCount;
+		}
+		else if (instanceSet.type == RandomMotion) {
+			randomInstanceCount += instanceSet.childInstances.size();
+			++randomInstanceSetCount;
+		}
 	}
 
 	uint32_t offset = 0;
 	instances.resize(staticInstanceCount + periodInstanceCount + randomInstanceCount);
 	for (int i = 0; i < staticInstanceSets.size(); ++i) {
 		staticInstanceSets[i].getInstance(instances, offset, 0);
+
+		for (int j = 0; j < staticInstanceSets[i].childInstances.size(); ++j)
+			staticInstanceIndexToInstanceSetIndex.insert({ offset + j, i });
+
 		offset += staticInstanceSets[i].childInstances.size();
 	}
 	for (int i = 0; i < periodInstanceSets.size(); ++i) {
@@ -150,7 +216,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 		instanceSet.getInstance(instances, offset, 0);
 
 		for (int j = 0; j < periodInstanceSets[i].childInstances.size(); ++j)
-			periodInstanceIndexToInstanceSetIndex.insert({ offset, i });
+			periodInstanceIndexToInstanceSetIndex.insert({ offset + j, i });
 
 		offset += instanceSet.childInstances.size();
 	}
@@ -161,18 +227,34 @@ void FzbRenderer::Scene::createSceneFromXML() {
 	}
 
 	isStaticScene = instances.size() == staticInstanceCount;
-	//------------------------------------------------¹âÔ´---------------------------------------------------------------
+	//------------------------------------------------å…‰æº---------------------------------------------------------------
 	if (pugi::xml_node lightsNode = sceneInfoNode.child("lights")) {
 		sceneInfo.useSky = false;
-		if (pugi::xml_node useSkyNode = lightsNode.child("useSky"))
+		sceneInfo.numLights = 0;
+		if (pugi::xml_node useSkyNode = lightsNode.child("useSky")) {
 			sceneInfo.useSky = std::string(useSkyNode.attribute("value").value()) == "true";
+			if (sceneInfo.useSky) {
+				LightInstance lightInstance;
+				lightInstances.push_back(lightInstance);
+
+				shaderio::Light& light = lightInstances[0].light;
+				light.type = shaderio::Direction;
+				light.direction = glm::normalize(-sceneInfo.skySimpleParam.sunDirection);
+				light.pos = shaderio::float3(0.0f) - 10000.0f * light.direction;
+				light.color = sceneInfo.skySimpleParam.sunColor;
+				light.intensity = sceneInfo.skySimpleParam.sunIntensity;
+
+				sceneInfo.lights[sceneInfo.numLights] = light;
+				++sceneInfo.numLights;
+			}
+		}
+			
 		sceneInfo.backgroundColor = glm::vec3(0.85f);
 		if (pugi::xml_node backgroudColorNode = lightsNode.child("backgroundColor"))
 			sceneInfo.backgroundColor = FzbRenderer::getRGBFromString(backgroudColorNode.attribute("value").value());
 
-		sceneInfo.numLights = 0;
 		for (pugi::xml_node lightNode : lightsNode.children("light")) {
-			if (sceneInfo.numLights > LIGHT_COUNT) break;
+			if (sceneInfo.numLights >= LIGHT_COUNT) break;
 
 			LightInstance lightInstance = LightInstance(lightNode);
 			lightInstances.push_back(lightInstance);
@@ -188,8 +270,10 @@ void FzbRenderer::Scene::createSceneFromXML() {
 				light.intensity = std::stof(intensityNode.attribute("value").value());
 
 			if (lightType == "point") {
-				light.type = shaderio::Point;
-				light.pos = glm::vec3(lightInstance.baseMatrix * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+				light.type = shaderio::LightType::Point;
+				light.pos = FzbRenderer::getRGBFromString(lightNode.child("pos").attribute("value").value());
+				light.color = FzbRenderer::getRGBFromString(lightNode.child("emissive").attribute("value").value());
+				light.intensity = std::stof(lightNode.child("intensity").attribute("value").value());
 			}
 			else if (lightType == "spot") {
 				light.type = shaderio::Spot;
@@ -203,7 +287,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 				light.type == shaderio::Direction;
 				sceneInfo.useSky = true;
 			}
-			else if (lightType == "area") {		//Ä¬ÈÏÊÇ¾ØĞÎ¹âÔ´
+			else if (lightType == "area") {		//é»˜è®¤æ˜¯çŸ©å½¢å…‰æº
 				light.type = shaderio::Area;
 				std::vector<glm::vec3> lightMeshVertices(4);
 				if (pugi::xml_node shapeNode = lightNode.child("shape")) {
@@ -253,16 +337,16 @@ void FzbRenderer::Scene::createSceneFromXML() {
 	createSceneInfoBuffer();
 }
 /*
-ÔÚshaderÖĞ»ñÈ¡¶¥µãÊı¾İµÄÁ÷³ÌÊÇ
-1. ÏÈ»ñÈ¡µ½µ±Ç°ÊµÀıµÄË÷Òı
-	a. Õı³£¹ÜÏßÍ¨¹ıpushconstantµÃµ½
-	b. rt¹ÜÏßÍ¨¹ıInstanceIndexº¯ÊıµÃµ½£¬vulkanÔÚ´´½¨tlasÊ±×Ô¶¯Ìí¼Ó£¬ËùÒÔÒª±£Ö¤tlasµÄ´´½¨Ë³ĞòÓëinstancesµÄvectorË³ĞòÏàÍ¬
-2. È»ºó´ÓsceneInfoÖĞÄÃµ½¾ßÌåµÄgltfInstanceÊı¾İ£¬ÖªµÀ±ä»»¡¢materialIndexºÍmeshIndex
-3. È»ºó´ÓsceneInfoÖĞÄÃµ½¾ßÌåµÄgltfMeshÊı¾İ
-	a. Õı³£¹ÜÏßÖĞ£¬¶¥µã×ÅÉ«Æ÷µÄÊäÈë»á¸ø¶¥µãË÷ÒıvertexIndex£¬ËùÒÔ¸ù¾İbufferViewµÄoffsetºÍvertexIndex£¬ÔÙ¼ÓÉÏaccessorµÄoffsetÄÃµ½¸÷¸ö¶¥µãÊı¾İ
-	b. rt¹ÜÏßÖĞ£¬PrimitiveIndexº¯Êı
-	(¸ù¾İ¸øblasµÄ¶¥µãbufferºÍË÷Òıbuffer£¬¾ÍÏñÎÒcuda´²¼ÜBVHÒ»Ñù£¬¿ÉÒÔ¼ÇÂ¼Èı½ÇĞÎÖĞÃ¿¸ö¶¥µãÔÚ»º³åÖĞµÄË÷Òı)
-	»á·µ»Ø´òÖĞµÄÍ¼ÔªµÄË÷Òı£¬È»ºóÍ¬ÀíÄÃµ½¶¥µãÊı¾İ
+åœ¨shaderä¸­è·å–é¡¶ç‚¹æ•°æ®çš„æµç¨‹æ˜¯
+1. å…ˆè·å–åˆ°å½“å‰å®ä¾‹çš„ç´¢å¼•
+	a. æ­£å¸¸ç®¡çº¿é€šè¿‡pushconstantå¾—åˆ°
+	b. rtç®¡çº¿é€šè¿‡InstanceIndexå‡½æ•°å¾—åˆ°ï¼Œvulkanåœ¨åˆ›å»ºtlasæ—¶è‡ªåŠ¨æ·»åŠ ï¼Œæ‰€ä»¥è¦ä¿è¯tlasçš„åˆ›å»ºé¡ºåºä¸instancesçš„vectoré¡ºåºç›¸åŒ
+2. ç„¶åä»sceneInfoä¸­æ‹¿åˆ°å…·ä½“çš„gltfInstanceæ•°æ®ï¼ŒçŸ¥é“å˜æ¢ã€materialIndexå’ŒmeshIndex
+3. ç„¶åä»sceneInfoä¸­æ‹¿åˆ°å…·ä½“çš„gltfMeshæ•°æ®
+	a. æ­£å¸¸ç®¡çº¿ä¸­ï¼Œé¡¶ç‚¹ç€è‰²å™¨çš„è¾“å…¥ä¼šç»™é¡¶ç‚¹ç´¢å¼•vertexIndexï¼Œæ‰€ä»¥æ ¹æ®bufferViewçš„offsetå’ŒvertexIndexï¼Œå†åŠ ä¸Šaccessorçš„offsetæ‹¿åˆ°å„ä¸ªé¡¶ç‚¹æ•°æ®
+	b. rtç®¡çº¿ä¸­ï¼ŒPrimitiveIndexå‡½æ•°
+	(æ ¹æ®ç»™blasçš„é¡¶ç‚¹bufferå’Œç´¢å¼•bufferï¼Œå°±åƒæˆ‘cudaåºŠæ¶BVHä¸€æ ·ï¼Œå¯ä»¥è®°å½•ä¸‰è§’å½¢ä¸­æ¯ä¸ªé¡¶ç‚¹åœ¨ç¼“å†²ä¸­çš„ç´¢å¼•)
+	ä¼šè¿”å›æ‰“ä¸­çš„å›¾å…ƒçš„ç´¢å¼•ï¼Œç„¶ååŒç†æ‹¿åˆ°é¡¶ç‚¹æ•°æ®
 */
 void FzbRenderer::Scene::createSceneInfoBuffer() {
 	SCOPED_TIMER(__FUNCTION__);
@@ -320,20 +404,48 @@ void FzbRenderer::Scene::clean() {
 		allocator.destroyBuffer(data);
 	for (auto& texture : textures)
 		allocator.destroyImage(texture);
+
+	for (auto& data : bDatas_lowPoly)
+		allocator.destroyBuffer(data);
+	allocator.destroyBuffer(bMeshes_lowPoly);
 }
 
 void FzbRenderer::Scene::preRender() {
-	time = frameIndex % (2 * periodFrameIndex);
-	if (time < periodFrameIndex) time /= periodFrameIndex;
-	else time = 2.0f - (time / periodFrameIndex);
+	//time = frameIndex % (2 * periodFrameIndex);
+	//if (time < periodFrameIndex) time /= periodFrameIndex;
+	//else time = 2.0f - (time / periodFrameIndex);
+	time = float(frameIndex) / float(periodFrameIndex);
+
+	if (sceneInfo.useSky) {
+		LightInstance& sunLightInstance = lightInstances[0];
+		shaderio::Light& sun = sunLightInstance.light;
+		sun.direction = glm::normalize(-sceneInfo.skySimpleParam.sunDirection);
+		sun.pos = shaderio::float3(0.0f) - 10000.0f * sun.direction;
+		sun.color = sceneInfo.skySimpleParam.sunColor;
+		sun.intensity = sceneInfo.skySimpleParam.sunIntensity;
+	}
 
 	for (int i = 0; i < sceneInfo.numLights; ++i) {
 		LightInstance lightInstanceInfo = lightInstances[i];		
 		sceneInfo.lights[i] = lightInstanceInfo.getLight(time);
 	}
 
+	if (frameIndex == 0) {
+		cameraInfo_lastFrame.cameraPos = cameraManip->getEye();
+		cameraInfo_lastFrame.viewMatrix = cameraManip->getViewMatrix();
+		cameraInfo_lastFrame.projMatrix = cameraManip->getPerspectiveMatrix();
+	}
+	else {
+		cameraInfo_lastFrame.cameraPos = sceneInfo.cameraPosition;
+		cameraInfo_lastFrame.viewMatrix = sceneInfo.viewMatrix;
+		cameraInfo_lastFrame.projMatrix = sceneInfo.projMatrix;
+	}
+
+
 	const glm::mat4& viewMatrix = cameraManip->getViewMatrix();
 	const glm::mat4& projMatrix = cameraManip->getPerspectiveMatrix();
+	sceneInfo.viewMatrix = viewMatrix;
+	sceneInfo.projMatrix = projMatrix;
 	sceneInfo.viewProjMatrix = projMatrix * viewMatrix;
 	sceneInfo.projInvMatrix = glm::inverse(projMatrix);
 	sceneInfo.viewInvMatrix = glm::inverse(viewMatrix);
@@ -361,7 +473,7 @@ void FzbRenderer::Scene::preRender() {
 
 		const auto& m = cameraManip->getViewMatrix();
 		const auto& fov = cameraManip->getFov();
-		if (refCamMatrix != m || refFov != fov) {	//Èç¹ûÏà»ú²ÎÊı±ä»¯£¬Ôò´ÓĞÂÀÛ¼ÆÖ¡
+		if (refCamMatrix != m || refFov != fov) {	//å¦‚æœç›¸æœºå‚æ•°å˜åŒ–ï¼Œåˆ™ä»æ–°ç´¯è®¡å¸§
 			cameraChange = true;
 			refCamMatrix = m;
 			refFov = fov;
@@ -371,8 +483,27 @@ void FzbRenderer::Scene::preRender() {
 
 }
 void FzbRenderer::Scene::UIRender() {
-	if (ImGui::Begin("Scene Resources")) {
+	uint32_t randomSeed = 0;
 
+	if (ImGui::Begin("Scene Resources")) {
+		auto showInstanceSets = [&](const char* label, const std::vector<InstanceSet>& instanceSets) {
+			if (!ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen)) return;
+
+			ImGui::Text("%d instance set(s)", static_cast<int>(instanceSets.size()));
+			for (int index = 0; index < static_cast<int>(instanceSets.size()); ++index) {
+				const InstanceSet& instanceSet = instanceSets[index];
+				ImGui::BulletText("%s (%d child instance(s))", instanceSet.instanceID.c_str(), static_cast<int>(instanceSet.childInstances.size()));
+				if (instanceSet.type == InstanceType::PeriodMotion) {
+					float randomNumber = rand(randomSeed++);
+					ImGui::Checkbox(std::string("isStatic" + std::to_string(randomNumber)).c_str(), (bool*)&instanceSet.isStatic);
+					ImGui::DragFloat(std::string("speed" + std::to_string(randomNumber)).c_str(), (float*)&instanceSet.speed, 0.1f, 0.0f, 100.0f);
+				}
+			}
+		};
+
+		showInstanceSets("Static Instance Sets", staticInstanceSets);
+		showInstanceSets("Period Motion Instance Sets", periodInstanceSets);
+		showInstanceSets("Random Motion Instance Sets", randomInstanceSets);
 	}
 	ImGui::End();
 }
@@ -393,7 +524,7 @@ void FzbRenderer::Scene::updateDataPerFrame(VkCommandBuffer cmd) {
 	}
 }
 
-FzbRenderer::MeshInfo FzbRenderer::Scene::getMeshInfo(uint32_t meshIndex) {
+FzbRenderer::MeshInfo& FzbRenderer::Scene::getMeshInfo(uint32_t meshIndex) {
 	uint32_t meshSetIndex = getMeshSetIndex(meshIndex);
 	MeshSet& meshSet = meshSets[meshSetIndex];
 	return meshSet.childMeshInfos[meshIndex - meshSet.meshOffset];
@@ -403,16 +534,16 @@ FzbRenderer::InstanceSet FzbRenderer::Scene::getInstanceSet(InstanceType type, u
 		case Static: return staticInstanceSets[index]; break;
 		case PeriodMotion: return periodInstanceSets[index]; break;
 		case RandomMotion: return randomInstanceSets[index]; break;
-		default: printf("ÊµÀıÃ»ÓĞÏàÓ¦ÀàĞÍ»ò¸ÃÀàĞÍÃ»ÓĞ%dË÷Òı", index);
+		default: printf("å®ä¾‹æ²¡æœ‰ç›¸åº”ç±»å‹æˆ–è¯¥ç±»å‹æ²¡æœ‰%dç´¢å¼•", index);
 	}
 	return InstanceSet();
 }
 uint32_t FzbRenderer::Scene::getInstanceSetSize(InstanceType type) {
 	switch (type) {
-		case Static: return staticInstanceCount; break;
-		case PeriodMotion: return periodInstanceCount; break;
-		case RandomMotion: return randomInstanceCount; break;
-		default: printf("ÊµÀıÃ»ÓĞÏàÓ¦ÀàĞÍ"); return 0;
+		case Static: return staticInstanceSetCount; break;
+		case PeriodMotion: return periodInstanceSetCount; break;
+		case RandomMotion: return randomInstanceSetCount; break;
+		default: printf("å®ä¾‹æ²¡æœ‰ç›¸åº”ç±»å‹"); return 0;
 	}
 
 	return 0;
@@ -422,6 +553,6 @@ void FzbRenderer::Scene::addInstanceSet(InstanceSet& instanceSet) {
 		case Static: return staticInstanceSets.push_back(instanceSet); break;
 		case PeriodMotion: return periodInstanceSets.push_back(instanceSet); break;
 		case RandomMotion: return randomInstanceSets.push_back(instanceSet); break;
-		default: printf("ÊµÀıÃ»ÓĞÏàÓ¦ÀàĞÍ");
+		default: printf("å®ä¾‹æ²¡æœ‰ç›¸åº”ç±»å‹");
 	}
 }

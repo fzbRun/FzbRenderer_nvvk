@@ -17,6 +17,9 @@
 #endif
 #ifndef NDEBUG
 [[vk::binding(StaticBindingPoints_FzbPG::eDepthImage, 0)]] RWTexture2D<float> depthImage; // VK_FORMAT_D32_SFLOAT
+[[vk::binding(StaticBindingPoints_FzbPG::ePGValueImage, 0)]] RWTexture2D<float4> pgValueImage;
+[[vk::binding(StaticBindingPoints_FzbPG::ePGValue2Image, 0)]] RWTexture2D<float4> pgValue2Image;
+[[vk::binding(StaticBindingPoints_FzbPG::ePGVarianceImage, 0)]] RWTexture2D<float4> pgVarianceImage;
 #endif
 
 typedef CallablePayload HitPayload_FzbPG;
@@ -28,6 +31,7 @@ groupshared OctreeNodeData_G_FzbPG groupOctreeNodeData_G[3510];                 
 groupshared OctreeNodeData_E_FzbPG groupClusterLayerNodeData_E[CLUSTER_LAYER_NODECOUNT_E_FZBPG];   //1.71KB
 #endif
 //-------------------------------------------------Function----------------------------------------------
+/*
 bool hitTestTraceRay(RayDesc ray, inout HitTestPayload payload) {
     RayQuery<RAY_FLAG_NONE> q;
     q.TraceRayInline(topLevelAS, RAY_FLAG_NONE, 0xFF, ray);
@@ -77,6 +81,7 @@ void getDirectionLight(inout HitPayload_FzbPG payload, SceneInfo sceneInfo) {
         }
     }
 }
+*/
 
 bool traceRay(RayDesc ray, inout HitPayload_FzbPG payload)
 {
@@ -527,6 +532,11 @@ void computeMain_FzbPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
     float3 accumulatedRadiance = float3(0.0f);
     float RR = 0.8f;
 
+    #ifndef NDEBUG
+    float3 pgValue = 0.0f;
+    float3 pgValue2 = 0.0f;
+    #endif
+
     for (int sampleIndex = 0; sampleIndex < pushConst.spp; ++sampleIndex) {
         float r1 = rand(payload.randomSeed);
         float r2 = rand(payload.randomSeed);
@@ -577,12 +587,6 @@ void computeMain_FzbPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
                 AABB nodeAABB_E;
                 bool useFzbPG = getNodeAABB_E_FzbPG(nodeAABB_E, payload, pgSample_pgPdf, jitterPdf, nodeLabel_G, outgoingIndex, threadIndex);
 
-                //if (!useFzbPG) {
-                //    accumulatedRadiance = float3(1.0f, 0.0f, 0.0f);
-                //    //if (pushConst.frameIndex == 1) printf("useFzbPG: %d, pgSample_pgPdf: %f\n", useFzbPG, pgSample_pgPdf);
-                //}
-                //break;
-
                 if (useFzbPG) {
                     useFzbPG = SphericalRectangleSample(nodeAABB_E, payload.hitPos, payload.randomSeed, pgSample, pgSample_pgPdf, threadIndex);
                     if (useFzbPG) {
@@ -595,14 +599,6 @@ void computeMain_FzbPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
                     pgSample_bsdfPdf = 0.0f;
                 }
                 float pgSample_weight = 1.0f / max(pgSample_pgPdf + pgSample_bsdfPdf, 1e-16f);
-
-                // if (pushConst.frameIndex == 1 && nodeLabel_G == 747) {
-                //     printf("pgSample_pgPdf: %f, aabb: %f %f %f %f %f %f\n",
-                //         pgSample_pgPdf,
-                //         nodeAABB_E.minimum.x, nodeAABB_E.minimum.y, nodeAABB_E.minimum.z,
-                //         nodeAABB_E.maximum.x, nodeAABB_E.maximum.y, nodeAABB_E.maximum.z,
-                //     );
-                // }
 
                 getDirectionLight(payload, sceneInfo);
                 BSDF_SAMPLE(payload);
@@ -626,6 +622,14 @@ void computeMain_FzbPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
                 }
                 float bsdfSample_weight = 1.0f / max(bsdfSample_pgPdf + bsdfSample_bsdfPdf, 1e-16f);
 
+                #ifndef NDEBUG
+                if (bounceDepth > 0) {
+                    float3 pgValue_temp = (payload.material.emissive + payload.directionLightRadiance) * bsdf_cosine_pdf;
+                    pgValue += pgValue_temp;
+                    pgValue2 += pgValue_temp * pgValue_temp;
+                }
+                #endif
+
                 // MIS
                 //float probabilitySum = max(pgSample_pgPdf * pgSample_bsdfPdf + bsdfSample_bsdfPdf, 1e-16f);
                 //float pgSample_selectProbability = pgSample_pgPdf * pgSample_bsdfPdf / probabilitySum;
@@ -644,7 +648,8 @@ void computeMain_FzbPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
                 float cosine = dot(hitNormal, payload.incidence);
                 bsdf_cosine_pdf *= cosine;
 
-                bool end = any(bsdf_cosine_pdf <= 0.0f) || all(bsdf_cosine_pdf <= 0.0f) || any(isnan(bsdf_cosine_pdf)) || any(isinf(bsdf_cosine_pdf));
+                //bool end = any(bsdf_cosine_pdf <= 0.0f) || all(bsdf_cosine_pdf <= 0.0f) || any(isnan(bsdf_cosine_pdf)) || any(isinf(bsdf_cosine_pdf));
+                bool end = any(bsdf_cosine_pdf < 0.0f) || all(bsdf_cosine_pdf == 0.0f) || any(isnan(bsdf_cosine_pdf)) || any(isinf(bsdf_cosine_pdf));
                 if (end) break;
 
                 //randomNumber = rand(payload.randomSeed);
@@ -663,14 +668,22 @@ void computeMain_FzbPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
     }
     accumulatedRadiance /= pushConst.spp;
 
-    //if (pushConst.frameIndex == 1) printf("threadIndex: %d %d\naccumulatedRadiance: %f %f %f\n\n", 
-    //    threadIndex.x, threadIndex.y,
-    //    accumulatedRadiance.x, accumulatedRadiance.y, accumulatedRadiance.z
-    //);
+    #ifndef NDEBUG
+    uint n = max(pushConst.spp, 1);
+    pgValue /= n;
+    pgValue2 /= n;
+    if (pushConst.frameIndex > 0) {
+        pgValue = (pgValue + pgValueImage[threadIndex].xyz * (pushConst.frameIndex - 1)) / pushConst.frameIndex;
+        pgValue2 = (pgValue2 + pgValue2Image[threadIndex].xyz * (pushConst.frameIndex - 1)) / pushConst.frameIndex;
+
+        pgVarianceImage[threadIndex].x = luminance(pgValue2 - pgValue * pgValue);
+    }
+    pgValueImage[threadIndex].xyz = pgValue;
+    pgValue2Image[threadIndex].xyz = pgValue2;
+    #endif
 
     // When the maximum frame rate is reached, the original image will decay by ((maxframe-1)/maxframe)^k < 1, and the final image will turn black
-    if (pushConst.maxFrameCount > 1 && pushConst.frameIndex > 0)
-    {
+    if (pushConst.maxFrameCount > 1 && pushConst.frameIndex > 0){
         float a = 1.0f / float(pushConst.frameIndex + 1);
         float3 old_color = outImage[int2(launchID)].xyz;
         outImage[int2(launchID)] = float4(lerp(old_color, accumulatedRadiance, a), 1.0f);

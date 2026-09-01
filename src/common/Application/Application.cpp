@@ -50,6 +50,8 @@ void FzbRenderer::Application::getAppInfoFromXML(nvapp::ApplicationCreateInfo& a
 	}
 	else throw std::runtime_error("sceneInfoXML必须指定一个renderer！");
 
+	appInfo.cmdCount = cmdCount;
+
 	doc.reset();
 }
 FzbRenderer::Application::Application(nvapp::ApplicationCreateInfo& appInfo, nvvk::Context& vkContext) {
@@ -116,14 +118,22 @@ void FzbRenderer::Application::onAttach(nvapp::Application* app) {
 	};
 	allocator.init(allocatorInfo);
 	stagingUploader.init(&allocator, true);   //所有的CPU、GPU只一方可见的缓冲的交互都要经过暂存缓冲区
+	for (auto& instanceExtension : vkContextInitInfo.instanceExtensions) {
+		if (strcmp(instanceExtension, VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME) == 0) {
+			allocatorExport.init(allocatorInfo);
+			stagingUploaderExport.init(&allocatorExport, true);
+		}
+	}
+
 	initSlangCompiler();
 	samplerPool.init(app->getDevice());
 
 	sceneResource.createSceneFromXML();
-	renderer->init();
 
 	skySimple.init(&allocator, std::span(sky_simple_slang));
 	tonemapper.init(&allocator, std::span(tonemapper_slang));
+
+	renderer->init();
 }
 void FzbRenderer::Application::initSlangCompiler() {
 	//必须要有一个，否则在查询shader的for循环不会进入（数量为0），那么直接找不到;
@@ -178,10 +188,13 @@ void FzbRenderer::Application::onDetach() {
 	sceneResource.clean();
 
 	stagingUploader.deinit();
+	stagingUploaderExport.deinit();
+
 	skySimple.deinit();
 	tonemapper.deinit();
 	samplerPool.deinit();
 	allocator.deinit();
+	allocatorExport.deinit();
 }
 void FzbRenderer::Application::onUIRender() {
 	namespace PE = nvgui::PropertyEditor;
@@ -234,10 +247,14 @@ void FzbRenderer::Application::onUIRender() {
 		//PE::end();
 	}
 	ImGui::End();
+	sceneResource.UIRender();
 	renderer->uiRender();
 
-	if (ImGui::Begin("Viewport"))
-		ImGui::Image(ImTextureID(viewportImage), ImGui::GetContentRegionAvail());
+	if (ImGui::Begin("Viewport")) {
+		viewportScreenPos = ImGui::GetCursorScreenPos();
+		viewportContentSize = ImGui::GetContentRegionAvail();
+		ImGui::Image(ImTextureID(viewportImage), viewportContentSize);
+	}
 	ImGui::End();
 }
 void FzbRenderer::Application::onResize(VkCommandBuffer cmd, const VkExtent2D& size) {
@@ -248,15 +265,9 @@ void FzbRenderer::Application::onPreRender() {
 	sceneResource.preRender();
 	renderer->preRender();
 }
-void FzbRenderer::Application::onRender(VkCommandBuffer cmd) {
-	updateDataPerFrame(cmd);
+void FzbRenderer::Application::onRender(VkCommandBuffer* cmd) {
+	sceneResource.updateDataPerFrame(cmd[0]);
 	renderer->render(cmd);
-}
-void FzbRenderer::Application::updateDataPerFrame(VkCommandBuffer cmd) {
-	NVVK_DBG_SCOPE(cmd);
-
-	sceneResource.updateDataPerFrame(cmd);
-	renderer->updateDataPerFrame(cmd);
 }
 
 void FzbRenderer::Application::onUIMenu() {
@@ -275,4 +286,11 @@ void FzbRenderer::Application::onUIMenu() {
 }
 void FzbRenderer::Application::onLastHeadlessFrame() {
 	renderer->onLastHeadlessFrame();
+}
+
+void FzbRenderer::Application::uploadResource() {
+	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
+	Application::stagingUploader.cmdUploadAppended(cmd);
+	Application::stagingUploaderExport.cmdUploadAppended(cmd);
+	Application::app->submitAndWaitTempCmdBuffer(cmd);
 }

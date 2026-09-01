@@ -5,10 +5,15 @@
 #include <common/Shader/Shader.h>
 #include <nvvk/default_structs.hpp>
 #include <nvgui/property_editor.hpp>
-#include <nvvk/default_structs.hpp>
 #include <nvvk/compute_pipeline.hpp>
 
 using namespace FzbRenderer;
+
+ShadowMap::ShadowMap() {
+	//Application::vkContextInitInfo.deviceExtensions.push_back({ VK_NV_VIEWPORT_ARRAY2_EXTENSION_NAME });
+	//Application::vkContextInitInfo.deviceExtensions.push_back({ VK_KHR_MULTIVIEW_EXTENSION_NAME });
+	//Application::vkContextInitInfo.deviceExtensions.push_back({ VK_NV_VIEWPORT_SWIZZLE_EXTENSION_NAME });
+}
 
 void ShadowMap::init(ShadowMapCreateInfo createInfo) {
 	this->setting = createInfo;
@@ -20,31 +25,42 @@ void ShadowMap::init(ShadowMapCreateInfo createInfo) {
 #endif
 	createPipeline();
 	compileAndCreateShaders();
+
+	{
+		sceneAABB.minimum = { FLT_MAX, FLT_MAX, FLT_MAX };
+		sceneAABB.maximum = -sceneAABB.minimum;
+		FzbRenderer::Scene& sceneResource = Application::sceneResource;
+		for (int i = 0; i < sceneResource.instances.size(); ++i) {
+			uint32_t meshIndex = sceneResource.instances[i].meshIndex;
+			MeshInfo meshInfo = sceneResource.getMeshInfo(meshIndex);
+			shaderio::AABB meshAABB = meshInfo.getAABB(sceneResource.instances[i].transform);	//å¯¹äºŽåŠ¨æ€ç‰©ä½“ï¼Œè¿™é‡Œéœ€è¦ä¿®æ”¹
+
+			sceneAABB.minimum.x = std::min(meshAABB.minimum.x, sceneAABB.minimum.x);
+			sceneAABB.minimum.y = std::min(meshAABB.minimum.y, sceneAABB.minimum.y);
+			sceneAABB.minimum.z = std::min(meshAABB.minimum.z, sceneAABB.minimum.z);
+			sceneAABB.maximum.x = std::max(meshAABB.maximum.x, sceneAABB.maximum.x);
+			sceneAABB.maximum.y = std::max(meshAABB.maximum.y, sceneAABB.maximum.y);
+			sceneAABB.maximum.z = std::max(meshAABB.maximum.z, sceneAABB.maximum.z);
+		}
+	}
 }
 void ShadowMap::clean() {
 	Feature::clean();
-	for (int i = 0; i < shadowMaps.size(); ++i) Application::allocator.destroyImage(shadowMaps[i]);
+	for (int i = 0; i < shadowMaps.size(); ++i) shadowMaps[i].clean();
 
 	VkDevice device = Application::app->getDevice();
 	vkDestroyShaderEXT(device, vertexShader_directionLight, nullptr);
 	vkDestroyShaderEXT(device, fragmentShader_directionLight, nullptr);
 
 	vkDestroyShaderEXT(device, vertexShader_pointLight, nullptr);
-	vkDestroyShaderEXT(device, geometryShader_pointLight, nullptr);
 	vkDestroyShaderEXT(device, fragmentShader_pointLight, nullptr);
 
 #ifndef NDEBUG
-	if(descriptorPool) vkFreeDescriptorSets(device, descriptorPool, uint32_t(uiDescriptorSets.size()), uiDescriptorSets.data());
-	vkDestroyDescriptorSetLayout(device, descLayout, nullptr);
-	uiDescriptorSets.clear();
-	descLayout = VK_NULL_HANDLE;
-
-	for (const VkImageView& view : uiImageViews) vkDestroyImageView(device, view, nullptr);
-
 	vkDestroyShaderEXT(device, computeShader_debug, nullptr);
 #endif
 }
 void ShadowMap::uiRender() {
+	return;
 #ifndef NDEBUG
 	uint32_t mapCount = shadowMaps.size();
 	if (mapCount == 0) return;
@@ -71,8 +87,8 @@ void ShadowMap::uiRender() {
 				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, hoveredColor);
 				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(5, 5));
 	
-				bool result = ImGui::ImageButton("##but", (ImTextureID)uiDescriptorSets[selectedShadowMapIndex],
-					ImVec2(100, 100));		//ÕâÀïÓ¦¸ÃÓÐÒ»¸ö½µ²ÉÑù
+				bool result = ImGui::ImageButton("##but", (ImTextureID)shadowMaps[selectedShadowMapIndex].uiDescriptorSet,
+					ImVec2(100, 100));		//ï¿½ï¿½ï¿½ï¿½Ó¦ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 	
 				ImGui::PopStyleColor(2);
 				ImGui::PopStyleVar();
@@ -85,37 +101,37 @@ void ShadowMap::uiRender() {
 		}
 		PE::end();
 
-		if (PE::begin()) {
-			if (PE::entry("Depth Restruct result", [&] {
-				static const ImVec4 highlightColor = ImVec4(118.f / 255.f, 185.f / 255.f, 0.f, 1.f);
-				ImVec4 selectedColor = showRestructResultMap ? highlightColor : ImGui::GetStyleColorVec4(ImGuiCol_Button);
-				ImVec4 hoveredColor = ImVec4(selectedColor.x * 1.2f, selectedColor.y * 1.2f, selectedColor.z * 1.2f, 1.f);
-				ImGui::PushStyleColor(ImGuiCol_Button, selectedColor);
-				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, hoveredColor);
-				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(5, 5));
-
-				bool result = ImGui::ImageButton("##but", (ImTextureID)gBuffers.getDescriptorSet(selectedShadowMapIndex),
-					ImVec2(100 * gBuffers.getAspectRatio(), 100));
-
-				ImGui::PopStyleColor(2);
-				ImGui::PopStyleVar();
-				return result;
-				}))
-			{
-				showRestructResultMap = !showRestructResultMap;
-				showShadowMap = false;
-			}
-		}
-		PE::end();
+		//if (PE::begin()) {
+		//	if (PE::entry("Depth Restruct result", [&] {
+		//		static const ImVec4 highlightColor = ImVec4(118.f / 255.f, 185.f / 255.f, 0.f, 1.f);
+		//		ImVec4 selectedColor = showRestructResultMap ? highlightColor : ImGui::GetStyleColorVec4(ImGuiCol_Button);
+		//		ImVec4 hoveredColor = ImVec4(selectedColor.x * 1.2f, selectedColor.y * 1.2f, selectedColor.z * 1.2f, 1.f);
+		//		ImGui::PushStyleColor(ImGuiCol_Button, selectedColor);
+		//		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, hoveredColor);
+		//		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(5, 5));
+		//
+		//		bool result = ImGui::ImageButton("##but", (ImTextureID)gBuffers.getDescriptorSet(selectedShadowMapIndex),
+		//			ImVec2(100 * gBuffers.getAspectRatio(), 100));
+		//
+		//		ImGui::PopStyleColor(2);
+		//		ImGui::PopStyleVar();
+		//		return result;
+		//		}))
+		//	{
+		//		showRestructResultMap = !showRestructResultMap;
+		//		showShadowMap = false;
+		//	}
+		//}
+		//PE::end();
 	}
 	ImGui::End();
 
-	if (showShadowMap) Application::viewportImage = uiDescriptorSets[selectedShadowMapIndex];
+	if (showShadowMap) Application::viewportImage = shadowMaps[selectedShadowMapIndex].uiDescriptorSet;
 	if (showRestructResultMap) Application::viewportImage = gBuffers.getDescriptorSet(selectedShadowMapIndex);
 #endif
 };
 void ShadowMap::resize(VkCommandBuffer cmd, const VkExtent2D& size) {}
-void ShadowMap::preRender(VkCommandBuffer cmd){}
+void ShadowMap::preRender(){}
 void ShadowMap::render(VkCommandBuffer cmd) {
 	if (shadowMaps.size() == 0) return;
 
@@ -133,59 +149,163 @@ void ShadowMap::render(VkCommandBuffer cmd) {
 
 	graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
 	graphicsDynamicPipeline.inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_FRONT_BIT;	//ÕýÃæÌÞ³ý
+	//graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_FRONT_BIT;
+	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
 	graphicsDynamicPipeline.rasterizationState.polygonMode = VK_POLYGON_MODE_FILL;
 	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_TRUE;
 	graphicsDynamicPipeline.depthStencilState.depthWriteEnable = VK_TRUE;
 	graphicsDynamicPipeline.depthStencilState.stencilTestEnable = VK_FALSE;
 
 	for (int i = 0; i < shadowMaps.size(); ++i) {
-		shaderio::Light& light = Application::sceneResource.sceneInfo.lights[lightIndices[i]];
-		VkShaderEXT vertexShader{}, fragmentShader{};
-		if (light.type == shaderio::LightType::Direction) {
-			shaderio::float4x4 viewMatrix = glm::lookAt(light.pos, light.pos + light.direction, glm::vec3(0.0f, 1.0f, 0.0f));
-			float near_plane = 0.1f, far_plane = 20.0f;
-			glm::mat4 orthoMatrix = glm::orthoRH_ZO(-10.0f, 10.0f, -10.0f, 10.0f, near_plane, far_plane);
-			orthoMatrix[1][1] *= -1;
-			pushConstant.lightVP = orthoMatrix * viewMatrix;
-
-			vertexShader = vertexShader_directionLight;
-			fragmentShader = fragmentShader_directionLight;
-		}
-		else if (light.type == shaderio::LightType::Point) {}
-
-		nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(i), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL });
-		nvvk::cmdImageMemoryBarrier(cmd, { shadowMaps[i].image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-			{ VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
-
-#ifndef NDEBUG
-		VkRenderingAttachmentInfo colorAttachment = DEFAULT_VkRenderingAttachmentInfo;
-		colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-		colorAttachment.imageView = gBuffers.getColorImageView(i);
-		colorAttachment.clearValue = { .color = {0.0f, 0.0f, 0.0f, 0.0f} };
-#endif
 		VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
 		depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 		depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
-		depthAttachment.imageView = shadowMaps[i].descriptor.imageView;
+		depthAttachment.imageView = shadowMaps[i].image.descriptor.imageView;
 
 		VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
 		renderingInfo.renderArea = { {0, 0}, setting.resolution };
-#ifndef NDEBUG
-		renderingInfo.colorAttachmentCount = 1;
-		renderingInfo.pColorAttachments = &colorAttachment;
-#else
 		renderingInfo.colorAttachmentCount = 0;
 		renderingInfo.pColorAttachments = nullptr;
-#endif
 		renderingInfo.pDepthAttachment = &depthAttachment;
+
+		shaderio::Light& light = Application::sceneResource.sceneInfo.lights[lightIndices[i]];
+		VkShaderEXT vertexShader{}, fragmentShader{};
+		if (light.type == shaderio::LightType::Direction) {
+			//shaderio::float4x4 viewMatrix = glm::lookAt(light.pos, light.pos + light.direction, glm::vec3(0.0f, 1.0f, 0.0f));
+			//float near_plane = 0.1f, far_plane = 20.0f;
+			//glm::mat4 orthoMatrix = glm::orthoRH_ZO(-10.0f, 10.0f, -10.0f, 10.0f, near_plane, far_plane);
+			//orthoMatrix[1][1] *= -1;
+			//pushConstant.lightVP = orthoMatrix * viewMatrix;
+
+			shaderio::float3 sceneSize = sceneAABB.maximum - sceneAABB.minimum;
+			shaderio::float3 sceneStartPos = sceneAABB.minimum;
+
+			glm::vec3 distance = sceneSize * 1.1f;
+			glm::vec3 center = (sceneAABB.maximum + sceneAABB.minimum) * 0.5f;
+			glm::vec3 minimum = center - distance * 0.5f;
+			glm::vec3 maximum = center + distance * 0.5f;
+			float sceneLength = glm::length(distance);
+			shaderio::float3 lightPos = center - light.direction * sceneLength;
+
+			glm::vec3 up = fabs(light.direction.y) > 0.99f ? glm::vec3(0, 0, 1) : glm::vec3(0, 1, 0);
+			glm::mat4 viewMatrix = glm::lookAt(lightPos, lightPos + light.direction, up);
+
+			std::vector<glm::vec3> corners = {
+				glm::vec3(minimum.x, minimum.y, minimum.z),
+				glm::vec3(maximum.x, minimum.y, minimum.z),
+				glm::vec3(minimum.x, maximum.y, minimum.z),
+				glm::vec3(minimum.x, minimum.y, maximum.z),
+				glm::vec3(maximum.x, maximum.y, minimum.z),
+				glm::vec3(maximum.x, minimum.y, maximum.z),
+				glm::vec3(minimum.x, maximum.y, maximum.z),
+				glm::vec3(maximum.x, maximum.y, maximum.z)
+			};
+
+			glm::vec3 minView(FLT_MAX);
+			glm::vec3 maxView(-FLT_MAX);
+			for (auto& v : corners) {
+				glm::vec4 p = viewMatrix * glm::vec4(v, 1.0f);
+				glm::vec3 p3 = glm::vec3(p) / p.w;
+				minView = glm::min(minView, p3);
+				maxView = glm::max(maxView, p3);
+			}
+			{
+				float texelSizeX = (maxView.x - minView.x) / setting.resolution.width;
+				float texelSizeY = (maxView.y - minView.y) / setting.resolution.height;
+
+				minView.x = floor(minView.x / texelSizeX) * texelSizeX;
+				maxView.x = floor(maxView.x / texelSizeX) * texelSizeX;
+
+				minView.y = floor(minView.y / texelSizeY) * texelSizeY;
+				maxView.y = floor(maxView.y / texelSizeY) * texelSizeY;
+			}
+
+			glm::mat4 orthoMatrix = glm::orthoRH_ZO(minView.x, maxView.x, minView.y, maxView.y, -maxView.z, -minView.z);
+			orthoMatrix[1][1] *= -1;
+			pushConstant.lightVP = orthoMatrix * viewMatrix;
+
+			graphicsDynamicPipeline.rasterizationState.depthBiasEnable = VK_TRUE;
+			graphicsDynamicPipeline.rasterizationState.depthBiasConstantFactor = 1.5f;
+			graphicsDynamicPipeline.rasterizationState.depthBiasSlopeFactor = 1.0f;
+			graphicsDynamicPipeline.rasterizationState.depthBiasClamp = 0.0f;
+			graphicsDynamicPipeline.cmdSetViewportAndScissor(cmd, setting.resolution);
+
+			//VkViewportSwizzleNV swizzle = {
+			//	VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_X_NV,  // r
+			//	VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_Y_NV,  // g
+			//	VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_Z_NV,  // b
+			//	VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_W_NV   // a
+			//};
+			//vkCmdSetViewportSwizzleNV(cmd, 0, 1, &swizzle);
+
+			vertexShader = vertexShader_directionLight;
+			fragmentShader = fragmentShader_directionLight;
+
+#ifndef NDEBUG
+			nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(i), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL });
+#endif
+			nvvk::cmdImageMemoryBarrier(cmd, { shadowMaps[i].image.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+				{ VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
+		}
+		else if (light.type == shaderio::LightType::Point) {
+			shaderio::float4x4 viewMatrix = glm::lookAt(light.pos, light.pos + shaderio::float3(0.0f, 0.0f, 1.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+			float near_plane = 0.1f, far_plane = 20.0f;
+			glm::mat4 projMatrix = glm::perspectiveRH_ZO(glm::radians(90.0f), 1.0f, far_plane, near_plane);
+			//projMatrix[1][1] *= -1;
+			pushConstant.lightVP = projMatrix * viewMatrix;
+
+			VkViewport viewports[6];
+			VkRect2D scissors[6];
+			for (int j = 0; j < 6; j++){
+				viewports[j].x = 0;
+				viewports[j].y = 0;
+				viewports[j].width = setting.resolution.width;
+				viewports[j].height = setting.resolution.height;
+				viewports[j].minDepth = 0.0f;
+				viewports[j].maxDepth = 1.0f;
+
+				scissors[j].offset = { 0, 0 };
+				scissors[j].extent = setting.resolution;
+			}
+			vkCmdSetViewport(cmd, 0, 6, viewports);
+			vkCmdSetScissor(cmd, 0, 6, scissors);
+
+			VkViewportSwizzleNV swizzles[6] = {
+				{ VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_Z_NV, VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_Y_NV,
+				  VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_W_NV, VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_X_NV }, // +X
+				{ VK_VIEWPORT_COORDINATE_SWIZZLE_NEGATIVE_Z_NV, VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_Y_NV,
+				  VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_W_NV, VK_VIEWPORT_COORDINATE_SWIZZLE_NEGATIVE_X_NV }, // -X
+				{ VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_X_NV, VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_Z_NV,
+				  VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_W_NV, VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_Y_NV }, // +Y
+				{ VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_X_NV, VK_VIEWPORT_COORDINATE_SWIZZLE_NEGATIVE_Z_NV,
+				  VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_W_NV, VK_VIEWPORT_COORDINATE_SWIZZLE_NEGATIVE_Y_NV }, // -Y
+				{ VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_X_NV, VK_VIEWPORT_COORDINATE_SWIZZLE_NEGATIVE_Y_NV,
+				  VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_W_NV, VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_Z_NV }, // +Z
+				{ VK_VIEWPORT_COORDINATE_SWIZZLE_NEGATIVE_X_NV, VK_VIEWPORT_COORDINATE_SWIZZLE_NEGATIVE_Y_NV,
+				  VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_W_NV, VK_VIEWPORT_COORDINATE_SWIZZLE_NEGATIVE_Z_NV }  // -Z
+			};
+			vkCmdSetViewportSwizzleNV(cmd, 0, 6, swizzles);
+
+			graphicsDynamicPipeline.rasterizationState.depthClampEnable = VK_TRUE;
+			graphicsDynamicPipeline.depthStencilState.depthCompareOp = VK_COMPARE_OP_GREATER;
+
+			depthAttachment.imageView = shadowMaps[i].imageViews[0];	//VK_IMAGE_VIEW_TYPE_2D_ARRAY
+			depthAttachment.clearValue.depthStencil = { 0.0f, 0 };
+			renderingInfo.layerCount = 6;
+			renderingInfo.viewMask = 0x3F;
+
+			nvvk::cmdImageMemoryBarrier(cmd, { shadowMaps[i].image.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+				{ VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, 6} });
+
+			vertexShader = vertexShader_pointLight;
+			fragmentShader = fragmentShader_pointLight;
+		}
 
 		vkCmdBeginRendering(cmd, &renderingInfo);
 
-		//vkCmdSetDepthBias(cmd, 1.5f, 0.0f, 1.0f);
-		//vkCmdSetDepthBiasEnable(cmd, VK_TRUE);
+		vkCmdSetDepthBias(cmd, 1.5f, 0.0f, 1.0f);
+		vkCmdSetDepthBiasEnable(cmd, VK_TRUE);
 		graphicsDynamicPipeline.cmdApplyAllStates(cmd);
-		graphicsDynamicPipeline.cmdSetViewportAndScissor(cmd, setting.resolution);
 		graphicsDynamicPipeline.cmdBindShaders(cmd, { .vertex = vertexShader, .fragment = fragmentShader });
 
 		VkVertexInputBindingDescription2EXT bindingDescription{};
@@ -198,6 +318,8 @@ void ShadowMap::render(VkCommandBuffer cmd) {
 			uint32_t meshIndex = Application::sceneResource.instances[j].meshIndex;
 			const shaderio::Mesh& mesh = Application::sceneResource.meshes[meshIndex];
 			const shaderio::TriangleMesh& triMesh = mesh.triMesh;
+
+			if (Application::sceneResource.materials[Application::sceneResource.instances[j].materialIndex].type == shaderio::MaterialType::RoughDielectric) continue;
 
 			pushConstant.instanceIndex = int(j);
 			vkCmdPushConstants2(cmd, &pushInfo);
@@ -212,8 +334,20 @@ void ShadowMap::render(VkCommandBuffer cmd) {
 
 		vkCmdEndRendering(cmd);
 
+		if (light.type == shaderio::LightType::Point) {
+			VkViewportSwizzleNV identitySwizzle = {
+				VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_X_NV,
+				VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_Y_NV,
+				VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_Z_NV,
+				VK_VIEWPORT_COORDINATE_SWIZZLE_POSITIVE_W_NV
+			};
+			vkCmdSetViewportSwizzleNV(cmd, 0, 1, &identitySwizzle);
+		}
+
+#ifndef NDEBUG
 		nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(i), VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
-		nvvk::cmdImageMemoryBarrier(cmd, { shadowMaps[i].image, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+#endif
+		nvvk::cmdImageMemoryBarrier(cmd, { shadowMaps[i].image.image, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
 			{ VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
 	}
 }
@@ -222,47 +356,103 @@ void ShadowMap::postProcess(VkCommandBuffer cmd) {
 }
 
 VkResult ShadowMap::createShadowMap() {
-	VkSampler pointSampler{};
+	int lightCount = 0; lightIndices.resize(0);
+	for (int i = 0; i < Application::sceneResource.sceneInfo.numLights; ++i) {
+		const shaderio::Light& light = Application::sceneResource.sceneInfo.lights[i];
+		if (light.type == shaderio::LightType::Non) break;
+		if (light.type == shaderio::LightType::Direction) {	// || light.type == shaderio::LightType::Point
+			++lightCount;
+			lightIndices.push_back(i);
+		}
+	}
+	shadowMaps.resize(lightCount);
+	if (lightCount == 0) return VK_SUCCESS;
+
 	VkSamplerCreateInfo sampleCreateInfo = {
 		.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
 		.magFilter = VK_FILTER_NEAREST,
 		.minFilter = VK_FILTER_NEAREST,
 		.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
 		.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-		.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
-	};
-	NVVK_CHECK(Application::samplerPool.acquireSampler(pointSampler, sampleCreateInfo));
-	NVVK_DBG_NAME(pointSampler);
+		.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+		.compareEnable = VK_TRUE,
+		.compareOp = VK_COMPARE_OP_LESS,
+		.maxLod = 0.0f,
+		.unnormalizedCoordinates = VK_FALSE
 
-	
-	int lightCount = 0; lightIndices.resize(0);
-	for (int i = 0; i < Application::sceneResource.sceneInfo.numLights; ++i) {
-		const shaderio::Light& light = Application::sceneResource.sceneInfo.lights[i];
-		if (light.type == shaderio::LightType::Non) break;
-		if (light.type == shaderio::LightType::Direction || light.type == shaderio::LightType::Point) {
-			++lightCount;
-			lightIndices.push_back(i);
+	};
+
+	for (int i = 0; i < lightCount; ++i) {
+		sampleCreateInfo.compareOp = VK_COMPARE_OP_LESS;
+
+		std::string shadowMapName = "";
+		FzbRenderer::ImageCreateInfo colorImageCreateInfo = FzbRenderer::createDefaultImageCreateInfo();
+		shaderio::LightType lightType = (shaderio::LightType)Application::sceneResource.sceneInfo.lights[lightIndices[i]].type;
+		if (lightType == shaderio::LightType::Direction) {
+			shadowMapName = "shadowMap_direction_" + std::to_string(i);
+			
+			colorImageCreateInfo.info.extent = { setting.resolution.width, setting.resolution.height, 1 };
+			colorImageCreateInfo.info.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT
+				| VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+
+			colorImageCreateInfo.viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+
+			colorImageCreateInfo.viewInfo.subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .levelCount = 1, .layerCount = 1 };
 		}
+		else if (lightType == shaderio::LightType::Point) {
+			sampleCreateInfo.compareOp = VK_COMPARE_OP_GREATER;
+
+			shadowMapName = "shadowMap_Point_" + std::to_string(i);
+
+			colorImageCreateInfo = FzbRenderer::createDefaultImageCreateInfo(2);
+
+			colorImageCreateInfo.info.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+			colorImageCreateInfo.info.arrayLayers = 6;
+
+			colorImageCreateInfo.viewInfos[0].format = colorImageCreateInfo.info.format;
+			colorImageCreateInfo.viewInfos[0].viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;	//ç”¨äºŽæ¸²æŸ“
+			colorImageCreateInfo.viewInfos[0].subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 6 };
+			colorImageCreateInfo.viewInfos[1].format = colorImageCreateInfo.info.format;
+			colorImageCreateInfo.viewInfos[1].viewType = VK_IMAGE_VIEW_TYPE_CUBE;	//ç”¨äºŽé‡‡æ ·
+			colorImageCreateInfo.viewInfos[1].subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 6 };
+
+			colorImageCreateInfo.viewInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;		//ç”¨äºŽé‡‡æ ·
+			colorImageCreateInfo.viewInfo.subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 6 };
+		}
+		shadowMaps[i] = FzbRenderer::Image(shadowMapName);
+		
+		colorImageCreateInfo.info.imageType = VK_IMAGE_TYPE_2D;
+		colorImageCreateInfo.info.extent = { setting.resolution.width, setting.resolution.height, 1 };
+		colorImageCreateInfo.info.format = VK_FORMAT_D32_SFLOAT;
+		colorImageCreateInfo.info.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT
+			| VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+
+		colorImageCreateInfo.viewInfo.format = colorImageCreateInfo.info.format;
+
+		colorImageCreateInfo.samplerInfo = sampleCreateInfo;
+
+		shadowMaps[i].init(colorImageCreateInfo);
 	}
-	shadowMaps.resize(lightCount);
-#ifndef NDEBUG
+
+
+	/*
+	#ifndef NDEBUG
 	uiImageViews.resize(lightCount);
 #endif
-	if (lightCount == 0) return VK_SUCCESS;
 
-	FzbRenderer::ImageCreateInfo createInfo = createDefaultImageCreateInfo();
+		FzbRenderer::ImageCreateInfo createInfo = createDefaultImageCreateInfo();
 	createInfo.info.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
 		| VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
 	createInfo.info.format = nvvk::findDepthFormat(Application::app->getPhysicalDevice());
 	createInfo.viewInfo.format = nvvk::findDepthFormat(Application::app->getPhysicalDevice());
 	createInfo.viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-	createInfo.sampler = pointSampler;
+	createInfo.samplerInfo = sampleCreateInfo;
 	createInfo.info.extent = { setting.resolution.width, setting.resolution.height, 1 };
 	for (int i = 0; i < lightCount; ++i) {
 		const shaderio::Light& light = Application::sceneResource.sceneInfo.lights[lightIndices[i]];
 		if (light.type == shaderio::LightType::Direction) {}
 		else if (light.type == shaderio::LightType::Point) {
-			throw std::runtime_error("»¹Ã»ÓÐÊµÏÖµã¹âÔ´ÒõÓ°");
+			throw std::runtime_error("ï¿½ï¿½Ã»ï¿½ï¿½Êµï¿½Öµï¿½ï¿½Ô´ï¿½ï¿½Ó°");
 		}
 		NVVK_FAIL_RETURN(createImage(shadowMaps[i], createInfo));
 
@@ -340,7 +530,7 @@ VkResult ShadowMap::createShadowMap() {
 	NVVK_FAIL_RETURN(vkAllocateDescriptorSets(device, &allocInfos, uiDescriptorSets.data()));
 
 	for (uint32_t i = 0; i < lightCount; ++i){
-		descImages[i] = { pointSampler, uiImageViews[i], layout };
+		descImages[i] = { shadowMaps[i].descriptor.sampler, uiImageViews[i], layout };
 		writeDesc[i] = {
 			 .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
 			 .dstSet = uiDescriptorSets[i],
@@ -351,6 +541,8 @@ VkResult ShadowMap::createShadowMap() {
 	}
 	vkUpdateDescriptorSets(device, uint32_t(uiDescriptorSets.size()), writeDesc.data(), 0, nullptr);
 #endif
+	*/
+
 
 	return VK_SUCCESS;
 }
@@ -415,6 +607,25 @@ void ShadowMap::compileAndCreateShaders(){
 	shaderInfo.pCode = shaderCode.pCode;
 	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &fragmentShader_directionLight);
 	NVVK_DBG_NAME(fragmentShader_directionLight);
+	//--------------------------------------------------------------------------------------
+	//vkDestroyShaderEXT(device, vertexShader_pointLight, nullptr);
+	//vkDestroyShaderEXT(device, fragmentShader_pointLight, nullptr);
+	//
+	//shaderInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+	//shaderInfo.nextStage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	//shaderInfo.pName = "vertexMain_pointLight";
+	//shaderInfo.codeSize = shaderCode.codeSize;
+	//shaderInfo.pCode = shaderCode.pCode;
+	//vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &vertexShader_pointLight);
+	//NVVK_DBG_NAME(vertexShader_pointLight);
+	//
+	//shaderInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	//shaderInfo.nextStage = 0;
+	//shaderInfo.pName = "fragmentMain_pointLight";
+	//shaderInfo.codeSize = shaderCode.codeSize;
+	//shaderInfo.pCode = shaderCode.pCode;
+	//vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &fragmentShader_pointLight);
+	//NVVK_DBG_NAME(fragmentShader_pointLight);
 //#ifndef NDEBUG
 //	//--------------------------------------------------------------------------------------
 //	vkDestroyShaderEXT(device, computeShader_debug, nullptr);
@@ -451,7 +662,9 @@ void ShadowMap::debug_prepare() {
 	nvvk::WriteSetContainer write{};
 	VkWriteDescriptorSet    shadowMapsWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_ShadowMap::eShadowMaps, 0, 0, shadowMaps.size());
-	nvvk::Image* shadowMapsPtr = shadowMaps.data();
+	std::vector<nvvk::Image> shadowMaps_nvvk(shadowMaps.size());
+	for (int i = 0; i < shadowMaps.size(); ++i) shadowMaps_nvvk[i] = shadowMaps[i].image;
+	nvvk::Image* shadowMapsPtr = shadowMaps_nvvk.data();
 	write.append(shadowMapsWrite, shadowMapsPtr);
 
 	VkWriteDescriptorSet    depthRestructResultMapsWrite =

@@ -9,6 +9,7 @@
 #include <nvutils/primitives.hpp>
 #include <nvvk/buffer_suballocator.hpp>
 
+#include <meshoptimizer.h>
 
 #ifndef FZBRENDERER_MESH_H
 #define FZBRENDERER_MESH_H
@@ -24,7 +25,7 @@ struct MeshInfo {
 
 	uint32_t meshIndex;
 
-	shaderio::AABB getAABB(glm::mat4 transformMatrix = glm::mat4(1.0f));
+	shaderio::AABB getAABB(glm::mat4 transformMatrix = glm::mat4(1.0f), bool isStatic = false);
 };
 
 class MeshSet{
@@ -41,11 +42,17 @@ public:
 	static nvutils::PrimitiveMesh createWireframe(float width = 1.0F, float height = 1.0F, float depth = 1.0F);
 	static nvutils::PrimitiveMesh createSphere(bool normal = false, bool texCoords = false, uint32_t sectorCount = 36, uint32_t stackCount = 18);
 
+	void createMeshLets();
+
 	std::string meshID;
 	uint32_t meshOffset;
 	std::vector<MeshInfo> childMeshInfos;		//当前mesh中的小mesh
 	std::vector<uint8_t> meshByteData;
 	shaderio::AABB aabb = { { FLT_MAX, FLT_MAX, FLT_MAX }, { -FLT_MAX, -FLT_MAX, -FLT_MAX } };
+
+	std::vector<MeshInfo> childMeshInfos_LowPoly;
+	std::vector<uint8_t> meshByteData_LowPoly;	//只有顶点坐标
+	void createLowPoly(float ratio = 0.1f);
 private:
 	void loadGltfData(const tinygltf::Model& model, bool importInstance = false);
 	void processMesh(aiMesh* meshData, const aiScene* sceneData);

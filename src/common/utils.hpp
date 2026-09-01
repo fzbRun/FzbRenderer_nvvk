@@ -24,10 +24,13 @@
 #include <span>
 #include <string>
 #include <vector>
+#include <random>
 
 #include <nvutils/file_operations.hpp>
 #include <vulkan/vulkan_core.h>
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <nvvk/resources.hpp>
 #include <nvvk/staging.hpp>
 
@@ -60,4 +63,20 @@ namespace FzbRenderer {
     float rand(uint32_t seed);
     
     nvvk::Buffer createStagingBuffer(size_t bufferSize, size_t dataSize, const void* data);
+    void GetMemoryWin32HandleKHR(VkMemoryGetWin32HandleInfoKHR* handleInfo, HANDLE* handle);
+
+    inline std::mt19937& engine() {
+        static thread_local std::mt19937 gen(std::random_device{}());
+        return gen;
+    }
+
+    inline glm::mat3 randomRotationMatrix() {
+        auto& rng = engine();
+        // 生成四个独立的标准正态分布随机数
+        std::normal_distribution<float> gauss(0.0f, 1.0f);
+        glm::quat q(gauss(rng), gauss(rng), gauss(rng), gauss(rng));
+        // 归一化得到均匀分布在 SO(3) 上的四元数
+        q = glm::normalize(q);
+        return glm::mat3_cast(q);
+    }
 }

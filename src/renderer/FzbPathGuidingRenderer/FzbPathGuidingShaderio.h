@@ -8,11 +8,11 @@ NAMESPACE_SHADERIO_BEGIN()
 
 //#define GEOMETRY_CLUSTER_WITH_E
 
-#define ADAPTIVE_IMPORTANCE_SAMPLING	//Adaptive importance sampling
+//#define ADAPTIVE_IMPORTANCE_SAMPLING	//Adaptive importance sampling
 #define HITTEST_COUNT_PER_CHILDNODE_FZBPG 4		//must <= 4
 #define ADAPTIVE_IMPORTANCE_SAMPLING_MAX_LAYER 3
 
-#define NEARBYNODE_JITTER_FZBPG
+//#define NEARBYNODE_JITTER_FZBPG
 #define NEARBY_NODE_COUNT_FZBPG 4	//dont't change!!!
 //#define COMMON_NEARBYNODE_JITTER
 
@@ -52,6 +52,9 @@ enum class StaticBindingPoints_FzbPG
 #endif
 #ifndef NDEBUG
 	eDepthImage,
+	ePGValueImage,
+	ePGValue2Image,
+	ePGVarianceImage,
 #endif
 };
 enum class DynamicBindingPoints_FzbPG {

@@ -16,7 +16,8 @@ FzbRenderer::PathTracingRenderer::PathTracingRenderer(pugi::xml_node& rendererNo
 		pushValues.spp = std::stoi(sppNode.attribute("value").value());
 	if (pugi::xml_node useNEENode = rendererNode.child("useNEE"))
 		useNEE = std::string(useNEENode.attribute("value").value()) == "true";
-		
+	if (pugi::xml_node useRCVNode = rendererNode.child("useRCV"))
+		useRCV = std::string(useRCVNode.attribute("value").value()) == "true";
 }
 //-----------------------------------------创造光追管线----------------------------------------------------------
 /*
@@ -166,11 +167,10 @@ void FzbRenderer::PathTracingRenderer::createRayTracingPipeline() {
 
 	addPathTracingSlangMacro();
 	std::string shaderSlangName;
-	if (useNEE) {
-		shaderSlangName = "pathTracingNEEShaders.slang";
-		pushValues.HitTestShaderIndex = 1;
-	}
+	if (useNEE) shaderSlangName = "pathTracingNEEShaders.slang";
+	else if (useRCV) shaderSlangName = "pathTracingRCVShaders.slang";
 	else shaderSlangName = "pathTracingShaders.slang";
+	pushValues.HitTestShaderIndex = 1;
 
 	//VkShaderModuleCreateInfo shaderCode = compileSlangShader("pathTracingShaders.slang", {});
 	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
@@ -381,12 +381,16 @@ void FzbRenderer::PathTracingRenderer::uiRender() {
 		ImGui::TextDisabled("Current PathTracing Frame: %d", pushValues.frameIndex);
 		ImGui::TextDisabled("Current Renderer Frame: %d", Application::frameIndex);
 
+
 		ImGui::SeparatorText("Bounces");
 		{
-			PE::begin();
-			PE::SliderInt("Bounces Depth", &pushValues.maxDepth, 1, std::min(MAX_DEPTH, ptContext.rtProperties.maxRayRecursionDepth), "%d", ImGuiSliderFlags_AlwaysClamp,
-				"Maximum Bounces depth");
-			PE::end();
+			if (useRCV) ImGui::Text("Bounce depth = 3");
+			else {
+				PE::begin();
+				PE::SliderInt("Bounces Depth", &pushValues.maxDepth, 1, std::min(MAX_DEPTH, ptContext.rtProperties.maxRayRecursionDepth), "%d", ImGuiSliderFlags_AlwaysClamp,
+					"Maximum Bounces depth");
+				PE::end();
+			}
 		}
 		ImGui::SeparatorText("SPP");
 		{
@@ -445,7 +449,8 @@ void FzbRenderer::PathTracingRenderer::preRender() {
 
 	asManager.updateToplevelAS();
 }
-void FzbRenderer::PathTracingRenderer::render(VkCommandBuffer cmd) {
+void FzbRenderer::PathTracingRenderer::render(VkCommandBuffer* cmdPtr) {
+	VkCommandBuffer cmd = cmdPtr[0];
 	NVVK_DBG_SCOPE(cmd);
 
 	//maxFrames等于1表示只要一帧，我们就每帧都替换

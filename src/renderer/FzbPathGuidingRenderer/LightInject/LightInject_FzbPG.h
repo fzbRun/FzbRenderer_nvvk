@@ -28,7 +28,7 @@ public:
 	void uiRender() override;
 	void resize(VkCommandBuffer cmd, const VkExtent2D& size) override;
 	void preRender();
-	void render(VkCommandBuffer cmd) override;
+	void render(VkCommandBuffer cmd);
 	void postProcess(VkCommandBuffer cmd) override;
 
 	void createBuffer();

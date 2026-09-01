@@ -21,6 +21,11 @@ sceneManager主要有三个功能
 #include <common/Instance/Instance.h>
 
 namespace FzbRenderer {
+struct CameraInfo_lastFrame{
+	shaderio::float4x4 viewMatrix;
+	shaderio::float4x4 projMatrix;
+	shaderio::float3 cameraPos;
+};
 
 class Scene {
 public:
@@ -36,20 +41,26 @@ public:
 	void updateDataPerFrame(VkCommandBuffer cmd);
 
 	std::filesystem::path scenePath;
+	std::string name = "scene";
 	std::shared_ptr<nvutils::CameraManipulator> cameraManip{ std::make_shared<nvutils::CameraManipulator>() };
 	bool cameraChange = false;
+	CameraInfo_lastFrame cameraInfo_lastFrame;
 	
 	bool isStaticScene = true;
 	std::vector<FzbRenderer::MeshSet> meshSets;
 	uint32_t staticInstanceCount = 0;
+	uint32_t staticInstanceSetCount = 0;
 	std::vector<InstanceSet> staticInstanceSets;
+
 	uint32_t periodInstanceCount = 0;
+	uint32_t periodInstanceSetCount = 0;
 	std::vector<InstanceSet> periodInstanceSets;
 	uint32_t frameIndex = 0;
 	uint32_t periodFrameIndex = 100;
 	float time = 0.0f;
 
 	uint32_t randomInstanceCount = 0;
+	uint32_t randomInstanceSetCount = 0;
 	std::vector<InstanceSet> randomInstanceSets;
 
 	bool hasDynamicLight = false;
@@ -67,9 +78,15 @@ public:
 	nvvk::Buffer bInstances;
 	nvvk::Buffer bMaterials;
 	nvvk::Buffer bSceneInfo;
+
+	std::vector<shaderio::Mesh> meshes_lowPoly;
+	std::vector<nvvk::Buffer> bDatas_lowPoly;
+	nvvk::Buffer bMeshes_lowPoly;
 	//-----------------------------------------------------------------------------------------------------
 	int loadTexture(const std::filesystem::path& texturePath);
 	void addMeshSet(MeshSet& meshSet);
+
+	void createMeshLowPoly(float ratio = 0.1f);
 
 	int getMeshSetIndex(std::string meshSetID) { return meshSetIDToIndex[meshSetID]; };
 	int getMaterialIndex(std::string materialID) { return uniqueMaterialIDToIndex[materialID]; };
@@ -80,7 +97,7 @@ public:
 	uint32_t getInstanceSetSize(InstanceType type);
 	void addInstanceSet(InstanceSet& instanceSet);
 
-	MeshInfo getMeshInfo(uint32_t meshIndex);
+	MeshInfo& getMeshInfo(uint32_t meshIndex);
 
 	//映射
 	std::unordered_map<std::string, uint32_t> uniqueMaterialIDToIndex;
@@ -88,7 +105,9 @@ public:
 	std::map<std::string, uint32_t> meshSetIDToIndex;	//根据meshSetID获取meshSet数组的索引
 	std::vector<uint32_t> meshToBufferIndex;	//meshToBufferIndex[meshIndex] = bufferIndex，前向或延时渲染时按mesh渲染时使用
 	std::vector<uint32_t> meshIndexToMeshSetIndex;
-	std::map<std::string, std::pair<uint32_t, uint32_t>> instanceIDToInstance;
+	//std::map<std::string, std::pair<uint32_t, uint32_t>> instanceIDToInstance;
+	std::map<std::string, std::pair<uint32_t, uint32_t>> instanceIDToInstanceSet;
+	std::map<uint32_t, uint32_t> staticInstanceIndexToInstanceSetIndex;
 	std::map<uint32_t, uint32_t> periodInstanceIndexToInstanceSetIndex;
 };
 

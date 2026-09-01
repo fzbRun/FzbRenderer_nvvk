@@ -26,9 +26,11 @@ void AccelerationStructureManager::clean() {
 	for (int i = 0; i < blasIndirectDataBuffers.size(); ++i) Application::allocator.destroyBuffer(blasIndirectDataBuffers[i]);
 	Application::allocator.destroyBuffer(tlasIndirectDataBuffer);
 
-	asBuilder.m_uploader->releaseStaging();
-	asBuilder.deinitAccelerationStructures();
-	asBuilder.deinit();
+	if (asBuilder.m_uploader) {
+		asBuilder.m_uploader->releaseStaging();
+		asBuilder.deinitAccelerationStructures();
+		asBuilder.deinit();
+	}
 }
 
 nvvk::AccelerationStructureGeometryInfo AccelerationStructureManager::primitiveToGeometry_nvvk(const shaderio::Mesh& mesh) {
