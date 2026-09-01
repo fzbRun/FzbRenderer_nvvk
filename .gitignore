@@ -55,8 +55,8 @@ conanbuildinfo.cmake
 .DS_Store
 
 _downloaded_resources/
-third_party/
+#third_party/
 
 *.exr
 *.bin
-.vscode/settings.json
+#.vscode/settings.json
