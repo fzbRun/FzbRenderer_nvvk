@@ -1,10 +1,10 @@
 <rendererInfo>
 	<name value = "SLPG" />
 	<resolution width = "1280" height = "720" />
-	<sceneXML path = "yanYun" />	<!--开头不能加/，但可以是./或不加--><!--simpleTest bearBox veach-ajar-dynamic  veach-ajar-2  veach-mis staircase yanYun-->
+	<sceneXML path = "veach-ajar-2" />	<!--开头不能加/，但可以是./或不加--><!--simpleTest bearBox veach-ajar-dynamic  veach-ajar-2  veach-mis staircase yanYun-->
 
-	<renderer type = "VolumetricFog">  <!--FzbPathGuiding NPMPathGuiding PathTracing PathTracing_KPCNNDenoising VolumetricFog Deferred  Mesh ZhiHuCode-->
-		<maxDepth value = "2" />
+	<renderer type = "FzbPathGuiding">  <!--FzbPathGuiding NPMPathGuiding PathTracing PathTracing_KPCNNDenoising VolumetricFog Deferred  Mesh ZhiHuCode-->
+		<maxDepth value = "4" />
 		<useNEE value = "false" />
 		<spp value = "1" />
 		<RasterVoxelization>
