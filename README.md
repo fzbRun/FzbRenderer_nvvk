@@ -23,14 +23,14 @@
 - **GPU构建SVO**
   - 三视图、体素结果以及线框结果可视化
   - 0.5ms内构建SVO
-    <img src="./result/rasterVoxelization_dragon.png" alt="FzbRenderer_nvvk" style="width:80%; border-radius:6px; display:block;" />
+  <img src="./result/rasterVoxelization_dragon.png" alt="FzbRenderer_nvvk" style="width:80%; border-radius:6px; display:block;" />
 <!--
 - **Stochastic Lightcuts PathGuiding**
   - 利用随机光切简化空间结构，实现实时，多bounces的pathGuiding
     <img src="./result/result.png" alt="FzbRenderer_nvvk" style="width:80%; border-radius:6px; display:block;" />
 -->
 - **KPCN 卷积神经网络降噪器**
-  - <img src="./result/KPCN.png" alt="FzbRenderer_nvvk" style="width:80%; border-radius:6px; display:block;" />
+  <img src="./result/KPCN.png" alt="FzbRenderer_nvvk" style="width:80%; border-radius:6px; display:block;" />
 - **体积雾以及流体模拟(实习项目，无法公开)**
 - **Octree ReSTIR Path Guiding**
 
