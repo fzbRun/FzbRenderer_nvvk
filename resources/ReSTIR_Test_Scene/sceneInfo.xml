@@ -84,9 +84,21 @@
 			<eta value="1.91, 1.31, 0.82" />
 			<k value="8.05, 6.93, 5.99" />
 		</bsdf>
-		<bsdf type="diffuse" id="LightBSDF">
+		<bsdf type="diffuse" id="LightBSDF_white">
 			<albedo value="0.8, 0.8, 0.8, 1.0" />
-			<emissive value="1000, 1000, 1000" />
+			<emissive value="100, 100, 100" />
+		</bsdf>
+		<bsdf type="diffuse" id="LightBSDF_red">
+			<albedo value="0.8, 0.8, 0.8, 1.0" />
+			<emissive value="100, 0, 0" />
+		</bsdf>
+		<bsdf type="diffuse" id="LightBSDF_green">
+			<albedo value="0.8, 0.8, 0.8, 1.0" />
+			<emissive value="0, 100, 0" />
+		</bsdf>
+		<bsdf type="diffuse" id="LightBSDF_blue">
+			<albedo value="0.8, 0.8, 0.8, 1.0" />
+			<emissive value="0, 0, 100" />
 		</bsdf>
 	</bsdfs>
 	<meshes>
@@ -354,34 +366,55 @@
 			<materialRef id="LightBSDF"/>
 		</instance>
 		-->
-		<instance id="Light">
+
+<!--		
+		<instance id="Light_white">
 			<transform name="to_world">
-				<!--matrix value="0.730445 0 0 -4.4391 0 -1.32136 -1.42138e-007 1.50656 0 1.42138e-007 -1.93037 -4.44377 0 0 0 1" /-->
-				<!--matrix value="0.730445 0 0 -5.7391 0 -1.32136 -1.42138e-007 1.50656 0 1.42138e-007 -1.93037 -4.44377 0 0 0 1" /-->
-				<matrix value="-0.600445 0 0 -1.2 0 -2.75 -1.42138e-007 2.75 0 0 1.93037 -7.59 0 0 0 1" />
+				<translate value = "-2.85, 0, -7.59" />
+				<rotate value = "0, 0, 0" />
+				<scale value = "1, 1, 1" />
 			</transform>
 			<meshRef id="custom" type="plane" />
-			<materialRef id="LightBSDF"/>
+			<materialRef id="LightBSDF_white"/>
 		</instance>
-		
+	
+		<instance id="Light_red">
+			<transform name="to_world">
+				<translate value = "6.42, 2.8, -7.59" />
+				<rotate value = "0, 0, 0" />
+				<scale value = "1, 1, 1" />
+			</transform>
+			<meshRef id="custom" type="plane" />
+			<materialRef id="LightBSDF_red"/>
+		</instance>
+	
+		<instance id="Light_green">
+			<transform name="to_world">
+				<matrix value="-0.600445 0 0 1.2 0 -2.75 -1.42138e-007 2.75 0 0 1.93037 -7.59 0 0 0 1" />
+			</transform>
+			<meshRef id="custom" type="plane" />
+			<materialRef id="LightBSDF_green"/>
+		</instance>
+
+		<instance id="Light_blue">
+			<transform name="to_world">
+				<matrix value="-0.600445 0 0 2.4 0 -2.75 -1.42138e-007 2.75 0 0 1.93037 -7.59 0 0 0 1" />
+			</transform>
+			<meshRef id="custom" type="plane" />
+			<materialRef id="LightBSDF_blue"/>
+		</instance>
+		-->
 	</instances>
 
 	<lights>
 		<useSky value = "false" />
 		<backgroundColor value = "0.0, 0.0, 0.0" />
 
-		<light type="area" id="Light">
+		<light type="area" id="Light0">
 			<emissive value = "1.0, 1.0, 1.0" />
 			<intensity value = "1000.0" />
 			<SphericalRectangleSample value="true" />
-			<instanceRef id="Light"/>
+			<instanceRef id="Light_white"/>
 		</light>
-		<!--
-		<light type="direction" id="Light">
-			<emissive value = "1.0, 1.0, 1.0" />
-			<intensity value = "20.0" />
-			<direction value="1.0, -1.0, -1.0" />
-		</light>
-		-->
 	</lights>
 </scene>

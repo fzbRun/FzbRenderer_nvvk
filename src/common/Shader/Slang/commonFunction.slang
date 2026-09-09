@@ -460,6 +460,24 @@ void TransformAABB(inout AABB aabb, float4x4 m){
         aabb.maximum = max(aabb.maximum, p);
     }
 }
+//---------------------------------------------------Plane------------------------------------------------------
+bool PointInRectangle(float3 pos, float3 startPos, float3 edge1, float3 edge2){
+    float3 p = pos - startPos;
+
+    float len1Sq = dot(edge1, edge1);
+    float len2Sq = dot(edge2, edge2);
+
+    // 防止退化（零向量）
+    if (len1Sq < 1e-12 || len2Sq < 1e-12)
+        return false;
+
+    float u = dot(p, edge1) / len1Sq;
+    float v = dot(p, edge2) / len2Sq;
+
+    const float eps = 1e-5; // 容差
+    return (u >= -eps && u <= 1.0 + eps &&
+            v >= -eps && v <= 1.0 + eps);
+}
 //---------------------------------------------------Camera------------------------------------------------------
 void ExtractFrustumPlanes(float4x4 cameraVP, out FrustumPlane planes[6]) {
     float4 row0 = { cameraVP[0][0], cameraVP[1][0], cameraVP[2][0], cameraVP[3][0] };
@@ -1191,6 +1209,15 @@ float3 sample_sphere_mean(inout uint seed) {
     float cosTheta = 1 - 2 * r1; float phi = 2.0f * M_PI * r2;
     float sinTheta = sqrt(1.0f - cosTheta * cosTheta);
     return float3(sinTheta * cos(phi), sinTheta * sin(phi), cosTheta);
+}
+
+float2 sample_circle_mean(inout uint seed, float R) {
+    float r1 = rand(seed); float r2 = rand(seed);
+    float theta = M_PI * 2.0f * r1;
+    float rho = R * sqrt(r2);
+    float x = rho * cos(theta);
+    float y = rho * sin(theta);
+    return float2(x, y);
 }
 //------------------------------------------------sphereRectangleSample---------------------------------------------
 struct Quadrilateral {

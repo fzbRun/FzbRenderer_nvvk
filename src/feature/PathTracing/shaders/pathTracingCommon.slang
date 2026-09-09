@@ -755,7 +755,7 @@ float3 getBSDF(BSDFMaterial material, float3 incidence, float3 normal, float3 ou
 
 float getPdf_Diffuse(float3 incidence, float3 normal) {
     float cosineIN = dot(incidence, normal);
-    return M_1_PI * max(cosineIN, 1e-10f);
+    return M_1_PI * max(cosineIN, 0.0f);
 }
 float getPdf_Conductor(float3 incidence, float3 normal, float3 outgoing) {
     float cosineIN = dot(incidence, normal);

@@ -181,24 +181,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 	pugi::xml_node instancesNode = sceneInfoNode.child("instances");
 	for (pugi::xml_node instanceNode : instancesNode.children("instance")) {
 		InstanceSet instanceSet = InstanceSet(instanceNode);
-		if (instanceSet.instanceID != "defaultInstanceID") {
-			//instanceIDToInstance.insert({ instanceSet.instanceID, {instanceSet.type, getInstanceSetSize(instanceSet.type)} });
-			instanceIDToInstanceSet.insert({ instanceSet.instanceID, {instanceSet.type, getInstanceSetSize(instanceSet.type)} });
-		}
-			
 		addInstanceSet(instanceSet);
-		if (instanceSet.type == Static) {
-			staticInstanceCount += instanceSet.childInstances.size();
-			++staticInstanceSetCount;
-		}
-		else if (instanceSet.type == PeriodMotion) {
-			periodInstanceCount += instanceSet.childInstances.size();
-			++periodInstanceSetCount;
-		}
-		else if (instanceSet.type == RandomMotion) {
-			randomInstanceCount += instanceSet.childInstances.size();
-			++randomInstanceSetCount;
-		}
 	}
 
 	uint32_t offset = 0;
@@ -254,8 +237,6 @@ void FzbRenderer::Scene::createSceneFromXML() {
 			sceneInfo.backgroundColor = FzbRenderer::getRGBFromString(backgroudColorNode.attribute("value").value());
 
 		for (pugi::xml_node lightNode : lightsNode.children("light")) {
-			if (sceneInfo.numLights >= LIGHT_COUNT) break;
-
 			LightInstance lightInstance = LightInstance(lightNode);
 			lightInstances.push_back(lightInstance);
 
@@ -285,7 +266,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 			}
 			else if (lightType == "sun") {
 				light.type == shaderio::Direction;
-				sceneInfo.useSky = true;
+				if (sceneInfo.numLights < LIGHT_COUNT) sceneInfo.useSky = true;
 			}
 			else if (lightType == "area") {		//默认是矩形光源
 				light.type = shaderio::Area;
@@ -327,8 +308,10 @@ void FzbRenderer::Scene::createSceneFromXML() {
 					lightInstances[lightInstances.size() - 1].getTransformMatrixFromXML(transformNode);
 			}
 
-			sceneInfo.lights[sceneInfo.numLights] = light;
-			++sceneInfo.numLights;
+			if (sceneInfo.numLights < LIGHT_COUNT) {
+				sceneInfo.lights[sceneInfo.numLights] = light;
+				++sceneInfo.numLights;
+			}
 		}
 	}
 
@@ -355,6 +338,7 @@ void FzbRenderer::Scene::createSceneInfoBuffer() {
 	nvvk::ResourceAllocator* allocator = stagingUploader.getResourceAllocator();
 
 	// Create all mesh buffers
+	allocator->destroyBuffer(bMeshes);
 	if (meshes.size() > 0) {
 		allocator->createBuffer(bMeshes, std::span(meshes).size_bytes(),
 			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
@@ -363,6 +347,7 @@ void FzbRenderer::Scene::createSceneInfoBuffer() {
 	}
 
 	// Create all instance buffers
+	allocator->destroyBuffer(bInstances);
 	if (instances.size() > 0) {
 		allocator->createBuffer(bInstances, std::span(instances).size_bytes(),
 			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
@@ -372,6 +357,7 @@ void FzbRenderer::Scene::createSceneInfoBuffer() {
 	}
 
 	// Create all material buffers
+	allocator->destroyBuffer(bMaterials);
 	if (materials.size() > 0) {
 		allocator->createBuffer(bMaterials, std::span(materials).size_bytes(),
 			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
@@ -381,6 +367,7 @@ void FzbRenderer::Scene::createSceneInfoBuffer() {
 	}
 
 	// Create the scene info buffer
+	allocator->destroyBuffer(bSceneInfo);
 	NVVK_CHECK(allocator->createBuffer(bSceneInfo,
 		std::span<const shaderio::SceneInfo>(&sceneInfo, 1).size_bytes(),
 		VK_BUFFER_USAGE_2_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT));
@@ -483,6 +470,7 @@ void FzbRenderer::Scene::preRender() {
 
 }
 void FzbRenderer::Scene::UIRender() {
+	return;
 	uint32_t randomSeed = 0;
 
 	if (ImGui::Begin("Scene Resources")) {
@@ -549,10 +537,29 @@ uint32_t FzbRenderer::Scene::getInstanceSetSize(InstanceType type) {
 	return 0;
 }
 void FzbRenderer::Scene::addInstanceSet(InstanceSet& instanceSet) {
+	if (instanceSet.instanceID != "defaultInstanceID") {
+		//instanceIDToInstance.insert({ instanceSet.instanceID, {instanceSet.type, getInstanceSetSize(instanceSet.type)} });
+		instanceIDToInstanceSet.insert({ instanceSet.instanceID, {instanceSet.type, getInstanceSetSize(instanceSet.type)} });
+	}
 	switch (instanceSet.type) {
-		case Static: return staticInstanceSets.push_back(instanceSet); break;
-		case PeriodMotion: return periodInstanceSets.push_back(instanceSet); break;
-		case RandomMotion: return randomInstanceSets.push_back(instanceSet); break;
+		case Static: {
+			staticInstanceSets.push_back(instanceSet); 
+			staticInstanceCount += instanceSet.childInstances.size();
+			++staticInstanceSetCount;
+			break;
+		}
+		case PeriodMotion: {
+			periodInstanceSets.push_back(instanceSet); 
+			periodInstanceCount += instanceSet.childInstances.size();
+			++periodInstanceSetCount;
+			break;
+		}
+		case RandomMotion: {
+			randomInstanceSets.push_back(instanceSet); 
+			randomInstanceCount += instanceSet.childInstances.size();
+			++randomInstanceSetCount;
+			break;
+		}
 		default: printf("实例没有相应类型");
 	}
 }
