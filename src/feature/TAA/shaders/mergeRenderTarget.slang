@@ -40,12 +40,13 @@ float3 ToneMap(float3 color){
 float3 UnToneMap(float3 color){
     return color / (1 - Luminance(color));
 }
-uint2 getClosestScreenPos(int2 screenPos){
+
+uint2 getClosestScreenPos(int2 screenPos) {
     float2 deltaRes = 1.0f / pushConst.screenSize;
     float closestDepth = 1.0f;
     uint2 closestScreenPos = screenPos;
 
-    for (int i = -1; i <= 1; ++i){
+    for (int i = -1; i <= 1; ++i) {
         for (int j = -1; j <= 1; ++j) {
             uint2 newScreenPos = clamp(screenPos + int2(i, j), 0, pushConst.screenSize - 1);
             float depth = depthImage[newScreenPos];
@@ -59,6 +60,7 @@ uint2 getClosestScreenPos(int2 screenPos){
 
     return closestScreenPos;
 }
+
 float3 clipAABB(float3 nowColor, float3 preColor, int2 screenPos) {
     float3 aabbMin = nowColor, aabbMax = nowColor;
     float2 deltaRes = 1.0f / pushConst.screenSize;

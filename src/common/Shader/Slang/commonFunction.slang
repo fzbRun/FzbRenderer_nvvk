@@ -1368,9 +1368,11 @@ float3 sphericalRectangleSample(Quadrilateral_initialization quadrangle, float u
     float hv2 = hv * hv;
     float yv = hv2 < 1 - 1e-6 ? (hv * dl) / sqrt(1.0f - hv2) : quadrangle.y1;
 
-    return xu * quadrangle.x + yv * quadrangle.y + quadrangle.z0 * quadrangle.z; // δ��һ��
+    return xu * quadrangle.x + yv * quadrangle.y + quadrangle.z0 * quadrangle.z;
 }
 //------------------------------------------------noise---------------------------------------------
 #include "common/Shader/Slang/noise.slang"
+//------------------------------------------------Jitter--------------------------------------------
+
 
 #endif

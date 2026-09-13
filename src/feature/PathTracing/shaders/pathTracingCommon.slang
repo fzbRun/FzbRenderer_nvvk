@@ -128,6 +128,23 @@ HitState getHitStateWithPositionFetch(const float3 barycentrics, float3 rayDirec
     return hitState;
 }
 //-------------------------------------------------获取纹理数据------------------------------------------------
+void getBSDFTextureData(inout BSDFMaterial material, float2 texCoords) {
+    int albedoMapIndex = material.materialMapIndex.y;
+    if (albedoMapIndex == int(AlbedoMapType::Checkerboard)) {
+        float2 uv = float2(texCoords.x * 8.0f, texCoords.y * 32.0f) * 2.0f;
+        float2 checker = floor(uv) % 2.0f;
+        float pattern = (checker.x + checker.y) % 2.0f;
+        material.albedo *= lerp(float3(0.8f), float3(0.2f), pattern);
+    }
+    else if (albedoMapIndex >= 0) material.albedo *= textures[albedoMapIndex].SampleLevel(texCoords, 0).xyz;
+
+    int bsdfParamMapIndex = material.materialMapIndex.z;
+    if (bsdfParamMapIndex >= 0) {
+        float4 bsdfParam = textures[bsdfParamMapIndex].SampleLevel(texCoords, 0);
+        material.eta = bsdfParam.xyz;
+        material.roughness = bsdfParam.w;
+    }
+}
 void getTextueData(inout CallablePayload payload, float2 texCoords) {
     if (texCoords.x == 0.0f && texCoords.y == 0.0f) return;
 
@@ -140,21 +157,7 @@ void getTextueData(inout CallablePayload payload, float2 texCoords) {
         payload.TBN = float3x3(tangent, bitangent, payload.hitNormal);
     }
 
-    int albedoMapIndex = payload.material.materialMapIndex.y;
-    if (albedoMapIndex == int(AlbedoMapType::Checkerboard)) {
-        float2 uv = float2(texCoords.x * 8.0f, texCoords.y * 32.0f) * 2.0f;
-        float2 checker = floor(uv) % 2.0f;
-        float pattern = (checker.x + checker.y) % 2.0f;
-        payload.material.albedo *= lerp(float3(0.8f), float3(0.2f), pattern);
-    }
-    else if (albedoMapIndex >= 0) payload.material.albedo *= textures[albedoMapIndex].SampleLevel(texCoords, 0).xyz;
-
-    int bsdfParamMapIndex = payload.material.materialMapIndex.z;
-    if (bsdfParamMapIndex >= 0) {
-        float4 bsdfParam = textures[bsdfParamMapIndex].SampleLevel(texCoords, 0);
-        payload.material.eta = bsdfParam.xyz;
-        payload.material.roughness = bsdfParam.w;
-    }
+    getBSDFTextureData(payload.material, texCoords);
 }
 //---------------------------------------------closethit variable setting------------------------------------
 void initCallableShader(inout CallablePayload callablePayload, 
@@ -990,8 +993,8 @@ void PopulateCallablePayload_RoughConductorMaterial(inout CallablePayload payloa
     float alpha = roughness * roughness;
 
     float3 outgoing_tangentSpace = mul(payload.TBN, payload.outgoing);
-    // float3 h_tangentSpace = hvd_ggx_sample_vndf(outgoing_tangentSpace, float2(roughness), float2(randomNumber1, randomNumber2));
-    float3 h_tangentSpace = SampleVisibleNormals(outgoing_tangentSpace, alpha, float2(randomNumber1, randomNumber2));
+    float3 h_tangentSpace = hvd_ggx_sample_vndf(outgoing_tangentSpace, float2(roughness), float2(randomNumber1, randomNumber2));
+    //float3 h_tangentSpace = SampleVisibleNormals(outgoing_tangentSpace, alpha, float2(randomNumber1, randomNumber2));
     if (h_tangentSpace.z == 0.0f) {
         payload.bsdf = float3(0.0f);
         payload.pdf = 1.0f;
@@ -1015,9 +1018,8 @@ void PopulateCallablePayload_RoughConductorMaterial(inout CallablePayload payloa
 
     float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h_tangentSpace); // h需要在切线空间中
     float D = D_costhetaNH / h_tangentSpace.z;                                   // max(h.z, 1e-6f);
-    payload.pdf = D_costhetaNH / (4.0f * cosineOH);
     //float D = GTR2_NDF(h_tangentSpace.z, roughness);
-    //payload.pdf = D * h_tangentSpace.z / (4.0f * cosineOH);
+    payload.pdf = D * h_tangentSpace.z / (4.0f * cosineOH);
 
     float G1_outgoing, G1_incidence;
     float G2 = ggx_smith_shadow_mask(
@@ -1034,6 +1036,8 @@ void PopulateCallablePayload_RoughConductorMaterial(inout CallablePayload payloa
     }
     float3 F = schlickFresnel(payload.material.albedo, float3(1.0F), cosineOH);
     payload.bsdf = (D * G2 * F) / (4.0f * outgoing_tangentSpace.z * incidence_tangentSpace.z);
+
+    //payload.pdf = D_costhetaNH * G1_outgoing / (4.0f * outgoing_tangentSpace.z);
 
     if (any(payload.directionLightRadiance > 0.001f)) {
         payload.directionLightRadiance *= 
