@@ -54,7 +54,7 @@ void ReSTIR_GI::uiRender() {
 
 		UIModified |= ImGui::Combo("Mode", &pushConstant.mode, modeNames_pointers.data(), static_cast<int>(modeNames_pointers.size()));
 		PE::begin();
-		if(pushConstant.mode == (uint32_t)ReSTIR_GI_Mode::eRIS_Spatial_Reuse) 
+		if(pushConstant.mode >= (uint32_t)ReSTIR_GI_Mode::eRIS_Spatial_Reuse) 
 			UIModified |= PE::DragInt("Spatial Reuse Radius", &pushConstant.spatialReuseRadius, 1, 1, 32);
 		PE::end();
 	}
@@ -178,13 +178,15 @@ void ReSTIR_GI::render(VkCommandBuffer* cmdPtr) {
 	
 	RIS(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+
+	if (pushConstant.mode == (uint32_t)ReSTIR_GI_Mode::eRIS_SpatialTemporal_Reuse) {
+		TemporalReuse(cmd);
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	}
+
 	if (pushConstant.mode >= (uint32_t)ReSTIR_GI_Mode::eRIS_Spatial_Reuse) {
 		SpatialReuse(cmd);
 		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-	}
-	if (pushConstant.mode == (uint32_t)ReSTIR_GI_Mode::eRIS_SpatialTemporal_Reuse) {
-		TemporalReuse(cmd);
-		//nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	}
 	
 	Application::tonemapper.runCompute(cmd, gBuffers.getSize(), Application::tonemapperData, gBuffers.getDescriptorImageInfo((uint32_t)GBuffers_ReSTIR_GI::eImgRendered), gBuffers.getDescriptorImageInfo((uint32_t)GBuffers_ReSTIR_GI::eImgTonemapped));
@@ -589,18 +591,6 @@ void ReSTIR_GI::SpatialReuse(VkCommandBuffer cmd) {
 	VkExtent2D sceneSize = Application::app->getViewportSize();
 	VkExtent2D groupSize = nvvk::getGroupCounts(sceneSize, VkExtent2D{ Spatial_Reuse_GroupSize, Spatial_Reuse_GroupSize });
 	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-}
-void ReSTIR_GI::TemporalReuse(VkCommandBuffer cmd) {
-	NVVK_DBG_SCOPE(cmd);
-	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
-
-	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_Temporal_Reuse_ReSTIR_GI);
-	pushInfo.pValues = &pushConstant;
-	vkCmdPushConstants2(cmd, &pushInfo);
-	VkExtent2D sceneSize = Application::app->getViewportSize();
-	VkExtent2D groupSize = nvvk::getGroupCounts(sceneSize, VkExtent2D{ Spatial_Reuse_GroupSize, Spatial_Reuse_GroupSize });
-	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT);
 
 	VkBufferCopy2 copyRegion = {
@@ -619,4 +609,15 @@ void ReSTIR_GI::TemporalReuse(VkCommandBuffer cmd) {
 		.pRegions = &copyRegion
 	};
 	vkCmdCopyBuffer2(cmd, &copyInfo);
+}
+void ReSTIR_GI::TemporalReuse(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
+	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
+
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_Temporal_Reuse_ReSTIR_GI);
+	pushInfo.pValues = &pushConstant;
+	vkCmdPushConstants2(cmd, &pushInfo);
+	VkExtent2D sceneSize = Application::app->getViewportSize();
+	VkExtent2D groupSize = nvvk::getGroupCounts(sceneSize, VkExtent2D{ Spatial_Reuse_GroupSize, Spatial_Reuse_GroupSize });
+	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
 }

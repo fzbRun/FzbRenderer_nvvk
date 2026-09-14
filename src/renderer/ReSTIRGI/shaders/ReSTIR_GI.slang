@@ -180,7 +180,7 @@ float3 RayMiss(float3 rayDirection) {
     else return sceneInfo.backgroundColor;
 }
 //-----------------------------------------------RIS--------------------------------------------
-#define NEE_SAMPLE_COUNT 8
+#define NEE_SAMPLE_COUNT 1
 #define BSDF_SAMPLE_COUNT 1
 void RIS(inout CallablePayload payload, inout Reservoir reservoir, inout float3 f, int areaLightCount) {
     reservoir.M = NEE_SAMPLE_COUNT + BSDF_SAMPLE_COUNT;
@@ -213,7 +213,7 @@ void RIS(inout CallablePayload payload, inout Reservoir reservoir, inout float3 
         float cosine = abs(dot(sampleDir, payload.hitNormal));
         float3 bsdf = getBSDF(payload.material, sampleDir, payload.hitNormal, payload.outgoing, payload.TBN, payload.isExt);
         float3 f_candidate = emissive * bsdf * cosine;
-        float p_hat_candidate = luminance(f_candidate);
+        float p_hat_candidate = dot(f_candidate, 1.0f);
 
         float p_bsdf = getPdf(payload.material, sampleDir, payload.hitNormal, payload.outgoing, payload.TBN, payload.isExt);
         float mi = p_nee / (BSDF_SAMPLE_COUNT * p_bsdf + NEE_SAMPLE_COUNT * p_nee);
@@ -253,7 +253,7 @@ void RIS(inout CallablePayload payload, inout Reservoir reservoir, inout float3 
 
         float cosine = abs(dot(payload.incidence, payload.hitNormal));
         float3 f_candidate = emissive * payload.bsdf * cosine;
-        float p_hat_candidate = luminance(f_candidate);
+        float p_hat_candidate = dot(f_candidate, 1.0f);
 
         float mi = payload.pdf / (BSDF_SAMPLE_COUNT * payload.pdf + NEE_SAMPLE_COUNT * p_nee);
 
@@ -401,9 +401,12 @@ void computeMain_ReSTIR_GI_SpatialReuse(uint2 threadIndex: SV_DispatchThreadID, 
     float p_select = 1.0f / (pushConst.spatialReuseRadius * pushConst.spatialReuseRadius);
     uint randomSeed = xxhash32(uint3(threadIndex, pushConst.frameIndex));
     for (int i = 0; i < SpatialReuseCount; ++i) {
-        int sampleIndex = int(pushConst.spatialReuseRadius * pushConst.spatialReuseRadius * rand(randomSeed));
-        int2 sampleXY = int2(sampleIndex % pushConst.spatialReuseRadius, sampleIndex / pushConst.spatialReuseRadius) - pushConst.spatialReuseRadius / 2;
-        samplePixels[i] = int2(threadIndex) + sampleXY;
+        //int sampleIndex = int(pushConst.spatialReuseRadius * pushConst.spatialReuseRadius * rand(randomSeed));
+        //int2 sampleXY = int2(sampleIndex % pushConst.spatialReuseRadius, sampleIndex / pushConst.spatialReuseRadius) - pushConst.spatialReuseRadius / 2;
+        //samplePixels[i] = int2(threadIndex) + sampleXY;
+
+        int2 randNeighbor = (int2)sample_circle_mean(randomSeed, (float)pushConst.spatialReuseRadius);
+        samplePixels[i] = int2(threadIndex) + randNeighbor;
     }
 
     RayDesc tempRay;
@@ -412,6 +415,7 @@ void computeMain_ReSTIR_GI_SpatialReuse(uint2 threadIndex: SV_DispatchThreadID, 
 
     pixelData_cur.reservoir.M = 0;
 
+    int M_sum = 0;
     float wSum = 0.0f;
     float p_hat_y = 1.0f;
     float3 f_y = 0.0f;
@@ -422,7 +426,11 @@ void computeMain_ReSTIR_GI_SpatialReuse(uint2 threadIndex: SV_DispatchThreadID, 
         PixelData_ReSTIR_GI pixelData_x_i;
         if (!getPixelData(threadIndex, groupThreadIndex, samplePixel, pixelData_x_i)) continue;
 
-        pixelData_cur.reservoir.M = min(pixelData_cur.reservoir.M + pixelData_x_i.reservoir.M, Max_Temporal_Confidence);
+        //bool geometryChange = dot(pixelData_cur.hitNormal, pixelData_x_i.hitNormal) < 0.8f;
+        //geometryChange |= distance(pixelData_cur.hitPos, pixelData_x_i.hitPos) > 0.1f;
+        //if (geometryChange) continue;
+
+        M_sum += pixelData_x_i.reservoir.M;
 
         float3 sampleDir = normalize(pixelData_x_i.reservoir.samplePos - pixelData_cur.hitPos);
         tempRay.Direction = sampleDir;
@@ -434,11 +442,11 @@ void computeMain_ReSTIR_GI_SpatialReuse(uint2 threadIndex: SV_DispatchThreadID, 
         float3 bsdf = getBSDF(material_cur, sampleDir, pixelData_cur.hitNormal, pixelData_cur.outgoing, TBN_cur, true);
         float cosine = abs(dot(sampleDir, pixelData_cur.hitNormal));
         float3 f_x_i = pixelData_x_i.reservoir.sampleEmissive * bsdf * cosine;
-        float p_hat_x_i = luminance(f_x_i);
+        float p_hat_x_i = dot(f_x_i, 1.0f);
         if (p_hat_x_i == 0.0f) continue;
 
-        float p_x_i = luminance(pixelData_x_i.f);// * (i == SpatialReuseCount - 1 ? 1.0f : p_select);
-        float p_x_j_sum = p_x_i;
+        float p_x_i = dot(pixelData_x_i.f, 1.0f); // * (i == SpatialReuseCount - 1 ? 1.0f : p_select);
+        float p_x_j_sum = p_x_i * pixelData_x_i.reservoir.M;
         for (int j = 0; j < SpatialReuseCount; ++j) {
             if (i == j) continue;
             int2 samplePixel = samplePixels[j];
@@ -462,11 +470,11 @@ void computeMain_ReSTIR_GI_SpatialReuse(uint2 threadIndex: SV_DispatchThreadID, 
             bsdf = getBSDF(material_x_j, sampleDir, pixelData_x_j.hitNormal, pixelData_x_j.outgoing, TBN, true);
             cosine = abs(dot(sampleDir, pixelData_x_j.hitNormal));
             float3 f_x_j = pixelData_x_i.reservoir.sampleEmissive * bsdf * cosine;
-            float p_x_j = luminance(f_x_j);// * (j == SpatialReuseCount - 1 ? 1.0f : p_select);
-            p_x_j_sum += p_x_j;
+            float p_x_j = dot(f_x_j, 1.0f); // * (j == SpatialReuseCount - 1 ? 1.0f : p_select);
+            p_x_j_sum += p_x_j * pixelData_x_j.reservoir.M;
         }
-        float mi = p_x_i / p_x_j_sum;
-        float wi = mi * p_hat_x_i * pixelData_x_i.reservoir.W;// / (i == SpatialReuseCount - 1 ? 1.0f : p_select);
+        float mi = p_x_i * pixelData_x_i.reservoir.M / max(p_x_j_sum, 1e-30f);
+        float wi = mi * p_hat_x_i * pixelData_x_i.reservoir.W; // / (i == SpatialReuseCount - 1 ? 1.0f : p_select);
 
         wSum += wi;
         if (rand(randomSeed) <= wi / max(wSum, 1e-30f)) {
@@ -478,24 +486,20 @@ void computeMain_ReSTIR_GI_SpatialReuse(uint2 threadIndex: SV_DispatchThreadID, 
         }
     }
     float W_y = wSum / p_hat_y;
+    pixelData_cur.reservoir.W = W_y;
+    pixelData_cur.reservoir.M = M_sum;
+    pixelData_cur.f = f_y;
+    uint pixelIndexU = threadIndex.y * pushConst.screenSize.x + threadIndex.x;
+    pixelDataBuffer[pixelIndexU] = pixelData_cur;
 
-    if (pushConst.mode == 2) {
-        float3 result = pixelData_cur.emissive + f_y * W_y;
-
-        float2 launchID = (float2)threadIndex;
-        if (pushConst.maxFrameCount > 1 && pushConst.frameIndex > 0) {
-            float a = 1.0f / float(pushConst.frameIndex + 1);
-            float3 old_color = outImage[int2(launchID)].xyz;
-            outImage[int2(launchID)] = float4(lerp(old_color, result, a), 1.0f);
-        }
-        else outImage[int2(launchID)] = float4(result, 1.0f);
-    } else {
-        pixelData_cur.reservoir.W = W_y;
-        pixelData_cur.f = f_y;
-
-        uint pixelIndexU = threadIndex.y * pushConst.screenSize.x + threadIndex.x;
-        pixelDataBuffer[pixelIndexU] = pixelData_cur;
+    float3 result = pixelData_cur.emissive + f_y * W_y;
+    float2 launchID = (float2)threadIndex;
+    if (pushConst.maxFrameCount > 1 && pushConst.frameIndex > 0) {
+        float a = 1.0f / float(pushConst.frameIndex + 1);
+        float3 old_color = outImage[int2(launchID)].xyz;
+        outImage[int2(launchID)] = float4(lerp(old_color, result, a), 1.0f);
     }
+    else outImage[int2(launchID)] = float4(result, 1.0f);
 }
 
 [numthreads(Spatial_Reuse_GroupSize, Spatial_Reuse_GroupSize, 1)]
@@ -512,44 +516,24 @@ void computeMain_ReSTIR_GI_TemporalReuse(uint2 threadIndex: SV_DispatchThreadID,
     uint pixelIndex_linear = threadIndex.y * pushConst.screenSize.x + threadIndex.x;
     PixelData_ReSTIR_GI pixelData_cur = pixelDataBuffer[pixelIndex_linear];
 
-    if (pixelData_cur.materialIndex == -1) {
-        if (pushConst.maxFrameCount > 1 && pushConst.frameIndex > 0) {
-            float3 old_color = outImage[int2(launchID)].xyz;
-            outImage[int2(launchID)] = float4(lerp(old_color, pixelData_cur.emissive, a), 1.0f);
-        }
-        else outImage[int2(launchID)] = float4(pixelData_cur.emissive, 1.0f);
-        return;
-    }
+    if (pixelData_cur.materialIndex == -1) return;
 
     float3 result = pixelData_cur.emissive + pixelData_cur.f * pixelData_cur.reservoir.W;
-    if (pushConst.frameIndex == 0) {
-        outImage[int2(launchID)] = float4(result, 1.0f);
-        return;
-    }
+    if (pushConst.frameIndex == 0) return;
 
     float2 velocity = velocityImage[threadIndex].xy;
     float2 screenPos = (float2(threadIndex) + 0.5f) / pushConst.screenSize;
     float2 offsetScreenPos = screenPos - velocity;
-    if (any(offsetScreenPos < 0.0f) || any(offsetScreenPos >= 1.0f)) {
-        if (pushConst.maxFrameCount > 1 && pushConst.frameIndex > 0) {
-            float3 old_color = outImage[int2(launchID)].xyz;
-            outImage[int2(launchID)] = float4(lerp(old_color, result, a), 1.0f);
-        }
-        else outImage[int2(launchID)] = float4(result, 1.0f);
-        return;
-    }
+    if (any(offsetScreenPos < 0.0f) || any(offsetScreenPos >= 1.0f)) return;
 
     int2 lastPixelIndex = int2(offsetScreenPos * pushConst.screenSize);
     uint lastPixelIndex_linear = lastPixelIndex.y * pushConst.screenSize.x + lastPixelIndex.x;
     PixelData_ReSTIR_GI pixelData_last = pixelDataBuffer_lastFrame[lastPixelIndex_linear];
-    if (pixelData_last.materialIndex == -1 || pixelData_last.reservoir.W == 0.0f) {
-        if (pushConst.maxFrameCount > 1 && pushConst.frameIndex > 0) {
-            float3 old_color = outImage[int2(launchID)].xyz;
-            outImage[int2(launchID)] = float4(lerp(old_color, result, a), 1.0f);
-        }
-        else outImage[int2(launchID)] = float4(result, 1.0f);
-        return;
-    }
+    if (pixelData_last.materialIndex == -1 || pixelData_last.reservoir.W == 0.0f) return;
+
+    bool geometryChange = dot(pixelData_cur.hitNormal, pixelData_last.hitNormal) < 0.9f;
+    geometryChange |= distance(pixelData_cur.hitPos, pixelData_last.hitPos) > 0.01f;
+    if (geometryChange) return;
 
     uint randomSeed = xxhash32(uint3(threadIndex, pushConst.frameIndex));
 
@@ -570,62 +554,62 @@ void computeMain_ReSTIR_GI_TemporalReuse(uint2 threadIndex: SV_DispatchThreadID,
 
     int M_cur = pixelData_cur.reservoir.M;
     int M_last = pixelData_last.reservoir.M;
-    int M_final = M_cur;
     float3 samplePos = 0.0f, sampleEmissive = 0.0f;
-    float wSum = 0.0f; float3 f_y = 0.0f; float p_hat_y = 1.0f;
+    float wSum = 0.0f; float3 f_y = 0.0f;
     {
-        float3 f_curPixel = 0.0f;
-        float p_hat_curPixel = 0.0f;
-        float p_hat_lastPixel = luminance(pixelData_last.f);
-        float mis_sum = M_last * p_hat_lastPixel;
+        //float3 f_curPixel = 0.0f;
+        //float p_hat_curPixel = 0.0f;
+        //float p_hat_lastPixel = dot(pixelData_last.f, 1.0f);
+        //float mis_sum = M_last * p_hat_lastPixel;
+        //
+        //float3 sampleDir = normalize(pixelData_last.reservoir.samplePos - pixelData_cur.hitPos);
+        //tempRay.Direction = sampleDir;
+        //tempRay.Origin = pixelData_cur.hitPos + 0.00001f * tempRay.Direction;
+        //float3 pos;
+        //if (traceRay3(tempRay, pos)) {
+        //    if (distance(pos, pixelData_last.reservoir.samplePos) <= 0.01f) {
+        //        float3 bsdf = getBSDF(material_cur, sampleDir, pixelData_cur.hitNormal, pixelData_cur.outgoing, TBN_cur, true);
+        //        float cosine = abs(dot(sampleDir, pixelData_cur.hitNormal));
+        //        f_curPixel = pixelData_last.reservoir.sampleEmissive * bsdf * cosine;
+        //        p_hat_curPixel = dot(f_curPixel, 1.0f);
+        //        mis_sum += M_cur * p_hat_curPixel;
+        //
+        //        M_final += M_last;
+        //    }
+        //}
 
-        float3 sampleDir = normalize(pixelData_last.reservoir.samplePos - pixelData_cur.hitPos);
-        tempRay.Direction = sampleDir;
-        tempRay.Origin = pixelData_cur.hitPos + 0.00001f * tempRay.Direction;
-        float3 pos;
-        if (traceRay3(tempRay, pos)) {
-            if (distance(pos, pixelData_last.reservoir.samplePos) <= 0.01f) {
-                float3 bsdf = getBSDF(material_cur, sampleDir, pixelData_cur.hitNormal, pixelData_cur.outgoing, TBN_cur, true);
-                float cosine = abs(dot(sampleDir, pixelData_cur.hitNormal));
-                f_curPixel = pixelData_last.reservoir.sampleEmissive * bsdf * cosine;
-                p_hat_curPixel = luminance(f_curPixel);
-                mis_sum += M_cur * p_hat_curPixel;
-
-                M_final += M_last;
-            }
-        }
-
-        float mi = M_last * p_hat_lastPixel / mis_sum;
+        float p_hat_curPixel = dot(pixelData_last.f, 1.0f);
+        float mi = (float)M_last / (M_cur + M_last);    //M_last * p_hat_lastPixel / mis_sum;
         float wi = mi * p_hat_curPixel * pixelData_last.reservoir.W;
         wSum += wi;
         if (rand(randomSeed) <= wi / max(wSum, 1e-30f)) {
             samplePos = pixelData_last.reservoir.samplePos;
             sampleEmissive = pixelData_last.reservoir.sampleEmissive;
 
-            f_y = f_curPixel;
-            p_hat_y = p_hat_curPixel;
+            f_y = pixelData_last.f;
         }
     }
     if (pixelData_cur.reservoir.W > 0.0f){
-        float p_hat_curPixel = luminance(pixelData_cur.f);
-        float p_hat_lastPixel = 0.0f;
-        float mis_sum = M_cur * p_hat_curPixel;
+        //float p_hat_curPixel = dot(pixelData_cur.f, 1.0f);
+        //float p_hat_lastPixel = 0.0f;
+        //float mis_sum = M_cur * p_hat_curPixel;
+        //
+        //float3 sampleDir = normalize(pixelData_cur.reservoir.samplePos - pixelData_last.hitPos);
+        //tempRay.Direction = sampleDir;
+        //tempRay.Origin = pixelData_last.hitPos + 0.00001f * tempRay.Direction;
+        //float3 pos;
+        //if (traceRay3(tempRay, pos)) {
+        //    if (distance(pos, pixelData_cur.reservoir.samplePos) <= 0.01f) {
+        //        float3 bsdf = getBSDF(material_last, sampleDir, pixelData_last.hitNormal, pixelData_last.outgoing, TBN_last, true);
+        //        float cosine = abs(dot(sampleDir, pixelData_last.hitNormal));
+        //        float3 f_lastPixel = pixelData_cur.reservoir.sampleEmissive * bsdf * cosine;
+        //        p_hat_lastPixel = dot(f_lastPixel, 1.0f);
+        //        mis_sum += M_last * p_hat_lastPixel;
+        //    }
+        //}
 
-        float3 sampleDir = normalize(pixelData_cur.reservoir.samplePos - pixelData_last.hitPos);
-        tempRay.Direction = sampleDir;
-        tempRay.Origin = pixelData_last.hitPos + 0.00001f * tempRay.Direction;
-        float3 pos;
-        if (traceRay3(tempRay, pos)) {
-            if (distance(pos, pixelData_cur.reservoir.samplePos) <= 0.01f) {
-                float3 bsdf = getBSDF(material_last, sampleDir, pixelData_last.hitNormal, pixelData_last.outgoing, TBN_last, true);
-                float cosine = abs(dot(sampleDir, pixelData_last.hitNormal));
-                float3 f_lastPixel = pixelData_cur.reservoir.sampleEmissive * bsdf * cosine;
-                p_hat_lastPixel = luminance(f_lastPixel);
-                mis_sum += M_last * p_hat_lastPixel;
-            }
-        }
-
-        float mi = M_cur * p_hat_curPixel / mis_sum;
+        float p_hat_curPixel = dot(pixelData_cur.f, 1.0f);
+        float mi = (float)M_cur / (M_cur + M_last);    //M_cur * p_hat_curPixel / mis_sum;
         float wi = mi * p_hat_curPixel * pixelData_cur.reservoir.W;
         wSum += wi;
         if (rand(randomSeed) <= wi / max(wSum, 1e-30f)) {
@@ -633,19 +617,16 @@ void computeMain_ReSTIR_GI_TemporalReuse(uint2 threadIndex: SV_DispatchThreadID,
             sampleEmissive = pixelData_cur.reservoir.sampleEmissive;
 
             f_y = pixelData_cur.f;
-            p_hat_y = p_hat_curPixel;
         }
     }
 
+    //if (pushConst.frameIndex == 0 && all(f_y == 0.0f)) printf("wSum: %f\n", wSum);
+
     pixelData_cur.reservoir.samplePos = samplePos;
     pixelData_cur.reservoir.sampleEmissive = sampleEmissive;
-    pixelData_cur.reservoir.W = wSum / p_hat_y;
-    pixelData_cur.reservoir.M = min(M_final, Max_Temporal_Confidence);
+    pixelData_cur.reservoir.W = wSum / dot(f_y, 1.0f);
+    pixelData_cur.reservoir.M = min(M_cur + M_last, Max_Temporal_Confidence);
     pixelData_cur.f = f_y;
     uint pixelIndexU = threadIndex.y * pushConst.screenSize.x + threadIndex.x;
     pixelDataBuffer[pixelIndexU] = pixelData_cur;
-
-    result = pixelData_cur.emissive + f_y * pixelData_cur.reservoir.W;
-    float3 old_color = outImage[int2(launchID)].xyz;
-    outImage[int2(launchID)] = float4(lerp(old_color, result, a), 1.0f);
 }
