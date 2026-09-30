@@ -6,6 +6,11 @@
 #define FZBRENDERER_FZB_PATHGUIDING_SHADER_IO_H
 NAMESPACE_SHADERIO_BEGIN()
 
+#define RIS_Version
+#define Candidate_Samples_Count 64
+
+#define OCTREE_E_CLUSTER
+
 //#define GEOMETRY_CLUSTER_WITH_E
 
 //#define ADAPTIVE_IMPORTANCE_SAMPLING	//Adaptive importance sampling
@@ -33,6 +38,9 @@ struct FzbPathGuidingPushConstant
 	SceneInfo* sceneInfoAddress;
 	uint2 sceneSize;
 	uint2 threadGroupCount;
+
+	uint* indivisibleNodeInfoBufferAddress_E;
+	float* weightSumBufferAddress;
 };
 
 enum class StaticBindingPoints_FzbPG

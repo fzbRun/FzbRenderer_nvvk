@@ -47,6 +47,7 @@ struct AreaLight_ReSTIR_GI {
 
 struct Reservoir {
 	float3 samplePos;
+	float3 sampleNormal;
 	float3 sampleEmissive;
 	int M;
 	float W;

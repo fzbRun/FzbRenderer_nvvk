@@ -25,6 +25,8 @@ struct OctreePushConstant_FzbPG {
 	int maxFrameCount;
 	float4 VGBStartPos_Size;
 	float4 VGBVoxelSize;
+
+	float* OctreeNodePairWeightSumBufferAddress;
 #ifndef NDEBUG
 	int showOctreeNodeTotalCount;
 	int normalIndex;
@@ -183,6 +185,8 @@ struct OctreeNearbyNodeInfo_FzbPG {
 #define HITTEST_CS_THREADGROUP_SIZE 256
 #define VISIBLEAABB_CLUSTER_CS_THREADGROUP_SIZE 512
 #define GETPROBABILITY_CS_THREADGROUP_SIZE 1024
+
+#define OCTREE_RIS_THREADGROUP_SIZE OUTGOING_COUNT_FZBPG
 
 #define GETNEARBYNODES_CS_THREADGROUP_SIZE 512
 #define GETNEARBYNODES2_CS_THREADGROUP_SIZE 1024

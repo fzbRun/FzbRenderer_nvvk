@@ -510,6 +510,8 @@ void FzbPathGuidingRenderer::pathGuiding(VkCommandBuffer cmd) {
 
 	pushConstant.sceneSize = shaderio::uint2(sceneSize.width, sceneSize.height);
 	pushConstant.threadGroupCount = shaderio::uint2(groupSize.width, groupSize.height);
+	pushConstant.indivisibleNodeInfoBufferAddress_E = (uint32_t*)octree->indivisibleNodeInfosBuffer_E.address;
+	pushConstant.weightSumBufferAddress = (float*)octree->weightSumBuffer.address;
 	vkCmdPushConstants2(cmd, &pushInfo);
 
 	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);

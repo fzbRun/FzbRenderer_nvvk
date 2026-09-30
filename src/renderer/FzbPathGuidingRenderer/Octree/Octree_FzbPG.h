@@ -60,6 +60,7 @@ public:
 	nvvk::Buffer indivisibleNodeInfosBuffer_E;
 
 	nvvk::Buffer octreeNodePairWeightBuffer;
+	nvvk::Buffer weightSumBuffer;
 
 	nvvk::Buffer nearbyNodeInfoBuffer;
 
@@ -96,6 +97,7 @@ private:
 
 	VkShaderEXT computeShader_initWeights{};
 	VkShaderEXT computeShader_octreeNodeHitTest{};
+	VkShaderEXT computeShader_getWeightSum{};
 	VkShaderEXT computeShader_getProbability{};
 
 	VkShaderEXT computeShader_getNearbyNodes1{};

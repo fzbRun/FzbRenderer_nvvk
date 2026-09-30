@@ -188,6 +188,10 @@ float InterleavedGradientNoise(float2 uv, float FrameId){
     return frac(((magic.z) * (frac(dot(uv, magic.xy)))));
 }
 
+float gumbelNoise(inout uint randomSeed) {
+    float randomNumber = clamp(rand(randomSeed), 1e-6f, 1.0f - 1e-6f);
+    return -log(-log(randomNumber));
+}
 //---------------------------------------------------------------------clouad-----------------------------------------------------------------------
 float3 hash33(float3 p) {
     uint3 q = uint3(int3(p)) * 2798796415U;

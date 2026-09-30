@@ -53,6 +53,7 @@ void Octree_FzbPG::clean() {
 	Application::allocator.destroyBuffer(threadGroupInfoBuffer);
 
 	Application::allocator.destroyBuffer(octreeNodePairWeightBuffer);
+	Application::allocator.destroyBuffer(weightSumBuffer);
 
 	Application::allocator.destroyBuffer(nearbyNodeTempInfoBuffer);
 	Application::allocator.destroyBuffer(nearbyNodeInfoBuffer);
@@ -77,6 +78,7 @@ void Octree_FzbPG::clean() {
 
 	vkDestroyShaderEXT(device, computeShader_initWeights, nullptr);
 	vkDestroyShaderEXT(device, computeShader_octreeNodeHitTest, nullptr);
+	vkDestroyShaderEXT(device, computeShader_getWeightSum, nullptr);
 	vkDestroyShaderEXT(device, computeShader_getProbability, nullptr);
 
 	vkDestroyShaderEXT(device, computeShader_getNearbyNodes1, nullptr);
@@ -326,6 +328,7 @@ void Octree_FzbPG::render(VkCommandBuffer cmd) {
 	write.append(dynamicDescPack.makeWrite(shaderio::DynamicSetBindingPoints_PT::eTlas_PT), setting.asManager->asBuilder.tlas);
 	vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 1, write.size(), write.data());
 
+	pushConstant.OctreeNodePairWeightSumBufferAddress = (float*)weightSumBuffer.address;
 	vkCmdPushConstants2(cmd, &pushInfo);
 
 	initOctreeArray(cmd);
@@ -471,6 +474,11 @@ void Octree_FzbPG::createOctreeArray() {
 	allocator->createBuffer(octreeNodePairWeightBuffer, bufferSize,
 		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 	NVVK_DBG_NAME(octreeNodePairWeightBuffer.buffer);
+
+	bufferSize = OUTGOING_COUNT_FZBPG * IndivisibleNodeCount_G_FZBPG * sizeof(float);
+	allocator->createBuffer(weightSumBuffer, bufferSize,
+		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+	NVVK_DBG_NAME(weightSumBuffer.buffer);
 
 	#ifdef NEARBYNODE_JITTER_FZBPG
 	bufferSize = IndivisibleNodeCount_G_FZBPG * (IndivisibleNodeCount_G_FZBPG / GETNEARBYNODES_CS_THREADGROUP_SIZE) * sizeof(shaderio::IndivisibleNodeNearbyNodeTempInfo_FzbPG);
@@ -1003,6 +1011,16 @@ void Octree_FzbPG::compileAndCreateShaders() {
 		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_octreeNodeHitTest);
 		NVVK_DBG_NAME(computeShader_octreeNodeHitTest);
 		//--------------------------------------------------------------------------------------
+		vkDestroyShaderEXT(device, computeShader_getWeightSum, nullptr);
+
+		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		shaderInfo.nextStage = 0;
+		shaderInfo.pName = "computeMain_getWeightSum";
+		shaderInfo.codeSize = shaderCode.codeSize;
+		shaderInfo.pCode = shaderCode.pCode;
+		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_getWeightSum);
+		NVVK_DBG_NAME(computeShader_getWeightSum);
+		//--------------------------------------------------------------------------------------
 		vkDestroyShaderEXT(device, computeShader_getProbability, nullptr);
 
 		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
@@ -1130,8 +1148,13 @@ void Octree_FzbPG::getOctreeNodePairData(VkCommandBuffer cmd) {
 	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 
+#ifdef RIS_Version
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getWeightSum);
+	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
+#else
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getProbability);
 	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
+#endif
 }
 void Octree_FzbPG::getNearbyNodeInfo(VkCommandBuffer cmd) {
 #ifdef NEARBYNODE_JITTER_FZBPG

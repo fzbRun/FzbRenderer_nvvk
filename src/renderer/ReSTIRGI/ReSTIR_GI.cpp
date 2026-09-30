@@ -161,10 +161,6 @@ void ReSTIR_GI::render(VkCommandBuffer* cmdPtr) {
 		.pValues = &pushConstant,
 	};
 
-	//if (pushConstant.mode == (uint32_t)ReSTIR_GI_Mode::eRIS_SpatialTemporal_Reuse) {
-	//	if (Application::sceneResource.cameraChange) pushConstant.mode = (uint32_t)ReSTIR_GI_Mode::eRIS_Spatial_Reuse;
-	//}
-
 	if (pushConstant.mode == (uint32_t)ReSTIR_GI_Mode::eRIS_SpatialTemporal_Reuse) {
 		createGBuffers(cmd);
 		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
