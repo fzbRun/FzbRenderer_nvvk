@@ -707,7 +707,7 @@ float3 getBSDF_RoughDielectric(float eta, float3 albedo, float roughness, float3
 float3 getBSDF_RoughtPlastic(float eta, float3 albedo_diffuse, float3 albedo_specular, float roughness, float3 incidence, float3 normal, float3 outgoing, float3x3 TBN) {
     float cosineIN = dot(incidence, normal);
     float cosineON = dot(outgoing, normal);
-    if (cosineIN <= 0.0f || cosineON <= 0.0f) return float3(1.0f);
+    if (cosineIN <= 0.0f || cosineON <= 0.0f) return float3(0.0f);
 
     float3 h = normalize(incidence + outgoing);
     float3 h_tangentSpace = mul(TBN, h);
@@ -733,7 +733,7 @@ float3 getBSDF_RoughtPlastic(float eta, float3 albedo_diffuse, float3 albedo_spe
     float3 F_o = FresnelDielectric(cosineOH, eta);
     float3 diffuse_contrib = albedo_diffuse * (1.0f - F_o) * (1.0f - F_i) / M_PI;
 
-    return (specular_contib + diffuse_contrib) * cosineON;
+    return specular_contib + diffuse_contrib;  //(specular_contib + diffuse_contrib) * cosineON;
 }
 float3 getBSDF(BSDFMaterial material, float3 incidence, float3 normal, float3 outgoing, float3x3 TBN, bool isExt) {
     float3 bsdf = float3(0.0f);

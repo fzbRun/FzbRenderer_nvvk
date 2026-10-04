@@ -10,6 +10,7 @@
 #include "VolumetricFog/VolumetricFog.h"
 #include "MeshRenderer/MeshRenderer.h"
 #include "ReSTIRGI/ReSTIR_GI.h"
+#include "StochasticLightcuts/StochasticLightcuts.h"
 
 enum FzbRendererType {
 	FZB_RENDERER_FORWARD,
@@ -22,6 +23,7 @@ enum FzbRendererType {
 	FZB_RENDERER_FZB_PATH_GUIDING,
 	FZB_RENDERER_PATH_TRACING_KPCNN_DENOISING,
 	FZB_RENDERER_RESTIR_GI,
+	FZB_RENDERER_STOCHASTIC_LIGHTCUTS,
 	FZB_RENDERER_VOLUMETRIC_FOG,
 	FZB_RENDERER_MESH,
 	FZB_ZHIHU_CODE,
@@ -35,6 +37,7 @@ std::map<std::string, FzbRendererType> RendererTypeMap{
 	{ "FzbPathGuiding", FZB_RENDERER_FZB_PATH_GUIDING },
 	{ "PathTracing_KPCNNDenoising", FZB_RENDERER_PATH_TRACING_KPCNN_DENOISING },
 	{ "ReSTIR_GI", FZB_RENDERER_RESTIR_GI },
+	{ "StochasticLightcuts", FZB_RENDERER_STOCHASTIC_LIGHTCUTS },
 	{ "VolumetricFog", FZB_RENDERER_VOLUMETRIC_FOG },
 	{ "Mesh", FZB_RENDERER_MESH },
 	{ "ZhiHuCode", FZB_ZHIHU_CODE },
@@ -51,6 +54,7 @@ std::shared_ptr<FzbRenderer::Renderer> FzbRenderer::createRenderer(RendererCreat
 			//case FZB_RENDERER_NPM_PATH_GUIDING: return std::make_shared<NPMPathGuiding>(createInfo.rendererNode);
 			case FZB_RENDERER_PATH_TRACING_KPCNN_DENOISING: return std::make_shared<PathTracing_KPCNNDenoising>(createInfo.rendererNode);
 			case FZB_RENDERER_RESTIR_GI: return std::make_shared<ReSTIR_GI>(createInfo.rendererNode);
+			case FZB_RENDERER_STOCHASTIC_LIGHTCUTS: return std::make_shared<StochasticLightcutsRenderer>(createInfo.rendererNode);
 			case FZB_RENDERER_VOLUMETRIC_FOG: return std::make_shared<VolumetricFog>(createInfo.rendererNode);
 			case FZB_RENDERER_MESH: return std::make_shared<MeshRenderer>(createInfo.rendererNode);
 			case FZB_ZHIHU_CODE: return std::make_shared<ZhiHuCode>(createInfo.rendererNode);

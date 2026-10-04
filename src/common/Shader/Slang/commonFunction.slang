@@ -478,6 +478,8 @@ bool PointInRectangle(float3 pos, float3 startPos, float3 edge1, float3 edge2){
     return (u >= -eps && u <= 1.0 + eps &&
             v >= -eps && v <= 1.0 + eps);
 }
+
+
 //---------------------------------------------------Camera------------------------------------------------------
 void ExtractFrustumPlanes(float4x4 cameraVP, out FrustumPlane planes[6]) {
     float4 row0 = { cameraVP[0][0], cameraVP[1][0], cameraVP[2][0], cameraVP[3][0] };
@@ -1220,6 +1222,7 @@ float2 sample_circle_mean(inout uint seed, float R) {
     return float2(x, y);
 }
 //------------------------------------------------sphereRectangleSample---------------------------------------------
+/*
 struct Quadrilateral {
     float3 startPos;
     float3 normal;
@@ -1227,8 +1230,8 @@ struct Quadrilateral {
     float3 edge2;
 };
 float3 sphereRectangleSample(Quadrilateral quad, float3 hitPos, float u, float v, inout float pdf) {
-    float exl = length(quad.edge1);
-    float eyl = length(quad.edge2);
+    float exl = max(length(quad.edge1), 1e-8f);
+    float eyl = max(length(quad.edge2), 1e-8f);
     float3 axisX = quad.edge1 / exl;
     float3 axisY = quad.edge2 / eyl;
     float3 axisZ = quad.normal;
@@ -1254,7 +1257,7 @@ float3 sphereRectangleSample(Quadrilateral quad, float3 hitPos, float u, float v
     float3 v11 = float3(x1, y1, z0);
 
     float3 n0 = float3(0.0f, z0, -y0); // normalize(cross(v00, v10));
-    n0.z /= sqrt(z0sq + y0sq);         // ����ֻ��z��Ҫ���õ���x��y�����0�����ù�
+    n0.z /= sqrt(z0sq + y0sq);
     float3 n1 = float3(-z0, 0.0f, x1); // normalize(cross(v10, v11));
     n1.z /= sqrt(z0sq + x1 * x1);
     float3 n2 = float3(0.0f, -z0, y1); // normalize(cross(v11, v01));
@@ -1271,14 +1274,14 @@ float3 sphereRectangleSample(Quadrilateral quad, float3 hitPos, float u, float v
     float b1 = n2.z;
     float b0sq = b0 * b0;
     float k = 2 * M_PI - g2 - g3;
-    float S = g0 + g1 - k;
+    float S = max(g0 + g1 - k, 0.0f);
 
     pdf = 1.0f / S;
 
     float au = u * S + k;
     float fu = (cos(au) * b0 - b1) / sin(au);
     float cu = 1.0f / sqrt(fu * fu + b0sq) * (fu > 0.0f ? 1.0f : -1.0f);
-    cu = clamp(cu, -1.0f, 1.0f);
+    cu = clamp(cu, -1.0f + 1e-6f, 1.0f - 1e-6f);
     float xu = -(cu * z0) / sqrt(1.0f - cu * cu);
     xu = clamp(xu, x0, x1);
 
@@ -1303,8 +1306,8 @@ struct Quadrilateral_initialization { // For a surface that needs to be sampled 
 Quadrilateral_initialization initQuadrilateral(float3 hitPos, float3 quadRangleStartPos, float3 ex, float3 ey) {
     Quadrilateral_initialization quadrangle;
     quadrangle.o = hitPos;
-    float exl = length(ex);
-    float eyl = length(ey);
+    float exl = max(length(ex), 1e-8f);
+    float eyl = max(length(ey), 1e-8f);
     quadrangle.x = ex / exl;
     quadrangle.y = ey / eyl;
     quadrangle.z = cross(quadrangle.x, quadrangle.y);
@@ -1357,7 +1360,7 @@ float3 sphericalRectangleSample(Quadrilateral_initialization quadrangle, float u
     float au = u * quadrangle.S + quadrangle.k;
     float fu = (cos(au) * quadrangle.b0 - quadrangle.b1) / sin(au);
     float cu = 1.0f / sqrt(fu * fu + quadrangle.b0sq) * (fu > 0.0f ? 1.0f : -1.0f);
-    cu = clamp(cu, -1.0f, 1.0f);
+    cu = clamp(cu, -1.0f + 1e-6f, 1.0f - 1e-6f);
     float xu = -(cu * quadrangle.z0) / sqrt(1.0f - cu * cu);
     xu = clamp(xu, quadrangle.x0, quadrangle.x1);
 
@@ -1369,6 +1372,285 @@ float3 sphericalRectangleSample(Quadrilateral_initialization quadrangle, float u
     float yv = hv2 < 1 - 1e-6 ? (hv * dl) / sqrt(1.0f - hv2) : quadrangle.y1;
 
     return xu * quadrangle.x + yv * quadrangle.y + quadrangle.z0 * quadrangle.z;
+}
+bool SphericalRectangleSample(AABB aabb, float3 hitPos, inout uint randomSeed, inout float3 sampleDir, inout float pdf) {
+    float3 distance = aabb.maximum - aabb.minimum;
+    float3 nodeDirection = (aabb.maximum + aabb.minimum) * 0.5f - hitPos;
+
+    float3 edge0 = float3(distance.x, 0.0f, 0.0f);
+    float3 edge1 = float3(0.0f, distance.y, 0.0f);
+    float3 edge2 = float3(0.0f, 0.0f, distance.z);
+
+    float3 face0StartPos = aabb.minimum;
+    face0StartPos.x += nodeDirection.x < 0 ? distance.x : 0.0f; // in left
+    float3 face1StartPos = aabb.minimum;
+    face1StartPos.y += nodeDirection.y < 0 ? distance.y : 0.0f; // in bottom
+    float3 face2StartPos = aabb.minimum;
+    face2StartPos.z += nodeDirection.z < 0 ? distance.z : 0.0f; // in back
+
+    Quadrilateral_initialization quad0 = initQuadrilateral(hitPos, face0StartPos, edge2, edge1);
+    quad0.S = isnan(quad0.S) ? 0.0f : quad0.S;
+    Quadrilateral_initialization quad1 = initQuadrilateral(hitPos, face1StartPos, edge0, edge2);
+    quad1.S = isnan(quad1.S) ? 0.0f : quad1.S;
+    Quadrilateral_initialization quad2 = initQuadrilateral(hitPos, face2StartPos, edge0, edge1);
+    quad2.S = isnan(quad2.S) ? 0.0f : quad2.S;
+
+    float sphericalRectangleSampleProbability = 1.0f;
+    float selectFaceProbability = rand(randomSeed);
+    float randomU = rand(randomSeed); float randomV = rand(randomSeed);
+
+    // The occurrence of this all-0 situation indicates that hitPos is located on the sampling plane, and we degenerate to BSDF sampling
+    if (quad0.S + quad1.S + quad2.S == 0.0f) return false;
+    else {
+        float3 sphereQuadrilateralSolidAngle = float3(quad0.S, quad1.S, quad2.S);
+        sphereQuadrilateralSolidAngle /= quad0.S + quad1.S + quad2.S;
+        Quadrilateral_initialization sampleQuad;
+        if (selectFaceProbability <= sphereQuadrilateralSolidAngle.x) {
+            sampleQuad = quad0;
+            sphericalRectangleSampleProbability *= sphereQuadrilateralSolidAngle.x;
+        }
+        else if (selectFaceProbability <= 1.0f - sphereQuadrilateralSolidAngle.z) {
+            sampleQuad = quad1;
+            sphericalRectangleSampleProbability *= sphereQuadrilateralSolidAngle.y;
+        }
+        else {
+            sampleQuad = quad2;
+            sphericalRectangleSampleProbability *= sphereQuadrilateralSolidAngle.z;
+        }
+
+        pdf *= sphericalRectangleSampleProbability;
+        sampleDir = normalize(sphericalRectangleSample(sampleQuad, randomU, randomV, pdf)); // p *= 1 / quad.s
+
+        if (!(pdf > 0.0f) || isnan(pdf)) return false;
+    }
+
+    return true;
+}
+*/
+
+struct Quadrilateral {
+    float3 startPos;
+    float3 normal;
+    float3 edge1;
+    float3 edge2;
+};
+
+float3 sphereRectangleSample(Quadrilateral quad, float3 hitPos, float u, float v, inout float pdf) {
+    float exl = max(length(quad.edge1), 1e-8f);
+    float eyl = max(length(quad.edge2), 1e-8f);
+    float3 axisX = quad.edge1 / exl;
+    float3 axisY = quad.edge2 / eyl;
+    float3 axisZ = normalize(cross(axisX, axisY));
+
+    float3 d = quad.startPos - hitPos;
+    float z0 = dot(d, axisZ);
+    if (z0 > 0) {
+        axisZ *= -1.0f;
+        z0 *= -1.0f;
+    }
+    float z0sq = z0 * z0;
+
+    float x0 = dot(d, axisX);
+    float y0 = dot(d, axisY);
+    float x1 = x0 + exl;
+    float y1 = y0 + eyl;
+    float y0sq = y0 * y0;
+    float y1sq = y1 * y1;
+
+    float3 v00 = float3(x0, y0, z0);
+    float3 v01 = float3(x0, y1, z0);
+    float3 v10 = float3(x1, y0, z0);
+    float3 v11 = float3(x1, y1, z0);
+
+    float3 n0 = float3(0.0f, z0, -y0);
+    n0.z /= sqrt(z0sq + y0sq);
+    float3 n1 = float3(-z0, 0.0f, x1);
+    n1.z /= sqrt(z0sq + x1 * x1);
+    float3 n2 = float3(0.0f, -z0, y1);
+    n2.z /= sqrt(z0sq + y1sq);
+    float3 n3 = float3(z0, 0.0f, -x0);
+    n3.z /= sqrt(z0sq + x0 * x0);
+
+    float g0 = acos(clamp(-n0.z * n1.z, -1.0f, 1.0f));
+    float g1 = acos(clamp(-n1.z * n2.z, -1.0f, 1.0f));
+    float g2 = acos(clamp(-n2.z * n3.z, -1.0f, 1.0f));
+    float g3 = acos(clamp(-n3.z * n0.z, -1.0f, 1.0f));
+
+    float b0 = n0.z;
+    float b1 = n2.z;
+    float b0sq = b0 * b0;
+    float k = 2 * M_PI - g2 - g3;
+    float S = max(g0 + g1 - k, 0.0f);
+
+    if (S <= 0.0f) {
+        pdf = 0.0f;
+        return float3(0.0f, 0.0f, 0.0f);
+    }
+
+    pdf = 1.0f / S;
+
+    float au = u * S + k;
+    float fu = (cos(au) * b0 - b1) / sin(au);
+    float cu = 1.0f / sqrt(fu * fu + b0sq) * (fu > 0.0f ? 1.0f : -1.0f);
+    cu = clamp(cu, -1.0f + 1e-6f, 1.0f - 1e-6f);
+    float xu = -(cu * z0) / sqrt(1.0f - cu * cu);
+    xu = clamp(xu, x0, x1);
+
+    float dl = sqrt(xu * xu + z0sq);
+    float h0 = y0 / sqrt(dl * dl + y0sq);
+    float h1 = y1 / sqrt(dl * dl + y1sq);
+    float hv = h0 + v * (h1 - h0);
+    float hv2 = hv * hv;
+    float yv = hv2 < 1 - 1e-6 ? (hv * dl) / sqrt(1.0f - hv2) : y1;
+
+    return xu * axisX + yv * axisY + z0 * axisZ;
+}
+
+struct Quadrilateral_initialization {
+    float3 o, x, y, z;
+    float z0, z0sq;
+    float x0, y0, y0sq;
+    float x1, y1, y1sq;
+    float b0, b1, b0sq, k;
+    float S;
+};
+
+Quadrilateral_initialization initQuadrilateral(float3 hitPos, float3 quadRangleStartPos, float3 ex, float3 ey) {
+    Quadrilateral_initialization quadrangle;
+    quadrangle.o = hitPos;
+    float exl = max(length(ex), 1e-8f);
+    float eyl = max(length(ey), 1e-8f);
+    quadrangle.x = ex / exl;
+    quadrangle.y = ey / eyl;
+    float3 crossZ = cross(quadrangle.x, quadrangle.y);
+    float crossLen = length(crossZ);
+    if (crossLen < 1e-8f) {
+        quadrangle.z = float3(0.0f, 0.0f, 1.0f);
+    } else {
+        quadrangle.z = crossZ / crossLen;
+    }
+
+    float3 d = quadRangleStartPos - quadrangle.o;
+    quadrangle.z0 = dot(d, quadrangle.z);
+    if (quadrangle.z0 > 0) {
+        quadrangle.z *= -1.0f;
+        quadrangle.z0 *= -1.0f;
+    }
+    quadrangle.z0sq = quadrangle.z0 * quadrangle.z0;
+
+    quadrangle.x0 = dot(d, quadrangle.x);
+    quadrangle.y0 = dot(d, quadrangle.y);
+    quadrangle.x1 = quadrangle.x0 + exl;
+    quadrangle.y1 = quadrangle.y0 + eyl;
+    quadrangle.y0sq = quadrangle.y0 * quadrangle.y0;
+    quadrangle.y1sq = quadrangle.y1 * quadrangle.y1;
+
+    float3 v00 = float3(quadrangle.x0, quadrangle.y0, quadrangle.z0);
+    float3 v01 = float3(quadrangle.x0, quadrangle.y1, quadrangle.z0);
+    float3 v10 = float3(quadrangle.x1, quadrangle.y0, quadrangle.z0);
+    float3 v11 = float3(quadrangle.x1, quadrangle.y1, quadrangle.z0);
+
+    float3 n0 = float3(0.0f, quadrangle.z0, -quadrangle.y0);
+    n0.z /= sqrt(quadrangle.z0sq + quadrangle.y0sq);
+    float3 n1 = float3(-quadrangle.z0, 0.0f, quadrangle.x1);
+    n1.z /= sqrt(quadrangle.z0sq + quadrangle.x1 * quadrangle.x1);
+    float3 n2 = float3(0.0f, -quadrangle.z0, quadrangle.y1);
+    n2.z /= sqrt(quadrangle.z0sq + quadrangle.y1sq);
+    float3 n3 = float3(quadrangle.z0, 0.0f, -quadrangle.x0);
+    n3.z /= sqrt(quadrangle.z0sq + quadrangle.x0 * quadrangle.x0);
+
+    float g0 = acos(clamp(-n0.z * n1.z, -1.0f, 1.0f));
+    float g1 = acos(clamp(-n1.z * n2.z, -1.0f, 1.0f));
+    float g2 = acos(clamp(-n2.z * n3.z, -1.0f, 1.0f));
+    float g3 = acos(clamp(-n3.z * n0.z, -1.0f, 1.0f));
+
+    quadrangle.b0 = n0.z;
+    quadrangle.b1 = n2.z;
+    quadrangle.b0sq = quadrangle.b0 * quadrangle.b0;
+    quadrangle.k = 2 * M_PI - g2 - g3;
+    quadrangle.S = max(g0 + g1 - quadrangle.k, 0.0f);
+
+    return quadrangle;
+}
+
+float3 sphericalRectangleSample(Quadrilateral_initialization quadrangle, float u, float v, inout float pdf) {
+    if (quadrangle.S <= 0.0f) {
+        pdf = 0.0f;
+        return float3(0.0f, 0.0f, 0.0f);
+    }
+
+    pdf *= 1.0f / quadrangle.S;
+
+    float au = u * quadrangle.S + quadrangle.k;
+    float fu = (cos(au) * quadrangle.b0 - quadrangle.b1) / sin(au);
+    float cu = 1.0f / sqrt(fu * fu + quadrangle.b0sq) * (fu > 0.0f ? 1.0f : -1.0f);
+    cu = clamp(cu, -1.0f + 1e-6f, 1.0f - 1e-6f);
+    float xu = -(cu * quadrangle.z0) / sqrt(1.0f - cu * cu);
+    xu = clamp(xu, quadrangle.x0, quadrangle.x1);
+
+    float dl = sqrt(xu * xu + quadrangle.z0sq);
+    float h0 = quadrangle.y0 / sqrt(dl * dl + quadrangle.y0sq);
+    float h1 = quadrangle.y1 / sqrt(dl * dl + quadrangle.y1sq);
+    float hv = h0 + v * (h1 - h0);
+    float hv2 = hv * hv;
+    float yv = hv2 < 1 - 1e-6 ? (hv * dl) / sqrt(1.0f - hv2) : quadrangle.y1;
+
+    return xu * quadrangle.x + yv * quadrangle.y + quadrangle.z0 * quadrangle.z;
+}
+
+bool SphericalRectangleSample(AABB aabb, float3 hitPos, inout uint randomSeed, inout float3 sampleDir, inout float pdf) {
+    float3 distance = aabb.maximum - aabb.minimum;
+    float3 nodeDirection = (aabb.maximum + aabb.minimum) * 0.5f - hitPos;
+
+    float3 edge0 = float3(distance.x, 0.0f, 0.0f);
+    float3 edge1 = float3(0.0f, distance.y, 0.0f);
+    float3 edge2 = float3(0.0f, 0.0f, distance.z);
+
+    float3 face0StartPos = aabb.minimum;
+    face0StartPos.x += nodeDirection.x < 0 ? distance.x : 0.0f;
+    float3 face1StartPos = aabb.minimum;
+    face1StartPos.y += nodeDirection.y < 0 ? distance.y : 0.0f;
+    float3 face2StartPos = aabb.minimum;
+    face2StartPos.z += nodeDirection.z < 0 ? distance.z : 0.0f;
+
+    Quadrilateral_initialization quad0 = initQuadrilateral(hitPos, face0StartPos, edge2, edge1);
+    quad0.S = (quad0.S > 0.0f && !isnan(quad0.S)) ? quad0.S : 0.0f;
+    Quadrilateral_initialization quad1 = initQuadrilateral(hitPos, face1StartPos, edge0, edge2);
+    quad1.S = (quad1.S > 0.0f && !isnan(quad1.S)) ? quad1.S : 0.0f;
+    Quadrilateral_initialization quad2 = initQuadrilateral(hitPos, face2StartPos, edge0, edge1);
+    quad2.S = (quad2.S > 0.0f && !isnan(quad2.S)) ? quad2.S : 0.0f;
+
+    float totalS = quad0.S + quad1.S + quad2.S;
+    if (totalS <= 1e-8f) return false;
+
+    float p0 = quad0.S / totalS;
+    float p1 = quad1.S / totalS;
+    float p2 = quad2.S / totalS;
+
+    float selectFaceProbability = rand(randomSeed);
+    float randomU = rand(randomSeed);
+    float randomV = rand(randomSeed);
+
+    Quadrilateral_initialization sampleQuad;
+    float sphericalRectangleSampleProbability = 0.0f;
+
+    if (selectFaceProbability < p0) {
+        sampleQuad = quad0;
+        sphericalRectangleSampleProbability = p0;
+    } else if (selectFaceProbability < p0 + p1) {
+        sampleQuad = quad1;
+        sphericalRectangleSampleProbability = p1;
+    } else {
+        sampleQuad = quad2;
+        sphericalRectangleSampleProbability = p2;
+    }
+
+    pdf *= sphericalRectangleSampleProbability;
+    sampleDir = normalize(sphericalRectangleSample(sampleQuad, randomU, randomV, pdf));
+
+    if (!(pdf > 0.0f) || !isfinite(pdf)) return false;
+
+    return true;
 }
 //------------------------------------------------noise---------------------------------------------
 #include "common/Shader/Slang/noise.slang"
