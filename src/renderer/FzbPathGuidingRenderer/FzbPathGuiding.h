@@ -1,10 +1,15 @@
 #pragma once
 
-#include "renderer/PathTracingRenderer/hard/PathTracingRenderer.h"
 #include "./FzbPathGuidingShaderio.h"
+#include "renderer/PathTracingRenderer/hard/PathTracingRenderer.h"
 #include "RasterVoxelization/RasterVoxelization_FzbPG.h"
 #include "LightInject/LightInject_FzbPG.h"
+
+#ifdef StochasticLightcuts_RIS
+#include "Octree2/Octree2_FzbPG.h"
+#else
 #include "Octree/Octree_FzbPG.h"
+#endif
 #include <feature/ShadowMap/ShadowMap.h>
 
 #ifndef FZBRENDERER_FZB_PATHGUIDING_H
@@ -50,7 +55,11 @@ private:
 
 	std::shared_ptr<RasterVoxelization_FzbPG> rasterVoxelization;
 	std::shared_ptr<LightInject_FzbPG> lightInject;
+#ifdef StochasticLightcuts_RIS
+	std::shared_ptr<Octree2_FzbPG> octree;
+#else
 	std::shared_ptr<Octree_FzbPG> octree;
+#endif
 
 	shaderio::FzbPathGuidingPushConstant pushConstant{};
 	VkShaderEXT computeShader_FzbPathGuiding{};

@@ -131,48 +131,6 @@ struct LightLeafNode {
     float pdf;
 };
 
-float MaxCosToAABB(float3 posX, float3 normalY, float3 minimum, float3 maximum) {
-    if (all(normalY == 0.0f)) return 1.0f;
-    normalY = normalize(normalY);
-
-    float3 up = abs(normalY.y) < 0.999 ? float3(0, 1, 0) : float3(1, 0, 0);
-    float3 tangentX = normalize(cross(up, normalY));
-    float3 tangentY = cross(normalY, tangentX);
-
-    float minX = 1e30, maxX = -1e30;
-    float minY = 1e30, maxY = -1e30;
-    float minZ = 1e30, maxZ = -1e30;
-
-    [unroll]
-    for (int i = 0; i < 8; ++i){
-        float3 corner = float3(
-            (i & 1) == 1 ? maximum.x : minimum.x,
-            (i & 2) == 2 ? maximum.y : minimum.y,
-            (i & 4) == 4 ? maximum.z : minimum.z
-        );
-        float3 rel = corner - posX;
-        float x = dot(rel, tangentX);
-        float y = dot(rel, tangentY);
-        float z = dot(rel, normalY);
-
-        minX = min(minX, x); maxX = max(maxX, x);
-        minY = min(minY, y); maxY = max(maxY, y);
-        minZ = min(minZ, z); maxZ = max(maxZ, z);
-    }
-
-    float minAbsX = (minX <= 0 && maxX >= 0) ? 0 : min(abs(minX), abs(maxX));
-    float maxAbsX = max(abs(minX), abs(maxX));
-    float minAbsY = (minY <= 0 && maxY >= 0) ? 0 : min(abs(minY), abs(maxY));
-    float maxAbsY = max(abs(minY), abs(maxY));
-
-    float denomSq = (maxZ >= 0) ? minAbsX * minAbsX + minAbsY * minAbsY + maxZ * maxZ
-                                : maxAbsX * maxAbsX + maxAbsY * maxAbsY + maxZ * maxZ;
-
-    if (denomSq <= 1e-20f) return 0.0;
-    float bound = maxZ / sqrt(denomSq);
-    return max(0.0, bound);
-}
-
 float3 getLightcutMUpperBound(LightNode lightNode, BSDFMaterial material, float3 pos, float3 normal, float3 outgoing) {
     float3 maxCosine = MaxCosToAABB(pos, lightNode.normal, lightNode.minimum, lightNode.maximum);
 

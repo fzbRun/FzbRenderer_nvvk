@@ -19,7 +19,11 @@ FzbPathGuidingRenderer::FzbPathGuidingRenderer(pugi::xml_node& rendererNode) {
 	if (pugi::xml_node lightInjectNode = rendererNode.child("LightInject"))
 		lightInject = std::make_shared<LightInject_FzbPG>(lightInjectNode);
 	if (pugi::xml_node octreeNode = rendererNode.child("Octree"))
-		octree = std::make_shared<Octree_FzbPG>(octreeNode);
+#ifdef StochasticLightcuts_RIS
+		octree = std::make_shared<Octree2_FzbPG>(octreeNode);
+#else
+	octree = std::make_shared<Octree_FzbPG>(octreeNode);
+#endif
 
 	shadowMap = std::make_shared<ShadowMap>();
 }
@@ -43,12 +47,17 @@ void FzbPathGuidingRenderer::init() {
 	};
 	lightInject->init(lightInjectCreateInfo);
 	
-	OctreeCreateInfo_FzbPG octreeCreateInfo{
+#ifdef StochasticLightcuts_RIS
+	Octree2CreateInfo_FzbPG octreeCreateInfo
+#else
+	OctreeCreateInfo_FzbPG octreeCreateInfo
+#endif
+	{
 		.VGBs = rasterVoxelization->VGBs,
-		.VGBStartPos = rasterVoxelization->setting.pushConstant.voxelGroupStartPos,
-		.VGBVoxelSize = glm::vec3(rasterVoxelization->setting.pushConstant.voxelSize_Count),
-		.VGBSize = rasterVoxelization->setting.pushConstant.voxelSize_Count.w,
-		.asManager = &asManager,
+			.VGBStartPos = rasterVoxelization->setting.pushConstant.voxelGroupStartPos,
+			.VGBVoxelSize = glm::vec3(rasterVoxelization->setting.pushConstant.voxelSize_Count),
+			.VGBSize = rasterVoxelization->setting.pushConstant.voxelSize_Count.w,
+			.asManager = &asManager,
 	};
 	octree->init(octreeCreateInfo);
 
@@ -223,7 +232,11 @@ void FzbPathGuidingRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size)
 
 	IF_DEBUG(rasterVoxelization->resize(cmd, size, gBuffers, (uint32_t)ImageType_FzbPG::eImgTonemapped), rasterVoxelization->resize(cmd, size));
 	lightInject->resize(cmd, size);
+#ifdef StochasticLightcuts_RIS
+	octree->resize(cmd, size);
+#else
 	IF_DEBUG(octree->resize(cmd, size, gBuffers, (uint32_t)ImageType_FzbPG::eImgTonemapped), octree->resize(cmd, size));
+#endif
 };
 void FzbPathGuidingRenderer::preRender() {
 	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
@@ -244,7 +257,9 @@ void FzbPathGuidingRenderer::preRender() {
 	rasterVoxelization->preRender(cmd);
 	lightInject->preRender();
 	octree->preRender();
+#ifndef StochasticLightcuts_RIS
 	octree->pushConstant.maxFrameCount = maxFrames;
+#endif
 
 	pushConstant.randomRotateMatrix = octree->pushConstant.randomRotateMatrix;
 
@@ -268,8 +283,8 @@ void FzbPathGuidingRenderer::render(VkCommandBuffer* cmdPtr) {
 	octree->render(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	
-	pathGuiding(cmd);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	//pathGuiding(cmd);
+	//nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	
 	Application::tonemapper.runCompute(cmd, gBuffers.getSize(), Application::tonemapperData, gBuffers.getDescriptorImageInfo((uint32_t)ImageType_FzbPG::eImgRendered), gBuffers.getDescriptorImageInfo((uint32_t)ImageType_FzbPG::eImgTonemapped));
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -277,8 +292,8 @@ void FzbPathGuidingRenderer::render(VkCommandBuffer* cmdPtr) {
 	
 	//if(renderStaticScene) shadowMap->postProcess(cmd);
 	//rasterVoxelization->postProcess(cmd);
-	//lightInject->postProcess(cmd);
-	//octree->postProcess(cmd);
+	lightInject->postProcess(cmd);
+	octree->postProcess(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
 
 	//nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
@@ -296,6 +311,8 @@ void FzbPathGuidingRenderer::createDescriptorSetLayout() {
 			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
 			.descriptorCount = 1,
 			.stageFlags = VK_SHADER_STAGE_ALL });
+#ifdef StochasticLightcuts_RIS
+#else
 	bindings.addBinding({
 		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeData_G,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -306,6 +323,13 @@ void FzbPathGuidingRenderer::createDescriptorSetLayout() {
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodePairWeight,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+#endif
+
 #ifdef ADAPTIVE_IMPORTANCE_SAMPLING
 	bindings.addBinding({
 		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodePairData,
@@ -313,11 +337,7 @@ void FzbPathGuidingRenderer::createDescriptorSetLayout() {
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
 #endif
-	bindings.addBinding({
-		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodePairWeight,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = 1,
-		.stageFlags = VK_SHADER_STAGE_ALL });
+
 	bindings.addBinding({
 		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eGlobalInfo,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -387,6 +407,8 @@ void FzbPathGuidingRenderer::createDescriptorSet() {
 		write.append(allTextures, allImages);
 	}
 
+#ifdef StochasticLightcuts_RIS
+#else
 	VkWriteDescriptorSet	OctreeArrayWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeData_G, 0, 0, octree->octreeDataBuffer_G.size());
 	nvvk::Buffer* octreeArraysPtr = octree->octreeDataBuffer_G.data();
@@ -399,6 +421,9 @@ void FzbPathGuidingRenderer::createDescriptorSet() {
 	VkWriteDescriptorSet NodePairInfoWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodePairWeight, 0, 0, 1);
 	write.append(NodePairInfoWrite, octree->octreeNodePairWeightBuffer, 0, octree->octreeNodePairWeightBuffer.bufferSize);
+#endif
+	
+
 #ifdef ADAPTIVE_IMPORTANCE_SAMPLING
 	NodePairInfoWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodePairData, 0, 0, 1);
@@ -465,17 +490,17 @@ void FzbPathGuidingRenderer::compileAndCreateShaders() {
 	};
 	VkDevice device = Application::app->getDevice();
 	//--------------------------------------------------------------------------------------
-	{
-		vkDestroyShaderEXT(device, computeShader_FzbPathGuiding, nullptr);
-
-		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-		shaderInfo.nextStage = 0;
-		shaderInfo.pName = "computeMain_FzbPathGuiding";
-		shaderInfo.codeSize = shaderCode.codeSize;
-		shaderInfo.pCode = shaderCode.pCode;
-		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_FzbPathGuiding);
-		NVVK_DBG_NAME(computeShader_FzbPathGuiding);
-	}
+	//{
+	//	vkDestroyShaderEXT(device, computeShader_FzbPathGuiding, nullptr);
+	//
+	//	shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	//	shaderInfo.nextStage = 0;
+	//	shaderInfo.pName = "computeMain_FzbPathGuiding";
+	//	shaderInfo.codeSize = shaderCode.codeSize;
+	//	shaderInfo.pCode = shaderCode.pCode;
+	//	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_FzbPathGuiding);
+	//	NVVK_DBG_NAME(computeShader_FzbPathGuiding);
+	//}
 };
 void FzbPathGuidingRenderer::updateDataPerFrame(VkCommandBuffer cmd) {}
 
@@ -510,8 +535,11 @@ void FzbPathGuidingRenderer::pathGuiding(VkCommandBuffer cmd) {
 
 	pushConstant.sceneSize = shaderio::uint2(sceneSize.width, sceneSize.height);
 	pushConstant.threadGroupCount = shaderio::uint2(groupSize.width, groupSize.height);
-	pushConstant.indivisibleNodeInfoBufferAddress_E = (uint32_t*)octree->indivisibleNodeInfosBuffer_E.address;
+#ifdef StochasticLightcuts_RIS
+#else
 	pushConstant.weightSumBufferAddress = (float*)octree->weightSumBuffer.address;
+	pushConstant.indivisibleNodeInfoBufferAddress_E = (uint32_t*)octree->indivisibleNodeInfosBuffer_E.address;
+#endif
 	vkCmdPushConstants2(cmd, &pushInfo);
 
 	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);

@@ -201,9 +201,9 @@ void initNEE(inout LightInjectHitPayload payload) {
             float distance = length(lightSampleDir);
             lightSampleDir = normalize(lightSampleDir);
 
-            if (isnan(pdf) || isinf(pdf)) return;
-            if (dot(-lightSampleDir, light.direction) <= 0.001f) return;
-            if (dot(lightSampleDir, payload.hitNormal) <= 0.001f) return;
+            if (isnan(pdf) || isinf(pdf)) continue;
+            if (dot(-lightSampleDir, light.direction) <= 0.001f) continue;
+            if (dot(lightSampleDir, payload.hitNormal) <= 0.001f) continue;
 
             RayDesc ray;
             ray.TMin = 0.001;
@@ -213,7 +213,7 @@ void initNEE(inout LightInjectHitPayload payload) {
 
             HitTestPayload samplePayload;
             if (traceRay_NEE(ray, samplePayload)) {
-                if (samplePayload.distance + 0.002f < distance) return;
+                if (samplePayload.distance + 0.002f < distance) continue;
 
                 float cosineIN = dot(lightSampleDir, payload.hitNormal);
                 payload.lightRadiance += light.color * light.intensity * cosineIN;
@@ -221,7 +221,7 @@ void initNEE(inout LightInjectHitPayload payload) {
         } else if (light.type == uint(LightType::Direction)) {
             float3 lightSampleDir = -light.direction;
 
-            if (dot(lightSampleDir, payload.hitNormal) <= 0.001f) return;
+            if (dot(lightSampleDir, payload.hitNormal) <= 0.001f) continue;
 
             RayDesc ray;
             ray.TMin = 0.001;
@@ -395,7 +395,7 @@ VSout_Cube vertexMain_Cube(uint vertexIndex: SV_VertexID, int instanceIndex: SV_
 
         SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
         output.sv_position = mul(float4(output.worldPos.xyz, 1.0f), sceneInfo.viewProjMatrix);
-        output.color = voxelData.irradiance.xyz / voxelData.irradiance.w;
+        output.color = voxelData.irradiance.xyz / voxelData.irradiance.w * 10.0f;
     }
     //if (voxelIndex >= 160 && voxelIndex <= 167 && VGBIndex == 5) {
     //    output.worldPos.x = ((vertexIndex & 3) * 2) % 6 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.x) : OrderedIntToFloat(voxelData.aabbI.maximum.x);

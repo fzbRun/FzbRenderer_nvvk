@@ -51,7 +51,7 @@ void computeMain_initWeights(uint threadIndex: SV_DispatchThreadID, uint groupTh
         #endif
     }
 }
-
+//-------------------------------------------------------------------------------------------------------------------------
 struct IndivisibleNodeData_E {
     AABB aabb;
     float3 normal;
@@ -122,7 +122,7 @@ void traceRay(RayDesc ray, inout HitPayload_FzbWeight payload)
     }
     else payload.hit = 0.0f;
 }
-
+//-------------------------------------------------------------------------------------------------------------------------
 #ifdef RIS_Version
 #define MAX_INDIVISIBLE_NODE_G_COUNT HITTEST_CS_THREADGROUP_SIZE / OUTGOING_COUNT_FZBPG
 groupshared IndivisibleNodeData_G groupNodeData_G[MAX_INDIVISIBLE_NODE_G_COUNT];
@@ -264,7 +264,11 @@ void computeMain_octreeNodeHitTest(uint threadIndex: SV_DispatchThreadID, uint t
 
     if (threadIndex == 0) GlobalInfoBuffer[0].cmd.x = OUTGOING_COUNT_FZBPG * indivisibleNodeCount_G;
 }
+//-------------------------------------------------------------------------------------------------------------------------
+#elif defined(StochasticLightcuts_RIS)
 
+
+//-------------------------------------------------------------------------------------------------------------------------
 #elif defined(ADAPTIVE_IMPORTANCE_SAMPLING)
 [[vk::binding(BindingPoints_Octree_FzbPG::eOctreeNodePairData)]] RWStructuredBuffer<OctreeNodePairData_FzbPG, ScalarDataLayout> OctreeNodePairDataBuffer;
 struct ChildNodeInfo_E {
@@ -539,7 +543,7 @@ void computeMain_octreeNodeHitTest(uint threadIndex: SV_DispatchThreadID, uint t
 
     if (threadIndex == 0) GlobalInfoBuffer[0].cmd.x = OUTGOING_COUNT_FZBPG * indivisibleNodeCount_G;
 }
-
+//-------------------------------------------------------------------------------------------------------------------------
 #else
 #define MAX_INDIVISIBLE_NODE_G_COUNT HITTEST_CS_THREADGROUP_SIZE / OUTGOING_COUNT_FZBPG
 groupshared IndivisibleNodeData_G groupNodeData_G[MAX_INDIVISIBLE_NODE_G_COUNT];
@@ -685,7 +689,7 @@ void computeMain_octreeNodeHitTest(uint threadIndex: SV_DispatchThreadID, uint t
     }
 }
 #endif
-
+//-------------------------------------------------------------------------------------------------------------------------
 groupshared float groupWeightSum;
 [numthreads(CLUSTER_LAYER_NODECOUNT_E_FZBPG, 1, 1)]
 [shader("compute")]
@@ -781,6 +785,7 @@ void computeMain_getProbability(uint threadIndex: SV_DispatchThreadID, uint thre
         }
     }
 }
+
 //------------------------------------------------debug---------------------------------------------------------
 #ifndef NDEBUG
 struct VSout_OctreeNodePairHitTestResult {

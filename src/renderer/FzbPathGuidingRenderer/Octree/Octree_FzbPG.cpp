@@ -342,10 +342,10 @@ void Octree_FzbPG::render(VkCommandBuffer cmd) {
 }
 void Octree_FzbPG::postProcess(VkCommandBuffer cmd) {
 #ifndef NDEBUG
-	debug_OctreeLayer_Visualization(cmd);
-	debug_OctreeIndivisibleNodes_Visualization(cmd);
-	debug_OctreeNodePairHitTestResult_Visualization(cmd);
-	debug_NearbyNodeInfoResult_Visualization(cmd);
+	//debug_OctreeLayer_Visualization(cmd);
+	//debug_OctreeIndivisibleNodes_Visualization(cmd);
+	//debug_OctreeNodePairHitTestResult_Visualization(cmd);
+	//debug_NearbyNodeInfoResult_Visualization(cmd);
 #endif
 };
 
