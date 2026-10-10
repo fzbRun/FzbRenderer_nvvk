@@ -82,6 +82,9 @@ enum class BindingPoints_Octree_FzbPG : uint32_t {
 
 	eClusterPairInfo,
 	eClusterPairGlobalInfo,
+
+	eClusetPairHitTestInfo,
+
 	eCandidateNodeData_E,
 };
 //------------------------------------------------------------------------------------------
@@ -111,6 +114,7 @@ struct OctreeNodeData_E_FzbPG {
 struct CandidateNodeData_E_FzbPG {
 	AABB aabb;
 	float w;
+	float p_hat;
 };
 
 //------------------------------------------------------------------------------------------
@@ -154,9 +158,20 @@ struct ClusterPairInfo {
 	int layerIndex_E;
 	int nodeIndex_E;
 	int candidateNodeIndex;
+	float leafNodePdf;
 };
 struct ClusterPairGlobalInfo {
 	uint clusterPairCount;
+};
+struct ClusterPairHitInfo {
+	float3 pos_G;
+	float isHit;
+	float3 normal_G;
+	int materialIndex;
+	float3 sampleDir;
+	float d;
+	float cosine;
+	float cosine_Light;
 };
 //------------------------------------------------------------------------------------------
 
@@ -167,6 +182,7 @@ struct ClusterPairGlobalInfo {
 
 #define INIT_CANDIDATE_NODES_CS_THREADGROUP_SIZE 256
 #define GET_CANDIDATE_NODES_CS_THREADGROUP_SIZE 128
+#define CLUSTER_PAIR_HITTEST_CS_THREADGROUP_SIZE 256
 #define GET_CANDIDATE_NODE_WEIGHTS_CS_THREADGROUP_SIZE OUTGOING_COUNT_FZBPG * HITTEST_COUNT_FZBPG
 
 #define OCTREE_RIS_THREADGROUP_SIZE OUTGOING_COUNT_FZBPG

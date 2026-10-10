@@ -57,6 +57,7 @@ public:
 
 	nvvk::Buffer clusterPairInfoBuffer;
 	nvvk::Buffer clusterPairGlobalInfoBuffer;
+	nvvk::Buffer clusterPairHitInfoBuffer;
 	nvvk::Buffer candidateNodeDataBuffer_E;
 
 	nvvk::Buffer octreeNodePairDataBuffer;
@@ -86,6 +87,7 @@ private:
 	VkShaderEXT computeShader_initWeights{};
 	VkShaderEXT computeShader_getCandidateNodes{};
 	VkShaderEXT computeShader_dispatchGetWeight{};
+	VkShaderEXT computeShader_clusterPairHitTest{};
 	VkShaderEXT computeShader_getCandidateNodeWeights{};;
 
 	VkBindDescriptorSetsInfo bindDescriptorSetsInfo;

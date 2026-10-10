@@ -40,10 +40,27 @@ struct FzbPathGuidingPushConstant
 	uint2 sceneSize;
 	uint2 threadGroupCount;
 
+#ifndef StochasticLightcuts_RIS
 	uint* indivisibleNodeInfoBufferAddress_E;
 	float* weightSumBufferAddress;
+#endif
 };
 
+#ifdef StochasticLightcuts_RIS
+enum class StaticBindingPoints_FzbPG
+{
+	eOctreeNodeInfo_G = 2,
+	eCandidateNodeData_E,
+	eGlobalInfo,
+
+#ifndef NDEBUG
+	eDepthImage,
+	ePGValueImage,
+	ePGValue2Image,
+	ePGVarianceImage,
+#endif
+};
+#else
 enum class StaticBindingPoints_FzbPG
 {
 	//eTextures = 0,
@@ -66,6 +83,7 @@ enum class StaticBindingPoints_FzbPG
 	ePGVarianceImage,
 #endif
 };
+#endif
 enum class DynamicBindingPoints_FzbPG {
 	//eTlas_SVOPG = 0,
 	eSVOTlas_SVOPG = 1,
