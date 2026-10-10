@@ -851,6 +851,7 @@ void Octree2_FzbPG::createOctreeArray(VkCommandBuffer cmd) {
 
 		vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createOctreeArray);
 		vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT);
 
 		layerBlockCount /= 8;
 	}
@@ -861,10 +862,11 @@ void Octree2_FzbPG::createOctreeArray(VkCommandBuffer cmd) {
 		pushConstant.currentLayerNodeCount = layerNodeCount;
 		vkCmdPushConstants2(cmd, &pushInfo);
 
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+
 		vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createOctreeArray2);
 		VkExtent2D groupSize = nvvk::getGroupCounts({ layerNodeCount, 1 }, VkExtent2D{ CREATEOCTREE_CS_THREADGROUP_SIZE, 1 });
 		vkCmdDispatch(cmd, groupSize.width, 1, 1);
-		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	}
 }
 void Octree2_FzbPG::getOctreeLabel(VkCommandBuffer cmd) {

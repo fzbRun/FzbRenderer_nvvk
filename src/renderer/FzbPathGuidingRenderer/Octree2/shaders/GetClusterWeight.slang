@@ -31,7 +31,13 @@ void computeMain_initCandidateNodes(uint threadIndex: SV_DispatchThreadID, uint 
     }
     int threadTotalCount = OUTGOING_COUNT_FZBPG * indivisibleNodeCount_G * Candidate_Samples_Count;
     if (threadIndex >= threadTotalCount) return;
-    candidateNodeDataBuffer_E[threadIndex].w = 0.0f;
+
+    CandidateNodeData_E_FzbPG candidateData;
+    candidateData.w = 0.0f;
+    candidateData.subTreeNodeIndex_layer = -1;
+    candidateData.radiance = 0.0f;
+    candidateData.p_hat = 0.0f;
+    candidateNodeDataBuffer_E[threadIndex] = candidateData;
 
     if (threadIndex == 0) {
         clusterPairGlobalInfoBuffer[0].clusterPairCount = 0;
@@ -318,7 +324,7 @@ LightLeafNode getLightLeafNode(int groupClusterPairIndex, int warpLane, int laye
 
         float target = WaveReadLaneAt(rand(randomSeed), blockFirstWarpLane) * weightSum;
         uint belowBits = (WaveActiveBallot(incl <= target).x >> blockFirstWarpLane) & 0xFFu;
-        int chosen = (int)countbits(belowBits);
+        int chosen = min((int)countbits(belowBits), 7);
         float chosenWeight = WaveReadLaneAt(weight, blockFirstWarpLane + chosen);
 
         nodeIndex = nodeIndex * 8 + chosen;
@@ -427,7 +433,7 @@ void computeMain_clusterPairHitTest(uint threadIndex: SV_DispatchThreadID, uint 
     clusterPairHitTestInfoBuffer[clusterPairIndex * HITTEST_COUNT_FZBPG + hitTestIndex] = hitInfo;
 
     if (hitTestIndex == 0) {
-        clusterPairInfoBuffer[clusterPairIndex].nodeIndex_E = nodeData_E.nodeIndex;
+        clusterPairInfoBuffer[clusterPairIndex].leafNodeIndex_E = nodeData_E.nodeIndex;
         clusterPairInfoBuffer[clusterPairIndex].leafNodePdf = nodeData_E.pdf;
     }
 }
@@ -453,7 +459,7 @@ void computeMain_getCandidateNodeWeight(uint threadIndex: SV_DispatchThreadID, u
         else if (warpIndex == 3) {
             ClusterPairInfo clusterPairInfo = clusterPairInfoBuffer[threadGroupIndex];
             groupClusterPairInfo = clusterPairInfo;
-            groupLeafNodeData_E = OctreeNodeDataBuffer_E[pushConst.octreeMaxLayer][clusterPairInfo.nodeIndex_E];
+            groupLeafNodeData_E = OctreeNodeDataBuffer_E[pushConst.octreeMaxLayer][clusterPairInfo.leafNodeIndex_E];
         }
     }
     if (warpIndex == 4 && warpLane < HITTEST_COUNT_FZBPG) {
@@ -497,7 +503,9 @@ void computeMain_getCandidateNodeWeight(uint threadIndex: SV_DispatchThreadID, u
         CandidateNodeData_E_FzbPG candidateNodeData;
         candidateNodeData.w = w;
         candidateNodeData.p_hat = p_hat;
+        candidateNodeData.radiance = leafNodeData_E.radiance;
         candidateNodeData.aabb = leafNodeData_E.aabb;
+        candidateNodeData.subTreeNodeIndex_layer = (groupClusterPairInfo.nodeIndex_E << 4) | groupClusterPairInfo.layerIndex_E;
 
         int candidateNodeIndex = outgoingIndex * groupIndivisibleNodeCount_G * Candidate_Samples_Count +
                                  groupClusterPairInfo.indivisibleNodeLabel * Candidate_Samples_Count +

@@ -115,6 +115,9 @@ struct CandidateNodeData_E_FzbPG {
 	AABB aabb;
 	float w;
 	float p_hat;
+
+	float3 radiance;
+	int subTreeNodeIndex_layer;
 };
 
 //------------------------------------------------------------------------------------------
@@ -158,6 +161,8 @@ struct ClusterPairInfo {
 	int layerIndex_E;
 	int nodeIndex_E;
 	int candidateNodeIndex;
+
+	int leafNodeIndex_E;
 	float leafNodePdf;
 };
 struct ClusterPairGlobalInfo {

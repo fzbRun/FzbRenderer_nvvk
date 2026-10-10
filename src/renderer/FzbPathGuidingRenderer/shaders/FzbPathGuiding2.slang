@@ -5,8 +5,16 @@
 
 [[vk::push_constant]] ConstantBuffer<FzbPathGuidingPushConstant, ScalarDataLayout> pushConst;
 [[vk::binding(StaticBindingPoints_FzbPG::eOctreeNodeInfo_G)]] RWStructuredBuffer<OctreeNodeInfo_G_FzbPG, ScalarDataLayout> OctreeNodeInfoBuffer_G[];
+[[vk::binding(StaticBindingPoints_FzbPG::eOctreeNodeData_E)]] RWStructuredBuffer<OctreeNodeData_E_FzbPG, ScalarDataLayout> OctreeNodeDataBuffer_E[];
 [[vk::binding(StaticBindingPoints_FzbPG::eCandidateNodeData_E)]] RWStructuredBuffer<CandidateNodeData_E_FzbPG, ScalarDataLayout> candidateNodeDataBuffer_E;
 [[vk::binding(StaticBindingPoints_FzbPG::eGlobalInfo)]] RWStructuredBuffer<OctreeGlobalInfo_FzbPG, ScalarDataLayout> GlobalInfoBuffer;
+
+#ifndef NDEBUG
+[[vk::binding(StaticBindingPoints_FzbPG::eDepthImage, 0)]] RWTexture2D<float> depthImage; // VK_FORMAT_D32_SFLOAT
+[[vk::binding(StaticBindingPoints_FzbPG::ePGValueImage, 0)]] RWTexture2D<float4> pgValueImage;
+[[vk::binding(StaticBindingPoints_FzbPG::ePGValue2Image, 0)]] RWTexture2D<float4> pgValue2Image;
+[[vk::binding(StaticBindingPoints_FzbPG::ePGVarianceImage, 0)]] RWTexture2D<float4> pgVarianceImage;
+#endif
 
 typedef CallablePayload HitPayload_FzbPG;
 //---------------------------------------------groupsharedMemory-----------------------------------------
@@ -230,7 +238,7 @@ bool getNodeAABB_E_FzbPG(inout AABB aabb, inout HitPayload_FzbPG payload, inout 
     float3 outgoing = mul(pushConst.randomRotateMatrix, payload.outgoing);
     float3 hitNormal = mul(pushConst.randomRotateMatrix, payload.hitNormal);
     outgoingIndex = inverseOutgoing_FzbPG(outgoing, OUTGOING_COUNT_FZBPG, weightSampleProbability, hitNormal);
-    jitterPdf *= weightSampleProbability;
+    //jitterPdf *= weightSampleProbability;
 
     uint indivisibleNodeCount_G = groupGlobalInfo.indivisibleNodeCount_G;
     uint candidateNodeStartIndex = outgoingIndex * indivisibleNodeCount_G * Candidate_Samples_Count + nodeLabel_G * Candidate_Samples_Count;
@@ -250,4 +258,252 @@ bool getNodeAABB_E_FzbPG(inout AABB aabb, inout HitPayload_FzbPG payload, inout 
 
     nodeEPdf = sampleP_hat / max(weightSum, 1e-10f); // pdf = 1 / W = 1 / ( weightSum / p_hat);
     return true;
+}
+
+float getPgPdf(uint nodeLabel_G, uint outgoingIndex, float3 hitPos, float3 hitNormal, float3 viewPos, uint2 threadIndex) {
+    uint nodeIndex_E = getNodeIndex_E(hitPos, hitNormal);
+    OctreeNodeData_E_FzbPG nodeData_E = OctreeNodeDataBuffer_E[pushConst.maxOctreeLayer][nodeIndex_E];
+
+    uint indivisibleNodeCount_G = groupGlobalInfo.indivisibleNodeCount_G;
+    uint candidateNodeStartIndex = outgoingIndex * indivisibleNodeCount_G * Candidate_Samples_Count + nodeLabel_G * Candidate_Samples_Count;
+    float p_hat = 0.0f;
+    float wSum = 0.0f;
+    for (int i = 0; i < Candidate_Samples_Count; ++i) {
+        CandidateNodeData_E_FzbPG candidateNodeData = candidateNodeDataBuffer_E[candidateNodeStartIndex + i];
+        if (candidateNodeData.subTreeNodeIndex_layer == -1) continue;
+
+        int subTreeNodeIndex = candidateNodeData.subTreeNodeIndex_layer >> 4;
+        int subTreeLayer = candidateNodeData.subTreeNodeIndex_layer & 15;
+        int leafNodeCount = (1 << (3 * (pushConst.maxOctreeLayer - subTreeLayer)));
+        int leafNodeStartIndex = subTreeNodeIndex * (1 << (3 * (pushConst.maxOctreeLayer - subTreeLayer)));
+        if (nodeIndex_E >= leafNodeStartIndex && nodeIndex_E < leafNodeStartIndex + leafNodeCount)
+            p_hat = dot(candidateNodeData.radiance, 1.0f) / max(dot(nodeData_E.radiance, 1.0f), 1e-6f) * candidateNodeData.p_hat;
+
+        wSum += candidateNodeData.w;
+    }
+    float pg_Pdf = p_hat / max(wSum, 1e-10f);
+    if (pg_Pdf == 0.0f) return pg_Pdf;
+
+    // getPdf from Sphere sample
+    {
+        float3 distance = nodeData_E.aabb.maximum - nodeData_E.aabb.minimum;
+        float3 nodeDirection = (nodeData_E.aabb.maximum + nodeData_E.aabb.minimum) * 0.5f - viewPos;
+
+        float3 edge0 = float3(distance.x, 0.0f, 0.0f);
+        float3 edge1 = float3(0.0f, distance.y, 0.0f);
+        float3 edge2 = float3(0.0f, 0.0f, distance.z);
+
+        float3 face0StartPos = nodeData_E.aabb.minimum;
+        face0StartPos.x += nodeDirection.x < 0 ? distance.x : 0.0f; // in left
+        float3 face1StartPos = nodeData_E.aabb.minimum;
+        face1StartPos.y += nodeDirection.y < 0 ? distance.y : 0.0f; // in bottom
+        float3 face2StartPos = nodeData_E.aabb.minimum;
+        face2StartPos.z += nodeDirection.z < 0 ? distance.z : 0.0f; // in back
+
+        Quadrilateral_initialization quad0 = initQuadrilateral(viewPos, face0StartPos, edge2, edge1);
+        quad0.S = isnan(quad0.S) ? 0.0f : quad0.S;
+        Quadrilateral_initialization quad1 = initQuadrilateral(viewPos, face1StartPos, edge0, edge2);
+        quad1.S = isnan(quad1.S) ? 0.0f : quad1.S;
+        Quadrilateral_initialization quad2 = initQuadrilateral(viewPos, face2StartPos, edge0, edge1);
+        quad2.S = isnan(quad2.S) ? 0.0f : quad2.S;
+
+        float solidAngleSum = quad0.S + quad1.S + quad2.S;
+        if (solidAngleSum == 0.0f) {}
+        else pg_Pdf /= solidAngleSum;
+    }
+
+    return pg_Pdf;
+}
+//---------------------------------------------PathGuiding-----------------------------------------
+[numthreads(FZB_PATHGUIDING_THREADGROUP_SIZE_X, FZB_PATHGUIDING_THREADGROUP_SIZE_Y, 1)]
+[shader("compute")]
+void computeMain_FzbPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 groupThreadIndex: SV_GroupThreadID) {
+    uint groupThreadIndex_linear = groupThreadIndex.y * FZB_PATHGUIDING_THREADGROUP_SIZE_X + groupThreadIndex.x;
+    uint threadGroupThreadTotalCount = FZB_PATHGUIDING_THREADGROUP_SIZE_X * FZB_PATHGUIDING_THREADGROUP_SIZE_Y;
+    if (groupThreadIndex_linear == 0) groupGlobalInfo = GlobalInfoBuffer[0];
+    for (int i = groupThreadIndex_linear; i < 3510; i += threadGroupThreadTotalCount) {
+        int layerIndex = 0; int nodeIndex = i; int layerNodeCount = 6;
+        for (; layerIndex < 4; ++layerIndex) {
+            if (nodeIndex < layerNodeCount) break;
+            nodeIndex -= layerNodeCount;
+            layerNodeCount *= 8;
+        }
+        groupOctreeNodeInfo_G[i] = OctreeNodeInfoBuffer_G[layerIndex][nodeIndex];
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    float2 launchID = (float2)threadIndex;
+    float2 launchSize = (float2)pushConst.sceneSize;
+    if (threadIndex.x >= pushConst.sceneSize.x || threadIndex.y >= pushConst.sceneSize.y) return;
+
+    SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+
+    const uint rayFlags = 0; // RAY_FLAG_CULL_BACK_FACING_TRIANGLES;
+    RayDesc ray;
+    ray.TMin = 0.001;
+    ray.TMax = INFINITE;
+
+    HitPayload_FzbPG payload;
+    payload.randomSeed = xxhash32(uint3(threadIndex, pushConst.frameIndex));
+
+    float3 accumulatedRadiance = float3(0.0f);
+    float RR = 0.8f;
+
+    #ifndef NDEBUG
+    float3 pgValue = 0.0f;
+    float3 pgValue2 = 0.0f;
+    #endif
+
+    for (int sampleIndex = 0; sampleIndex < pushConst.spp; ++sampleIndex) {
+        float r1 = rand(payload.randomSeed);
+        float r2 = rand(payload.randomSeed);
+        float2 subpixel_jitter = pushConst.frameIndex == 0 && sampleIndex == 0 ? float2(0.5f, 0.5f) : float2(r1, r2);
+
+        const float2 pixelCenter = launchID + subpixel_jitter;
+        const float2 clipCoords = pixelCenter / launchSize * 2.0 - 1.0;
+        float4 viewCoords = mul(float4(clipCoords, 1.0, 1.0), sceneInfo.projInvMatrix);
+        viewCoords /= viewCoords.w;
+
+        ray.Origin = sceneInfo.cameraPosition;
+        ray.Direction = normalize(mul(float4(normalize(viewCoords.xyz), 0.0), sceneInfo.viewInvMatrix).xyz);
+
+        payload.bsdf = float3(1.0f);
+        payload.pdf = 1.0f;
+        payload.outgoing = -ray.Direction;
+        payload.isExt = true;
+
+        float3 bsdf_cosine_pdf = float3(1.0f);
+
+        int nodeLabel_G = 0;
+        uint outgoingIndex = 0;
+
+        uint bounceDepth = 0; bool useBsdfSample = false, hit = true;
+        while (bounceDepth < pushConst.maxDepth) {
+            if (!useBsdfSample) hit = traceRay(ray, payload);
+            useBsdfSample = false;
+
+            #ifndef NDEBUG
+            if (bounceDepth == 0 && sampleIndex == 0) {
+                float3 hitPos = payload.hitPos + 0.01f * ray.Direction;
+                float4 clipPos = mul(float4(hitPos, 1.0f), sceneInfo.viewProjMatrix);
+                float depth = clipPos.z / clipPos.w; // any hitPoint must in our cameraView
+                depthImage[int2(launchID)] = depth;
+            } else if (bounceDepth == MISS_DEPTH) depthImage[int2(launchID)] = 1.0f;
+            #endif
+
+            if (!hit) {
+                accumulatedRadiance += RayMiss(ray.Direction) * bsdf_cosine_pdf;
+                bounceDepth = MISS_DEPTH;
+            } else {
+                float jitterPdf = 1.0f;
+
+                float3 pgSample;
+                float pgSample_pgPdf = 0.0f;
+                float pgSample_bsdfPdf = 0.0f;
+                float3 pgSample_bsdf = float3(0.0f);
+                AABB nodeAABB_E;
+                bool useFzbPG = getNodeAABB_E_FzbPG(nodeAABB_E, payload, pgSample_pgPdf, jitterPdf, nodeLabel_G, outgoingIndex, threadIndex);
+
+                if (useFzbPG) {
+                    useFzbPG = SphericalRectangleSample(nodeAABB_E, payload.hitPos, payload.randomSeed, pgSample, pgSample_pgPdf, threadIndex);
+                    if (useFzbPG) {
+                        pgSample_bsdf = getBSDF(payload.material, pgSample, payload.hitNormal, payload.outgoing, payload.TBN, payload.isExt);
+                        pgSample_bsdfPdf = getPdf(payload.material, pgSample, payload.hitNormal, payload.outgoing, payload.TBN, payload.isExt);
+                    }
+                }
+                if (!useFzbPG){
+                    pgSample_pgPdf = 0.0f;
+                    pgSample_bsdfPdf = 0.0f;
+                }
+                float pgSample_weight = 1.0f / max(pgSample_pgPdf + pgSample_bsdfPdf, 1e-16f);
+
+                getDirectionLight(payload, sceneInfo);
+                BSDF_SAMPLE(payload);
+
+                accumulatedRadiance += (payload.material.emissive + payload.directionLightRadiance) * bsdf_cosine_pdf;
+
+                float3 bsdfSample = payload.incidence;
+                float3 bsdfSample_bsdf = payload.bsdf;
+                float bsdfSample_bsdfPdf = payload.pdf;
+
+                float3 hitNormal = payload.hitNormal;
+                float3 hitPos = payload.hitPos;
+                ray.Origin = offsetRay(hitPos, hitNormal);
+                ray.Direction = bsdfSample;
+                hit = traceRay(ray, payload);       //after here, payload is changed to next hitPos's payload!!!!!!
+
+                float bsdfSample_pgPdf = 0.0f;
+                if (useFzbPG && hit) {
+                    bsdfSample_pgPdf = getPgPdf(nodeLabel_G, outgoingIndex, payload.hitPos, payload.hitNormal, hitPos, threadIndex);
+                    //bsdfSample_pgPdf *= jitterPdf;
+                }
+                float bsdfSample_weight = 1.0f / max(bsdfSample_pgPdf + bsdfSample_bsdfPdf, 1e-16f);
+
+                #ifndef NDEBUG
+                if (bounceDepth > 0) {
+                    float3 pgValue_temp = (payload.material.emissive + payload.directionLightRadiance) * bsdf_cosine_pdf;
+                    pgValue += pgValue_temp;
+                    pgValue2 += pgValue_temp * pgValue_temp;
+                }
+                #endif
+
+                // MIS
+                //float probabilitySum = max(pgSample_pgPdf * pgSample_bsdfPdf + bsdfSample_bsdfPdf, 1e-16f);
+                //float pgSample_selectProbability = pgSample_pgPdf * pgSample_bsdfPdf / probabilitySum;
+                float probabilitySum = max(pgSample_pgPdf * pgSample_weight + bsdfSample_bsdfPdf * bsdfSample_weight, 1e-16f);
+                float pgSample_selectProbability = pgSample_pgPdf * pgSample_weight / probabilitySum;
+                float randomNumber = rand(payload.randomSeed);
+                if (randomNumber <= pgSample_selectProbability) {
+                    payload.incidence = pgSample;
+                    bsdf_cosine_pdf *= pgSample_weight * pgSample_bsdf / pgSample_selectProbability;
+                } else {
+                    useBsdfSample = true;
+                    payload.incidence = bsdfSample;
+                    bsdf_cosine_pdf *= bsdfSample_weight * bsdfSample_bsdf / (1.0f - pgSample_selectProbability);
+                }
+
+                float cosine = dot(hitNormal, payload.incidence);
+                bsdf_cosine_pdf *= cosine;
+
+                //bool end = any(bsdf_cosine_pdf <= 0.0f) || all(bsdf_cosine_pdf <= 0.0f) || any(isnan(bsdf_cosine_pdf)) || any(isinf(bsdf_cosine_pdf));
+                bool end = any(bsdf_cosine_pdf < 0.0f) || all(bsdf_cosine_pdf == 0.0f) || any(isnan(bsdf_cosine_pdf)) || any(isinf(bsdf_cosine_pdf));
+                if (end) break;
+
+                //randomNumber = rand(payload.randomSeed);
+                //if (randomNumber >= RR) break;
+                //bsdf_cosine_pdf /= RR;
+
+                payload.outgoing = -payload.incidence;
+                if (!useBsdfSample) {
+                    ray.Direction = payload.incidence;
+                    ray.Origin = offsetRay(hitPos, hitNormal);
+                }
+
+                ++bounceDepth;
+            }
+        }
+    }
+    accumulatedRadiance /= pushConst.spp;
+
+    #ifndef NDEBUG
+    uint n = max(pushConst.spp, 1);
+    pgValue /= n;
+    pgValue2 /= n;
+    if (pushConst.frameIndex > 0) {
+        pgValue = (pgValue + pgValueImage[threadIndex].xyz * (pushConst.frameIndex - 1)) / pushConst.frameIndex;
+        pgValue2 = (pgValue2 + pgValue2Image[threadIndex].xyz * (pushConst.frameIndex - 1)) / pushConst.frameIndex;
+
+        pgVarianceImage[threadIndex].x = luminance(pgValue2 - pgValue * pgValue);
+    }
+    pgValueImage[threadIndex].xyz = pgValue;
+    pgValue2Image[threadIndex].xyz = pgValue2;
+    #endif
+
+    // When the maximum frame rate is reached, the original image will decay by ((maxframe-1)/maxframe)^k < 1, and the final image will turn black
+    if (pushConst.maxFrameCount > 1 && pushConst.frameIndex > 0){
+        float a = 1.0f / float(pushConst.frameIndex + 1);
+        float3 old_color = outImage[int2(launchID)].xyz;
+        outImage[int2(launchID)] = float4(lerp(old_color, accumulatedRadiance, a), 1.0f);
+    }
+    else outImage[int2(launchID)] = float4(accumulatedRadiance, 1.0f);
 }

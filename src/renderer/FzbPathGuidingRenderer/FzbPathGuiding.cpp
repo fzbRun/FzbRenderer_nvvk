@@ -283,8 +283,8 @@ void FzbPathGuidingRenderer::render(VkCommandBuffer* cmdPtr) {
 	octree->render(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	
-	//pathGuiding(cmd);
-	//nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	pathGuiding(cmd);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	
 	Application::tonemapper.runCompute(cmd, gBuffers.getSize(), Application::tonemapperData, gBuffers.getDescriptorImageInfo((uint32_t)ImageType_FzbPG::eImgRendered), gBuffers.getDescriptorImageInfo((uint32_t)ImageType_FzbPG::eImgTonemapped));
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -312,6 +312,23 @@ void FzbPathGuidingRenderer::createDescriptorSetLayout() {
 			.descriptorCount = 1,
 			.stageFlags = VK_SHADER_STAGE_ALL });
 #ifdef StochasticLightcuts_RIS
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodeInfo_G,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = (uint32_t)octree->octreeNodeInfoBuffer_G.size(),
+		.stageFlags = VK_SHADER_STAGE_ALL });
+
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodeData_E,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = (uint32_t)octree->octreeNodeDataBuffer_E.size(),
+		.stageFlags = VK_SHADER_STAGE_ALL });
+
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateNodeData_E,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
 #else
 	bindings.addBinding({
 		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeData_G,
@@ -408,6 +425,19 @@ void FzbPathGuidingRenderer::createDescriptorSet() {
 	}
 
 #ifdef StochasticLightcuts_RIS
+	VkWriteDescriptorSet	OctreeArrayWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodeInfo_G, 0, 0, octree->octreeNodeInfoBuffer_G.size());
+	nvvk::Buffer* octreeArraysPtr = octree->octreeNodeInfoBuffer_G.data();
+	write.append(OctreeArrayWrite, octreeArraysPtr);
+
+	OctreeArrayWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodeData_E, 0, 0, octree->octreeNodeDataBuffer_E.size());
+	octreeArraysPtr = octree->octreeNodeDataBuffer_E.data();
+	write.append(OctreeArrayWrite, octreeArraysPtr);
+
+	OctreeArrayWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateNodeData_E, 0, 0, 1);
+	write.append(OctreeArrayWrite, octree->candidateNodeDataBuffer_E, 0, octree->candidateNodeDataBuffer_E.bufferSize);
 #else
 	VkWriteDescriptorSet	OctreeArrayWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeData_G, 0, 0, octree->octreeDataBuffer_G.size());
@@ -469,7 +499,12 @@ void FzbPathGuidingRenderer::compileAndCreateShaders() {
 	SCOPED_TIMER(__FUNCTION__);
 
 	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
+	#ifdef StochasticLightcuts_RIS
+	std::filesystem::path shaderSource = shaderPath / "FzbPathGuiding2.slang";
+	#else
 	std::filesystem::path shaderSource = shaderPath / "FzbPathGuiding.slang";
+	#endif
+	
 	VkShaderModuleCreateInfo shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
 
 	const VkPushConstantRange pushConstantRange{
@@ -490,17 +525,17 @@ void FzbPathGuidingRenderer::compileAndCreateShaders() {
 	};
 	VkDevice device = Application::app->getDevice();
 	//--------------------------------------------------------------------------------------
-	//{
-	//	vkDestroyShaderEXT(device, computeShader_FzbPathGuiding, nullptr);
-	//
-	//	shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-	//	shaderInfo.nextStage = 0;
-	//	shaderInfo.pName = "computeMain_FzbPathGuiding";
-	//	shaderInfo.codeSize = shaderCode.codeSize;
-	//	shaderInfo.pCode = shaderCode.pCode;
-	//	vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_FzbPathGuiding);
-	//	NVVK_DBG_NAME(computeShader_FzbPathGuiding);
-	//}
+	{
+		vkDestroyShaderEXT(device, computeShader_FzbPathGuiding, nullptr);
+	
+		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		shaderInfo.nextStage = 0;
+		shaderInfo.pName = "computeMain_FzbPathGuiding";
+		shaderInfo.codeSize = shaderCode.codeSize;
+		shaderInfo.pCode = shaderCode.pCode;
+		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_FzbPathGuiding);
+		NVVK_DBG_NAME(computeShader_FzbPathGuiding);
+	}
 };
 void FzbPathGuidingRenderer::updateDataPerFrame(VkCommandBuffer cmd) {}
 

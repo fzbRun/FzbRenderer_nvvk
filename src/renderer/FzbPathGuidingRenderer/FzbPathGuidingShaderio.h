@@ -6,9 +6,9 @@
 #define FZBRENDERER_FZB_PATHGUIDING_SHADER_IO_H
 NAMESPACE_SHADERIO_BEGIN()
 
-//#define RIS_Version
-#define StochasticLightcuts_RIS
-#define Candidate_Samples_Count 16
+#define RIS_Version
+//#define StochasticLightcuts_RIS
+#define Candidate_Samples_Count 32
 
 #define OCTREE_E_CLUSTER
 
@@ -50,6 +50,7 @@ struct FzbPathGuidingPushConstant
 enum class StaticBindingPoints_FzbPG
 {
 	eOctreeNodeInfo_G = 2,
+	eOctreeNodeData_E,
 	eCandidateNodeData_E,
 	eGlobalInfo,
 
