@@ -7,6 +7,7 @@
 [[vk::binding(StaticBindingPoints_FzbPG::eOctreeNodeInfo_G)]] RWStructuredBuffer<OctreeNodeInfo_G_FzbPG, ScalarDataLayout> OctreeNodeInfoBuffer_G[];
 [[vk::binding(StaticBindingPoints_FzbPG::eOctreeNodeData_E)]] RWStructuredBuffer<OctreeNodeData_E_FzbPG, ScalarDataLayout> OctreeNodeDataBuffer_E[];
 [[vk::binding(StaticBindingPoints_FzbPG::eCandidateNodeData_E)]] RWStructuredBuffer<CandidateNodeData_E_FzbPG, ScalarDataLayout> candidateNodeDataBuffer_E;
+[[vk::binding(StaticBindingPoints_FzbPG::eCandidatePrefixWSum_E)]] RWStructuredBuffer<float> candidatePrefixWSumBuffer_E;
 [[vk::binding(StaticBindingPoints_FzbPG::eGlobalInfo)]] RWStructuredBuffer<OctreeGlobalInfo_FzbPG, ScalarDataLayout> GlobalInfoBuffer;
 
 #ifndef NDEBUG
@@ -153,9 +154,8 @@ bool SphericalRectangleSample(AABB aabb, float3 hitPos, inout uint randomSeed, i
     return true;
 }
 int getNodeIndex_E(float3 hitPos, float3 hitNormal) {
-    float3 voxelSize = pushConst.VGBVoxelSize * (1 << (pushConst.maxOctreeLayer - OCTREE_CLUSTER_LAYER_FZBPG));
-    int3 voxelIndex = int3((hitPos - pushConst.VGBStartPos_Size.xyz) / voxelSize);
-    int voxelCount = 1 << OCTREE_CLUSTER_LAYER_FZBPG;
+    int3 voxelIndex = int3((hitPos - pushConst.VGBStartPos_Size.xyz) / pushConst.VGBVoxelSize);
+    int voxelCount = 1 << pushConst.maxOctreeLayer;
     int voxelTotalCount = voxelCount * voxelCount * voxelCount;
 
     uint normalIndex = getNormalIndex(hitNormal);
@@ -241,22 +241,24 @@ bool getNodeAABB_E_FzbPG(inout AABB aabb, inout HitPayload_FzbPG payload, inout 
     //jitterPdf *= weightSampleProbability;
 
     uint indivisibleNodeCount_G = groupGlobalInfo.indivisibleNodeCount_G;
-    uint candidateNodeStartIndex = outgoingIndex * indivisibleNodeCount_G * Candidate_Samples_Count + nodeLabel_G * Candidate_Samples_Count;
+    int candidateNodeStartIndex = outgoingIndex * indivisibleNodeCount_G * Candidate_Samples_Count + nodeLabel_G * Candidate_Samples_Count;
+    float wSum = candidatePrefixWSumBuffer_E[candidateNodeStartIndex + Candidate_Samples_Count - 1];
+    if (wSum == 0.0f) return false;
 
-    float randomNumber = rand(payload.randomSeed);
-    float sampleP_hat = 0.0f; float weightSum = 0.0f;
-    for (int i = 0; i < Candidate_Samples_Count; ++i) {
-        CandidateNodeData_E_FzbPG candidateNodeData = candidateNodeDataBuffer_E[candidateNodeStartIndex + i];
-        weightSum += candidateNodeData.w;
-
-        if (candidateNodeData.w / max(weightSum, 1e-6f) >= rand(payload.randomSeed)) {
-            aabb = candidateNodeData.aabb;
-            sampleP_hat = candidateNodeData.p_hat;
-        }
+    float randomNumber = rand(payload.randomSeed) * wSum;
+    int lo = 0;
+    int hi = Candidate_Samples_Count - 1;
+    while (lo < hi) {
+        int mid = (lo + hi) >> 1;
+        if (randomNumber < candidatePrefixWSumBuffer_E[candidateNodeStartIndex + mid]) hi = mid;
+        else lo = mid + 1;
     }
-    if (weightSum == 0.0f) return false;
 
-    nodeEPdf = sampleP_hat / max(weightSum, 1e-10f); // pdf = 1 / W = 1 / ( weightSum / p_hat);
+    int sampleNodeIndex = candidateNodeStartIndex + lo;
+    CandidateNodeData_E_FzbPG candidateNodeData = candidateNodeDataBuffer_E[sampleNodeIndex];
+    aabb = candidateNodeData.aabb;
+    nodeEPdf = candidateNodeData.p_hat / wSum;
+
     return true;
 }
 
@@ -265,9 +267,11 @@ float getPgPdf(uint nodeLabel_G, uint outgoingIndex, float3 hitPos, float3 hitNo
     OctreeNodeData_E_FzbPG nodeData_E = OctreeNodeDataBuffer_E[pushConst.maxOctreeLayer][nodeIndex_E];
 
     uint indivisibleNodeCount_G = groupGlobalInfo.indivisibleNodeCount_G;
-    uint candidateNodeStartIndex = outgoingIndex * indivisibleNodeCount_G * Candidate_Samples_Count + nodeLabel_G * Candidate_Samples_Count;
+    int candidateNodeStartIndex = outgoingIndex * indivisibleNodeCount_G * Candidate_Samples_Count + nodeLabel_G * Candidate_Samples_Count;
+    float wSum = candidatePrefixWSumBuffer_E[candidateNodeStartIndex + Candidate_Samples_Count - 1];
+    if (wSum == 0.0f) return 0.0f;
+
     float p_hat = 0.0f;
-    float wSum = 0.0f;
     for (int i = 0; i < Candidate_Samples_Count; ++i) {
         CandidateNodeData_E_FzbPG candidateNodeData = candidateNodeDataBuffer_E[candidateNodeStartIndex + i];
         if (candidateNodeData.subTreeNodeIndex_layer == -1) continue;
@@ -276,13 +280,13 @@ float getPgPdf(uint nodeLabel_G, uint outgoingIndex, float3 hitPos, float3 hitNo
         int subTreeLayer = candidateNodeData.subTreeNodeIndex_layer & 15;
         int leafNodeCount = (1 << (3 * (pushConst.maxOctreeLayer - subTreeLayer)));
         int leafNodeStartIndex = subTreeNodeIndex * (1 << (3 * (pushConst.maxOctreeLayer - subTreeLayer)));
-        if (nodeIndex_E >= leafNodeStartIndex && nodeIndex_E < leafNodeStartIndex + leafNodeCount)
+        if (nodeIndex_E >= leafNodeStartIndex && nodeIndex_E < leafNodeStartIndex + leafNodeCount) {
             p_hat = dot(candidateNodeData.radiance, 1.0f) / max(dot(nodeData_E.radiance, 1.0f), 1e-6f) * candidateNodeData.p_hat;
-
-        wSum += candidateNodeData.w;
+            break;
+        }
     }
-    float pg_Pdf = p_hat / max(wSum, 1e-10f);
-    if (pg_Pdf == 0.0f) return pg_Pdf;
+    float pg_Pdf = p_hat / wSum;
+    if (pg_Pdf == 0.0f) return 0.0f;
 
     // getPdf from Sphere sample
     {

@@ -6,8 +6,8 @@
 #define FZBRENDERER_FZB_PATHGUIDING_SHADER_IO_H
 NAMESPACE_SHADERIO_BEGIN()
 
-#define RIS_Version
-//#define StochasticLightcuts_RIS
+//#define RIS_Version
+#define StochasticLightcuts_RIS
 #define Candidate_Samples_Count 32
 
 #define OCTREE_E_CLUSTER
@@ -27,15 +27,21 @@ NAMESPACE_SHADERIO_BEGIN()
 
 struct FzbPathGuidingPushConstant
 {
-	float3x3 randomRotateMatrix;
-	float3 VGBVoxelSize;
-	int maxDepth = 6;
-	int spp = 1;
-	float time;
-	int maxOctreeLayer;
-	float4 VGBStartPos_Size;
 	int maxFrameCount;
 	int frameIndex = 0;
+	float time;
+
+	int maxDepth = 6;
+	int spp = 1;
+	float3 padding0;
+
+	float3 VGBVoxelSize;
+	int maxOctreeLayer;
+	float4 VGBStartPos_Size;
+
+	float3x3 randomRotateMatrix;
+	int3 padding1;
+
 	SceneInfo* sceneInfoAddress;
 	uint2 sceneSize;
 	uint2 threadGroupCount;
@@ -52,6 +58,7 @@ enum class StaticBindingPoints_FzbPG
 	eOctreeNodeInfo_G = 2,
 	eOctreeNodeData_E,
 	eCandidateNodeData_E,
+	eCandidatePrefixWSum_E,
 	eGlobalInfo,
 
 #ifndef NDEBUG

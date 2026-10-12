@@ -59,8 +59,7 @@ public:
 	nvvk::Buffer clusterPairGlobalInfoBuffer;
 	nvvk::Buffer clusterPairHitInfoBuffer;
 	nvvk::Buffer candidateNodeDataBuffer_E;
-
-	nvvk::Buffer octreeNodePairDataBuffer;
+	nvvk::Buffer candidatePrefixWSumBuffer_E;
 private:
 	Octree2CreateInfo_FzbPG setting;
 
@@ -89,6 +88,7 @@ private:
 	VkShaderEXT computeShader_dispatchGetWeight{};
 	VkShaderEXT computeShader_clusterPairHitTest{};
 	VkShaderEXT computeShader_getCandidateNodeWeights{};;
+	VkShaderEXT computeShader_createCandidatePrefixWSum{};;
 
 	VkBindDescriptorSetsInfo bindDescriptorSetsInfo;
 	VkPushConstantsInfo pushInfo;
@@ -97,14 +97,24 @@ private:
 		eGeometryClusterResult,
 		eLightClusterResult,
 		eGeometrySVO,
+		eClusterPairResult,
 		eBufferCount,
 	};
+
 	shaderio::OctreeDebugPushConstant_FzbPG debugPushConstant;
 	void geometryTreeDebug(VkCommandBuffer cmd);
 	void lightTreeDebug(VkCommandBuffer cmd);
 	void geometrySVODebug(VkCommandBuffer cmd);
 	VkShaderEXT vertexShader_TreeDebug{};
 	VkShaderEXT fragmentShader_TreeDebug{};
+
+	bool changeClusterG = true;
+	nvvk::Buffer clusterPairDebugGlobalInfoBuffer;
+	shaderio::ClusterPairDebugPushConstant_FzbPG debugPushConstant2;
+	void clusterPairDebug(VkCommandBuffer cmd);
+	VkShaderEXT computeShader_GetDebugClusterG{};
+	VkShaderEXT vertexShader_ClusterPairDebug{};
+	VkShaderEXT fragmentShader_ClusterPairDebug{};
 };
 }
 #endif

@@ -12,10 +12,11 @@
 NAMESPACE_SHADERIO_BEGIN()
 
 struct OctreePushConstant_FzbPG {
-	float frameIndex;
+	int frameIndex;
 
 	uint32_t VGBVoxelTotalCount;
 	float voxelVolume;
+	float padding;
 	float4 VGBStartPos_Size;
 	float4 VGBVoxelSize;
 
@@ -60,6 +61,34 @@ struct OctreeDebugPushConstant_FzbPG {
 	float2 padding5;
 };
 
+struct ClusterPairDebugGlobalInfo {
+	int clusterIndex_G;
+};
+struct ClusterPairDebugPushConstant_FzbPG {
+	int frameIndex;
+	int mode = 0;
+	
+	uint32_t octreeMaxLayer;
+	uint32_t VGBVoxelTotalCount;
+	float4 VGBStartPos_Size;
+	float4 VGBVoxelSize;
+	
+	uint2 pixelIndex;
+	uint2 screenSize;
+
+	int outgoingIndex = 0;
+	float padding;
+	
+	SceneInfo* sceneInfoAddress;
+	ClusterPairDebugGlobalInfo* globalInfoAddress;
+
+	float4x4 padding0;
+	float4x4 padding1;
+	float4 padding2;
+	float4 padding3;
+	float2 padding4;
+};
+
 enum class BindingPoints_Octree_FzbPG : uint32_t {
 	eVGB = 2,
 
@@ -86,6 +115,7 @@ enum class BindingPoints_Octree_FzbPG : uint32_t {
 	eClusetPairHitTestInfo,
 
 	eCandidateNodeData_E,
+	eCandidatePrefixWSum_E,
 };
 //------------------------------------------------------------------------------------------
 //don't change!!!!!
@@ -142,7 +172,7 @@ struct OctreeThreadGroupInfo_FzbPG {
 	uint threadGroupIndivisibleNodeCount_G;
 };
 //------------------------------------------------------------------------------------------
-#define OUTGOING_COUNT_FZBPG 64		//not smaller than 8
+#define OUTGOING_COUNT_FZBPG 32		//not smaller than 8
 #define HITTEST_COUNT_FZBPG 8		//not bigger than 32 or smaller than 8
 
 #define OUTGOING_TYPE_FZBPG 0
@@ -189,6 +219,7 @@ struct ClusterPairHitInfo {
 #define GET_CANDIDATE_NODES_CS_THREADGROUP_SIZE 128
 #define CLUSTER_PAIR_HITTEST_CS_THREADGROUP_SIZE 256
 #define GET_CANDIDATE_NODE_WEIGHTS_CS_THREADGROUP_SIZE OUTGOING_COUNT_FZBPG * HITTEST_COUNT_FZBPG
+#define CREATE_CANDIDATE_NODE_TREE_CS_THREADGROUP_SIZE OUTGOING_COUNT_FZBPG * Candidate_Samples_Count
 
 #define OCTREE_RIS_THREADGROUP_SIZE OUTGOING_COUNT_FZBPG
 

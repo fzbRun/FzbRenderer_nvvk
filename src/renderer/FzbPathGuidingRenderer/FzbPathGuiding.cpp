@@ -257,7 +257,8 @@ void FzbPathGuidingRenderer::preRender() {
 	rasterVoxelization->preRender(cmd);
 	lightInject->preRender();
 	octree->preRender();
-#ifndef StochasticLightcuts_RIS
+#ifdef StochasticLightcuts_RIS
+#else
 	octree->pushConstant.maxFrameCount = maxFrames;
 #endif
 
@@ -326,6 +327,12 @@ void FzbPathGuidingRenderer::createDescriptorSetLayout() {
 
 	bindings.addBinding({
 		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateNodeData_E,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidatePrefixWSum_E,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
@@ -438,6 +445,10 @@ void FzbPathGuidingRenderer::createDescriptorSet() {
 	OctreeArrayWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateNodeData_E, 0, 0, 1);
 	write.append(OctreeArrayWrite, octree->candidateNodeDataBuffer_E, 0, octree->candidateNodeDataBuffer_E.bufferSize);
+
+	OctreeArrayWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidatePrefixWSum_E, 0, 0, 1);
+	write.append(OctreeArrayWrite, octree->candidatePrefixWSumBuffer_E, 0, octree->candidatePrefixWSumBuffer_E.bufferSize);
 #else
 	VkWriteDescriptorSet	OctreeArrayWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeData_G, 0, 0, octree->octreeDataBuffer_G.size());

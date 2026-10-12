@@ -594,7 +594,7 @@ void ReSTIR_GI::SpatialReuse(VkCommandBuffer cmd) {
 		.pNext = nullptr,
 		.srcOffset = 0,
 		.dstOffset = 0,
-		.size = pixelDataBuffer.allocMemSize,
+		.size = pixelDataBuffer.buffer.bufferSize,
 	};
 	VkCopyBufferInfo2 copyInfo = {
 		.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_INFO_2,
