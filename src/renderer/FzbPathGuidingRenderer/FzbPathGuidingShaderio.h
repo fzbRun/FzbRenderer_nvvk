@@ -10,6 +10,9 @@ NAMESPACE_SHADERIO_BEGIN()
 #define StochasticLightcuts_RIS
 #define Candidate_Samples_Count 32
 
+#define SpatialReuse_FzbPG
+#define Pairwise_MIS
+
 #define OCTREE_E_CLUSTER
 
 //#define GEOMETRY_CLUSTER_WITH_E
@@ -57,8 +60,13 @@ enum class StaticBindingPoints_FzbPG
 {
 	eOctreeNodeInfo_G = 2,
 	eOctreeNodeData_E,
-	eCandidateNodeData_E,
-	eCandidatePrefixWSum_E,
+
+	eCandidateSubTreeInfo,
+	eCandidateLeafNodeData,
+
+	eCandidateSampleData,
+	eCandidateSamplePrefixWSum,
+
 	eGlobalInfo,
 
 #ifndef NDEBUG

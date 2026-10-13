@@ -12,7 +12,9 @@
 
 [[vk::binding(BindingPoints_Octree_FzbPG::eGlobalInfo)]] RWStructuredBuffer<OctreeGlobalInfo_FzbPG, ScalarDataLayout> GlobalInfoBuffer;
 
-[[vk::binding(BindingPoints_Octree_FzbPG::eCandidateNodeData_E)]] RWStructuredBuffer<CandidateNodeData_E_FzbPG, ScalarDataLayout> candidateNodeDataBuffer_E;
+[[vk::binding(BindingPoints_Octree_FzbPG::eCandidateSubTreeInfo)]] RWStructuredBuffer<CandidateSubTreeInfo, ScalarDataLayout> candidateSubTreeInfoBuffer;
+[[vk::binding(BindingPoints_Octree_FzbPG::eCandidateLeafNodeData)]] RWStructuredBuffer<CandidateLeafNodeData, ScalarDataLayout> candidateLeafNodeDataBuffer;
+[[vk::binding(BindingPoints_Octree_FzbPG::eCandidateSampleData)]] RWStructuredBuffer<CandidateSampleData_FzbPG, ScalarDataLayout> candidateSampleDataBuffer;
 //------------------------------------------------------------------------------------------
 bool traceRay(RayDesc ray, inout CallablePayload payload)
 {
@@ -175,21 +177,23 @@ VSout vertexMain(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID
         return output;
     } else {
         int candidateIndex = pushConst.outgoingIndex * GlobalInfoBuffer[0].indivisibleNodeCount_G * Candidate_Samples_Count + pushConst.globalInfoAddress.clusterIndex_G * Candidate_Samples_Count + instanceIndex;
-        CandidateNodeData_E_FzbPG candidateNodeData = candidateNodeDataBuffer_E[candidateIndex];
-        if (candidateNodeData.subTreeNodeIndex_layer < 0) {
+        CandidateSampleData_FzbPG candidateNodeData = candidateSampleDataBuffer[candidateIndex];
+        CandidateSubTreeInfo candidateSubTree = candidateSubTreeInfoBuffer[pushConst.globalInfoAddress.clusterIndex_G * Candidate_Samples_Count + instanceIndex];
+        if (candidateSubTree.subTreeNodeIndex_layer < 0) {
             output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
             return output;
         }
 
-        int layerIndex = candidateNodeData.subTreeNodeIndex_layer & 15;
-        int nodeIndex = candidateNodeData.subTreeNodeIndex_layer >> 4;
+        int layerIndex = candidateSubTree.subTreeNodeIndex_layer & 15;
+        int nodeIndex = candidateSubTree.subTreeNodeIndex_layer >> 4;
         OctreeNodeData_E_FzbPG nodeData = OctreeNodeDataBuffer_E[layerIndex][nodeIndex];
 
         //nodeAABB = nodeData.aabb;
         //output.color.xyz = nodeData.radiance;
 
-        nodeAABB = candidateNodeData.aabb;
-        output.color.xyz = candidateNodeData.radiance;
+        CandidateLeafNodeData leafNodeData = candidateLeafNodeDataBuffer[pushConst.globalInfoAddress.clusterIndex_G * Candidate_Samples_Count + instanceIndex];
+        nodeAABB = leafNodeData.aabb;
+        output.color.xyz = leafNodeData.radiance;
     }
 
     float3 aabbSize = nodeAABB.maximum - nodeAABB.minimum;

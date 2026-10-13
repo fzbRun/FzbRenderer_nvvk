@@ -326,13 +326,24 @@ void FzbPathGuidingRenderer::createDescriptorSetLayout() {
 		.stageFlags = VK_SHADER_STAGE_ALL });
 
 	bindings.addBinding({
-		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateNodeData_E,
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateSubTreeInfo,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateLeafNodeData,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
 
 	bindings.addBinding({
-		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidatePrefixWSum_E,
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateSampleData,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateSamplePrefixWSum,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
@@ -443,12 +454,20 @@ void FzbPathGuidingRenderer::createDescriptorSet() {
 	write.append(OctreeArrayWrite, octreeArraysPtr);
 
 	OctreeArrayWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateNodeData_E, 0, 0, 1);
-	write.append(OctreeArrayWrite, octree->candidateNodeDataBuffer_E, 0, octree->candidateNodeDataBuffer_E.bufferSize);
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateSubTreeInfo, 0, 0, 1);
+	write.append(OctreeArrayWrite, octree->candidateSubTreeInfoBuffer, 0, octree->candidateSubTreeInfoBuffer.bufferSize);
 
 	OctreeArrayWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidatePrefixWSum_E, 0, 0, 1);
-	write.append(OctreeArrayWrite, octree->candidatePrefixWSumBuffer_E, 0, octree->candidatePrefixWSumBuffer_E.bufferSize);
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateLeafNodeData, 0, 0, 1);
+	write.append(OctreeArrayWrite, octree->candidateLeafNodeDataBuffer, 0, octree->candidateLeafNodeDataBuffer.bufferSize);
+
+	OctreeArrayWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateSampleData, 0, 0, 1);
+	write.append(OctreeArrayWrite, octree->candidateSampleDataBuffer, 0, octree->candidateSampleDataBuffer.bufferSize);
+
+	OctreeArrayWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateSamplePrefixWSum, 0, 0, 1);
+	write.append(OctreeArrayWrite, octree->candidateSamplePrefixWSumBuffer, 0, octree->candidateSamplePrefixWSumBuffer.bufferSize);
 #else
 	VkWriteDescriptorSet	OctreeArrayWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeData_G, 0, 0, octree->octreeDataBuffer_G.size());

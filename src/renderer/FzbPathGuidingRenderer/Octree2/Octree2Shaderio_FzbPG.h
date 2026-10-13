@@ -109,13 +109,31 @@ enum class BindingPoints_Octree_FzbPG : uint32_t {
 
 	eIndivisibleNodeInfos_G,
 
+	eAdjClusterInfo_G,
+
 	eClusterPairInfo,
 	eClusterPairGlobalInfo,
-
 	eClusetPairHitTestInfo,
 
-	eCandidateNodeData_E,
-	eCandidatePrefixWSum_E,
+	eCandidateSubTreeInfo,
+	eCandidateLeafNodeData,
+
+	eCandidateSampleData,
+	eCandidateSamplePrefixWSum,
+
+	eCandidateSampleIndex,
+
+	eCandidateSampleAABB,
+	eCandidateSampleRadiance,
+	eCandidateSampleSubTreeInfo,
+};
+//------------------------------------------------------------------------------------------
+#define MAX_ADJACENT_CLUSTER_COUNT 4
+
+struct AdjClusterTempInfo_FzbPG {
+	uint nodeLabel;
+	int2 nearbyNodeInfos[NEARBY_NODE_COUNT_FZBPG];
+	float nearbyNodeDistances[NEARBY_NODE_COUNT_FZBPG];
 };
 //------------------------------------------------------------------------------------------
 //don't change!!!!!
@@ -141,13 +159,21 @@ struct OctreeNodeData_E_FzbPG {
 	AABB aabb;
 };
 
-struct CandidateNodeData_E_FzbPG {
+//------------------------------------------------------------------------------------------
+struct CandidateSubTreeInfo {
+	int subTreeNodeIndex_layer;
+};
+struct CandidateLeafNodeData {
 	AABB aabb;
+	float3 radiance;
+#ifdef SpatialReuse_FzbPG
+	float3 normal;
+#endif
+};
+//------------------------------------------------------------------------------------------
+struct CandidateSampleData_FzbPG {
 	float w;
 	float p_hat;
-
-	float3 radiance;
-	int subTreeNodeIndex_layer;
 };
 
 //------------------------------------------------------------------------------------------

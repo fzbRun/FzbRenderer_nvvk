@@ -55,11 +55,22 @@ public:
 	nvvk::Buffer globalInfoBuffer;
 	nvvk::Buffer indivisibleNodeInfosBuffer_G;					//所有indivisibleNode按照label排序，存有uint2：layerIndex + nodeIndex
 
+	nvvk::Buffer adjClusterInfoBuffer;
+
 	nvvk::Buffer clusterPairInfoBuffer;
 	nvvk::Buffer clusterPairGlobalInfoBuffer;
 	nvvk::Buffer clusterPairHitInfoBuffer;
-	nvvk::Buffer candidateNodeDataBuffer_E;
-	nvvk::Buffer candidatePrefixWSumBuffer_E;
+
+	nvvk::Buffer candidateSubTreeInfoBuffer;
+	nvvk::Buffer candidateLeafNodeDataBuffer;
+
+	nvvk::Buffer candidateSampleDataBuffer;
+	nvvk::Buffer candidateSamplePrefixWSumBuffer;
+
+	nvvk::Buffer candidateSampleIndexBuffer;
+	nvvk::Buffer candidateSampleAABBBuffer;
+	nvvk::Buffer candidateSampleRadianceBuffer;
+	nvvk::Buffer candidateSampleSubTreeInfoBuffer;
 private:
 	Octree2CreateInfo_FzbPG setting;
 
@@ -85,7 +96,8 @@ private:
 
 	VkShaderEXT computeShader_initWeights{};
 	VkShaderEXT computeShader_getCandidateNodes{};
-	VkShaderEXT computeShader_dispatchGetWeight{};
+	VkShaderEXT computeShader_dispatchGetCandidateLeafNodes{};
+	VkShaderEXT computeShader_getCandidateLeafNodes{};
 	VkShaderEXT computeShader_clusterPairHitTest{};
 	VkShaderEXT computeShader_getCandidateNodeWeights{};;
 	VkShaderEXT computeShader_createCandidatePrefixWSum{};;

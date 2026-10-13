@@ -6,8 +6,13 @@
 [[vk::push_constant]] ConstantBuffer<FzbPathGuidingPushConstant, ScalarDataLayout> pushConst;
 [[vk::binding(StaticBindingPoints_FzbPG::eOctreeNodeInfo_G)]] RWStructuredBuffer<OctreeNodeInfo_G_FzbPG, ScalarDataLayout> OctreeNodeInfoBuffer_G[];
 [[vk::binding(StaticBindingPoints_FzbPG::eOctreeNodeData_E)]] RWStructuredBuffer<OctreeNodeData_E_FzbPG, ScalarDataLayout> OctreeNodeDataBuffer_E[];
-[[vk::binding(StaticBindingPoints_FzbPG::eCandidateNodeData_E)]] RWStructuredBuffer<CandidateNodeData_E_FzbPG, ScalarDataLayout> candidateNodeDataBuffer_E;
-[[vk::binding(StaticBindingPoints_FzbPG::eCandidatePrefixWSum_E)]] RWStructuredBuffer<float> candidatePrefixWSumBuffer_E;
+
+[[vk::binding(StaticBindingPoints_FzbPG::eCandidateSubTreeInfo)]] RWStructuredBuffer<CandidateSubTreeInfo, ScalarDataLayout> candidateSubTreeInfoBuffer;
+[[vk::binding(StaticBindingPoints_FzbPG::eCandidateLeafNodeData)]] RWStructuredBuffer<CandidateLeafNodeData, ScalarDataLayout> candidateLeafNodeDataBuffer;
+
+[[vk::binding(StaticBindingPoints_FzbPG::eCandidateSampleData)]] RWStructuredBuffer<CandidateSampleData_FzbPG, ScalarDataLayout> candidateSampleDataBuffer;
+[[vk::binding(StaticBindingPoints_FzbPG::eCandidateSamplePrefixWSum)]] RWStructuredBuffer<float> candidateSamplePrefixWSumBuffer;
+
 [[vk::binding(StaticBindingPoints_FzbPG::eGlobalInfo)]] RWStructuredBuffer<OctreeGlobalInfo_FzbPG, ScalarDataLayout> GlobalInfoBuffer;
 
 #ifndef NDEBUG
@@ -242,7 +247,7 @@ bool getNodeAABB_E_FzbPG(inout AABB aabb, inout HitPayload_FzbPG payload, inout 
 
     uint indivisibleNodeCount_G = groupGlobalInfo.indivisibleNodeCount_G;
     int candidateNodeStartIndex = outgoingIndex * indivisibleNodeCount_G * Candidate_Samples_Count + nodeLabel_G * Candidate_Samples_Count;
-    float wSum = candidatePrefixWSumBuffer_E[candidateNodeStartIndex + Candidate_Samples_Count - 1];
+    float wSum = candidateSamplePrefixWSumBuffer[candidateNodeStartIndex + Candidate_Samples_Count - 1];
     if (wSum == 0.0f) return false;
 
     float randomNumber = rand(payload.randomSeed) * wSum;
@@ -250,41 +255,44 @@ bool getNodeAABB_E_FzbPG(inout AABB aabb, inout HitPayload_FzbPG payload, inout 
     int hi = Candidate_Samples_Count - 1;
     while (lo < hi) {
         int mid = (lo + hi) >> 1;
-        if (randomNumber < candidatePrefixWSumBuffer_E[candidateNodeStartIndex + mid]) hi = mid;
+        if (randomNumber < candidateSamplePrefixWSumBuffer[candidateNodeStartIndex + mid]) hi = mid;
         else lo = mid + 1;
     }
 
-    int sampleNodeIndex = candidateNodeStartIndex + lo;
-    CandidateNodeData_E_FzbPG candidateNodeData = candidateNodeDataBuffer_E[sampleNodeIndex];
-    aabb = candidateNodeData.aabb;
-    nodeEPdf = candidateNodeData.p_hat / wSum;
+    aabb = candidateLeafNodeDataBuffer[nodeLabel_G * Candidate_Samples_Count + lo].aabb;
+    nodeEPdf = candidateSampleDataBuffer[candidateNodeStartIndex + lo].p_hat / wSum;
 
     return true;
 }
 
 float getPgPdf(uint nodeLabel_G, uint outgoingIndex, float3 hitPos, float3 hitNormal, float3 viewPos, uint2 threadIndex) {
     uint nodeIndex_E = getNodeIndex_E(hitPos, hitNormal);
-    OctreeNodeData_E_FzbPG nodeData_E = OctreeNodeDataBuffer_E[pushConst.maxOctreeLayer][nodeIndex_E];
 
     uint indivisibleNodeCount_G = groupGlobalInfo.indivisibleNodeCount_G;
     int candidateNodeStartIndex = outgoingIndex * indivisibleNodeCount_G * Candidate_Samples_Count + nodeLabel_G * Candidate_Samples_Count;
-    float wSum = candidatePrefixWSumBuffer_E[candidateNodeStartIndex + Candidate_Samples_Count - 1];
+    float wSum = candidateSamplePrefixWSumBuffer[candidateNodeStartIndex + Candidate_Samples_Count - 1];
     if (wSum == 0.0f) return 0.0f;
 
-    float p_hat = 0.0f;
+    int candidateIndex = -1;
     for (int i = 0; i < Candidate_Samples_Count; ++i) {
-        CandidateNodeData_E_FzbPG candidateNodeData = candidateNodeDataBuffer_E[candidateNodeStartIndex + i];
-        if (candidateNodeData.subTreeNodeIndex_layer == -1) continue;
+        CandidateSubTreeInfo candidateSubTreeInfo = candidateSubTreeInfoBuffer[nodeLabel_G * Candidate_Samples_Count + i];
+        if (candidateSubTreeInfo.subTreeNodeIndex_layer == -1) continue;
 
-        int subTreeNodeIndex = candidateNodeData.subTreeNodeIndex_layer >> 4;
-        int subTreeLayer = candidateNodeData.subTreeNodeIndex_layer & 15;
+        int subTreeNodeIndex = candidateSubTreeInfo.subTreeNodeIndex_layer >> 4;
+        int subTreeLayer = candidateSubTreeInfo.subTreeNodeIndex_layer & 15;
         int leafNodeCount = (1 << (3 * (pushConst.maxOctreeLayer - subTreeLayer)));
         int leafNodeStartIndex = subTreeNodeIndex * (1 << (3 * (pushConst.maxOctreeLayer - subTreeLayer)));
         if (nodeIndex_E >= leafNodeStartIndex && nodeIndex_E < leafNodeStartIndex + leafNodeCount) {
-            p_hat = dot(candidateNodeData.radiance, 1.0f) / max(dot(nodeData_E.radiance, 1.0f), 1e-6f) * candidateNodeData.p_hat;
+            candidateIndex = i;
             break;
         }
     }
+    if (candidateIndex == -1) return 0.0f;
+
+    OctreeNodeData_E_FzbPG nodeData_E = OctreeNodeDataBuffer_E[pushConst.maxOctreeLayer][nodeIndex_E];
+    float3 newRadiance = candidateLeafNodeDataBuffer[nodeLabel_G * Candidate_Samples_Count + candidateIndex].radiance;
+    float p_hat = candidateSampleDataBuffer[candidateNodeStartIndex + candidateIndex].p_hat;
+    p_hat *= dot(newRadiance, 1.0f) / max(dot(nodeData_E.radiance, 1.0f), 1e-6f);
     float pg_Pdf = p_hat / wSum;
     if (pg_Pdf == 0.0f) return 0.0f;
 

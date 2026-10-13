@@ -61,6 +61,25 @@ float3 UnpackFloatToFloat3(float packed) {
     unpacked.z = float(u & 0x7FF) / 2047.0;
     return unpacked;
 }
+//---------------------------------------------------float---------------------------------------------------
+float3 SnapToDominantAxis(float3 v)
+{
+    float3 a = abs(v);
+    float maxVal = max(a.x, max(a.y, a.z));
+
+    float x_is_max = step(maxVal, a.x);
+    float y_is_max = step(maxVal, a.y);
+    float z_is_max = step(maxVal, a.z);
+
+    float x_weight = x_is_max;
+    float y_weight = (1.0 - x_is_max) * y_is_max;
+    float z_weight = (1.0 - x_is_max) * (1.0 - y_is_max) * z_is_max;
+
+    return float3(sign(v.x) * x_weight,
+                  sign(v.y) * y_weight,
+                  sign(v.z) * z_weight);
+}
+
 //---------------------------------------------------Matrix---------------------------------------------------
 float3x3 Inverse3x3(float3x3 m) {
 	float3 c0 = m[0];

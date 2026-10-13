@@ -49,6 +49,8 @@ void Octree2_FzbPG::clean() {
 	Application::allocator.destroyBuffer(divisibleNodeInfoBuffer_G);
 	Application::allocator.destroyBuffer(threadGroupInfoBuffer);
 
+	Application::allocator.destroyBuffer(adjClusterInfoBuffer);
+
 	Application::allocator.destroyBuffer(blockInfoBuffer_G);
 	Application::allocator.destroyBuffer(blockInfoBuffer_E);
 	Application::allocator.destroyBuffer(hasDataBlockIndexBuffer_G);
@@ -58,8 +60,17 @@ void Octree2_FzbPG::clean() {
 	Application::allocator.destroyBuffer(clusterPairInfoBuffer);
 	Application::allocator.destroyBuffer(clusterPairGlobalInfoBuffer);
 	Application::allocator.destroyBuffer(clusterPairHitInfoBuffer);
-	Application::allocator.destroyBuffer(candidateNodeDataBuffer_E);
-	Application::allocator.destroyBuffer(candidatePrefixWSumBuffer_E);
+
+	Application::allocator.destroyBuffer(candidateSubTreeInfoBuffer);
+	Application::allocator.destroyBuffer(candidateLeafNodeDataBuffer);
+
+	Application::allocator.destroyBuffer(candidateSampleDataBuffer);
+	Application::allocator.destroyBuffer(candidateSamplePrefixWSumBuffer);
+
+	Application::allocator.destroyBuffer(candidateSampleIndexBuffer);
+	Application::allocator.destroyBuffer(candidateSampleAABBBuffer);
+	Application::allocator.destroyBuffer(candidateSampleRadianceBuffer);
+	Application::allocator.destroyBuffer(candidateSampleSubTreeInfoBuffer);
 
 	VkDevice device = Application::app->getDevice();
 	vkDestroyShaderEXT(device, computeShader_initOctreeArray, nullptr);
@@ -75,7 +86,8 @@ void Octree2_FzbPG::clean() {
 
 	vkDestroyShaderEXT(device, computeShader_initWeights, nullptr);
 	vkDestroyShaderEXT(device, computeShader_getCandidateNodes, nullptr);
-	vkDestroyShaderEXT(device, computeShader_dispatchGetWeight, nullptr);
+	vkDestroyShaderEXT(device, computeShader_dispatchGetCandidateLeafNodes, nullptr);
+	vkDestroyShaderEXT(device, computeShader_getCandidateLeafNodes, nullptr);
 	vkDestroyShaderEXT(device, computeShader_clusterPairHitTest, nullptr);
 	vkDestroyShaderEXT(device, computeShader_getCandidateNodeWeights, nullptr);
 	vkDestroyShaderEXT(device, computeShader_createCandidatePrefixWSum, nullptr);
@@ -421,75 +433,123 @@ void Octree2_FzbPG::createOctreeArray() {
 
 		layerNodeCount *= 8;
 	}
+	//-----------------------------------------------------------------------------------------------------------------------------------------
+	uint32_t bufferSize = 0;
+	{
+		bufferSize = uint32_t(pow(8, octreeMaxLayer)) * 6 / 8 * sizeof(uint32_t);
+		allocator->createBuffer(blockInfoBuffer_G, bufferSize,
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+		NVVK_DBG_NAME(blockInfoBuffer_G.buffer);
 
-	uint32_t bufferSize = uint32_t(pow(8, octreeMaxLayer)) * 6 / 8 * sizeof(uint32_t);
-	allocator->createBuffer(blockInfoBuffer_G, bufferSize,
-		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-	NVVK_DBG_NAME(blockInfoBuffer_G.buffer);
+		allocator->createBuffer(blockInfoBuffer_E, bufferSize,
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+		NVVK_DBG_NAME(blockInfoBuffer_E.buffer);
 
-	allocator->createBuffer(blockInfoBuffer_E, bufferSize,
-		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-	NVVK_DBG_NAME(blockInfoBuffer_E.buffer);
+		bufferSize = int(pow(8, octreeMaxLayer)) * 6 / 8 * sizeof(uint32_t);
+		allocator->createBuffer(hasDataBlockIndexBuffer_G, bufferSize,
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+		NVVK_DBG_NAME(hasDataBlockIndexBuffer_G.buffer);
 
-	bufferSize = int(pow(8, octreeMaxLayer)) * 6 / 8 * sizeof(uint32_t);
-	allocator->createBuffer(hasDataBlockIndexBuffer_G, bufferSize,
-		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-	NVVK_DBG_NAME(hasDataBlockIndexBuffer_G.buffer);
+		allocator->createBuffer(hasDataBlockIndexBuffer_E, bufferSize,
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+		NVVK_DBG_NAME(hasDataBlockIndexBuffer_E.buffer);
 
-	allocator->createBuffer(hasDataBlockIndexBuffer_E, bufferSize,
-		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-	NVVK_DBG_NAME(hasDataBlockIndexBuffer_E.buffer);
+		bufferSize = sizeof(shaderio::HasDataOctreeBlockCount_FzbPG);
+		allocator->createBuffer(hasDataBlockCountBuffer, bufferSize,
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+		NVVK_DBG_NAME(hasDataBlockCountBuffer.buffer);
 
-	bufferSize = sizeof(shaderio::HasDataOctreeBlockCount_FzbPG);
-	allocator->createBuffer(hasDataBlockCountBuffer, bufferSize,
-		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-	NVVK_DBG_NAME(hasDataBlockCountBuffer.buffer);
+		bufferSize = sizeof(shaderio::OctreeGlobalInfo_FzbPG);
+		allocator->createBuffer(globalInfoBuffer, bufferSize,
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_2_INDIRECT_BUFFER_BIT);
+		NVVK_DBG_NAME(globalInfoBuffer.buffer);
+	}
+	//-----------------------------------------------------------------------------------------------------------------------------------------
+	{
+		bufferSize = sizeof(shaderio::uint2) * ((IndivisibleNodeCount_G_FZBPG + 7) / 8);
+		allocator->createBuffer(divisibleNodeInfoBuffer_G, bufferSize,
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+		NVVK_DBG_NAME(divisibleNodeInfoBuffer_G.buffer);
 
-	bufferSize = sizeof(shaderio::OctreeGlobalInfo_FzbPG);
-	allocator->createBuffer(globalInfoBuffer, bufferSize,
-		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_2_INDIRECT_BUFFER_BIT);
-	NVVK_DBG_NAME(globalInfoBuffer.buffer);
+		uint32_t maxLayerNodeCount = (1 << (3 * octreeMaxLayer)) * 6;
+		bufferSize = sizeof(shaderio::OctreeThreadGroupInfo_FzbPG) * ((maxLayerNodeCount + GETOCTREELABEL_CS_THREADGROUP_SIZE - 1) / GETOCTREELABEL_CS_THREADGROUP_SIZE);
+		allocator->createBuffer(threadGroupInfoBuffer, bufferSize,
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+		NVVK_DBG_NAME(threadGroupInfoBuffer.buffer);
 
-	bufferSize = sizeof(shaderio::uint2) * ((IndivisibleNodeCount_G_FZBPG + 7) / 8);
-	allocator->createBuffer(divisibleNodeInfoBuffer_G, bufferSize,
-		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-	NVVK_DBG_NAME(divisibleNodeInfoBuffer_G.buffer);
+		bufferSize = IndivisibleNodeCount_G_FZBPG * sizeof(shaderio::uint2);
+		allocator->createBuffer(indivisibleNodeInfosBuffer_G, bufferSize,
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+		NVVK_DBG_NAME(indivisibleNodeInfosBuffer_G.buffer);
+	}
+	//-----------------------------------------------------------------------------------------------------------------------------------------
+	{
+		bufferSize = IndivisibleNodeCount_G_FZBPG * Candidate_Samples_Count * sizeof(shaderio::uint);
+		allocator->createBuffer(adjClusterInfoBuffer, bufferSize,
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+		NVVK_DBG_NAME(adjClusterInfoBuffer.buffer);
+	}
+	//-----------------------------------------------------------------------------------------------------------------------------------------
+	{
+		bufferSize = IndivisibleNodeCount_G_FZBPG * Candidate_Samples_Count * sizeof(shaderio::ClusterPairInfo);
+		allocator->createBuffer(clusterPairInfoBuffer, bufferSize,
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+		NVVK_DBG_NAME(clusterPairInfoBuffer.buffer);
 
-	uint32_t maxLayerNodeCount = (1 << (3 * octreeMaxLayer)) * 6;
-	bufferSize = sizeof(shaderio::OctreeThreadGroupInfo_FzbPG) * ((maxLayerNodeCount + GETOCTREELABEL_CS_THREADGROUP_SIZE - 1) / GETOCTREELABEL_CS_THREADGROUP_SIZE);
-	allocator->createBuffer(threadGroupInfoBuffer, bufferSize,
-		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-	NVVK_DBG_NAME(threadGroupInfoBuffer.buffer);
+		bufferSize = sizeof(shaderio::ClusterPairGlobalInfo);
+		allocator->createBuffer(clusterPairGlobalInfoBuffer, bufferSize,
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+		NVVK_DBG_NAME(clusterPairGlobalInfoBuffer.buffer);
 
-	bufferSize = IndivisibleNodeCount_G_FZBPG * sizeof(shaderio::uint2);
-	allocator->createBuffer(indivisibleNodeInfosBuffer_G, bufferSize,
-		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-	NVVK_DBG_NAME(indivisibleNodeInfosBuffer_G.buffer);
+		bufferSize = IndivisibleNodeCount_G_FZBPG * Candidate_Samples_Count * HITTEST_COUNT_FZBPG * sizeof(shaderio::ClusterPairHitInfo);
+		allocator->createBuffer(clusterPairHitInfoBuffer, bufferSize,
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+		NVVK_DBG_NAME(clusterPairHitInfoBuffer.buffer);
+	}
+	//-----------------------------------------------------------------------------------------------------------------------------------------
+	{
+		bufferSize = IndivisibleNodeCount_G_FZBPG * Candidate_Samples_Count * sizeof(shaderio::CandidateSubTreeInfo);
+		allocator->createBuffer(candidateSubTreeInfoBuffer, bufferSize,
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+		NVVK_DBG_NAME(candidateSubTreeInfoBuffer.buffer);
 
-	bufferSize = IndivisibleNodeCount_G_FZBPG * Candidate_Samples_Count * sizeof(shaderio::ClusterPairInfo);
-	allocator->createBuffer(clusterPairInfoBuffer, bufferSize,
-		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-	NVVK_DBG_NAME(clusterPairInfoBuffer.buffer);
+		bufferSize = IndivisibleNodeCount_G_FZBPG * Candidate_Samples_Count * sizeof(shaderio::CandidateLeafNodeData);
+		allocator->createBuffer(candidateLeafNodeDataBuffer, bufferSize,
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+		NVVK_DBG_NAME(candidateLeafNodeDataBuffer.buffer);
+	}
+	//-----------------------------------------------------------------------------------------------------------------------------------------
+	{
+		bufferSize = OUTGOING_COUNT_FZBPG * IndivisibleNodeCount_G_FZBPG * Candidate_Samples_Count * sizeof(shaderio::CandidateSampleData_FzbPG);
+		allocator->createBuffer(candidateSampleDataBuffer, bufferSize,
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+		NVVK_DBG_NAME(candidateSampleDataBuffer.buffer);
 
-	bufferSize = sizeof(shaderio::ClusterPairGlobalInfo);
-	allocator->createBuffer(clusterPairGlobalInfoBuffer, bufferSize,
-		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-	NVVK_DBG_NAME(clusterPairGlobalInfoBuffer.buffer);
+		bufferSize = OUTGOING_COUNT_FZBPG * IndivisibleNodeCount_G_FZBPG * Candidate_Samples_Count * sizeof(float);
+		allocator->createBuffer(candidateSamplePrefixWSumBuffer, bufferSize,
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+		NVVK_DBG_NAME(candidateSamplePrefixWSumBuffer.buffer);
 
-	bufferSize = IndivisibleNodeCount_G_FZBPG * Candidate_Samples_Count * HITTEST_COUNT_FZBPG * sizeof(shaderio::ClusterPairHitInfo);
-	allocator->createBuffer(clusterPairHitInfoBuffer, bufferSize,
-		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-	NVVK_DBG_NAME(clusterPairHitInfoBuffer.buffer);
+		bufferSize = OUTGOING_COUNT_FZBPG * IndivisibleNodeCount_G_FZBPG * sizeof(int);
+		allocator->createBuffer(candidateSampleIndexBuffer, bufferSize,
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+		NVVK_DBG_NAME(candidateSampleIndexBuffer.buffer);
 
-	bufferSize = OUTGOING_COUNT_FZBPG * IndivisibleNodeCount_G_FZBPG * Candidate_Samples_Count * sizeof(shaderio::CandidateNodeData_E_FzbPG);
-	allocator->createBuffer(candidateNodeDataBuffer_E, bufferSize,
-		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-	NVVK_DBG_NAME(candidateNodeDataBuffer_E.buffer);
+		bufferSize = OUTGOING_COUNT_FZBPG * IndivisibleNodeCount_G_FZBPG * Candidate_Samples_Count * sizeof(shaderio::AABB);
+		allocator->createBuffer(candidateSampleAABBBuffer, bufferSize,
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+		NVVK_DBG_NAME(candidateSampleAABBBuffer.buffer);
 
-	bufferSize = OUTGOING_COUNT_FZBPG * IndivisibleNodeCount_G_FZBPG * Candidate_Samples_Count * sizeof(float);
-	allocator->createBuffer(candidatePrefixWSumBuffer_E, bufferSize,
-		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-	NVVK_DBG_NAME(candidatePrefixWSumBuffer_E.buffer);
+		bufferSize = OUTGOING_COUNT_FZBPG * IndivisibleNodeCount_G_FZBPG * Candidate_Samples_Count * sizeof(shaderio::float3);
+		allocator->createBuffer(candidateSampleRadianceBuffer, bufferSize,
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+		NVVK_DBG_NAME(candidateSampleRadianceBuffer.buffer);
+
+		bufferSize = OUTGOING_COUNT_FZBPG * IndivisibleNodeCount_G_FZBPG * Candidate_Samples_Count * sizeof(shaderio::uint);
+		allocator->createBuffer(candidateSampleSubTreeInfoBuffer, bufferSize,
+			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
+		NVVK_DBG_NAME(candidateSampleSubTreeInfoBuffer.buffer);
+	}
 
 	pushConstant.octreeMaxLayer = octreeMaxLayer;
 	pushConstant.octreeNodeTotalCount = int(pow(8, octreeMaxLayer + 1) - 1) / 7 * 6;
@@ -513,98 +573,143 @@ void Octree2_FzbPG::createDescriptorSetLayout() {
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = (uint32_t)setting.VGBs.size(),
 		.stageFlags = VK_SHADER_STAGE_ALL });
-
-	bindings.addBinding({
+	{
+		bindings.addBinding({
 		.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eOctreeNodeData_G,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = (uint32_t)octreeNodeDataBuffer_G.size(),
 		.stageFlags = VK_SHADER_STAGE_ALL });
-	bindings.addBinding({
-		.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eOctreeNodeInfo_G,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = (uint32_t)octreeNodeInfoBuffer_G.size(),
-		.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eOctreeNodeInfo_G,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = (uint32_t)octreeNodeInfoBuffer_G.size(),
+			.stageFlags = VK_SHADER_STAGE_ALL });
 
-	bindings.addBinding({
-		.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eOctreeNodeData_E,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = (uint32_t)octreeNodeDataBuffer_E.size(),
-		.stageFlags = VK_SHADER_STAGE_ALL });
-
-	bindings.addBinding({
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eOctreeNodeData_E,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = (uint32_t)octreeNodeDataBuffer_E.size(),
+			.stageFlags = VK_SHADER_STAGE_ALL });
+	}
+	{
+		bindings.addBinding({
 		.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eBlockInfos_G,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
-	bindings.addBinding({
-		.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eBlockInfos_E,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = 1,
-		.stageFlags = VK_SHADER_STAGE_ALL });
-	bindings.addBinding({
-		.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eHasDataBlockIndices_G,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = 1,
-		.stageFlags = VK_SHADER_STAGE_ALL });
-	bindings.addBinding({
-		.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eHasDataBlockIndices_E,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = 1,
-		.stageFlags = VK_SHADER_STAGE_ALL });
-	bindings.addBinding({
-		.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eHasDataBlockCount,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = 1,
-		.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eBlockInfos_E,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eHasDataBlockIndices_G,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eHasDataBlockIndices_E,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eHasDataBlockCount,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
 
-	bindings.addBinding({
-		.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eGlobalInfo,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = 1,
-		.stageFlags = VK_SHADER_STAGE_ALL });
-
-	bindings.addBinding({
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eGlobalInfo,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+	}
+	{
+		bindings.addBinding({
 		.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eDivisibleNodeInfos_G,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
-	bindings.addBinding({
-		.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eThreadGroupInfos,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = 1,
-		.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eThreadGroupInfos,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
 
-	bindings.addBinding({
-		.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eIndivisibleNodeInfos_G,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = 1,
-		.stageFlags = VK_SHADER_STAGE_ALL });
-
-	bindings.addBinding({
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eIndivisibleNodeInfos_G,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+	}
+	{
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eAdjClusterInfo_G,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+	}
+	{
+		bindings.addBinding({
 		.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eClusterPairInfo,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
-	bindings.addBinding({
-		.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eClusterPairGlobalInfo,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = 1,
-		.stageFlags = VK_SHADER_STAGE_ALL });
-	bindings.addBinding({
-		.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eClusetPairHitTestInfo,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = 1,
-		.stageFlags = VK_SHADER_STAGE_ALL });
-	bindings.addBinding({
-		.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eCandidateNodeData_E,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = 1,
-		.stageFlags = VK_SHADER_STAGE_ALL });
-	bindings.addBinding({
-		.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eCandidatePrefixWSum_E,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = 1,
-		.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eClusterPairGlobalInfo,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eClusetPairHitTestInfo,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+	}
+	{
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eCandidateSubTreeInfo,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eCandidateLeafNodeData,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+	}
+	{
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eCandidateSampleData,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eCandidateSamplePrefixWSum,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eCandidateSampleIndex,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eCandidateSampleAABB,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eCandidateSampleRadiance,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+		bindings.addBinding({
+			.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eCandidateSampleSubTreeInfo,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_ALL });
+	}
 
 	staticDescPack.init(bindings, Application::app->getDevice(), 1, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
 		VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT);
@@ -629,76 +734,112 @@ void Octree2_FzbPG::createDescriptorSet() {
 	nvvk::Buffer* VGBsPtr = setting.VGBs.data();
 	write.append(VGBWrite, VGBsPtr);
 
-	VkWriteDescriptorSet    OctreeArrayWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eOctreeNodeData_G, 0, 0, octreeNodeDataBuffer_G.size());
-	nvvk::Buffer* octreeArraysPtr = octreeNodeDataBuffer_G.data();
-	write.append(OctreeArrayWrite, octreeArraysPtr);
+	{
+		VkWriteDescriptorSet    OctreeArrayWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eOctreeNodeData_G, 0, 0, octreeNodeDataBuffer_G.size());
+		nvvk::Buffer* octreeArraysPtr = octreeNodeDataBuffer_G.data();
+		write.append(OctreeArrayWrite, octreeArraysPtr);
 
-	OctreeArrayWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eOctreeNodeInfo_G, 0, 0, octreeNodeInfoBuffer_G.size());
-	octreeArraysPtr = octreeNodeInfoBuffer_G.data();
-	write.append(OctreeArrayWrite, octreeArraysPtr);
+		OctreeArrayWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eOctreeNodeInfo_G, 0, 0, octreeNodeInfoBuffer_G.size());
+		octreeArraysPtr = octreeNodeInfoBuffer_G.data();
+		write.append(OctreeArrayWrite, octreeArraysPtr);
 
-	OctreeArrayWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eOctreeNodeData_E, 0, 0, octreeNodeDataBuffer_E.size());
-	octreeArraysPtr = octreeNodeDataBuffer_E.data();
-	write.append(OctreeArrayWrite, octreeArraysPtr);
+		OctreeArrayWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eOctreeNodeData_E, 0, 0, octreeNodeDataBuffer_E.size());
+		octreeArraysPtr = octreeNodeDataBuffer_E.data();
+		write.append(OctreeArrayWrite, octreeArraysPtr);
+	}
+	{
+		VkWriteDescriptorSet    HasDataInfoWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eBlockInfos_G, 0, 0, 1);
+		write.append(HasDataInfoWrite, blockInfoBuffer_G, 0, blockInfoBuffer_G.bufferSize);
 
-	VkWriteDescriptorSet    HasDataInfoWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eBlockInfos_G, 0, 0, 1);
-	write.append(HasDataInfoWrite, blockInfoBuffer_G, 0, blockInfoBuffer_G.bufferSize);
+		HasDataInfoWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eBlockInfos_E, 0, 0, 1);
+		write.append(HasDataInfoWrite, blockInfoBuffer_E, 0, blockInfoBuffer_E.bufferSize);
 
-	HasDataInfoWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eBlockInfos_E, 0, 0, 1);
-	write.append(HasDataInfoWrite, blockInfoBuffer_E, 0, blockInfoBuffer_E.bufferSize);
+		HasDataInfoWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eHasDataBlockIndices_G, 0, 0, 1);
+		write.append(HasDataInfoWrite, hasDataBlockIndexBuffer_G, 0, hasDataBlockIndexBuffer_G.bufferSize);
 
-	HasDataInfoWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eHasDataBlockIndices_G, 0, 0, 1);
-	write.append(HasDataInfoWrite, hasDataBlockIndexBuffer_G, 0, hasDataBlockIndexBuffer_G.bufferSize);
+		HasDataInfoWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eHasDataBlockIndices_E, 0, 0, 1);
+		write.append(HasDataInfoWrite, hasDataBlockIndexBuffer_E, 0, hasDataBlockIndexBuffer_E.bufferSize);
 
-	HasDataInfoWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eHasDataBlockIndices_E, 0, 0, 1);
-	write.append(HasDataInfoWrite, hasDataBlockIndexBuffer_E, 0, hasDataBlockIndexBuffer_E.bufferSize);
+		HasDataInfoWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eHasDataBlockCount, 0, 0, 1);
+		write.append(HasDataInfoWrite, hasDataBlockCountBuffer, 0, hasDataBlockCountBuffer.bufferSize);
 
-	HasDataInfoWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eHasDataBlockCount, 0, 0, 1);
-	write.append(HasDataInfoWrite, hasDataBlockCountBuffer, 0, hasDataBlockCountBuffer.bufferSize);
+		VkWriteDescriptorSet    GlobalInfoWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eGlobalInfo, 0, 0, 1);
+		write.append(GlobalInfoWrite, globalInfoBuffer, 0, globalInfoBuffer.bufferSize);
+	}
+	{
+		VkWriteDescriptorSet    LabelInfoWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eDivisibleNodeInfos_G, 0, 0, 1);
+		write.append(LabelInfoWrite, divisibleNodeInfoBuffer_G, 0, divisibleNodeInfoBuffer_G.bufferSize);
 
-	VkWriteDescriptorSet    GlobalInfoWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eGlobalInfo, 0, 0, 1);
-	write.append(GlobalInfoWrite, globalInfoBuffer, 0, globalInfoBuffer.bufferSize);
+		LabelInfoWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eThreadGroupInfos, 0, 0, 1);
+		write.append(LabelInfoWrite, threadGroupInfoBuffer, 0, threadGroupInfoBuffer.bufferSize);
 
-	VkWriteDescriptorSet    LabelInfoWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eDivisibleNodeInfos_G, 0, 0, 1);
-	write.append(LabelInfoWrite, divisibleNodeInfoBuffer_G, 0, divisibleNodeInfoBuffer_G.bufferSize);
+		VkWriteDescriptorSet    IndivisibleInfoWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eIndivisibleNodeInfos_G, 0, 0, 1);
+		write.append(IndivisibleInfoWrite, indivisibleNodeInfosBuffer_G, 0, indivisibleNodeInfosBuffer_G.bufferSize);
+	}
+	{
+		VkWriteDescriptorSet    adjClusterInfoWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eAdjClusterInfo_G, 0, 0, 1);
+		write.append(adjClusterInfoWrite, adjClusterInfoBuffer, 0, adjClusterInfoBuffer.bufferSize);
+	}
+	{
+		VkWriteDescriptorSet 	candidatePairsWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eClusterPairInfo, 0, 0, 1);
+		write.append(candidatePairsWrite, clusterPairInfoBuffer, 0, clusterPairInfoBuffer.bufferSize);
 
-	LabelInfoWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eThreadGroupInfos, 0, 0, 1);
-	write.append(LabelInfoWrite, threadGroupInfoBuffer, 0, threadGroupInfoBuffer.bufferSize);
+		candidatePairsWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eClusterPairGlobalInfo, 0, 0, 1);
+		write.append(candidatePairsWrite, clusterPairGlobalInfoBuffer, 0, clusterPairGlobalInfoBuffer.bufferSize);
 
-	VkWriteDescriptorSet    IndivisibleInfoWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eIndivisibleNodeInfos_G, 0, 0, 1);
-	write.append(IndivisibleInfoWrite, indivisibleNodeInfosBuffer_G, 0, indivisibleNodeInfosBuffer_G.bufferSize);
+		candidatePairsWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eClusetPairHitTestInfo, 0, 0, 1);
+		write.append(candidatePairsWrite, clusterPairHitInfoBuffer, 0, clusterPairHitInfoBuffer.bufferSize);
+	}
+	{
+		VkWriteDescriptorSet candidateNodesWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eCandidateSubTreeInfo, 0, 0, 1);
+		write.append(candidateNodesWrite, candidateSubTreeInfoBuffer, 0, candidateSubTreeInfoBuffer.bufferSize);
 
-	VkWriteDescriptorSet 	candidateNodesWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eClusterPairInfo, 0, 0, 1);
-	write.append(candidateNodesWrite, clusterPairInfoBuffer, 0, clusterPairInfoBuffer.bufferSize);
+		candidateNodesWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eCandidateLeafNodeData, 0, 0, 1);
+		write.append(candidateNodesWrite, candidateLeafNodeDataBuffer, 0, candidateLeafNodeDataBuffer.bufferSize);
+	}
+	{
+		VkWriteDescriptorSet candidateNodesWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eCandidateSampleData, 0, 0, 1);
+		write.append(candidateNodesWrite, candidateSampleDataBuffer, 0, candidateSampleDataBuffer.bufferSize);
 
-	candidateNodesWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eClusterPairGlobalInfo, 0, 0, 1);
-	write.append(candidateNodesWrite, clusterPairGlobalInfoBuffer, 0, clusterPairGlobalInfoBuffer.bufferSize);
+		candidateNodesWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eCandidateSamplePrefixWSum, 0, 0, 1);
+		write.append(candidateNodesWrite, candidateSamplePrefixWSumBuffer, 0, candidateSamplePrefixWSumBuffer.bufferSize);
 
-	candidateNodesWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eClusetPairHitTestInfo, 0, 0, 1);
-	write.append(candidateNodesWrite, clusterPairHitInfoBuffer, 0, clusterPairHitInfoBuffer.bufferSize);
-		
-	candidateNodesWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eCandidateNodeData_E, 0, 0, 1);
-	write.append(candidateNodesWrite, candidateNodeDataBuffer_E, 0, candidateNodeDataBuffer_E.bufferSize);
+		candidateNodesWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eCandidateSampleIndex, 0, 0, 1);
+		write.append(candidateNodesWrite, candidateSampleIndexBuffer, 0, candidateSampleIndexBuffer.bufferSize);
 
-	candidateNodesWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eCandidatePrefixWSum_E, 0, 0, 1);
-	write.append(candidateNodesWrite, candidatePrefixWSumBuffer_E, 0, candidatePrefixWSumBuffer_E.bufferSize);
+		candidateNodesWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eCandidateSampleAABB, 0, 0, 1);
+		write.append(candidateNodesWrite, candidateSampleAABBBuffer, 0, candidateSampleAABBBuffer.bufferSize);
+
+		candidateNodesWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eCandidateSampleRadiance, 0, 0, 1);
+		write.append(candidateNodesWrite, candidateSampleRadianceBuffer, 0, candidateSampleRadianceBuffer.bufferSize);
+
+		candidateNodesWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eCandidateSampleSubTreeInfo, 0, 0, 1);
+		write.append(candidateNodesWrite, candidateSampleSubTreeInfoBuffer, 0, candidateSampleSubTreeInfoBuffer.bufferSize);
+	}
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }
@@ -865,14 +1006,23 @@ void Octree2_FzbPG::compileAndCreateShaders() {
 		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_getCandidateNodes);
 		NVVK_DBG_NAME(computeShader_getCandidateNodes);
 		//--------------------------------------------------------------------------------------
-		vkDestroyShaderEXT(device, computeShader_dispatchGetWeight, nullptr);
+		vkDestroyShaderEXT(device, computeShader_dispatchGetCandidateLeafNodes, nullptr);
 		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
 		shaderInfo.nextStage = 0;
-		shaderInfo.pName = "computeMain_dispatchGetWeight";
+		shaderInfo.pName = "computeMain_dispatchGetCandidateLeafNodes";
 		shaderInfo.codeSize = shaderCode.codeSize;
 		shaderInfo.pCode = shaderCode.pCode;
-		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_dispatchGetWeight);
-		NVVK_DBG_NAME(computeShader_dispatchGetWeight);
+		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_dispatchGetCandidateLeafNodes);
+		NVVK_DBG_NAME(computeShader_dispatchGetCandidateLeafNodes);
+		//--------------------------------------------------------------------------------------
+		vkDestroyShaderEXT(device, computeShader_getCandidateLeafNodes, nullptr);
+		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		shaderInfo.nextStage = 0;
+		shaderInfo.pName = "computeMain_getCandidateLeafNodes";
+		shaderInfo.codeSize = shaderCode.codeSize;
+		shaderInfo.pCode = shaderCode.pCode;
+		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_getCandidateLeafNodes);
+		NVVK_DBG_NAME(computeShader_getCandidateLeafNodes);
 		//--------------------------------------------------------------------------------------
 		vkDestroyShaderEXT(device, computeShader_clusterPairHitTest, nullptr);
 		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
@@ -1053,7 +1203,11 @@ void Octree2_FzbPG::getOctreeNodePairData(VkCommandBuffer cmd) {
 	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 
-	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_dispatchGetWeight);
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_dispatchGetCandidateLeafNodes);
+	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getCandidateLeafNodes);
 	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 
@@ -1069,6 +1223,10 @@ void Octree2_FzbPG::getOctreeNodePairData(VkCommandBuffer cmd) {
 	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 
+#ifdef IndivisibleNodeCount_G_FZBPG
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createCandidatePrefixWSum);
+	vkCmdDispatch(cmd, (IndivisibleNodeCount_G_FZBPG + 1023) / 1024, 1, 1);
+#endif
 }
 
 void Octree2_FzbPG::geometryTreeDebug(VkCommandBuffer cmd) {
