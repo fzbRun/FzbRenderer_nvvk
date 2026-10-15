@@ -114,6 +114,12 @@ void FzbPathGuidingRenderer::uiRender() {
 			PE::end();
 		}
 
+		#ifdef StochasticLightcuts_RIS
+		#ifdef SpatialReuse_FzbPG
+		ImGui::Checkbox("Spatial Reuse", &octree->spatialReuse);
+		#endif
+		#endif
+
 		if (ptContext.rtPosFetchFeature.rayTracingPositionFetch == VK_FALSE){
 			ImGui::TextColored({ 1, 0, 0, 1 }, "ERROR: Position Fetch not supported!");
 			ImGui::Text("This hardware does not support");
@@ -258,6 +264,7 @@ void FzbPathGuidingRenderer::preRender() {
 	lightInject->preRender();
 	octree->preRender();
 #ifdef StochasticLightcuts_RIS
+	pushConstant.spatialRuse = octree->spatialReuse;
 #else
 	octree->pushConstant.maxFrameCount = maxFrames;
 #endif
@@ -347,6 +354,21 @@ void FzbPathGuidingRenderer::createDescriptorSetLayout() {
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
+
+#ifdef SpatialReuse_FzbPG
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateSampleData2,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateSampleAABB,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+#endif
+
 #else
 	bindings.addBinding({
 		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeData_G,
@@ -468,6 +490,17 @@ void FzbPathGuidingRenderer::createDescriptorSet() {
 	OctreeArrayWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateSamplePrefixWSum, 0, 0, 1);
 	write.append(OctreeArrayWrite, octree->candidateSamplePrefixWSumBuffer, 0, octree->candidateSamplePrefixWSumBuffer.bufferSize);
+
+#ifdef SpatialReuse_FzbPG
+	OctreeArrayWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateSampleData2, 0, 0, 1);
+	write.append(OctreeArrayWrite, octree->candidateSampleData2Buffer, 0, octree->candidateSampleData2Buffer.bufferSize);
+
+	OctreeArrayWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateSampleAABB, 0, 0, 1);
+	write.append(OctreeArrayWrite, octree->candidateSampleAABBBuffer, 0, octree->candidateSampleAABBBuffer.bufferSize);
+#endif
+
 #else
 	VkWriteDescriptorSet	OctreeArrayWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeData_G, 0, 0, octree->octreeDataBuffer_G.size());
@@ -530,7 +563,7 @@ void FzbPathGuidingRenderer::compileAndCreateShaders() {
 
 	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
 	#ifdef StochasticLightcuts_RIS
-	std::filesystem::path shaderSource = shaderPath / "FzbPathGuiding2.slang";
+	std::filesystem::path shaderSource = shaderPath / "FzbPathGuiding3.slang";
 	#else
 	std::filesystem::path shaderSource = shaderPath / "FzbPathGuiding.slang";
 	#endif

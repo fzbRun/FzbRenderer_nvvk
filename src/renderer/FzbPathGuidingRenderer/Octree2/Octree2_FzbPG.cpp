@@ -69,8 +69,7 @@ void Octree2_FzbPG::clean() {
 
 	Application::allocator.destroyBuffer(candidateSampleIndexBuffer);
 	Application::allocator.destroyBuffer(candidateSampleAABBBuffer);
-	Application::allocator.destroyBuffer(candidateSampleRadianceBuffer);
-	Application::allocator.destroyBuffer(candidateSampleSubTreeInfoBuffer);
+	Application::allocator.destroyBuffer(candidateSampleData2Buffer);
 
 	VkDevice device = Application::app->getDevice();
 	vkDestroyShaderEXT(device, computeShader_initOctreeArray, nullptr);
@@ -91,6 +90,11 @@ void Octree2_FzbPG::clean() {
 	vkDestroyShaderEXT(device, computeShader_clusterPairHitTest, nullptr);
 	vkDestroyShaderEXT(device, computeShader_getCandidateNodeWeights, nullptr);
 	vkDestroyShaderEXT(device, computeShader_createCandidatePrefixWSum, nullptr);
+
+	vkDestroyShaderEXT(device, computeShader_getAdjClusterG, nullptr);
+	
+	vkDestroyShaderEXT(device, computeShader_reservoirSample, nullptr);
+	vkDestroyShaderEXT(device, computeShader_SpatialReuse, nullptr);
 
 	vkDestroyShaderEXT(device, vertexShader_TreeDebug, nullptr);
 	vkDestroyShaderEXT(device, fragmentShader_TreeDebug, nullptr);
@@ -240,6 +244,9 @@ void Octree2_FzbPG::uiRender() {
 		if (ImGui::CollapsingHeader("Cluster Pair Debug", ImGuiTreeNodeFlags_DefaultOpen)) {
 			ImGui::Indent(20.0f);
 
+			std::vector<const char*> showModeNames = { "StochasticLightCut LeafNode", "Reservoir Node" };
+			ImGui::Combo("Cluster Struct", &debugPushConstant2.mode2, showModeNames.data(), static_cast<int>(showModeNames.size()));
+
 			ImGui::DragInt("OutogingIndex", (int*)&debugPushConstant2.outgoingIndex, 0, OUTGOING_COUNT_FZBPG, 1);
 
 			static bool showClusterPairDebugMap = false;
@@ -346,7 +353,7 @@ void Octree2_FzbPG::preRender() {
 	pushConstant.VGBVoxelSize = glm::vec4(setting.VGBVoxelSize, 1.0f);
 
 	float angle = FzbRenderer::rand(Application::frameIndex) * glm::two_pi<float>();
-	pushConstant.randomRotateMatrix = glm::mat3(glm::rotate(glm::mat4(1.0f), angle, glm::vec3(0, 0, 1)));
+	pushConstant.randomRotateMatrix = glm::mat3(1.0f);	// glm::mat3(glm::rotate(glm::mat4(1.0f), angle, glm::vec3(0, 0, 1)));
 
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 }
@@ -388,6 +395,7 @@ void Octree2_FzbPG::postProcess(VkCommandBuffer cmd) {
 
 	debugPushConstant.frameIndex = pushConstant.frameIndex;
 	debugPushConstant.sceneInfoAddress = pushConstant.sceneInfoAddress;
+	debugPushConstant2.spatialReuse = spatialReuse;
 
 	debugPushConstant.curLayerNodeCount_G = (1 << (3 * debugPushConstant.curLayer_G));
 	debugPushConstant.curLayerNodeCount_G_2 = (1 << (3 * debugPushConstant.curLayer_G_2));
@@ -540,15 +548,10 @@ void Octree2_FzbPG::createOctreeArray() {
 			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
 		NVVK_DBG_NAME(candidateSampleAABBBuffer.buffer);
 
-		bufferSize = OUTGOING_COUNT_FZBPG * IndivisibleNodeCount_G_FZBPG * Candidate_Samples_Count * sizeof(shaderio::float3);
-		allocator->createBuffer(candidateSampleRadianceBuffer, bufferSize,
+		bufferSize = OUTGOING_COUNT_FZBPG * IndivisibleNodeCount_G_FZBPG * Candidate_Samples_Count * sizeof(shaderio::CandidateSampleData_FzbPG);
+		allocator->createBuffer(candidateSampleData2Buffer, bufferSize,
 			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-		NVVK_DBG_NAME(candidateSampleRadianceBuffer.buffer);
-
-		bufferSize = OUTGOING_COUNT_FZBPG * IndivisibleNodeCount_G_FZBPG * Candidate_Samples_Count * sizeof(shaderio::uint);
-		allocator->createBuffer(candidateSampleSubTreeInfoBuffer, bufferSize,
-			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
-		NVVK_DBG_NAME(candidateSampleSubTreeInfoBuffer.buffer);
+		NVVK_DBG_NAME(candidateSampleData2Buffer.buffer);
 	}
 
 	pushConstant.octreeMaxLayer = octreeMaxLayer;
@@ -700,12 +703,7 @@ void Octree2_FzbPG::createDescriptorSetLayout() {
 			.descriptorCount = 1,
 			.stageFlags = VK_SHADER_STAGE_ALL });
 		bindings.addBinding({
-			.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eCandidateSampleRadiance,
-			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-			.descriptorCount = 1,
-			.stageFlags = VK_SHADER_STAGE_ALL });
-		bindings.addBinding({
-			.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eCandidateSampleSubTreeInfo,
+			.binding = (uint32_t)shaderio::BindingPoints_Octree_FzbPG::eCandidateSampleData2,
 			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 			.descriptorCount = 1,
 			.stageFlags = VK_SHADER_STAGE_ALL });
@@ -833,12 +831,8 @@ void Octree2_FzbPG::createDescriptorSet() {
 		write.append(candidateNodesWrite, candidateSampleAABBBuffer, 0, candidateSampleAABBBuffer.bufferSize);
 
 		candidateNodesWrite =
-			staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eCandidateSampleRadiance, 0, 0, 1);
-		write.append(candidateNodesWrite, candidateSampleRadianceBuffer, 0, candidateSampleRadianceBuffer.bufferSize);
-
-		candidateNodesWrite =
-			staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eCandidateSampleSubTreeInfo, 0, 0, 1);
-		write.append(candidateNodesWrite, candidateSampleSubTreeInfoBuffer, 0, candidateSampleSubTreeInfoBuffer.bufferSize);
+			staticDescPack.makeWrite((uint32_t)shaderio::BindingPoints_Octree_FzbPG::eCandidateSampleData2, 0, 0, 1);
+		write.append(candidateNodesWrite, candidateSampleData2Buffer, 0, candidateSampleData2Buffer.bufferSize);
 	}
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
@@ -1051,6 +1045,41 @@ void Octree2_FzbPG::compileAndCreateShaders() {
 		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_createCandidatePrefixWSum);
 		NVVK_DBG_NAME(computeShader_createCandidatePrefixWSum);
 	}
+	{
+#ifdef SpatialReuse_FzbPG
+		//--------------------------------------------------------------------------------------
+		vkDestroyShaderEXT(device, computeShader_reservoirSample, nullptr);
+		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		shaderInfo.nextStage = 0;
+		shaderInfo.pName = "computeMain_reservoirSample";
+		shaderInfo.codeSize = shaderCode.codeSize;
+		shaderInfo.pCode = shaderCode.pCode;
+		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_reservoirSample);
+		NVVK_DBG_NAME(computeShader_reservoirSample);
+		//--------------------------------------------------------------------------------------
+		vkDestroyShaderEXT(device, computeShader_SpatialReuse, nullptr);
+		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		shaderInfo.nextStage = 0;
+		shaderInfo.pName = "computeMain_SpatialReuse";
+		shaderInfo.codeSize = shaderCode.codeSize;
+		shaderInfo.pCode = shaderCode.pCode;
+		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_SpatialReuse);
+		NVVK_DBG_NAME(computeShader_SpatialReuse);
+		//--------------------------------------------------------------------------------------
+		shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
+		shaderSource = shaderPath / "GetAdjClusterG.slang";
+		shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
+
+		vkDestroyShaderEXT(device, computeShader_getAdjClusterG, nullptr);
+		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		shaderInfo.nextStage = 0;
+		shaderInfo.pName = "computeMain_getAdjClusterG";
+		shaderInfo.codeSize = shaderCode.codeSize;
+		shaderInfo.pCode = shaderCode.pCode;
+		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_getAdjClusterG);
+		NVVK_DBG_NAME(computeShader_getAdjClusterG);
+#endif
+	}
 	//---------------------------------Debug-------------------------------------
 	{
 		shaderSource = shaderPath / "Debug.slang";
@@ -1219,13 +1248,33 @@ void Octree2_FzbPG::getOctreeNodePairData(VkCommandBuffer cmd) {
 	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 
+	pushConstant.candidateSampleBufferIndex = 0;
+	vkCmdPushConstants2(cmd, &pushInfo);
+
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createCandidatePrefixWSum);
 	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 
-#ifdef IndivisibleNodeCount_G_FZBPG
-	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createCandidatePrefixWSum);
+#ifdef SpatialReuse_FzbPG
+	if (!spatialReuse) return;
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getAdjClusterG);
 	vkCmdDispatch(cmd, (IndivisibleNodeCount_G_FZBPG + 1023) / 1024, 1, 1);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_reservoirSample);
+	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_SpatialReuse);
+	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+
+	pushConstant.candidateSampleBufferIndex = 1;
+	vkCmdPushConstants2(cmd, &pushInfo);
+
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createCandidatePrefixWSum);
+	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
 #endif
 }
 

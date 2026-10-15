@@ -257,6 +257,9 @@ void getDirectionalLight(inout CallablePayload payload, SceneInfo sceneInfo, int
             if (tempPayload.distance != MISS_DISTANCE) continue;
             payload.directionLightDir = light.direction;
             payload.directionLightRadiance = light.color * light.intensity * cosine;
+
+            //float3 bsdf = getBSDF(payload.material, sampleDir, payload.hitNormal, payload.outgoing, payload.TBN, payload.isExt);
+            //payload.directionLightRadiance *= bsdf * cosine;
         }
     }
 }
@@ -514,6 +517,7 @@ void getDirectionLight(inout CallablePayload payload, SceneInfo sceneInfo) {
             if (tempPayload.distance != MISS_DISTANCE) continue;
             payload.directionLightDir = light.direction;
             payload.directionLightRadiance = light.color * light.intensity * cosine;
+
             break;
         }
     }

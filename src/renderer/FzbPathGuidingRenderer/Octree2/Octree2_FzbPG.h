@@ -69,8 +69,9 @@ public:
 
 	nvvk::Buffer candidateSampleIndexBuffer;
 	nvvk::Buffer candidateSampleAABBBuffer;
-	nvvk::Buffer candidateSampleRadianceBuffer;
-	nvvk::Buffer candidateSampleSubTreeInfoBuffer;
+	nvvk::Buffer candidateSampleData2Buffer;
+
+	bool spatialReuse = false;
 private:
 	Octree2CreateInfo_FzbPG setting;
 
@@ -101,6 +102,11 @@ private:
 	VkShaderEXT computeShader_clusterPairHitTest{};
 	VkShaderEXT computeShader_getCandidateNodeWeights{};;
 	VkShaderEXT computeShader_createCandidatePrefixWSum{};;
+
+	VkShaderEXT computeShader_getAdjClusterG{};
+
+	VkShaderEXT computeShader_reservoirSample{};;
+	VkShaderEXT computeShader_SpatialReuse{};;
 
 	VkBindDescriptorSetsInfo bindDescriptorSetsInfo;
 	VkPushConstantsInfo pushInfo;

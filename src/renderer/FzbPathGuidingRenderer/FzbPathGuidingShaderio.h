@@ -8,9 +8,9 @@ NAMESPACE_SHADERIO_BEGIN()
 
 //#define RIS_Version
 #define StochasticLightcuts_RIS
-#define Candidate_Samples_Count 32
+#define Candidate_Samples_Count 128
 
-#define SpatialReuse_FzbPG
+//#define SpatialReuse_FzbPG
 #define Pairwise_MIS
 
 #define OCTREE_E_CLUSTER
@@ -36,7 +36,9 @@ struct FzbPathGuidingPushConstant
 
 	int maxDepth = 6;
 	int spp = 1;
-	float3 padding0;
+
+	int spatialRuse = 0;
+	float2 padding0;
 
 	float3 VGBVoxelSize;
 	int maxOctreeLayer;
@@ -68,6 +70,9 @@ enum class StaticBindingPoints_FzbPG
 	eCandidateSamplePrefixWSum,
 
 	eGlobalInfo,
+
+	eCandidateSampleData2,
+	eCandidateSampleAABB,
 
 #ifndef NDEBUG
 	eDepthImage,

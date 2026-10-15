@@ -265,10 +265,6 @@ void computeMain_octreeNodeHitTest(uint threadIndex: SV_DispatchThreadID, uint t
     if (threadIndex == 0) GlobalInfoBuffer[0].cmd.x = OUTGOING_COUNT_FZBPG * indivisibleNodeCount_G;
 }
 //-------------------------------------------------------------------------------------------------------------------------
-#elif defined(StochasticLightcuts_RIS)
-
-
-//-------------------------------------------------------------------------------------------------------------------------
 #elif defined(ADAPTIVE_IMPORTANCE_SAMPLING)
 [[vk::binding(BindingPoints_Octree_FzbPG::eOctreeNodePairData)]] RWStructuredBuffer<OctreeNodePairData_FzbPG, ScalarDataLayout> OctreeNodePairDataBuffer;
 struct ChildNodeInfo_E {

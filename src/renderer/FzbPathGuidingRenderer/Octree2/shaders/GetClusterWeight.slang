@@ -27,8 +27,7 @@
 [[vk::binding(BindingPoints_Octree_FzbPG::eCandidateSampleIndex)]] RWStructuredBuffer<int> candidateSampleIndexBuffer;
 
 [[vk::binding(BindingPoints_Octree_FzbPG::eCandidateSampleAABB)]] RWStructuredBuffer<AABB, ScalarDataLayout> candidateSampleAABBBuffer;
-[[vk::binding(BindingPoints_Octree_FzbPG::eCandidateSampleRadiance)]] RWStructuredBuffer<float3> candidateSampleRadianceBuffer;
-[[vk::binding(BindingPoints_Octree_FzbPG::eCandidateSampleSubTreeInfo)]] RWStructuredBuffer<int> candidateSampleSubTreeInfoBuffer;
+[[vk::binding(BindingPoints_Octree_FzbPG::eCandidateSampleData2)]] RWStructuredBuffer<CandidateSampleData_FzbPG, ScalarDataLayout> candidateSampleData2Buffer;
 #endif
 //----------------------------------------------getNodePairData-------------------------------------------------
 groupshared uint groupIndivisibleNodeCount_G;
@@ -51,6 +50,10 @@ void computeMain_initCandidateNodes(uint threadIndex: SV_DispatchThreadID, uint 
     candidateData.w = 0.0f;
     candidateData.p_hat = 0.0f;
     candidateSampleDataBuffer[threadIndex] = candidateData;
+    #ifdef SpatialReuse_FzbPG
+    candidateSampleData2Buffer[threadIndex] = candidateData;
+    candidateSampleAABBBuffer[threadIndex] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+    #endif
     if (threadIndex < indivisibleNodeCount_G * Candidate_Samples_Count) candidateSubTreeInfoBuffer[threadIndex].subTreeNodeIndex_layer = -1;
 
     if (threadIndex == 0) {
@@ -181,7 +184,10 @@ void computeMain_getCandidateNodes(uint threadIndex: SV_DispatchThreadID, uint t
 
     uint2 indivisibleNodeInfo = IndivisibleNodeInfoBuffer_G[threadIndex];
     OctreeNodeData_G_FzbPG nodeData_G = OctreeNodeDataBuffer_G[indivisibleNodeInfo.x][indivisibleNodeInfo.y];
-    float3 nodePos_G = (nodeData_G.aabb.maximum + nodeData_G.aabb.minimum) * 0.5f;
+    // float3 nodePos_G = (nodeData_G.aabb.maximum + nodeData_G.aabb.minimum) * 0.5f;
+    uint seed = xxhash32(uint3(threadIndex, 0, (uint)pushConst.frameIndex));
+    float3 randXYZ = float3(rand(seed), rand(seed), rand(seed));
+    float3 nodePos_G = randXYZ * (nodeData_G.aabb.maximum - nodeData_G.aabb.minimum) + nodeData_G.aabb.minimum;
 
     LightCutNode cutNodes[Candidate_Samples_Count];
     cutNodes[0].layerIndex = -1;
@@ -211,9 +217,9 @@ void computeMain_getCandidateNodes(uint threadIndex: SV_DispatchThreadID, uint t
             float3 MUpperBound = MaxCosToAABB(nodePos_G, nodeData_G.meanNormal.xyz, node_E.aabb.minimum, node_E.aabb.maximum);
             float GUpperBound = getLightGUpperBound(node_E, nodePos_G);
             float3 center = (node_E.aabb.maximum + node_E.aabb.minimum) * 0.5f;
-            //float diagonalLength = length(node_E.aabb.maximum - node_E.aabb.minimum);
-            //float d = max(length(nodePos_G - center), diagonalLength + 1e-3f);
-            float d = max(length(nodePos_G - center), 1.0f);
+            float diagonalLength = length(node_E.aabb.maximum - node_E.aabb.minimum);
+            float d = max(length(nodePos_G - center), diagonalLength + 1e-3f);
+            //float d = max(length(nodePos_G - center), 1.0f);
 
             float error = I * dot(MUpperBound, 1.0f) * GUpperBound / (d * d);
             if (error == 0.0f) continue;
@@ -386,7 +392,9 @@ void computeMain_getCandidateLeafNodes(uint threadIndex: SV_DispatchThreadID, ui
         CandidateLeafNodeData leafNodeData;
         leafNodeData.radiance = nodeData_E.radiance;
         leafNodeData.aabb = nodeData_E.aabb;
+        #ifdef SpatialReuse_FzbPG
         leafNodeData.normal = nodeData_E.normal;
+        #endif
         candidateLeafNodeDataBuffer[candidateNodeIndex] = leafNodeData;
     }
 }
@@ -411,7 +419,7 @@ void computeMain_clusterPairHitTest(uint threadIndex: SV_DispatchThreadID, uint 
     }
     GroupMemoryBarrierWithGroupSync();
     if (threadIndex >= clusterPairCount * HITTEST_COUNT_FZBPG) return;
-    if (threadIndex == 0) GlobalInfoBuffer[0].cmd.x = groupClusterPairCount;
+    if (threadIndex == 0) GlobalInfoBuffer[0].cmd.x = clusterPairCount;
 
     int clusterPairIndex = threadIndex / HITTEST_COUNT_FZBPG;
     int hitTestIndex = threadIndex & (HITTEST_COUNT_FZBPG - 1);
@@ -460,10 +468,9 @@ void computeMain_clusterPairHitTest(uint threadIndex: SV_DispatchThreadID, uint 
         traceRay(ray, hitPayload);
         if (hitPayload.hit > 0.0f) {
             bool check = checkOcclusion(samplePoint_E, hitPayload.hitPos, nodeData_G.aabb);
-            if (checkPointInAABB2(hitPayload.hitPos, nodeData_G.aabb)) {
-                check &= dot(hitPayload.normal, -sampleDir) > 0.0f;
-                check &= dot(hitPayload.normal, normal_G) > 0.707f;
-            }
+            check &= checkPointInAABB2(hitPayload.hitPos, nodeData_G.aabb);
+            check &= dot(hitPayload.normal, -sampleDir) > 0.0f;
+            check &= dot(hitPayload.normal, normal_G) > 0.707f;
             if (!check) hitPayload.hit = -2.0f;
         }
     }
@@ -478,6 +485,24 @@ void computeMain_clusterPairHitTest(uint threadIndex: SV_DispatchThreadID, uint 
     hitInfo.cosine = max(dot(-hitPayload.sampleDir, hitPayload.normal), 0.0f);
     hitInfo.cosine_Light = max(dot(hitPayload.sampleDir, nodeData_E.meanNormal.xyz), 0.0f);
     clusterPairHitTestInfoBuffer[clusterPairIndex * HITTEST_COUNT_FZBPG + hitTestIndex] = hitInfo;
+
+    //bool isPrintf = pushConst.frameIndex == 65 && clusterPairInfo.indivisibleNodeLabel == 49;
+    //if (isPrintf) {
+    //    float3 normalE = nodeData_E.meanNormal.xyz;
+    //    printf("leaftNodeIndexE: %d, hitTesIndex: %d, hit: %f\n normalE: %f %f %f, samplePosE: %f %f %f\n normalG: %f %f %f, samplePosG: %f %f %f\n hitNormalG: %f %f %f, hitPos: %f %f %f\nAABB_E: %f %f %f %f %f %f\nAABB_G: %f %f %f %f %f %f\n\n", 
+    //        clusterPairInfo.leafNodeIndex_E, hitTestIndex, hitInfo.isHit, 
+    //        normalE.x, normalE.y, normalE.z,
+    //        samplePoint_E.x, samplePoint_E.y, samplePoint_E.z,
+    //        normal_G.x, normal_G.y, normal_G.z,
+    //        samplePoint_G.x, samplePoint_G.y, samplePoint_G.z,
+    //        hitPayload.normal.x, hitPayload.normal.y, hitPayload.normal.z,
+    //        hitPayload.hitPos.x, hitPayload.hitPos.y, hitPayload.hitPos.z,
+    //        nodeData_E.aabb.minimum.x, nodeData_E.aabb.minimum.y, nodeData_E.aabb.minimum.z,
+    //        nodeData_E.aabb.maximum.x, nodeData_E.aabb.maximum.y, nodeData_E.aabb.maximum.z,
+    //        nodeData_G.aabb.minimum.x, nodeData_G.aabb.minimum.y, nodeData_G.aabb.minimum.z,
+    //        nodeData_G.aabb.maximum.x, nodeData_G.aabb.maximum.y, nodeData_G.aabb.maximum.z,
+    //    );
+    //}
 }
 //--------------------------------------------------------------------------------------------------------------------------------------------------------
 groupshared SceneInfo groupSceneInfo;
@@ -503,6 +528,7 @@ void computeMain_getCandidateNodeWeight(uint threadIndex: SV_DispatchThreadID, u
             groupClusterPairInfo = clusterPairInfo;
             if (clusterPairInfo.leafNodeIndex_E >= 0)
                 groupLeafNodeData_E = OctreeNodeDataBuffer_E[pushConst.octreeMaxLayer][clusterPairInfo.leafNodeIndex_E];
+            else groupLeafNodeData_E.radiance = 0.0f;
         }
     }
     if (warpIndex == 4 && warpLane < HITTEST_COUNT_FZBPG) {
@@ -512,24 +538,37 @@ void computeMain_getCandidateNodeWeight(uint threadIndex: SV_DispatchThreadID, u
     GroupMemoryBarrierWithGroupSync();
     int clusterPairCount = groupClusterPairCount;
     if (threadIndex >= clusterPairCount * OUTGOING_COUNT_FZBPG * HITTEST_COUNT_FZBPG) return;
-    if (threadIndex == 0) GlobalInfoBuffer[0].cmd.x = groupIndivisibleNodeCount_G;
+    if (threadIndex == 0) GlobalInfoBuffer[0].cmd.x = OUTGOING_COUNT_FZBPG * groupIndivisibleNodeCount_G;
+    if (all(groupLeafNodeData_E.radiance == 0.0f)) return;
 
     uint seed = xxhash32(uint3(clusterPairIndex, hitTestIndex, (uint)pushConst.frameIndex));
 
     ClusterPairHitInfo hitInfo = groupClusterPairHitInfo[hitTestIndex];
-    if (hitInfo.isHit <= 0) return;
-    OctreeNodeData_E_FzbPG leafNodeData_E = groupLeafNodeData_E;
+    float3 f = 0.0f;
+    if (hitInfo.isHit > 0) {
+        OctreeNodeData_E_FzbPG leafNodeData_E = groupLeafNodeData_E;
 
-    float3 outgoing = mul(getOutgoing_FzbPG(outgoingIndex, OUTGOING_COUNT_FZBPG), pushConst.randomRotateMatrix);
+        float3 outgoing = mul(getOutgoing_FzbPG(outgoingIndex, OUTGOING_COUNT_FZBPG), pushConst.randomRotateMatrix);
 
-    float3 tangent, bitangent;
-    orthonormalBasis(hitInfo.normal_G, tangent, bitangent);
-    float3x3 TBN_G = float3x3(tangent, bitangent, hitInfo.normal_G);
+        float3 tangent, bitangent;
+        orthonormalBasis(hitInfo.normal_G, tangent, bitangent);
+        float3x3 TBN_G = float3x3(tangent, bitangent, hitInfo.normal_G);
 
-    BSDFMaterial material = groupSceneInfo.materials[hitInfo.materialIndex];
-    float3 bsdf = getBSDF(material, -hitInfo.sampleDir, hitInfo.normal_G, outgoing, TBN_G, true);
-    float d = hitInfo.d;
-    float3 f = leafNodeData_E.radiance * bsdf * hitInfo.cosine * hitInfo.cosine_Light / max(d * d, 0.01f);
+        BSDFMaterial material = groupSceneInfo.materials[hitInfo.materialIndex];
+        float3 bsdf = getBSDF(material, -hitInfo.sampleDir, hitInfo.normal_G, outgoing, TBN_G, true);
+        float d = hitInfo.d;
+        f = leafNodeData_E.radiance * bsdf * hitInfo.cosine * hitInfo.cosine_Light / max(d * d, 1e-3f);
+
+        //bool isPrintf = pushConst.frameIndex == 65 && groupClusterPairInfo.indivisibleNodeLabel == 49 && outgoingIndex == 0;
+        //if (isPrintf) {
+        //    printf("leaftNodeE: %d, hitTestIndex: %d, hit: %f\n incidence: %f %f %f, normal: %f %f %f, outgoing: %f %f %f\n\n", 
+        //        groupClusterPairInfo.leafNodeIndex_E, hitTestIndex, hitInfo.isHit,
+        //        -hitInfo.sampleDir.x, -hitInfo.sampleDir.y, -hitInfo.sampleDir.z,
+        //        hitInfo.normal_G.x, hitInfo.normal_G.y, hitInfo.normal_G.z,
+        //        outgoing.x, outgoing.y, outgoing.z,
+        //    );
+        //}
+    }
 
     for (int offset = HITTEST_COUNT_FZBPG / 2; offset > 0; offset /= 2) {
         uint targetLane = warpLane + offset;
@@ -556,22 +595,27 @@ void computeMain_getCandidateNodeWeight(uint threadIndex: SV_DispatchThreadID, u
     }
 }
 //--------------------------------------------------------------------------------------------------------------------------------------------------------
-[numthreads(CREATE_CANDIDATE_NODE_TREE_CS_THREADGROUP_SIZE, 1, 1)]
+groupshared float groupWSums[Candidate_Samples_Count / 32];
+
+[numthreads(Candidate_Samples_Count, 1, 1)]
 [shader("compute")]
 void computeMain_createCandidatePrefixWSum(uint threadIndex: SV_DispatchThreadID, uint threadGroupIndex: SV_GroupID, uint groupThreadIndex: SV_GroupThreadID) {
-#if Candidate_Samples_Count == 32
-    int indivisibleNodeIndex = threadGroupIndex;
-    int outgoingIndex = groupThreadIndex / Candidate_Samples_Count;
-    int candidateNodeIndex = groupThreadIndex & (Candidate_Samples_Count - 1);
-
-    if (groupThreadIndex == 0) {
-        groupIndivisibleNodeCount_G = GlobalInfoBuffer[0].indivisibleNodeCount_G;
-    }
+    if (groupThreadIndex == 0) groupIndivisibleNodeCount_G = GlobalInfoBuffer[0].indivisibleNodeCount_G;
     GroupMemoryBarrierWithGroupSync();
+    int indivisibleNodeCount = groupIndivisibleNodeCount_G;
+
+    int indivisibleNodeIndex = threadGroupIndex % indivisibleNodeCount;
+    int outgoingIndex = threadGroupIndex / indivisibleNodeCount;
+    int candidateNodeIndex = groupThreadIndex;
 
     int candidateNodeGlobalIndex = outgoingIndex * groupIndivisibleNodeCount_G * Candidate_Samples_Count + indivisibleNodeIndex * Candidate_Samples_Count + candidateNodeIndex;
+    #ifdef SpatialReuse_FzbPG
+    float w = pushConst.candidateSampleBufferIndex == 0 ? candidateSampleDataBuffer[candidateNodeGlobalIndex].w : candidateSampleData2Buffer[candidateNodeGlobalIndex].w;
+    #else
     float w = candidateSampleDataBuffer[candidateNodeGlobalIndex].w;
+    #endif
 
+    int warpIndex = groupThreadIndex / 32;
     int warpLane = groupThreadIndex & 31;
     float incl = w;
     [unroll]
@@ -579,11 +623,17 @@ void computeMain_createCandidatePrefixWSum(uint threadIndex: SV_DispatchThreadID
         float other = WaveReadLaneAt(incl, warpLane - off);
         if (warpLane >= off) incl += other;
     }
+    if (warpLane == 31) groupWSums[warpIndex] = incl;
+    GroupMemoryBarrierWithGroupSync();
+
+    for (int i = 0; i < warpIndex; ++i) incl += groupWSums[i];
     candidateSamplePrefixWSumBuffer[candidateNodeGlobalIndex] = incl;
-#else
-    printf("computeMain_createCandidatePrefixWSum忘记写Candidate_Samples_Count != 32的情况了");
+
+#ifdef SpatialReuse_FzbPG
+    if (threadIndex == 0) GlobalInfoBuffer[0].cmd.x = groupIndivisibleNodeCount_G;
 #endif
 }
+
 //--------------------------------------------------------------------------------------------------------------------------------------------------------
 #ifdef SpatialReuse_FzbPG
 [numthreads(OUTGOING_COUNT_FZBPG * Candidate_Samples_Count, 1, 1)]
@@ -620,95 +670,106 @@ void computeMain_reservoirSample(uint threadIndex: SV_DispatchThreadID, uint thr
 [shader("compute")]
 void computeMain_SpatialReuse(uint threadIndex: SV_DispatchThreadID, uint threadGroupIndex: SV_GroupID, uint groupThreadIndex: SV_GroupThreadID) {
 #if Candidate_Samples_Count == 32
+    int indivisibleNodeCount = GlobalInfoBuffer[0].indivisibleNodeCount_G;
+    if (threadIndex == 0) GlobalInfoBuffer[0].cmd.x = indivisibleNodeCount;
+
     int indivisibleNodeIndex = threadGroupIndex / OUTGOING_COUNT_FZBPG;
     int candidateLocalIndex = groupThreadIndex;
     int outgoingIndex = threadGroupIndex & (OUTGOING_COUNT_FZBPG - 1);
     float3 outgoing = mul(getOutgoing_FzbPG(outgoingIndex, OUTGOING_COUNT_FZBPG), pushConst.randomRotateMatrix);
 
+    int canonicalSampleLocalIndex = candidateSampleIndexBuffer[indivisibleNodeIndex * OUTGOING_COUNT_FZBPG + outgoingIndex];
+    CandidateLeafNodeData canonicalSampleData = candidateLeafNodeDataBuffer[indivisibleNodeIndex * Candidate_Samples_Count + canonicalSampleLocalIndex];
+    //--------------------------------------------
     uint adjClusterIndex = AdjClusterInfoBuffer[indivisibleNodeIndex * Candidate_Samples_Count + candidateLocalIndex];
-    int adjClusterCandidateLocalIndex;
+    int adjClusterCandidateLocalIndex = 0;
     OctreeNodeData_G_FzbPG adjClusterData;
-
-    int indivisibleNodeCount = GlobalInfoBuffer[0].indivisibleNodeCount_G;
     CandidateSampleData_FzbPG yData_i = { 0.0f, 0.0f };
     if (adjClusterIndex < indivisibleNodeCount) {
         uint2 adjClusterInfo = IndivisibleNodeInfoBuffer_G[adjClusterIndex];
         adjClusterData = OctreeNodeDataBuffer_G[adjClusterInfo.x][adjClusterInfo.y];
 
         adjClusterCandidateLocalIndex = candidateSampleIndexBuffer[adjClusterIndex * OUTGOING_COUNT_FZBPG + outgoingIndex];
-        int adjClusterCandidateGlobalStartIndex = outgoingIndex * IndivisibleNodeCount_G_FZBPG * Candidate_Samples_Count + adjClusterIndex * Candidate_Samples_Count;
-        yData_i = candidateSampleDataBuffer[adjClusterCandidateGlobalStartIndex + adjClusterCandidateLocalIndex];
+        int adjClusterCandidateGlobalStartIndex = outgoingIndex * indivisibleNodeCount * Candidate_Samples_Count + adjClusterIndex * Candidate_Samples_Count;
+        yData_i.p_hat = candidateSampleDataBuffer[adjClusterCandidateGlobalStartIndex + adjClusterCandidateLocalIndex].p_hat;
         yData_i.w = candidateSamplePrefixWSumBuffer[adjClusterCandidateGlobalStartIndex + Candidate_Samples_Count - 1]; // wSum
     }
-
-    int canonicalSampleLocalIndex = candidateSampleIndexBuffer[indivisibleNodeIndex * OUTGOING_COUNT_FZBPG + outgoingIndex];
-    CandidateLeafNodeData canonicalSampleData = candidateLeafNodeDataBuffer[indivisibleNodeIndex * Candidate_Samples_Count + canonicalSampleLocalIndex];
-
+    //-------------------------------------------
     float validCandidateCount = WaveActiveCountBits(adjClusterIndex < indivisibleNodeCount);
+    uint seed = xxhash32(uint3(threadGroupIndex, candidateLocalIndex, (uint)pushConst.frameIndex));
+
+    const int sampleCount = 1;
 
     float pj_hat = 0.0f;
     if (adjClusterIndex < indivisibleNodeCount && groupThreadIndex > 0) {
-        float3 samplePos_G = (adjClusterData.aabb.maximum + adjClusterData.aabb.minimum) * 0.5f;
-        float3 normal_G = SnapToDominantAxis(adjClusterData.meanNormal.xyz);
-
-        float3 samplePos_E = (canonicalSampleData.aabb.maximum + canonicalSampleData.aabb.minimum) * 0.5f;
-        float3 sampleDir = normalize(samplePos_G - samplePos_E);
-        samplePos_E = getAABBPoint(canonicalSampleData.aabb, samplePos_E, sampleDir);
+        float3 f = 0.0f;
 
         HitPayload_FzbWeight hitPayload;
-        hitPayload.hit = -1.0f;
-        hitPayload.sampleDir = sampleDir;
+        float3 normal_G = SnapToDominantAxis(adjClusterData.meanNormal.xyz);
+        for (int i = 0; i < sampleCount; ++i) {
+            // float3 samplePos_G = (adjClusterData.aabb.maximum + adjClusterData.aabb.minimum) * 0.5f;
+            float3 randXYZ = float3(rand(seed), rand(seed), rand(seed));
+            float3 samplePos_G = randXYZ * (adjClusterData.aabb.maximum - adjClusterData.aabb.minimum) + adjClusterData.aabb.minimum;
+            
+            // float3 samplePos_E = (canonicalSampleData.aabb.maximum + canonicalSampleData.aabb.minimum) * 0.5f;
+            randXYZ = float3(rand(seed), rand(seed), rand(seed));
+            float3 samplePos_E = randXYZ * (canonicalSampleData.aabb.maximum - canonicalSampleData.aabb.minimum) + canonicalSampleData.aabb.minimum;
+            float3 sampleDir = normalize(samplePos_G - samplePos_E);
+            samplePos_E = getAABBPoint(canonicalSampleData.aabb, samplePos_E, sampleDir);
 
-        bool hitTestAble = dot(canonicalSampleData.normal, sampleDir) > 0.0f;
-        hitTestAble &= dot(-sampleDir, normal_G) > 0.0f;
-        if (hitTestAble) {
-            RayDesc ray;
-            ray.Direction = sampleDir;
-            ray.Origin = samplePos_E + sampleDir * 0.00001f;
-            ray.TMin = 0.001;
-            ray.TMax = INFINITE;
-            traceRay(ray, hitPayload);
-            if (hitPayload.hit > 0.0f) {
-                bool check = checkOcclusion(samplePos_E, hitPayload.hitPos, adjClusterData.aabb);
-                if (checkPointInAABB2(hitPayload.hitPos, adjClusterData.aabb)) {
-                    check &= dot(hitPayload.normal, -sampleDir) > 0.0f;
-                    check &= dot(hitPayload.normal, normal_G) > 0.707f;
+            hitPayload.hit = -1.0f;
+            hitPayload.sampleDir = sampleDir;
+
+            bool hitTestAble = dot(canonicalSampleData.normal, sampleDir) > 0.0f;
+            hitTestAble &= dot(-sampleDir, normal_G) > 0.0f;
+            if (hitTestAble) {
+                RayDesc ray;
+                ray.Direction = sampleDir;
+                ray.Origin = samplePos_E + sampleDir * 0.00001f;
+                ray.TMin = 0.001;
+                ray.TMax = INFINITE;
+                traceRay(ray, hitPayload);
+                if (hitPayload.hit > 0.0f) {
+                    bool check = checkOcclusion(samplePos_E, hitPayload.hitPos, adjClusterData.aabb);
+                    if (checkPointInAABB2(hitPayload.hitPos, adjClusterData.aabb)) {
+                        check &= dot(hitPayload.normal, -sampleDir) > 0.0f;
+                        check &= dot(hitPayload.normal, normal_G) > 0.707f;
+                    }
+                    if (!check) hitPayload.hit = -2.0f;
                 }
-                if (!check) hitPayload.hit = -2.0f;
+            }
+
+            if (hitPayload.hit > 0.0f) {
+                float3 tangent, bitangent;
+                orthonormalBasis(normal_G, tangent, bitangent);
+                float3x3 TBN_G = float3x3(tangent, bitangent, normal_G);
+
+                BSDFMaterial material = pushConst.sceneInfoAddress.materials[hitPayload.materialIndex];
+                float3 bsdf = getBSDF(material, -sampleDir, normal_G, outgoing, TBN_G, true);
+                float d = distance(samplePos_E, hitPayload.hitPos);
+                float cosine = dot(normal_G, -sampleDir);
+                float cosine_Light = dot(canonicalSampleData.normal, sampleDir);
+                f += canonicalSampleData.radiance * bsdf * cosine * cosine_Light / max(d * d, 0.01f);
             }
         }
 
-        float3 f = 0.0f;
-        if (hitPayload.hit > 0.0f) {
-            float3 tangent, bitangent;
-            orthonormalBasis(normal_G, tangent, bitangent);
-            float3x3 TBN_G = float3x3(tangent, bitangent, normal_G);
-
-            BSDFMaterial material = pushConst.sceneInfoAddress.materials[hitPayload.materialIndex];
-            float3 bsdf = getBSDF(material, -sampleDir, normal_G, outgoing, TBN_G, true);
-            float d = distance(samplePos_E, hitPayload.hitPos);
-            float cosine = dot(normal_G, -sampleDir);
-            float cosine_Light = dot(canonicalSampleData.normal, sampleDir);
-            f = canonicalSampleData.radiance * bsdf * cosine * cosine_Light / max(d * d, 0.01f);
-        }
-
+        f /= sampleCount;
         pj_hat = dot(f, 1.0f);
     }
     float canonicalSampleP_hat = WaveReadLaneFirst(yData_i.p_hat);
     float param = canonicalSampleP_hat / (canonicalSampleP_hat + (validCandidateCount - 1) * pj_hat);
     param = WaveActiveSum(param) - (Candidate_Samples_Count - validCandidateCount);       //1 + sum(j not in R)
 
-    float mi = 1.0f;
-    if (groupThreadIndex == 0) mi = 1.0f / validCandidateCount * param;
-
-    int candidateGlobalIndex = outgoingIndex * IndivisibleNodeCount_G_FZBPG * Candidate_Samples_Count + indivisibleNodeIndex * Candidate_Samples_Count + candidateLocalIndex;
+    float mi = 0.0f;
+    if (groupThreadIndex == 0) mi = param / validCandidateCount;
+    //-------------------------------------------
+    int candidateGlobalIndex = outgoingIndex * indivisibleNodeCount * Candidate_Samples_Count + indivisibleNodeIndex * Candidate_Samples_Count + candidateLocalIndex;
     if (adjClusterIndex >= indivisibleNodeCount || yData_i.w == 0.0f) {
-        candidateSampleDataBuffer[candidateGlobalIndex] = { 0.0f, 0.0f };
+        candidateSampleData2Buffer[candidateGlobalIndex] = { 0.0f, 0.0f };
         candidateSampleAABBBuffer[candidateGlobalIndex] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
-        candidateSampleRadianceBuffer[candidateGlobalIndex] = 0.0f;
         return;
     }
-
+    //-------------------------------------------
     float pc_hat = yData_i.p_hat;
     CandidateLeafNodeData nonCanonicalSampleData = canonicalSampleData;
     if (adjClusterIndex < indivisibleNodeCount && groupThreadIndex > 0) {
@@ -716,61 +777,81 @@ void computeMain_SpatialReuse(uint threadIndex: SV_DispatchThreadID, uint thread
 
         uint2 curClusterInfo = IndivisibleNodeInfoBuffer_G[indivisibleNodeIndex];
         OctreeNodeData_G_FzbPG curClusterData = OctreeNodeDataBuffer_G[curClusterInfo.x][curClusterInfo.y];
-
-        float3 samplePos_G = (curClusterData.aabb.maximum + curClusterData.aabb.minimum) * 0.5f;
         float3 normal_G = SnapToDominantAxis(curClusterData.meanNormal.xyz);
 
-        float3 samplePos_E = (nonCanonicalSampleData.aabb.maximum + nonCanonicalSampleData.aabb.minimum) * 0.5f;
-        float3 sampleDir = normalize(samplePos_G - samplePos_E);
-        samplePos_E = getAABBPoint(nonCanonicalSampleData.aabb, samplePos_E, sampleDir);
-
         HitPayload_FzbWeight hitPayload;
-        hitPayload.hit = -1.0f;
-        hitPayload.sampleDir = sampleDir;
+        float3 f = 0.0f;
+        for (int i = 0; i < sampleCount; ++i) {
+            float3 randXYZ = float3(rand(seed), rand(seed), rand(seed));
+            float3 samplePos_G = randXYZ * (curClusterData.aabb.maximum - curClusterData.aabb.minimum) + curClusterData.aabb.minimum;
 
-        bool hitTestAble = dot(nonCanonicalSampleData.normal, sampleDir) > 0.0f;
-        hitTestAble &= dot(-sampleDir, normal_G) > 0.0f;
-        if (hitTestAble) {
-            RayDesc ray;
-            ray.Direction = sampleDir;
-            ray.Origin = samplePos_E + sampleDir * 0.00001f;
-            ray.TMin = 0.001;
-            ray.TMax = INFINITE;
-            traceRay(ray, hitPayload);
-            if (hitPayload.hit > 0.0f) {
-                bool check = checkOcclusion(samplePos_E, hitPayload.hitPos, curClusterData.aabb);
-                if (checkPointInAABB2(hitPayload.hitPos, curClusterData.aabb)) {
+            randXYZ = float3(rand(seed), rand(seed), rand(seed));
+            float3 samplePos_E = randXYZ * (nonCanonicalSampleData.aabb.maximum - nonCanonicalSampleData.aabb.minimum) + nonCanonicalSampleData.aabb.minimum;
+            float3 sampleDir = normalize(samplePos_G - samplePos_E);
+            samplePos_E = getAABBPoint(nonCanonicalSampleData.aabb, samplePos_E, sampleDir);
+
+            hitPayload.hit = -1.0f;
+            hitPayload.sampleDir = sampleDir;
+
+            bool hitTestAble = dot(nonCanonicalSampleData.normal, sampleDir) > 0.0f;
+            hitTestAble &= dot(-sampleDir, normal_G) > 0.0f;
+            if (hitTestAble) {
+                RayDesc ray;
+                ray.Direction = sampleDir;
+                ray.Origin = samplePos_E + sampleDir * 0.00001f;
+                ray.TMin = 0.001;
+                ray.TMax = INFINITE;
+                traceRay(ray, hitPayload);
+                if (hitPayload.hit > 0.0f) {
+                    bool check = checkOcclusion(samplePos_E, hitPayload.hitPos, curClusterData.aabb);
+                    check &= checkPointInAABB2(hitPayload.hitPos, curClusterData.aabb);
                     check &= dot(hitPayload.normal, -sampleDir) > 0.0f;
                     check &= dot(hitPayload.normal, normal_G) > 0.707f;
+                    if (!check) hitPayload.hit = -2.0f;
                 }
-                if (!check) hitPayload.hit = -2.0f;
             }
+
+            if (hitPayload.hit > 0.0f) {
+                float3 tangent, bitangent;
+                orthonormalBasis(normal_G, tangent, bitangent);
+                float3x3 TBN_G = float3x3(tangent, bitangent, normal_G);
+
+                BSDFMaterial material = pushConst.sceneInfoAddress.materials[hitPayload.materialIndex];
+                float3 bsdf = getBSDF(material, -sampleDir, normal_G, outgoing, TBN_G, true);
+                float d = distance(samplePos_E, hitPayload.hitPos);
+                float cosine = dot(normal_G, -sampleDir);
+                float cosine_Light = dot(nonCanonicalSampleData.normal, sampleDir);
+                f += nonCanonicalSampleData.radiance * bsdf * cosine * cosine_Light / max(d * d, 0.01f);
+            }
+
+            //if (pushConst.frameIndex == 23 && indivisibleNodeIndex == 49 && outgoingIndex == 0) {
+            //    pc_hat = dot(f, 1.0f);
+            //    printf("candidateIndex: %d\n wSum: %f, pc_hat: %f hit: %f\n E: normal: %f %f %f, pos: %f %f %f\n G: normal: %f %f %f, pos: %f %f %f\n E AABB: %f %f %f %f %f %f\n G AABB: %f %f %f %f %f %f\n sampleDir: %f %f %f\n", groupThreadIndex, 
+            //        yData_i.w, pc_hat, hitPayload.hit,
+            //        nonCanonicalSampleData.normal.x, nonCanonicalSampleData.normal.y, nonCanonicalSampleData.normal.z,
+            //        samplePos_E.x, samplePos_E.y, samplePos_E.z,
+            //        normal_G.x, normal_G.y, normal_G.z,
+            //        samplePos_G.x, samplePos_G.y, samplePos_G.z,
+            //        nonCanonicalSampleData.aabb.minimum.x, nonCanonicalSampleData.aabb.minimum.y, nonCanonicalSampleData.aabb.minimum.z,
+            //        nonCanonicalSampleData.aabb.maximum.x, nonCanonicalSampleData.aabb.maximum.y, nonCanonicalSampleData.aabb.maximum.z,
+            //        curClusterData.aabb.minimum.x, curClusterData.aabb.minimum.y, curClusterData.aabb.minimum.z,
+            //        curClusterData.aabb.maximum.x, curClusterData.aabb.maximum.y, curClusterData.aabb.maximum.z,
+            //        sampleDir.x, sampleDir.y, sampleDir.z
+            //    );
+            //}
         }
 
-        float3 f = 0.0f;
-        if (hitPayload.hit > 0.0f) {
-            float3 tangent, bitangent;
-            orthonormalBasis(normal_G, tangent, bitangent);
-            float3x3 TBN_G = float3x3(tangent, bitangent, normal_G);
-
-            BSDFMaterial material = pushConst.sceneInfoAddress.materials[hitPayload.materialIndex];
-            float3 bsdf = getBSDF(material, -sampleDir, normal_G, outgoing, TBN_G, true);
-            float d = distance(samplePos_E, hitPayload.hitPos);
-            float cosine = dot(normal_G, -sampleDir);
-            float cosine_Light = dot(nonCanonicalSampleData.normal, sampleDir);
-            f = nonCanonicalSampleData.radiance * bsdf * cosine * cosine_Light / max(d * d, 0.01f);
-        }
-
+        f /= sampleCount;
         pc_hat = dot(f, 1.0f);
         mi = (validCandidateCount - 1) / validCandidateCount * yData_i.p_hat / (pc_hat + (validCandidateCount - 1) * yData_i.p_hat);
     }
-
+    //-------------------------------------------
     float wi = mi * pc_hat / yData_i.p_hat * yData_i.w;
+    if (!(wi >= 0.0f) || isinf(wi)) wi = 0.0f;
 
     CandidateSampleData_FzbPG ycData = { wi, pc_hat };
-    candidateSampleDataBuffer[candidateGlobalIndex] = ycData;
+    candidateSampleData2Buffer[candidateGlobalIndex] = ycData;
     candidateSampleAABBBuffer[candidateGlobalIndex] = nonCanonicalSampleData.aabb;
-    candidateSampleRadianceBuffer[candidateGlobalIndex] = nonCanonicalSampleData.radiance;
 #else
     printf("computeMain_SpatialReuse忘记写Candidate_Samples_Count != 32的情况了");
 #endif
@@ -781,6 +862,7 @@ void computeMain_SpatialReuse(uint threadIndex: SV_DispatchThreadID, uint thread
 [shader("compute")]
 void computeMain_SpatialReuse(uint threadIndex: SV_DispatchThreadID, uint threadGroupIndex: SV_GroupID, uint groupThreadIndex: SV_GroupThreadID) {
     int indivisibleNodeCount = GlobalInfoBuffer[0].indivisibleNodeCount_G;
+    if (threadIndex == 0) GlobalInfoBuffer[0].cmd.x = indivisibleNodeCount;
 
     int indivisibleNodeIndex = threadGroupIndex / OUTGOING_COUNT_FZBPG;
     int candidateLocalIndex = groupThreadIndex;
@@ -799,7 +881,7 @@ void computeMain_SpatialReuse(uint threadIndex: SV_DispatchThreadID, uint thread
             adjClusterData = OctreeNodeDataBuffer_G[adjClusterInfo.x][adjClusterInfo.y];
 
             int adjClusterCandidateLocalIndex = candidateSampleIndexBuffer[adjClusterIndex * OUTGOING_COUNT_FZBPG + outgoingIndex];
-            int adjClusterCandidateGlobalStartIndex = outgoingIndex * IndivisibleNodeCount_G_FZBPG * Candidate_Samples_Count + adjClusterIndex * Candidate_Samples_Count;
+            int adjClusterCandidateGlobalStartIndex = outgoingIndex * indivisibleNodeCount * Candidate_Samples_Count + adjClusterIndex * Candidate_Samples_Count;
             yData_i = candidateSampleDataBuffer[adjClusterCandidateGlobalStartIndex + adjClusterCandidateLocalIndex];
             yData_i.w = candidateSamplePrefixWSumBuffer[adjClusterCandidateGlobalStartIndex + Candidate_Samples_Count - 1]; // wSum
             yData_i.p_hat = max(yData_i.p_hat, 1e-6f);
@@ -887,8 +969,8 @@ void computeMain_SpatialReuse(uint threadIndex: SV_DispatchThreadID, uint thread
     float wi = mi * pci_hat / yData_i.p_hat * yData_i.w;
 
     CandidateSampleData_FzbPG ycData = { wi, pci_hat };
-    int candidateGlobalIndex = outgoingIndex * IndivisibleNodeCount_G_FZBPG * Candidate_Samples_Count + indivisibleNodeIndex * Candidate_Samples_Count + candidateLocalIndex;
-    candidateSampleDataBuffer[candidateGlobalIndex] = ycData;
+    int candidateGlobalIndex = outgoingIndex * indivisibleNodeCount * Candidate_Samples_Count + indivisibleNodeIndex * Candidate_Samples_Count + candidateLocalIndex;
+    candidateSampleData2Buffer[candidateGlobalIndex] = ycData;
     candidateSampleAABBBuffer[candidateGlobalIndex] = yNodeData_i.aabb;
     candidateSampleRadianceBuffer[candidateGlobalIndex] = yNodeData_i.radiance;
 }

@@ -15,6 +15,11 @@
 [[vk::binding(BindingPoints_Octree_FzbPG::eCandidateSubTreeInfo)]] RWStructuredBuffer<CandidateSubTreeInfo, ScalarDataLayout> candidateSubTreeInfoBuffer;
 [[vk::binding(BindingPoints_Octree_FzbPG::eCandidateLeafNodeData)]] RWStructuredBuffer<CandidateLeafNodeData, ScalarDataLayout> candidateLeafNodeDataBuffer;
 [[vk::binding(BindingPoints_Octree_FzbPG::eCandidateSampleData)]] RWStructuredBuffer<CandidateSampleData_FzbPG, ScalarDataLayout> candidateSampleDataBuffer;
+
+#ifdef SpatialReuse_FzbPG
+[[vk::binding(BindingPoints_Octree_FzbPG::eCandidateSampleAABB)]] RWStructuredBuffer<AABB, ScalarDataLayout> candidateSampleAABBBuffer;
+[[vk::binding(BindingPoints_Octree_FzbPG::eCandidateSampleData2)]] RWStructuredBuffer<CandidateSampleData_FzbPG, ScalarDataLayout> candidateSampleData2Buffer;
+#endif
 //------------------------------------------------------------------------------------------
 bool traceRay(RayDesc ray, inout CallablePayload payload)
 {
@@ -177,23 +182,43 @@ VSout vertexMain(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID
         return output;
     } else {
         int candidateIndex = pushConst.outgoingIndex * GlobalInfoBuffer[0].indivisibleNodeCount_G * Candidate_Samples_Count + pushConst.globalInfoAddress.clusterIndex_G * Candidate_Samples_Count + instanceIndex;
-        CandidateSampleData_FzbPG candidateNodeData = candidateSampleDataBuffer[candidateIndex];
-        CandidateSubTreeInfo candidateSubTree = candidateSubTreeInfoBuffer[pushConst.globalInfoAddress.clusterIndex_G * Candidate_Samples_Count + instanceIndex];
-        if (candidateSubTree.subTreeNodeIndex_layer < 0) {
-            output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
-            return output;
+
+        if (pushConst.spatialReuse == 0) {
+            CandidateSampleData_FzbPG candidateNodeData = candidateSampleDataBuffer[candidateIndex];
+            CandidateSubTreeInfo candidateSubTree = candidateSubTreeInfoBuffer[pushConst.globalInfoAddress.clusterIndex_G * Candidate_Samples_Count + instanceIndex];
+
+            show = candidateSubTree.subTreeNodeIndex_layer >= 0;
+            if (pushConst.mode2 == 1) show &= candidateNodeData.w > 0.0f;
+            if (!show) {
+                output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
+                return output;
+            }
+
+            int layerIndex = candidateSubTree.subTreeNodeIndex_layer & 15;
+            int nodeIndex = candidateSubTree.subTreeNodeIndex_layer >> 4;
+            OctreeNodeData_E_FzbPG nodeData = OctreeNodeDataBuffer_E[layerIndex][nodeIndex];
+
+            // nodeAABB = nodeData.aabb;
+            // output.color.xyz = nodeData.radiance;
+
+            CandidateLeafNodeData leafNodeData = candidateLeafNodeDataBuffer[pushConst.globalInfoAddress.clusterIndex_G * Candidate_Samples_Count + instanceIndex];
+            nodeAABB = leafNodeData.aabb;
+            output.color.xyz = leafNodeData.radiance;
+        } else {
+            #ifdef SpatialReuse_FzbPG
+            CandidateSampleData_FzbPG candidateNodeData = candidateSampleData2Buffer[candidateIndex];
+
+            if (pushConst.mode2 == 1) show = candidateNodeData.w > 0.0f;
+            if (!show) {
+                output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
+                return output;
+            }
+
+            nodeAABB = candidateSampleAABBBuffer[candidateIndex];
+            output.color.xyz = float3(10.0f, 0.0f, 0.0f);
+            #endif
         }
-
-        int layerIndex = candidateSubTree.subTreeNodeIndex_layer & 15;
-        int nodeIndex = candidateSubTree.subTreeNodeIndex_layer >> 4;
-        OctreeNodeData_E_FzbPG nodeData = OctreeNodeDataBuffer_E[layerIndex][nodeIndex];
-
-        //nodeAABB = nodeData.aabb;
-        //output.color.xyz = nodeData.radiance;
-
-        CandidateLeafNodeData leafNodeData = candidateLeafNodeDataBuffer[pushConst.globalInfoAddress.clusterIndex_G * Candidate_Samples_Count + instanceIndex];
-        nodeAABB = leafNodeData.aabb;
-        output.color.xyz = leafNodeData.radiance;
+       
     }
 
     float3 aabbSize = nodeAABB.maximum - nodeAABB.minimum;

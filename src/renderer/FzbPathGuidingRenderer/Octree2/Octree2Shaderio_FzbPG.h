@@ -14,9 +14,10 @@ NAMESPACE_SHADERIO_BEGIN()
 struct OctreePushConstant_FzbPG {
 	int frameIndex;
 
+	int candidateSampleBufferIndex = 0;
+
 	uint32_t VGBVoxelTotalCount;
 	float voxelVolume;
-	float padding;
 	float4 VGBStartPos_Size;
 	float4 VGBVoxelSize;
 
@@ -67,6 +68,8 @@ struct ClusterPairDebugGlobalInfo {
 struct ClusterPairDebugPushConstant_FzbPG {
 	int frameIndex;
 	int mode = 0;
+	int mode2 = 0;
+	int spatialReuse = 0;
 	
 	uint32_t octreeMaxLayer;
 	uint32_t VGBVoxelTotalCount;
@@ -86,7 +89,6 @@ struct ClusterPairDebugPushConstant_FzbPG {
 	float4x4 padding1;
 	float4 padding2;
 	float4 padding3;
-	float2 padding4;
 };
 
 enum class BindingPoints_Octree_FzbPG : uint32_t {
@@ -124,8 +126,7 @@ enum class BindingPoints_Octree_FzbPG : uint32_t {
 	eCandidateSampleIndex,
 
 	eCandidateSampleAABB,
-	eCandidateSampleRadiance,
-	eCandidateSampleSubTreeInfo,
+	eCandidateSampleData2,
 };
 //------------------------------------------------------------------------------------------
 #define MAX_ADJACENT_CLUSTER_COUNT 4
@@ -245,7 +246,6 @@ struct ClusterPairHitInfo {
 #define GET_CANDIDATE_NODES_CS_THREADGROUP_SIZE 128
 #define CLUSTER_PAIR_HITTEST_CS_THREADGROUP_SIZE 256
 #define GET_CANDIDATE_NODE_WEIGHTS_CS_THREADGROUP_SIZE OUTGOING_COUNT_FZBPG * HITTEST_COUNT_FZBPG
-#define CREATE_CANDIDATE_NODE_TREE_CS_THREADGROUP_SIZE OUTGOING_COUNT_FZBPG * Candidate_Samples_Count
 
 #define OCTREE_RIS_THREADGROUP_SIZE OUTGOING_COUNT_FZBPG
 
