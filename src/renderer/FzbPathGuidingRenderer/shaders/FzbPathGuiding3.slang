@@ -20,6 +20,11 @@
 [[vk::binding(StaticBindingPoints_FzbPG::eCandidateSampleData2)]] RWStructuredBuffer<CandidateSampleData_FzbPG, ScalarDataLayout> candidateSampleData2Buffer;
 #endif
 
+#ifdef NEARBYNODE_JITTER_FZBPG
+[[vk::binding(StaticBindingPoints_FzbPG::eOctreeNodeData_G)]] RWStructuredBuffer<OctreeNodeData_G_FzbPG, ScalarDataLayout> OctreeNodeDataBuffer_G[];
+[[vk::binding(StaticBindingPoints_FzbPG::eNearbyNodeInfos)]] RWStructuredBuffer<OctreeNearbyNodeInfo_FzbPG, ScalarDataLayout> NearbyNodeInfoBuffer;
+#endif
+
 #ifndef NDEBUG
 [[vk::binding(StaticBindingPoints_FzbPG::eDepthImage, 0)]] RWTexture2D<float> depthImage; // VK_FORMAT_D32_SFLOAT
 [[vk::binding(StaticBindingPoints_FzbPG::ePGValueImage, 0)]] RWTexture2D<float4> pgValueImage;
@@ -250,6 +255,55 @@ bool getNodeAABB_E_FzbPG(inout PGSampleData sampleData, inout HitPayload_FzbPG p
         }
     }
     if (!hitIndivisible) return false;
+
+    #ifdef NEARBYNODE_JITTER_FZBPG
+    OctreeNodeData_G_FzbPG nodeData_G = OctreeNodeDataBuffer_G[layerIndex_G][nodeIndex_G];
+    float weights[NEARBY_NODE_COUNT_FZBPG + 1];
+
+    float3 center = (nodeData_G.aabb.maximum + nodeData_G.aabb.minimum) * 0.5f;
+    float3 centerToPos = abs(center - hitPos) + 1e-16f;
+    float distance = length(centerToPos);
+    float maxDistance = 5.0f;
+    weights[0] = max(0.0f, 1.0f - distance / maxDistance);
+    float weightSum = weights[0];
+
+    int2 nearbyNodeInfos[NEARBY_NODE_COUNT_FZBPG] = NearbyNodeInfoBuffer[nodeLabel_G].nearbyNodeInfos;
+    int nearbyNodeCount = 0;
+    for (; nearbyNodeCount < NEARBY_NODE_COUNT_FZBPG; ++nearbyNodeCount) {
+        int2 nearbyNodeInfo = nearbyNodeInfos[nearbyNodeCount];
+        if (nearbyNodeInfo.x == -1) {
+            weights[nearbyNodeCount + 1] = 0.0f;
+            continue;
+        }
+        OctreeNodeData_G_FzbPG nearbyNodeData = OctreeNodeDataBuffer_G[nearbyNodeInfo.x][nearbyNodeInfo.y];
+
+        center = (nearbyNodeData.aabb.maximum + nearbyNodeData.aabb.minimum) * 0.5f;
+        centerToPos = abs(center - hitPos) + 1e-16f;
+        distance = length(centerToPos);
+        weights[nearbyNodeCount + 1] = max(0.0f, 1.0f - distance / maxDistance);
+
+        weightSum += weights[nearbyNodeCount + 1];
+    }
+    if (weightSum > 0.0f) {
+        float nearbyNodeSampleProbability = rand(payload.randomSeed);
+        int selectNodeIndex = 0;
+        for (; selectNodeIndex < nearbyNodeCount + 1; ++selectNodeIndex) {
+            float selectProbability = weights[selectNodeIndex] / weightSum;
+            if (nearbyNodeSampleProbability <= selectProbability) break;
+            nearbyNodeSampleProbability -= selectProbability;
+        }
+        if (selectNodeIndex > 0 && selectNodeIndex != nearbyNodeCount + 1) {
+            int2 nearbyNodeInfo = nearbyNodeInfos[selectNodeIndex - 1];
+            nodeLabel_G = 0; uint nodeSum = 0;
+            for (int l = 0; l < nearbyNodeInfo.x; ++l) {
+                nodeLabel_G += groupGlobalInfo.layerInfos_G[l].indivisibleNodeCount;
+                nodeSum += 6 * (1u << (l * 3));
+            }
+            if (nearbyNodeInfo.x < 4) nodeLabel_G += (groupOctreeNodeInfo_G[nodeSum + nearbyNodeInfo.y].label_indivisible >> 1) - 1;
+            else nodeLabel_G += (OctreeNodeInfoBuffer_G[nearbyNodeInfo.x][nearbyNodeInfo.y].label_indivisible >> 1) - 1;
+        }
+    }
+    #endif
 
     float weightSampleProbability = rand(payload.randomSeed);
     float3 outgoing = mul(pushConst.randomRotateMatrix, payload.outgoing);

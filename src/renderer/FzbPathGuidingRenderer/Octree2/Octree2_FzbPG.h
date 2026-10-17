@@ -43,6 +43,7 @@ public:
 	void createOctreeArray(VkCommandBuffer cmd);
 	void getOctreeLabel(VkCommandBuffer cmd);
 	void getOctreeNodePairData(VkCommandBuffer cmd);
+	void getNearbyClusterInfo(VkCommandBuffer cmd);
 
 	shaderio::OctreePushConstant_FzbPG pushConstant{};
 
@@ -70,6 +71,9 @@ public:
 	nvvk::Buffer candidateSampleIndexBuffer;
 	nvvk::Buffer candidateSampleAABBBuffer;
 	nvvk::Buffer candidateSampleData2Buffer;
+
+	nvvk::Buffer nearbyNodeTempInfoBuffer;
+	nvvk::Buffer nearbyNodeInfoBuffer;
 
 	bool spatialReuse = false;
 private:
@@ -107,6 +111,10 @@ private:
 
 	VkShaderEXT computeShader_reservoirSample{};;
 	VkShaderEXT computeShader_SpatialReuse{};;
+
+	VkShaderEXT computeShader_dispatchGetNearbyClusterG{};
+	VkShaderEXT computeShader_getNearbyClusterG1{};
+	VkShaderEXT computeShader_getNearbyClusterG2{};
 
 	VkBindDescriptorSetsInfo bindDescriptorSetsInfo;
 	VkPushConstantsInfo pushInfo;

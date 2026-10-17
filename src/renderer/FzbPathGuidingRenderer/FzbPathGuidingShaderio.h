@@ -21,7 +21,7 @@ NAMESPACE_SHADERIO_BEGIN()
 #define HITTEST_COUNT_PER_CHILDNODE_FZBPG 4		//must <= 4
 #define ADAPTIVE_IMPORTANCE_SAMPLING_MAX_LAYER 3
 
-//#define NEARBYNODE_JITTER_FZBPG
+#define NEARBYNODE_JITTER_FZBPG
 #define NEARBY_NODE_COUNT_FZBPG 4	//dont't change!!!
 //#define COMMON_NEARBYNODE_JITTER
 
@@ -73,6 +73,11 @@ enum class StaticBindingPoints_FzbPG
 
 	eCandidateSampleData2,
 	eCandidateSampleAABB,
+
+#ifdef NEARBYNODE_JITTER_FZBPG
+	eOctreeNodeData_G,
+	eNearbyNodeInfos,
+#endif
 
 #ifndef NDEBUG
 	eDepthImage,

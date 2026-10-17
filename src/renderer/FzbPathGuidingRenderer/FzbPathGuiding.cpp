@@ -355,6 +355,20 @@ void FzbPathGuidingRenderer::createDescriptorSetLayout() {
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
 
+#ifdef NEARBYNODE_JITTER_FZBPG
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodeData_G,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = (uint32_t)octree->octreeNodeDataBuffer_G.size(),
+		.stageFlags = VK_SHADER_STAGE_ALL });
+
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eNearbyNodeInfos,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+#endif
+
 #ifdef SpatialReuse_FzbPG
 	bindings.addBinding({
 		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateSampleData2,
@@ -385,6 +399,19 @@ void FzbPathGuidingRenderer::createDescriptorSetLayout() {
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
+
+#ifdef NEARBYNODE_JITTER_FZBPG
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeClusterData_G,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = (uint32_t)octree->octreeClusterDataBuffer_G.size(),
+		.stageFlags = VK_SHADER_STAGE_ALL });
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eNearbyNodeInfos,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+#endif
 #endif
 
 #ifdef ADAPTIVE_IMPORTANCE_SAMPLING
@@ -400,18 +427,7 @@ void FzbPathGuidingRenderer::createDescriptorSetLayout() {
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
-#ifdef NEARBYNODE_JITTER_FZBPG
-	bindings.addBinding({
-		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeClusterData_G,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = (uint32_t)octree->octreeClusterDataBuffer_G.size(),
-		.stageFlags = VK_SHADER_STAGE_ALL });
-	bindings.addBinding({
-		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eNearbyNodeInfos,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = 1,
-		.stageFlags = VK_SHADER_STAGE_ALL });
-#endif
+
 #ifndef NDEBUG
 	bindings.addBinding({
 		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eDepthImage,
@@ -501,6 +517,17 @@ void FzbPathGuidingRenderer::createDescriptorSet() {
 	write.append(OctreeArrayWrite, octree->candidateSampleAABBBuffer, 0, octree->candidateSampleAABBBuffer.bufferSize);
 #endif
 
+#ifdef NEARBYNODE_JITTER_FZBPG
+	VkWriteDescriptorSet    OctreeNodeDataGWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodeData_G, 0, 0, (uint32_t)octree->octreeNodeDataBuffer_G.size());
+	octreeArraysPtr = octree->octreeNodeDataBuffer_G.data();
+	write.append(OctreeNodeDataGWrite, octreeArraysPtr);
+
+	VkWriteDescriptorSet    NearbyDataWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eNearbyNodeInfos, 0, 0, 1);
+	write.append(NearbyDataWrite, octree->nearbyNodeInfoBuffer, 0, octree->nearbyNodeInfoBuffer.bufferSize);
+#endif
+
 #else
 	VkWriteDescriptorSet	OctreeArrayWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeData_G, 0, 0, octree->octreeDataBuffer_G.size());
@@ -514,6 +541,17 @@ void FzbPathGuidingRenderer::createDescriptorSet() {
 	VkWriteDescriptorSet NodePairInfoWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodePairWeight, 0, 0, 1);
 	write.append(NodePairInfoWrite, octree->octreeNodePairWeightBuffer, 0, octree->octreeNodePairWeightBuffer.bufferSize);
+
+#ifdef NEARBYNODE_JITTER_FZBPG
+	VkWriteDescriptorSet    OctreeClusterDataWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeClusterData_G, 0, 0, octree->octreeClusterDataBuffer_G.size());
+	nvvk::Buffer* octreeClusterDataPtr = octree->octreeClusterDataBuffer_G.data();
+	write.append(OctreeClusterDataWrite, octreeClusterDataPtr);
+
+	VkWriteDescriptorSet    NearbyDataWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eNearbyNodeInfos, 0, 0, 1);
+	write.append(NearbyDataWrite, octree->nearbyNodeInfoBuffer, 0, octree->nearbyNodeInfoBuffer.bufferSize);
+#endif
 #endif
 	
 
@@ -526,17 +564,6 @@ void FzbPathGuidingRenderer::createDescriptorSet() {
 	VkWriteDescriptorSet    GlobalInfoWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eGlobalInfo, 0, 0, 1);
 	write.append(GlobalInfoWrite, octree->globalInfoBuffer, 0, octree->globalInfoBuffer.bufferSize);
-
-#ifdef NEARBYNODE_JITTER_FZBPG
-	VkWriteDescriptorSet    OctreeClusterDataWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeClusterData_G, 0, 0, octree->octreeClusterDataBuffer_G.size());
-	nvvk::Buffer* octreeClusterDataPtr = octree->octreeClusterDataBuffer_G.data();
-	write.append(OctreeClusterDataWrite, octreeClusterDataPtr);
-
-	VkWriteDescriptorSet    NearbyDataWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eNearbyNodeInfos, 0, 0, 1);
-	write.append(NearbyDataWrite, octree->nearbyNodeInfoBuffer, 0, octree->nearbyNodeInfoBuffer.bufferSize);
-#endif
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }

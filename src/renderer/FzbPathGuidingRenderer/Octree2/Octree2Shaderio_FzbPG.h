@@ -127,6 +127,9 @@ enum class BindingPoints_Octree_FzbPG : uint32_t {
 
 	eCandidateSampleAABB,
 	eCandidateSampleData2,
+
+	eNearbyNodeTempInfos,
+	eNearbyNodeInfos,
 };
 //------------------------------------------------------------------------------------------
 #define MAX_ADJACENT_CLUSTER_COUNT 4
@@ -236,7 +239,16 @@ struct ClusterPairHitInfo {
 	float cosine_Light;
 };
 //------------------------------------------------------------------------------------------
+struct IndivisibleNodeNearbyNodeTempInfo_FzbPG {
+	uint nodeLabel;
+	int2 nearbyNodeInfos[NEARBY_NODE_COUNT_FZBPG];
+	float nearbyNodeDistances[NEARBY_NODE_COUNT_FZBPG];
+};
 
+struct OctreeNearbyNodeInfo_FzbPG {
+	int2 nearbyNodeInfos[NEARBY_NODE_COUNT_FZBPG];		//0-3 is layer, 4 - 31 is nodeIndex
+};
+//------------------------------------------------------------------------------------------
 #define CREATEOCTREE_CS_THREADGROUP_SIZE 256
 
 #define GETOCTREELABEL_CS_THREADGROUP_SIZE 1024

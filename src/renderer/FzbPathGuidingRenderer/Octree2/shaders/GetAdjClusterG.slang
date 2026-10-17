@@ -3,6 +3,176 @@
 #include "renderer/FzbPathGuidingRenderer/Octree2/Octree2Shaderio_FzbPG.h"
 #include "feature/PathTracing/shaders/pathTracingCommon.slang"
 
+[[vk::push_constant]] ConstantBuffer<OctreePushConstant_FzbPG> pushConst;
+
+[[vk::binding(BindingPoints_Octree_FzbPG::eOctreeNodeData_G)]] RWStructuredBuffer<OctreeNodeData_G_FzbPG, ScalarDataLayout> OctreeNodeDataBuffer_G[];
+
+[[vk::binding(BindingPoints_Octree_FzbPG::eGlobalInfo)]] RWStructuredBuffer<OctreeGlobalInfo_FzbPG, ScalarDataLayout> GlobalInfoBuffer;
+
+[[vk::binding(BindingPoints_Octree_FzbPG::eIndivisibleNodeInfos_G)]] RWStructuredBuffer<uint2> IndivisibleNodeInfoBuffer_G;
+[[vk::binding(BindingPoints_Octree_FzbPG::eAdjClusterInfo_G)]] RWStructuredBuffer<uint> AdjClusterInfoBuffer;
+
+[[vk::binding(BindingPoints_Octree_FzbPG::eNearbyNodeTempInfos)]] RWStructuredBuffer<IndivisibleNodeNearbyNodeTempInfo_FzbPG, ScalarDataLayout> NearbyNodeTempInfoBuffer;
+[[vk::binding(BindingPoints_Octree_FzbPG::eNearbyNodeInfos)]] RWStructuredBuffer<OctreeNearbyNodeInfo_FzbPG, ScalarDataLayout> NearbyNodeInfoBuffer;
+//-------------------------------------------------------------------------------------------------------------------------------
+[numthreads(1, 1, 1)]
+[shader("compute")]
+void computeMain_dispatchGetNearbyClusterG() {
+    GlobalInfoBuffer[0].cmd.x = GlobalInfoBuffer[0].indivisibleNodeCount_G * (GlobalInfoBuffer[0].indivisibleNodeCount_G + GETNEARBYNODES_CS_THREADGROUP_SIZE - 1) / GETNEARBYNODES_CS_THREADGROUP_SIZE;
+}
+
+struct IndivisibleNodeData_G {
+    AABB aabb;
+    uint normalIndex;
+};
+
+groupshared uint groupIndivisibleNodeCount_G;
+groupshared IndivisibleNodeData_G groupIndivisibleNodeData;
+
+groupshared float groupDirWarpMinDistance[4][GETNEARBYNODES_CS_THREADGROUP_SIZE / 32];
+groupshared float groupDirMinDistances[4];
+groupshared int2 groupDirMinDistanceNodeInfos[4];
+
+[numthreads(GETNEARBYNODES_CS_THREADGROUP_SIZE, 1, 1)]
+[shader("compute")]
+void computeMain_getNearbyNodes1(uint threadIndex: SV_DispatchThreadID, uint threadGroupIndex: SV_GroupID, uint groupThreadIndex: SV_GroupThreadID) {
+    if (groupThreadIndex == 0) groupIndivisibleNodeCount_G = GlobalInfoBuffer[0].indivisibleNodeCount_G;
+    if (groupThreadIndex < 4) {
+        groupDirMinDistances[groupThreadIndex] = 1e30f;
+        groupDirMinDistanceNodeInfos[groupThreadIndex] = int2(-1);
+    }
+    GroupMemoryBarrierWithGroupSync();
+    int indivisibleNodeCount = groupIndivisibleNodeCount_G;
+    uint threadGroupCount_perIndivisibleNode = (indivisibleNodeCount + GETNEARBYNODES_CS_THREADGROUP_SIZE - 1) / GETNEARBYNODES_CS_THREADGROUP_SIZE;
+    uint indivisibleNodeLabel = threadGroupIndex / threadGroupCount_perIndivisibleNode;
+    if (groupThreadIndex == 0) {
+        uint2 nodeInfos = IndivisibleNodeInfoBuffer_G[indivisibleNodeLabel];
+        OctreeNodeData_G_FzbPG nodeData = OctreeNodeDataBuffer_G[nodeInfos.x][nodeInfos.y];
+        IndivisibleNodeData_G nodeInfo;
+
+        // nodeInfo.normal = normalize(nodeData.meanNormal.xyz);
+        uint octreeLayerNode = 1 << (3 * nodeInfos.x);
+        nodeInfo.normalIndex = nodeInfos.y / octreeLayerNode;
+
+        nodeInfo.aabb = nodeData.aabb;
+        groupIndivisibleNodeData = nodeInfo;
+    }
+    GroupMemoryBarrierWithGroupSync();
+    uint threadGroupOffset = threadGroupIndex % threadGroupCount_perIndivisibleNode;
+    uint nearbyNodeLabel = threadGroupOffset * GETNEARBYNODES_CS_THREADGROUP_SIZE + groupThreadIndex;
+    if (nearbyNodeLabel >= indivisibleNodeCount) return;
+
+    uint remainingThreadCount = indivisibleNodeCount - (threadGroupCount_perIndivisibleNode - 1) * GETNEARBYNODES_CS_THREADGROUP_SIZE;
+    uint warpCount = (threadGroupIndex % threadGroupCount_perIndivisibleNode) == threadGroupCount_perIndivisibleNode - 1 ? (remainingThreadCount + 31) / 32 : GETNEARBYNODES_CS_THREADGROUP_SIZE / 32;
+    uint warpLane = groupThreadIndex & 31;
+    uint warpIndex = groupThreadIndex / 32;
+
+    IndivisibleNodeData_G indivisibleNodeData = groupIndivisibleNodeData;
+    uint2 nearbyNodeInfo = IndivisibleNodeInfoBuffer_G[nearbyNodeLabel];
+    OctreeNodeData_G_FzbPG nearbyNodeData = OctreeNodeDataBuffer_G[nearbyNodeInfo.x][nearbyNodeInfo.y];
+    uint octreeLayerNode = 1 << (3 * nearbyNodeInfo.x);
+    uint nearbyNormalIndex = nearbyNodeInfo.y / octreeLayerNode;
+
+    float3 indivisibleNodeCenter = (indivisibleNodeData.aabb.minimum + indivisibleNodeData.aabb.maximum) * 0.5f;
+    float3 nearbyNodeCenter = (nearbyNodeData.aabb.minimum + nearbyNodeData.aabb.maximum) * 0.5f;
+    float3 centerDir = normalize(nearbyNodeCenter - indivisibleNodeCenter);
+    float3 absDir = abs(centerDir);
+    int dirIndex = absDir.x > absDir.y ? (absDir.x > absDir.z ? 0 : 2) : (absDir.y > absDir.z ? 1 : 2);
+    dirIndex = dirIndex * 2 + (sign(centerDir[dirIndex]) + 1) / 2;
+
+    bool isNearby = dirIndex / 2 != indivisibleNodeData.normalIndex / 2;
+    if (dirIndex > indivisibleNodeData.normalIndex) dirIndex -= 2;
+
+    float distance = AABBDistance2(indivisibleNodeData.aabb, nearbyNodeData.aabb);
+
+    float3 length = nearbyNodeData.aabb.maximum - nearbyNodeData.aabb.minimum;
+    length[indivisibleNodeData.normalIndex / 2] = 1.0f;
+    float surfaceArea = length.x * length.y * length.z;
+    distance += 1.0f - min(surfaceArea, 1.0f);
+
+    distance += nearbyNormalIndex == indivisibleNodeData.normalIndex ? 0.0f : 1e32f;
+    if (indivisibleNodeLabel == nearbyNodeLabel) distance = 1e30f;
+
+    for (int i = 0; i < 4; i++) {
+        float dirDistance = isNearby && i == dirIndex ? distance : 1e30f;
+        float warpMinDistance = WaveActiveMin(dirDistance);
+        if (warpLane == 0) groupDirWarpMinDistance[i][warpIndex] = warpMinDistance;
+        uint warpMinDistanceLabel = WavePrefixCountBits(dirDistance == warpMinDistance);
+        GroupMemoryBarrierWithGroupSync();
+
+        warpMinDistance = 1e30f;
+        if (warpLane < warpCount) warpMinDistance = groupDirWarpMinDistance[i][warpLane];
+        float groupDirMinDistance = WaveActiveMin(warpMinDistance);
+        uint groupMinDistanceLabel = WavePrefixCountBits(warpMinDistance == groupDirMinDistance);
+        groupMinDistanceLabel = WaveReadLaneAt(groupMinDistanceLabel, warpIndex);
+
+        if (dirDistance == groupDirMinDistance && warpMinDistanceLabel == 0 && groupMinDistanceLabel == 0)
+            groupDirMinDistanceNodeInfos[i] = nearbyNodeInfo;
+
+        if (groupThreadIndex == 0 && threadGroupCount_perIndivisibleNode > 1) groupDirMinDistances[i] = groupDirMinDistance;
+    }
+
+    if (groupThreadIndex == 0) {
+        if (threadGroupCount_perIndivisibleNode == 1) {
+            NearbyNodeInfoBuffer[indivisibleNodeLabel].nearbyNodeInfos = groupDirMinDistanceNodeInfos;
+        } else {
+            uint infoIndex = indivisibleNodeLabel * threadGroupCount_perIndivisibleNode + threadGroupOffset;
+            NearbyNodeTempInfoBuffer[infoIndex].nodeLabel = indivisibleNodeLabel;
+            NearbyNodeTempInfoBuffer[infoIndex].nearbyNodeInfos = groupDirMinDistanceNodeInfos;
+            NearbyNodeTempInfoBuffer[infoIndex].nearbyNodeDistances = groupDirMinDistances;
+        }
+        if (threadIndex == 0) {
+            DispatchIndirectCommand cmd;
+            if (threadGroupCount_perIndivisibleNode == 1) cmd.x = 0;
+            else cmd.x = (indivisibleNodeCount * 32 + GETNEARBYNODES2_CS_THREADGROUP_SIZE - 1) / GETNEARBYNODES2_CS_THREADGROUP_SIZE;
+            cmd.y = 1; cmd.z = 1;
+
+            if (threadGroupCount_perIndivisibleNode * NEARBY_NODE_COUNT_FZBPG > 32) {
+                printf("Error: Too many threads per indivisible node for getNearbyNodes. currentThreadCount: %u, maxThreadCount: %u\n",
+                       threadGroupCount_perIndivisibleNode * NEARBY_NODE_COUNT_FZBPG, 32);
+                cmd.x = 0; cmd.y = 0; cmd.z = 0;
+            }
+
+            GlobalInfoBuffer[0].cmd = cmd;
+        }
+    }
+}
+
+[numthreads(GETNEARBYNODES2_CS_THREADGROUP_SIZE, 1, 1)]
+[shader("compute")]
+void computeMain_getNearbyNodes2(uint threadIndex: SV_DispatchThreadID, uint threadGroupIndex: SV_GroupID, uint groupThreadIndex: SV_GroupThreadID) {
+    if (groupThreadIndex == 0) groupIndivisibleNodeCount_G = GlobalInfoBuffer[0].indivisibleNodeCount_G;
+    GroupMemoryBarrierWithGroupSync();
+    int indivisibleNodeCount = groupIndivisibleNodeCount_G;
+    uint indivisibleNodeLabel = threadIndex / 32;
+    if (indivisibleNodeLabel >= indivisibleNodeCount) return;
+
+    uint threadGroupCount_perIndivisibleNode = (indivisibleNodeCount + GETNEARBYNODES_CS_THREADGROUP_SIZE - 1) / GETNEARBYNODES_CS_THREADGROUP_SIZE;
+
+    uint warpLane = groupThreadIndex & 31;
+    uint warpIndex = groupThreadIndex / 32;
+
+    float distance = 1e30f; int2 nearbyNodeIndex = -1; uint nodeLabel = 0;
+    if (warpLane < threadGroupCount_perIndivisibleNode * 4) {
+        uint infoIndex = indivisibleNodeLabel * threadGroupCount_perIndivisibleNode + warpLane / 4;
+        distance = NearbyNodeTempInfoBuffer[infoIndex].nearbyNodeDistances[warpLane % 4];
+        nearbyNodeIndex = NearbyNodeTempInfoBuffer[infoIndex].nearbyNodeInfos[warpLane % 4];
+
+        nodeLabel = NearbyNodeTempInfoBuffer[indivisibleNodeLabel * threadGroupCount_perIndivisibleNode].nodeLabel;
+    }
+
+    int dirIndex = warpLane & 3;
+    for (int i = 0; i < 4; ++i) {
+        float dirDistance = dirIndex == i ? distance : 1e30f;
+        float minDistance = WaveActiveMin(dirDistance);
+
+        uint minDistanceLabel = WavePrefixCountBits(dirDistance == minDistance);
+        if (dirDistance == minDistance && minDistanceLabel == 0)
+            NearbyNodeInfoBuffer[nodeLabel].nearbyNodeInfos[i] = nearbyNodeIndex;
+    }
+}
+
+#ifdef SpatialReuse_FzbPG
 /*
     computeMain_getAdjClusterG
     ---------------------------------------------------------------------------
@@ -32,7 +202,7 @@
               实际访存约 N_G * (N_G / 1024) * 48B（N_G=2000 时约 190KB），可忽略；
               top-K 用 [unroll] 静态索引 => 数组常驻寄存器，不会落 local memory。
 */
-
+[[vk::binding(BindingPoints_Octree_FzbPG::eAdjClusterInfo_G)]] RWStructuredBuffer<uint> AdjClusterInfoBuffer;
 //---------------------------------------- 可调参数 ----------------------------------------
 #define ADJ_CLUSTER_COUNT           Candidate_Samples_Count     // 每个几何簇保存的条目数(32)：1 个自身 + 31 个邻居
 #define ADJ_CLUSTER_NORMAL_COS_MIN  0.7f                        // 平均法线相似度门限(1=完全同向)
@@ -41,16 +211,6 @@
 // 距离度量：默认用"盒子间隙"(AABBDistance, 0 表示相接/嵌套, 无 NaN 风险)。
 // 想改成"朝向面之间的距离"，把它换成 AABBDistance2(a, b) 即可。
 #define ADJ_CLUSTER_DISTANCE(a, b)  AABBDistance(a, b)
-
-[[vk::push_constant]] ConstantBuffer<OctreePushConstant_FzbPG> pushConst;
-
-[[vk::binding(BindingPoints_Octree_FzbPG::eOctreeNodeData_G)]] RWStructuredBuffer<OctreeNodeData_G_FzbPG, ScalarDataLayout> OctreeNodeDataBuffer_G[];
-
-[[vk::binding(BindingPoints_Octree_FzbPG::eGlobalInfo)]] RWStructuredBuffer<OctreeGlobalInfo_FzbPG, ScalarDataLayout> GlobalInfoBuffer;
-
-[[vk::binding(BindingPoints_Octree_FzbPG::eIndivisibleNodeInfos_G)]] RWStructuredBuffer<uint2> IndivisibleNodeInfoBuffer_G;
-
-[[vk::binding(BindingPoints_Octree_FzbPG::eAdjClusterInfo_G)]] RWStructuredBuffer<uint> AdjClusterInfoBuffer;
 //------------------------------------------------------------------------------------------
 [numthreads(1024, 1, 1)]
 [shader("compute")]
@@ -133,3 +293,4 @@ void computeMain_getAdjClusterG(uint threadIndex: SV_DispatchThreadID) {
     // 可选：如果空间复用想按"远近"加权，可以再开一个 float 缓冲把 bestDistance[k] 一并写出
     //       （注意 bestDistance[0] 恒为 0，即自身的距离）
 }
+#endif
