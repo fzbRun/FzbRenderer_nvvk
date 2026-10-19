@@ -6,8 +6,11 @@
 #define FZBRENDERER_FZB_PATHGUIDING_SHADER_IO_H
 NAMESPACE_SHADERIO_BEGIN()
 
-//#define RIS_Version
-#define StochasticLightcuts_RIS
+#define RIS_Version
+#define StochasticSample
+
+//#define StochasticLightcuts_RIS
+//#define NoLightcuts
 #define Candidate_Samples_Count 128
 
 //#define SpatialReuse_FzbPG
@@ -38,7 +41,8 @@ struct FzbPathGuidingPushConstant
 	int spp = 1;
 
 	int spatialRuse = 0;
-	float2 padding0;
+	int ditherSample = 1;
+	int padding;
 
 	float3 VGBVoxelSize;
 	int maxOctreeLayer;
@@ -63,7 +67,6 @@ enum class StaticBindingPoints_FzbPG
 	eOctreeNodeInfo_G = 2,
 	eOctreeNodeData_E,
 
-	eCandidateSubTreeInfo,
 	eCandidateLeafNodeData,
 
 	eCandidateSampleData,
@@ -108,6 +111,8 @@ enum class StaticBindingPoints_FzbPG
 	ePGValue2Image,
 	ePGVarianceImage,
 #endif
+
+	eClusterPairData,
 };
 #endif
 enum class DynamicBindingPoints_FzbPG {

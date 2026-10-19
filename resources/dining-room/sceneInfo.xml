@@ -1,0 +1,505 @@
+<scene>
+	<!-- dining-room: converted from Tengen/Tungsten scene_v3.xml (geometry, materials, camera). -->
+	<!-- NOTE: this renderer has no HDRI envmap support; the scene is lit by the simple sky instead. -->
+
+	<sensor type="perspective">
+		<fov value="60"/>
+		<transform type="to_world">
+			<matrix value="-0.999914 0.000835626 0.013058 -0.587317 -5.82126e-011 0.997959 -0.063863 2.7623 -0.0130847 -0.0638576 -0.997873 9.71429 0 0 0 1"/>
+		</transform>
+		<plane value="0.1 1000.0"/>
+	</sensor>
+
+	<bsdfs>
+		<!-- roughplastic(alpha 0.1, beckmann, ior 1.5, diffuse_reflectance 1) -->
+		<bsdf type="roughPlastic" id="WhitePlasticBSDF">
+			<roughness value="0.1"/>
+			<int_ior value="1.5"/>
+			<ext_ior value="1.0"/>
+			<albedo value="1.0, 1.0, 1.0, 1.0"/>
+			<albedo_diffuse value="1.0, 1.0, 1.0"/>
+		</bsdf>
+		<!-- roughconductor(alpha 0.05, ggx, chrome eta/k) -->
+		<bsdf type="roughConductor" id="ChromeBSDF">
+			<roughness value="0.05"/>
+			<eta value="4.36968, 2.9167, 1.6547"/>
+			<k value="5.20643, 4.23136, 3.75495"/>
+		</bsdf>
+		<!-- roughplastic(alpha 0.2, ggx, ior 1.5, diffuse_reflectance 0.05) -->
+		<bsdf type="roughPlastic" id="BlackRubberBSDF">
+			<roughness value="0.2"/>
+			<int_ior value="1.5"/>
+			<ext_ior value="1.0"/>
+			<albedo value="1.0, 1.0, 1.0, 1.0"/>
+			<albedo_diffuse value="0.05, 0.05, 0.05"/>
+		</bsdf>
+		<!-- diffuse(0.2) -->
+		<bsdf type="diffuse" id="WallsBSDF">
+			<albedo value="0.2, 0.2, 0.2, 1.0"/>
+		</bsdf>
+		<!-- diffuse + bitmap textures/picture3.jpg -->
+		<bsdf type="diffuse" id="ArtworkBSDF">
+			<albedo value="1.0, 1.0, 1.0, 1.0"/>
+			<albedoMap type="texture">
+				<filename value="textures/picture3.jpg"/>
+			</albedoMap>
+		</bsdf>
+		<!-- diffuse(0) -->
+		<bsdf type="diffuse" id="NoneBSDF">
+			<albedo value="0.0, 0.0, 0.0, 1.0"/>
+		</bsdf>
+		<!-- diffuse + bitmap textures/Tiles.jpg -->
+		<bsdf type="diffuse" id="FloorTilesBSDF">
+			<albedo value="1.0, 1.0, 1.0, 1.0"/>
+			<albedoMap type="texture">
+				<filename value="textures/Tiles.jpg"/>
+			</albedoMap>
+		</bsdf>
+		<!-- roughplastic(alpha 0.2, beckmann, ior 1.5, diffuse_reflectance 0.01) -->
+		<bsdf type="roughPlastic" id="BlackPaintBSDF">
+			<roughness value="0.2"/>
+			<int_ior value="1.5"/>
+			<ext_ior value="1.0"/>
+			<albedo value="1.0, 1.0, 1.0, 1.0"/>
+			<albedo_diffuse value="0.01, 0.01, 0.01"/>
+		</bsdf>
+		<!-- diffuse(0.325037) -->
+		<bsdf type="diffuse" id="WhiteMarbleBSDF">
+			<albedo value="0.325037, 0.325037, 0.325037, 1.0"/>
+		</bsdf>
+		<!-- roughconductor(alpha 0.1, beckmann, gold eta/k) -->
+		<bsdf type="roughConductor" id="GoldBSDF">
+			<roughness value="0.1"/>
+			<eta value="0.143119, 0.374957, 1.44248"/>
+			<k value="3.98316, 2.38572, 1.60322"/>
+		</bsdf>
+		<!-- roughplastic(alpha 0.01, beckmann, ior 1.5, diffuse_reflectance 1) -->
+		<bsdf type="roughPlastic" id="CeramicBSDF">
+			<roughness value="0.01"/>
+			<int_ior value="1.5"/>
+			<ext_ior value="1.0"/>
+			<albedo value="1.0, 1.0, 1.0, 1.0"/>
+			<albedo_diffuse value="1.0, 1.0, 1.0"/>
+		</bsdf>
+		<!-- roughconductor(alpha 0.1, beckmann, eta/k) -->
+		<bsdf type="roughConductor" id="RoughMetalBSDF">
+			<roughness value="0.1"/>
+			<eta value="1.65746, 0.880369, 0.521229"/>
+			<k value="9.22387, 6.26952, 4.837"/>
+		</bsdf>
+		<!-- roughplastic(alpha 0.01, beckmann, ior 1.5, diffuse_reflectance = textures/Teacup.png) -->
+		<bsdf type="roughPlastic" id="PaintedCeramicBSDF">
+			<roughness value="0.01"/>
+			<int_ior value="1.5"/>
+			<ext_ior value="1.0"/>
+			<albedo value="1.0, 1.0, 1.0, 1.0"/>
+			<albedo_diffuse value="1.0, 1.0, 1.0"/>
+			<albedoMap type="texture">
+				<filename value="textures/Teacup.png"/>
+			</albedoMap>
+		</bsdf>
+		<!-- roughplastic(alpha 0.1, ggx, ior 1.5, diffuse_reflectance 0.684615) -->
+		<bsdf type="roughPlastic" id="SkirtWoodBSDF">
+			<roughness value="0.1"/>
+			<int_ior value="1.5"/>
+			<ext_ior value="1.0"/>
+			<albedo value="1.0, 1.0, 1.0, 1.0"/>
+			<albedo_diffuse value="0.684615, 0.684615, 0.684615"/>
+		</bsdf>
+		<!-- roughplastic(alpha 0.1, ggx, ior 1.5, diffuse_reflectance 0.79311) -->
+		<bsdf type="roughPlastic" id="FrostedGlassBSDF">
+			<roughness value="0.1"/>
+			<int_ior value="1.5"/>
+			<ext_ior value="1.0"/>
+			<albedo value="1.0, 1.0, 1.0, 1.0"/>
+			<albedo_diffuse value="0.79311, 0.79311, 0.79311"/>
+		</bsdf>
+	</bsdfs>
+
+	<lights>
+		<useSky value="true" />
+		<backgroundColor value="0.0, 0.0, 0.0" />
+	</lights>
+
+	<meshes>
+		<mesh type="obj" id="Mesh013">
+			<filename value="models/Mesh013.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh016">
+			<filename value="models/Mesh016.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh015">
+			<filename value="models/Mesh015.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh023">
+			<filename value="models/Mesh023.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh020">
+			<filename value="models/Mesh020.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh017">
+			<filename value="models/Mesh017.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh024">
+			<filename value="models/Mesh024.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh041">
+			<filename value="models/Mesh041.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh011">
+			<filename value="models/Mesh011.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh026">
+			<filename value="models/Mesh026.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh018">
+			<filename value="models/Mesh018.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh007">
+			<filename value="models/Mesh007.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh005">
+			<filename value="models/Mesh005.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh019">
+			<filename value="models/Mesh019.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh021">
+			<filename value="models/Mesh021.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh037">
+			<filename value="models/Mesh037.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh004">
+			<filename value="models/Mesh004.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh014">
+			<filename value="models/Mesh014.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh012">
+			<filename value="models/Mesh012.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh028">
+			<filename value="models/Mesh028.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh025">
+			<filename value="models/Mesh025.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh008">
+			<filename value="models/Mesh008.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh032">
+			<filename value="models/Mesh032.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh035">
+			<filename value="models/Mesh035.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh042">
+			<filename value="models/Mesh042.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh010">
+			<filename value="models/Mesh010.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh036">
+			<filename value="models/Mesh036.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh027">
+			<filename value="models/Mesh027.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh043">
+			<filename value="models/Mesh043.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh044">
+			<filename value="models/Mesh044.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh031">
+			<filename value="models/Mesh031.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh022">
+			<filename value="models/Mesh022.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh038">
+			<filename value="models/Mesh038.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh030">
+			<filename value="models/Mesh030.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh046">
+			<filename value="models/Mesh046.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh047">
+			<filename value="models/Mesh047.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh034">
+			<filename value="models/Mesh034.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh033">
+			<filename value="models/Mesh033.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh006">
+			<filename value="models/Mesh006.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh048">
+			<filename value="models/Mesh048.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh049">
+			<filename value="models/Mesh049.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh051">
+			<filename value="models/Mesh051.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh040">
+			<filename value="models/Mesh040.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh003">
+			<filename value="models/Mesh003.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh002">
+			<filename value="models/Mesh002.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh009">
+			<filename value="models/Mesh009.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh045">
+			<filename value="models/Mesh045.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh029">
+			<filename value="models/Mesh029.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh039">
+			<filename value="models/Mesh039.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh050">
+			<filename value="models/Mesh050.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh001">
+			<filename value="models/Mesh001.obj"/>
+		</mesh>
+		<mesh type="obj" id="Mesh000">
+			<filename value="models/Mesh000.obj"/>
+		</mesh>
+	</meshes>
+	<instances>
+		<instance id="FrostedGlass_0001">
+			<meshRef id="Mesh013" />
+			<materialRef id="FrostedGlassBSDF" />
+		</instance>
+		<instance id="WhitePlastic_0001">
+			<meshRef id="Mesh016" />
+			<materialRef id="WhitePlasticBSDF" />
+		</instance>
+		<instance id="WhitePlastic_0002">
+			<meshRef id="Mesh015" />
+			<materialRef id="WhitePlasticBSDF" />
+		</instance>
+		<instance id="FrostedGlass_0002">
+			<meshRef id="Mesh023" />
+			<materialRef id="FrostedGlassBSDF" />
+		</instance>
+		<instance id="WhitePlastic_0003">
+			<meshRef id="Mesh020" />
+			<materialRef id="WhitePlasticBSDF" />
+		</instance>
+		<instance id="WhitePlastic_0004">
+			<meshRef id="Mesh017" />
+			<materialRef id="WhitePlasticBSDF" />
+		</instance>
+		<instance id="None">
+			<meshRef id="Mesh024" />
+			<materialRef id="NoneBSDF" />
+		</instance>
+		<instance id="BlackPaint_0001">
+			<meshRef id="Mesh041" />
+			<materialRef id="BlackPaintBSDF" />
+		</instance>
+		<instance id="BlackPaint_0002">
+			<meshRef id="Mesh011" />
+			<materialRef id="BlackPaintBSDF" />
+		</instance>
+		<instance id="Ceramic_0001">
+			<meshRef id="Mesh026" />
+			<materialRef id="CeramicBSDF" />
+		</instance>
+		<instance id="Gold_0001">
+			<meshRef id="Mesh018" />
+			<materialRef id="GoldBSDF" />
+		</instance>
+		<instance id="RoughMetal_0001">
+			<meshRef id="Mesh007" />
+			<materialRef id="RoughMetalBSDF" />
+		</instance>
+		<instance id="PaintedCeramic_0001">
+			<meshRef id="Mesh005" />
+			<materialRef id="PaintedCeramicBSDF" />
+		</instance>
+		<instance id="Gold_0002">
+			<meshRef id="Mesh019" />
+			<materialRef id="GoldBSDF" />
+		</instance>
+		<instance id="Ceramic_0002">
+			<meshRef id="Mesh021" />
+			<materialRef id="CeramicBSDF" />
+		</instance>
+		<instance id="Ceramic_0003">
+			<meshRef id="Mesh037" />
+			<materialRef id="CeramicBSDF" />
+		</instance>
+		<instance id="Gold_0003">
+			<meshRef id="Mesh004" />
+			<materialRef id="GoldBSDF" />
+		</instance>
+		<instance id="PaintedCeramic_0002">
+			<meshRef id="Mesh014" />
+			<materialRef id="PaintedCeramicBSDF" />
+		</instance>
+		<instance id="Gold_0004">
+			<meshRef id="Mesh012" />
+			<materialRef id="GoldBSDF" />
+		</instance>
+		<instance id="Ceramic_0004">
+			<meshRef id="Mesh028" />
+			<materialRef id="CeramicBSDF" />
+		</instance>
+		<instance id="RoughMetal_0002">
+			<meshRef id="Mesh025" />
+			<materialRef id="RoughMetalBSDF" />
+		</instance>
+		<instance id="Ceramic_0005">
+			<meshRef id="Mesh008" />
+			<materialRef id="CeramicBSDF" />
+		</instance>
+		<instance id="WhitePlastic_0005">
+			<meshRef id="Mesh032" />
+			<materialRef id="WhitePlasticBSDF" />
+		</instance>
+		<instance id="Chrome_0001">
+			<meshRef id="Mesh035" />
+			<materialRef id="ChromeBSDF" />
+		</instance>
+		<instance id="BlackRubber_0001">
+			<meshRef id="Mesh042" />
+			<materialRef id="BlackRubberBSDF" />
+		</instance>
+		<instance id="WhitePlastic_0006">
+			<meshRef id="Mesh010" />
+			<materialRef id="WhitePlasticBSDF" />
+		</instance>
+		<instance id="Chrome_0002">
+			<meshRef id="Mesh036" />
+			<materialRef id="ChromeBSDF" />
+		</instance>
+		<instance id="BlackRubber_0002">
+			<meshRef id="Mesh027" />
+			<materialRef id="BlackRubberBSDF" />
+		</instance>
+		<instance id="WhitePlastic_0007">
+			<meshRef id="Mesh043" />
+			<materialRef id="WhitePlasticBSDF" />
+		</instance>
+		<instance id="Chrome_0003">
+			<meshRef id="Mesh044" />
+			<materialRef id="ChromeBSDF" />
+		</instance>
+		<instance id="BlackRubber_0003">
+			<meshRef id="Mesh031" />
+			<materialRef id="BlackRubberBSDF" />
+		</instance>
+		<instance id="WhitePlastic_0008">
+			<meshRef id="Mesh022" />
+			<materialRef id="WhitePlasticBSDF" />
+		</instance>
+		<instance id="Chrome_0004">
+			<meshRef id="Mesh038" />
+			<materialRef id="ChromeBSDF" />
+		</instance>
+		<instance id="BlackRubber_0004">
+			<meshRef id="Mesh030" />
+			<materialRef id="BlackRubberBSDF" />
+		</instance>
+		<instance id="WhitePlastic_0009">
+			<meshRef id="Mesh046" />
+			<materialRef id="WhitePlasticBSDF" />
+		</instance>
+		<instance id="Chrome_0005">
+			<meshRef id="Mesh047" />
+			<materialRef id="ChromeBSDF" />
+		</instance>
+		<instance id="BlackRubber_0005">
+			<meshRef id="Mesh034" />
+			<materialRef id="BlackRubberBSDF" />
+		</instance>
+		<instance id="WhiteMarble">
+			<meshRef id="Mesh033" />
+			<materialRef id="WhiteMarbleBSDF" />
+		</instance>
+		<instance id="FloorTiles">
+			<meshRef id="Mesh006" />
+			<materialRef id="FloorTilesBSDF" />
+			<transform>
+				<matrix value="1 0 0 0 0 1 0 0 0 0 1.05106 -0.452102 0 0 0 1" />
+			</transform>
+		</instance>
+		<instance id="Walls_0001">
+			<meshRef id="Mesh048" />
+			<materialRef id="WallsBSDF" />
+		</instance>
+		<instance id="WhitePlastic_0010">
+			<meshRef id="Mesh049" />
+			<materialRef id="WhitePlasticBSDF" />
+		</instance>
+		<instance id="Chrome_0006">
+			<meshRef id="Mesh051" />
+			<materialRef id="ChromeBSDF" />
+		</instance>
+		<instance id="BlackRubber_0006">
+			<meshRef id="Mesh040" />
+			<materialRef id="BlackRubberBSDF" />
+		</instance>
+		<instance id="Ceramic_0006">
+			<meshRef id="Mesh003" />
+			<materialRef id="CeramicBSDF" />
+		</instance>
+		<instance id="Ceramic_0007">
+			<meshRef id="Mesh002" />
+			<materialRef id="CeramicBSDF" />
+		</instance>
+		<instance id="Gold_0005">
+			<meshRef id="Mesh009" />
+			<materialRef id="GoldBSDF" />
+		</instance>
+		<instance id="RoughMetal_0003">
+			<meshRef id="Mesh045" />
+			<materialRef id="RoughMetalBSDF" />
+		</instance>
+		<instance id="PaintedCeramic_0003">
+			<meshRef id="Mesh029" />
+			<materialRef id="PaintedCeramicBSDF" />
+		</instance>
+		<instance id="Gold_0006">
+			<meshRef id="Mesh039" />
+			<materialRef id="GoldBSDF" />
+		</instance>
+		<instance id="Ceramic_0008">
+			<meshRef id="Mesh050" />
+			<materialRef id="CeramicBSDF" />
+		</instance>
+		<instance id="Artwork">
+			<meshRef id="Mesh001" />
+			<materialRef id="ArtworkBSDF" />
+			<transform>
+				<matrix value="-1 0 -1.50996e-007 -0.621391 0 1 0 4.02309 1.50996e-007 0 -1 -4.47482 0 0 0 1" />
+			</transform>
+		</instance>
+		<instance id="SkirtWood">
+			<meshRef id="Mesh000" />
+			<materialRef id="SkirtWoodBSDF" />
+		</instance>
+		<instance id="Walls_0002">
+			<meshRef id="custom" type="plane" />
+			<materialRef id="WallsBSDF" />
+			<transform>
+				<matrix value="-4.17338e-007 -4.0127e-007 4.59 -6.29999 -9.5476 1.75401e-014 -2.00635e-007 8.03075 0 -14.688 -3.21016e-007 10.044 0 0 0 1" />
+			</transform>
+		</instance>
+	</instances>
+</scene>

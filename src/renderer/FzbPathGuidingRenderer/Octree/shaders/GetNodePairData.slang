@@ -22,6 +22,10 @@
 [[vk::binding(BindingPoints_Octree_FzbPG::eIndivisibleNodeInfos_E)]] RWStructuredBuffer<uint> IndivisibleNodeInfoBuffer_E;
 [[vk::binding(BindingPoints_Octree_FzbPG::eOctreeNodePairWeight)]] RWStructuredBuffer<float> OctreeNodePairWeightBuffer;
 
+[[vk::binding(BindingPoints_Octree_FzbPG::eClusterPairInfo)]] RWStructuredBuffer<ClusterPairInfo_FzbPG, ScalarDataLayout> ClusterPairInfoBuffer;
+[[vk::binding(BindingPoints_Octree_FzbPG::eCluterPairHitInfo)]] RWStructuredBuffer<ClusterPairHitInfo_FzbPG, ScalarDataLayout> CluterPairHitInfoBuffer;
+[[vk::binding(BindingPoints_Octree_FzbPG::eClusterPairData)]] RWStructuredBuffer<ClusterPairData_FzbPG, ScalarDataLayout> CluterPairDataBuffer;
+
 //----------------------------------------------getNodePairData-------------------------------------------------
 groupshared uint groupIndivisibleNodeCount_G;
 groupshared uint groupIndivisibleNodeCount_E;
@@ -42,7 +46,12 @@ void computeMain_initWeights(uint threadIndex: SV_DispatchThreadID, uint groupTh
     #endif
 
     if (threadIndex == 0) {
+        #ifdef StochasticSample
+        GlobalInfoBuffer[0].cmd.x = (indivisibleNodeCount_G * GlobalInfoBuffer[0].indivisibleNodeCount_E + 255) / 256;
+        #else
         GlobalInfoBuffer[0].cmd.x = GlobalInfoBuffer[0].indivisibleNodeCount_E * ((indivisibleNodeCount_G * OUTGOING_COUNT_FZBPG + HITTEST_CS_THREADGROUP_SIZE - 1) / HITTEST_CS_THREADGROUP_SIZE);
+        #endif
+        
         #ifdef NEARBYNODE_JITTER_FZBPG
         DispatchIndirectCommand cmd2;
         cmd2.x = indivisibleNodeCount_G * ((indivisibleNodeCount_G + GETNEARBYNODES_CS_THREADGROUP_SIZE - 1) / GETNEARBYNODES_CS_THREADGROUP_SIZE);
@@ -71,9 +80,8 @@ struct HitPayload_FzbWeight {
     float hit;
     float3 normal;
     float3 sampleDir;
+    int materialIndex;
 };
-
-groupshared IndivisibleNodeData_E groupNodeData_E;
 
 void traceRay(RayDesc ray, inout HitPayload_FzbWeight payload)
 {
@@ -101,6 +109,7 @@ void traceRay(RayDesc ray, inout HitPayload_FzbWeight payload)
         SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
         Instance instance = sceneInfo.instances[instanceIndex];         // Instance data
         payload.material = sceneInfo.materials[instance.materialIndex]; // Material properties
+        payload.materialIndex = instance.materialIndex;
 
         // Convert built-in barycentric coordinates to full barycentric coordinates
         const float3 barycentrics =
@@ -124,6 +133,241 @@ void traceRay(RayDesc ray, inout HitPayload_FzbWeight payload)
 }
 //-------------------------------------------------------------------------------------------------------------------------
 #ifdef RIS_Version
+
+#ifdef StochasticSample
+
+groupshared OctreeNodeClusterData_E_FzbPG groupNodeData_E;
+groupshared OctreeNodeClusterData_G_FzbPG groupNodeData_G;
+
+[numthreads(256, 1, 1)]
+[shader("compute")]
+void computeMain_getStochasticLeafNode(uint threadIndex: SV_DispatchThreadID, uint threadGroupIndex: SV_GroupID, uint groupThreadIndex: SV_GroupThreadID) {
+    if (groupThreadIndex == 0) {
+        groupIndivisibleNodeCount_G = GlobalInfoBuffer[0].indivisibleNodeCount_G;
+        groupIndivisibleNodeCount_E = GlobalInfoBuffer[0].indivisibleNodeCount_E;
+    }
+    GroupMemoryBarrierWithGroupSync();
+    int indivisibleNodeCount_G = groupIndivisibleNodeCount_G;
+    int indivisibleNodeCount_E = groupIndivisibleNodeCount_E;
+    if (threadIndex >= groupIndivisibleNodeCount_G * groupIndivisibleNodeCount_E) return;
+
+    int indivisibleNodeIndex_G = threadIndex / indivisibleNodeCount_E;
+    int indivisibleNodeIndex_E = threadIndex % indivisibleNodeCount_E;
+
+    uint2 nodeInfo_G = IndivisibleNodeInfoBuffer_G[indivisibleNodeIndex_G];
+    OctreeNodeClusterData_G_FzbPG nodeData_G = OctreeClusterDataBuffer_G[nodeInfo_G.x - OCTREE_CLUSTER_LAYER_FZBPG][nodeInfo_G.y];
+    float3 nodePos_G = (nodeData_G.aabb.maximum + nodeData_G.aabb.minimum) * 0.5;
+
+    uint nodeInfo_E = IndivisibleNodeInfoBuffer_E[indivisibleNodeIndex_E];
+    OctreeNodeClusterData_E_FzbPG nodeData_E = OctreeClusterDataBuffer_E[0][nodeInfo_E];
+
+    int seed = xxhash32(uint3(indivisibleNodeIndex_G, indivisibleNodeIndex_E, uint(pushConst.frameIndex)));
+    int layerIndex = 1; int nodeIndex_E = nodeInfo_E; float p = 1.0f; 
+    for (; layerIndex <= pushConst.octreeMaxLayer - OCTREE_CLUSTER_LAYER_FZBPG; ++layerIndex) {
+        float ws[8]; float wSum = 0.0f;
+        for (int subNodeIndex = 0; subNodeIndex < 8; ++subNodeIndex) {
+            ws[subNodeIndex] = 0.0f;
+
+            int nodeIndex = nodeIndex_E * 8 + subNodeIndex;
+            nodeData_E = OctreeClusterDataBuffer_E[layerIndex][nodeIndex];
+
+            float I = nodeData_E.E;
+            //float3 MUpperBound = MaxCosToAABB(nodePos_G, nodeData_G.meanNormal.xyz, nodeData_E.aabb.minimum, nodeData_E.aabb.maximum);
+            //float GUpperBound = getLightGUpperBound(nodeData_E, nodePos_G);
+            float3 center = (nodeData_E.aabb.maximum + nodeData_E.aabb.minimum) * 0.5f;
+            float diagonalLength = length(nodeData_E.aabb.maximum - nodeData_E.aabb.minimum);
+            float d = max(length(nodePos_G - center), diagonalLength + 1e-3f);
+            // float d = max(length(nodePos_G - center), 1.0f);
+
+            ws[subNodeIndex] = I / (d * d); // * dot(MUpperBound, 1.0f) * GUpperBound;
+            wSum += ws[subNodeIndex];
+
+            // if (pushConst.frameIndex == 0 && indivisibleNodeIndex == 0 && candidateNodeIndex == 0)
+            //     printf("layerIndex: %d, nodeIndex: %d, w: %f, radiance: %f %f %f\n",
+            //         layerIndex, nodeIndex,
+            //         ws[subNodeIndex],
+            //         node_E.radiance.x, node_E.radiance.y, node_E.radiance.z
+            //     );
+        }
+        if (wSum == 0.0f) break;
+
+        float randomNumber = rand(seed);
+        for (int subNodeIndex = 0; subNodeIndex < 8; ++subNodeIndex) {
+            float pSelect = ws[subNodeIndex] / wSum;
+            if (pSelect >= randomNumber) {
+                nodeIndex_E = nodeIndex_E * 8 + subNodeIndex;
+                p *= pSelect;
+                break;
+            }
+            randomNumber -= pSelect;
+        }
+    }
+    bool getCandidate = layerIndex == pushConst.octreeMaxLayer - OCTREE_CLUSTER_LAYER_FZBPG + 1;
+
+    ClusterPairInfo_FzbPG pairInfo;
+    pairInfo.leafNodeIndex_E = getCandidate ? nodeIndex_E : -1;
+    ClusterPairInfoBuffer[indivisibleNodeIndex_G * indivisibleNodeCount_E + indivisibleNodeIndex_E] = pairInfo;
+
+    ClusterPairData_FzbPG pairData;
+    if (getCandidate) {
+       pairData.aabb = OctreeClusterDataBuffer_E[pushConst.octreeMaxLayer - OCTREE_CLUSTER_LAYER_FZBPG][nodeIndex_E].aabb;
+       pairData.p = p;
+    } else {
+        pairData.p = 0.0f;
+        pairData.aabb.minimum = 0.0f;
+        pairData.aabb.maximum = 0.0f;
+    }
+    CluterPairDataBuffer[indivisibleNodeIndex_G * CLUSTER_LAYER_NODECOUNT_E_FZBPG + nodeInfo_E] = pairData;
+
+    if (threadIndex == 0) GlobalInfoBuffer[0].cmd.x = indivisibleNodeCount_G * ((indivisibleNodeCount_E * HITTEST_COUNT_FZBPG + HITTEST_CS_THREADGROUP_SIZE - 1) / HITTEST_CS_THREADGROUP_SIZE);
+}
+//-----------------------------------------------------------------------------------------------------------------------------------------------------
+[numthreads(HITTEST_CS_THREADGROUP_SIZE, 1, 1)]
+[shader("compute")]
+void computeMain_octreeNodeHitTest(uint threadIndex: SV_DispatchThreadID, uint threadGroupIndex: SV_GroupID, uint groupThreadIndex: SV_GroupThreadID) {
+    if (groupThreadIndex == 0) {
+        groupIndivisibleNodeCount_G = GlobalInfoBuffer[0].indivisibleNodeCount_G;
+        groupIndivisibleNodeCount_E = GlobalInfoBuffer[0].indivisibleNodeCount_E;
+    }
+    GroupMemoryBarrierWithGroupSync();
+    int indivisibleNodeCount_G = groupIndivisibleNodeCount_G;
+    int indivisibleNodeCount_E = groupIndivisibleNodeCount_E;
+
+    int threadGroupCount_perG = (indivisibleNodeCount_E * HITTEST_COUNT_FZBPG + HITTEST_CS_THREADGROUP_SIZE - 1) / HITTEST_CS_THREADGROUP_SIZE;
+    int indivisibleNodeIndex_G = threadGroupIndex / threadGroupCount_perG;
+    int indivisibleNodeIndex_E = (threadIndex - (indivisibleNodeIndex_G * threadGroupCount_perG * HITTEST_CS_THREADGROUP_SIZE)) / HITTEST_COUNT_FZBPG;
+    int hitTestIndex = threadIndex & (HITTEST_COUNT_FZBPG - 1);
+    if (groupThreadIndex == 0) {
+        uint2 nodeInfo_G = IndivisibleNodeInfoBuffer_G[indivisibleNodeIndex_G];
+        groupNodeData_G = OctreeClusterDataBuffer_G[nodeInfo_G.x - OCTREE_CLUSTER_LAYER_FZBPG][nodeInfo_G.y];
+    }
+    GroupMemoryBarrierWithGroupSync();
+    if (indivisibleNodeIndex_E >= groupIndivisibleNodeCount_E || indivisibleNodeIndex_G >= groupIndivisibleNodeCount_G) return;
+
+    ClusterPairInfo_FzbPG clusterPairInfo = ClusterPairInfoBuffer[indivisibleNodeIndex_G * groupIndivisibleNodeCount_E + indivisibleNodeIndex_E];
+    OctreeNodeClusterData_E_FzbPG nodeData_E;
+    if (clusterPairInfo.leafNodeIndex_E >= 0)
+        nodeData_E = OctreeClusterDataBuffer_E[pushConst.octreeMaxLayer - OCTREE_CLUSTER_LAYER_FZBPG] [clusterPairInfo.leafNodeIndex_E];
+    else {
+        CluterPairHitInfoBuffer[indivisibleNodeIndex_G * indivisibleNodeCount_E * HITTEST_COUNT_FZBPG + indivisibleNodeIndex_E * HITTEST_COUNT_FZBPG + hitTestIndex] .isHit = -1.0f;
+        return;
+    }
+
+    uint seed = xxhash32(uint3(threadIndex, 0, (uint)pushConst.frameIndex));
+
+    OctreeNodeClusterData_G_FzbPG nodeData_G = groupNodeData_G;
+    float3 randXYZ = float3(rand(seed), rand(seed), rand(seed));
+    float3 samplePoint_G = randXYZ * (nodeData_G.aabb.maximum - nodeData_G.aabb.minimum) + nodeData_G.aabb.minimum;
+    float3 normal_G = normalize(nodeData_G.meanNormal.xyz);
+
+    randXYZ = float3(rand(seed), rand(seed), rand(seed));
+    float3 samplePoint_E = randXYZ * (nodeData_E.aabb.maximum - nodeData_E.aabb.minimum) + nodeData_E.aabb.minimum;
+    float3 sampleDir = normalize(samplePoint_G - samplePoint_E);
+    samplePoint_E = getAABBPoint(nodeData_E.aabb, samplePoint_E, sampleDir);
+    float3 normal_E = normalize(nodeData_E.meanNormal.xyz);
+
+    HitPayload_FzbWeight hitPayload;
+    hitPayload.hit = -1.0f;
+    hitPayload.sampleDir = sampleDir;
+
+    bool hitTestAble = dot(normal_E, sampleDir) > 0.0f;
+    hitTestAble &= dot(-sampleDir, normal_G) > 0.0f;
+    if (hitTestAble) {
+        RayDesc ray;
+        ray.Direction = sampleDir;
+        ray.Origin = samplePoint_E + sampleDir * 0.00001f;
+        ray.TMin = 0.001;
+        ray.TMax = INFINITE;
+        traceRay(ray, hitPayload);
+        if (hitPayload.hit > 0.0f) {
+            bool check = checkPointInAABB2(hitPayload.hitPos, nodeData_G.aabb);
+            check &= dot(hitPayload.normal, -sampleDir) > 0.0f;
+            check &= dot(hitPayload.normal, normal_G) > 0.707f;
+            if (!check) hitPayload.hit = -1.0f;
+        }
+    }
+
+    ClusterPairHitInfo_FzbPG hitInfo;
+    hitInfo.pos_G = hitPayload.hitPos;
+    hitInfo.isHit = hitPayload.hit;
+    hitInfo.normal_G = hitPayload.normal;
+    hitInfo.materialIndex = hitPayload.materialIndex;
+    hitInfo.sampleDir = hitPayload.sampleDir;
+    hitInfo.d = distance(samplePoint_E, samplePoint_G);
+    hitInfo.cosine = max(dot(-hitPayload.sampleDir, hitPayload.normal), 0.0f);
+    hitInfo.cosine_Light = max(dot(hitPayload.sampleDir, nodeData_E.meanNormal.xyz), 0.0f);
+    hitInfo.E = nodeData_E.E;
+
+    CluterPairHitInfoBuffer[indivisibleNodeIndex_G * indivisibleNodeCount_E * HITTEST_COUNT_FZBPG + indivisibleNodeIndex_E * HITTEST_COUNT_FZBPG + hitTestIndex] = hitInfo;
+    if (threadIndex == 0) GlobalInfoBuffer[0].cmd.x = indivisibleNodeCount_E * indivisibleNodeCount_G;
+}
+//-----------------------------------------------------------------------------------------------------------------------------------------------------
+groupshared ClusterPairHitInfo_FzbPG groupHitInfo[HITTEST_COUNT_FZBPG];
+groupshared float groupP;
+
+[numthreads(OUTGOING_COUNT_FZBPG * HITTEST_COUNT_FZBPG, 1, 1)]
+[shader("compute")]
+void computeMain_getWeight(uint threadIndex: SV_DispatchThreadID, uint threadGroupIndex: SV_GroupID, uint groupThreadIndex: SV_GroupThreadID) {
+    if (groupThreadIndex == 0) {
+        groupIndivisibleNodeCount_G = GlobalInfoBuffer[0].indivisibleNodeCount_G;
+        groupIndivisibleNodeCount_E = GlobalInfoBuffer[0].indivisibleNodeCount_E;
+    }
+    GroupMemoryBarrierWithGroupSync();
+    int indivisibleNodeCount_G = groupIndivisibleNodeCount_G;
+    int indivisibleNodeCount_E = groupIndivisibleNodeCount_E;
+
+    int indivisibleNodeIndex_G = threadGroupIndex / indivisibleNodeCount_E;
+    int indivisibleNodeIndex_E = threadGroupIndex % indivisibleNodeCount_E;
+    if (groupThreadIndex < HITTEST_COUNT_FZBPG) {
+        groupHitInfo[groupThreadIndex] = CluterPairHitInfoBuffer[indivisibleNodeIndex_G * indivisibleNodeCount_E * HITTEST_COUNT_FZBPG + indivisibleNodeIndex_E * HITTEST_COUNT_FZBPG + groupThreadIndex];
+        int nodeInfo_E = IndivisibleNodeInfoBuffer_E[indivisibleNodeIndex_E];
+        groupP = max(CluterPairDataBuffer[indivisibleNodeIndex_G * CLUSTER_LAYER_NODECOUNT_E_FZBPG + nodeInfo_E].p, 1e-6f);
+    }
+    GroupMemoryBarrierWithGroupSync();
+    if (threadIndex == 0) GlobalInfoBuffer[0].cmd.x = OUTGOING_COUNT_FZBPG * indivisibleNodeCount_G;
+
+    int outgoingIndex = groupThreadIndex / HITTEST_COUNT_FZBPG;
+    int hitTestIndex = groupThreadIndex & (HITTEST_COUNT_FZBPG - 1);
+    ClusterPairHitInfo_FzbPG hitInfo = groupHitInfo[hitTestIndex];
+
+    float3 f = 0.0f;
+    if (hitInfo.isHit > 0) {
+        float3 outgoing = mul(getOutgoing_FzbPG(outgoingIndex, OUTGOING_COUNT_FZBPG), pushConst.randomRotateMatrix);
+
+        float3 tangent, bitangent;
+        orthonormalBasis(hitInfo.normal_G, tangent, bitangent);
+        float3x3 TBN_G = float3x3(tangent, bitangent, hitInfo.normal_G);
+
+        BSDFMaterial material = pushConst.sceneInfoAddress.materials[hitInfo.materialIndex];
+        float3 bsdf = getBSDF(material, -hitInfo.sampleDir, hitInfo.normal_G, outgoing, TBN_G, true);
+        float d = hitInfo.d;
+        f = hitInfo.E * bsdf * hitInfo.cosine * hitInfo.cosine_Light / max(d * d, 1e-3f);
+    }
+
+    int warpLane = groupThreadIndex & 31;
+    for (int offset = HITTEST_COUNT_FZBPG / 2; offset > 0; offset /= 2) {
+        uint targetLane = warpLane + offset;
+        f += WaveReadLaneAt(f, targetLane);
+    }
+    if ((warpLane & (HITTEST_COUNT_FZBPG - 1)) == 0) {
+        f /= HITTEST_COUNT_FZBPG;
+        float p_hat = dot(f, 1.0f);
+        if (p_hat == 0.0f) return;
+
+        float m = 1.0f;
+        float w = m * p_hat / groupP;
+
+        if (w > 0.0f) {
+            uint weightIndex = outgoingIndex * indivisibleNodeCount_G * CLUSTER_LAYER_NODECOUNT_E_FZBPG +
+                               indivisibleNodeIndex_G * CLUSTER_LAYER_NODECOUNT_E_FZBPG + IndivisibleNodeInfoBuffer_E[indivisibleNodeIndex_E];
+            OctreeNodePairWeightBuffer[weightIndex] = w;
+        }
+    }
+}
+#else
+
+groupshared IndivisibleNodeData_E groupNodeData_E;
+
 #define MAX_INDIVISIBLE_NODE_G_COUNT HITTEST_CS_THREADGROUP_SIZE / OUTGOING_COUNT_FZBPG
 groupshared IndivisibleNodeData_G groupNodeData_G[MAX_INDIVISIBLE_NODE_G_COUNT];
 groupshared HitPayload_FzbWeight groupHitPayloads[MAX_INDIVISIBLE_NODE_G_COUNT * HITTEST_COUNT_FZBPG];
@@ -264,6 +508,7 @@ void computeMain_octreeNodeHitTest(uint threadIndex: SV_DispatchThreadID, uint t
 
     if (threadIndex == 0) GlobalInfoBuffer[0].cmd.x = OUTGOING_COUNT_FZBPG * indivisibleNodeCount_G;
 }
+#endif
 //-------------------------------------------------------------------------------------------------------------------------
 #elif defined(ADAPTIVE_IMPORTANCE_SAMPLING)
 [[vk::binding(BindingPoints_Octree_FzbPG::eOctreeNodePairData)]] RWStructuredBuffer<OctreeNodePairData_FzbPG, ScalarDataLayout> OctreeNodePairDataBuffer;

@@ -202,7 +202,6 @@ void computeMain_getNearbyNodes2(uint threadIndex: SV_DispatchThreadID, uint thr
               实际访存约 N_G * (N_G / 1024) * 48B（N_G=2000 时约 190KB），可忽略；
               top-K 用 [unroll] 静态索引 => 数组常驻寄存器，不会落 local memory。
 */
-[[vk::binding(BindingPoints_Octree_FzbPG::eAdjClusterInfo_G)]] RWStructuredBuffer<uint> AdjClusterInfoBuffer;
 //---------------------------------------- 可调参数 ----------------------------------------
 #define ADJ_CLUSTER_COUNT           Candidate_Samples_Count     // 每个几何簇保存的条目数(32)：1 个自身 + 31 个邻居
 #define ADJ_CLUSTER_NORMAL_COS_MIN  0.7f                        // 平均法线相似度门限(1=完全同向)

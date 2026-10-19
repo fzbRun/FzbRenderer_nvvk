@@ -1,4 +1,5 @@
 #include "renderer/FzbPathGuidingRenderer/Octree2/Octree2Shaderio_FzbPG.h"
+#include "common/Shader/Slang/commonFunction.slang"
 
 [[vk::push_constant]] ConstantBuffer<OctreeDebugPushConstant_FzbPG> pushConst;
 
@@ -32,9 +33,10 @@ VSout vertexMain(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID
     } else if(pushConst.mode == 1) {
         int nodeIndex = pushConst.normalIndex_E * pushConst.curLayerNodeCount_E + instanceIndex;
         OctreeNodeData_E_FzbPG node = OctreeNodeDataBuffer_E[pushConst.curLayer_E][nodeIndex];
+        // OctreeNodeData_E_FzbPG node = OctreeNodeDataBuffer_E[pushConst.maxLayer][instanceIndex];
         show = any(node.radiance > 0.0f);
         nodeAABB = node.aabb;
-        color = node.radiance * 10.0f;
+        color = node.radiance * 50.0f;
     } else {
         int nodeIndex = pushConst.normalIndex_G_2 * pushConst.curLayerNodeCount_G_2 + instanceIndex;
         OctreeNodeInfo_G_FzbPG nodeInfo = OctreeNodeInfoBuffer_G[pushConst.curLayer_G_2][nodeIndex];
@@ -50,6 +52,8 @@ VSout vertexMain(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID
         OctreeNodeData_G_FzbPG node = OctreeNodeDataBuffer_G[indivisibleNodeInfo.x][indivisibleNodeInfo.y];
         show = show && indivisibleNodeInfo.x == pushConst.curLayer_G_2 && indivisibleNodeInfo.y == nodeIndex;
         nodeAABB = node.aabb;
+
+        color = float3(rand(instanceIndex), rand(instanceIndex), rand(instanceIndex));
     }
 
     VSout output;

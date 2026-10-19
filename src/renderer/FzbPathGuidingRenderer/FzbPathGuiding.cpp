@@ -120,6 +120,10 @@ void FzbPathGuidingRenderer::uiRender() {
 		#endif
 		#endif
 
+#ifdef NEARBYNODE_JITTER_FZBPG
+		ImGui::Checkbox("Cluster G Dither Sample", &octree->ditherSample);
+#endif
+
 		if (ptContext.rtPosFetchFeature.rayTracingPositionFetch == VK_FALSE){
 			ImGui::TextColored({ 1, 0, 0, 1 }, "ERROR: Position Fetch not supported!");
 			ImGui::Text("This hardware does not support");
@@ -177,6 +181,13 @@ void FzbPathGuidingRenderer::uiRender() {
 };
 void FzbPathGuidingRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 	NVVK_CHECK(gBuffers.update(cmd, size));
+
+	nvvk::WriteSetContainer write{};
+	VkWriteDescriptorSet    OutImageWrite =
+		staticDescPack.makeWrite(shaderio::StaticSetBindingPoints_PT::eOutImage_PT, 0, 0, 1);
+	write.append(OutImageWrite, gBuffers.getColorImageView((uint32_t)ImageType_FzbPG::eImgRendered), VK_IMAGE_LAYOUT_GENERAL);
+
+#ifndef NDEBUG
 	//清理深度纹理
 	{
 		VkSamplerCreateInfo samplerInfo = DEFAULT_VkSamplerCreateInfo;
@@ -209,12 +220,6 @@ void FzbPathGuidingRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size)
 		vkCmdPipelineBarrier2(cmd, &depInfo);
 	}
 
-	nvvk::WriteSetContainer write{};
-	VkWriteDescriptorSet    OutImageWrite =
-		staticDescPack.makeWrite(shaderio::StaticSetBindingPoints_PT::eOutImage_PT, 0, 0, 1);
-	write.append(OutImageWrite, gBuffers.getColorImageView((uint32_t)ImageType_FzbPG::eImgRendered), VK_IMAGE_LAYOUT_GENERAL);
-
-#ifndef NDEBUG
 	VkWriteDescriptorSet    depthImageWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eDepthImage, 0, 0, 1);
 	write.append(depthImageWrite, gBuffers.getDepthImageView(), VK_IMAGE_LAYOUT_GENERAL);
@@ -267,6 +272,10 @@ void FzbPathGuidingRenderer::preRender() {
 	pushConstant.spatialRuse = octree->spatialReuse;
 #else
 	octree->pushConstant.maxFrameCount = maxFrames;
+#endif
+
+#ifdef NEARBYNODE_JITTER_FZBPG
+	pushConstant.ditherSample = octree->ditherSample;
 #endif
 
 	pushConstant.randomRotateMatrix = octree->pushConstant.randomRotateMatrix;
@@ -332,11 +341,6 @@ void FzbPathGuidingRenderer::createDescriptorSetLayout() {
 		.descriptorCount = (uint32_t)octree->octreeNodeDataBuffer_E.size(),
 		.stageFlags = VK_SHADER_STAGE_ALL });
 
-	bindings.addBinding({
-		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateSubTreeInfo,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = 1,
-		.stageFlags = VK_SHADER_STAGE_ALL });
 	bindings.addBinding({
 		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateLeafNodeData,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -412,6 +416,12 @@ void FzbPathGuidingRenderer::createDescriptorSetLayout() {
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
 #endif
+
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eClusterPairData,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
 #endif
 
 #ifdef ADAPTIVE_IMPORTANCE_SAMPLING
@@ -492,10 +502,6 @@ void FzbPathGuidingRenderer::createDescriptorSet() {
 	write.append(OctreeArrayWrite, octreeArraysPtr);
 
 	OctreeArrayWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateSubTreeInfo, 0, 0, 1);
-	write.append(OctreeArrayWrite, octree->candidateSubTreeInfoBuffer, 0, octree->candidateSubTreeInfoBuffer.bufferSize);
-
-	OctreeArrayWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateLeafNodeData, 0, 0, 1);
 	write.append(OctreeArrayWrite, octree->candidateLeafNodeDataBuffer, 0, octree->candidateLeafNodeDataBuffer.bufferSize);
 
@@ -552,6 +558,10 @@ void FzbPathGuidingRenderer::createDescriptorSet() {
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eNearbyNodeInfos, 0, 0, 1);
 	write.append(NearbyDataWrite, octree->nearbyNodeInfoBuffer, 0, octree->nearbyNodeInfoBuffer.bufferSize);
 #endif
+
+	VkWriteDescriptorSet    ClusterPairDataWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eClusterPairData, 0, 0, 1);
+	write.append(ClusterPairDataWrite, octree->clusterPairDataBuffer, 0, octree->clusterPairDataBuffer.bufferSize);
 #endif
 	
 

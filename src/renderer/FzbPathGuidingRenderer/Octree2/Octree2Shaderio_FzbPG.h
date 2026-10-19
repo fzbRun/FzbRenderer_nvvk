@@ -41,6 +41,7 @@ struct OctreeDebugPushConstant_FzbPG {
 	int frameIndex;
 
 	int mode = 0;
+	int maxLayer;
 
 	int normalIndex_G = 0;
 	int curLayer_G;

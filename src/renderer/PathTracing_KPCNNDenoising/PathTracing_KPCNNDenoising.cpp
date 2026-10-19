@@ -363,9 +363,9 @@ void PathTracing_KPCNNDenoising::render(VkCommandBuffer* cmdPtr) {
 
 	//Renderer::postProcess(cmd, &colorImage.image.descriptor);
 	Application::tonemapper.runCompute(cmd, gBuffers.getSize(), Application::tonemapperData, colorImage.image.descriptor, gBuffers.getDescriptorImageInfo((uint32_t)GBufferImageIndex_KPCNN::eTonemapImage));
-	
+#ifndef NDEBUG
 	Application::tonemapper.runCompute(cmd, gBuffers.getSize(), Application::tonemapperData, gBuffers.getDescriptorImageInfo((uint32_t)GBufferImageIndex_KPCNN::eColorDebugImage), gBuffers.getDescriptorImageInfo((uint32_t)GBufferImageIndex_KPCNN::eColorDebugImage));
-
+#endif
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
 
 	++timeline;

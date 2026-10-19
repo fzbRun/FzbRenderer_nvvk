@@ -64,6 +64,10 @@ enum class BindingPoints_Octree_FzbPG : uint32_t {
 	eNearbyNodeTempInfos,
 	eNearbyNodeInfos,
 #endif
+
+	eClusterPairInfo,
+	eCluterPairHitInfo,
+	eClusterPairData,
 };
 //------------------------------------------------------------------------------------------
 #define OCTREE_CLUSTER_LAYER_FZBPG 2		//don't change!!!!!
@@ -138,6 +142,26 @@ struct OctreeGlobalInfo_FzbPG {
 struct OctreeThreadGroupInfo_FzbPG {
 	uint threadGroupDivisibleNodeCount_G;
 	uint threadGroupIndivisibleNodeCount_G;
+};
+//------------------------------------------------------------------------------------------
+struct ClusterPairInfo_FzbPG {
+	int leafNodeIndex_E;
+};
+struct ClusterPairHitInfo_FzbPG {
+	float3 pos_G;
+	float isHit;
+	float3 normal_G;
+	int materialIndex;
+	float3 sampleDir;
+	float d;
+	float cosine;
+	float cosine_Light;
+	float E;
+};
+
+struct ClusterPairData_FzbPG {
+	AABB aabb;
+	float p;
 };
 //------------------------------------------------------------------------------------------
 #define OUTGOING_COUNT_FZBPG 64

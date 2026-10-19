@@ -90,6 +90,7 @@ void Octree2_FzbPG::clean() {
 	vkDestroyShaderEXT(device, computeShader_getCandidateNodes, nullptr);
 	vkDestroyShaderEXT(device, computeShader_dispatchGetCandidateLeafNodes, nullptr);
 	vkDestroyShaderEXT(device, computeShader_getCandidateLeafNodes, nullptr);
+	vkDestroyShaderEXT(device, computeShader_getCandidateNodes_noLightcuts, nullptr);
 	vkDestroyShaderEXT(device, computeShader_clusterPairHitTest, nullptr);
 	vkDestroyShaderEXT(device, computeShader_getCandidateNodeWeights, nullptr);
 	vkDestroyShaderEXT(device, computeShader_createCandidatePrefixWSum, nullptr);
@@ -403,6 +404,7 @@ void Octree2_FzbPG::postProcess(VkCommandBuffer cmd) {
 	pushInfo.pValues = &debugPushConstant;
 
 	debugPushConstant.frameIndex = pushConstant.frameIndex;
+	debugPushConstant.maxLayer = pushConstant.octreeMaxLayer;
 	debugPushConstant.sceneInfoAddress = pushConstant.sceneInfoAddress;
 	debugPushConstant2.spatialReuse = spatialReuse;
 
@@ -1060,6 +1062,15 @@ void Octree2_FzbPG::compileAndCreateShaders() {
 		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_getCandidateLeafNodes);
 		NVVK_DBG_NAME(computeShader_getCandidateLeafNodes);
 		//--------------------------------------------------------------------------------------
+		vkDestroyShaderEXT(device, computeShader_getCandidateNodes_noLightcuts, nullptr);
+		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		shaderInfo.nextStage = 0;
+		shaderInfo.pName = "computeMain_getCandidateNodes_NoLightcuts";
+		shaderInfo.codeSize = shaderCode.codeSize;
+		shaderInfo.pCode = shaderCode.pCode;
+		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_getCandidateNodes_noLightcuts);
+		NVVK_DBG_NAME(computeShader_getCandidateNodes_noLightcuts);
+		//--------------------------------------------------------------------------------------
 		vkDestroyShaderEXT(device, computeShader_clusterPairHitTest, nullptr);
 		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
 		shaderInfo.nextStage = 0;
@@ -1301,8 +1312,13 @@ void Octree2_FzbPG::getOctreeNodePairData(VkCommandBuffer cmd) {
 	uint32_t threadTotalCount = OUTGOING_COUNT_FZBPG * IndivisibleNodeCount_G_FZBPG * Candidate_Samples_Count;
 	VkExtent2D groupSize = nvvk::getGroupCounts({ threadTotalCount, 1 }, VkExtent2D{ INIT_CANDIDATE_NODES_CS_THREADGROUP_SIZE, 1 });
 	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 
+#ifdef NoLightcuts
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getCandidateNodes_noLightcuts);
+	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+#else
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getCandidateNodes);
 	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
@@ -1314,25 +1330,26 @@ void Octree2_FzbPG::getOctreeNodePairData(VkCommandBuffer cmd) {
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getCandidateLeafNodes);
 	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+#endif
 
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_clusterPairHitTest);
 	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getCandidateNodeWeights);
 	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 
 	pushConstant.candidateSampleBufferIndex = 0;
 	vkCmdPushConstants2(cmd, &pushInfo);
 
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_createCandidatePrefixWSum);
 	vkCmdDispatchIndirect(cmd, globalInfoBuffer.buffer, 0);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 
 #ifdef SpatialReuse_FzbPG
 	if (!spatialReuse) return;
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getAdjClusterG);
 	vkCmdDispatch(cmd, (IndivisibleNodeCount_G_FZBPG + 1023) / 1024, 1, 1);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
@@ -1354,6 +1371,7 @@ void Octree2_FzbPG::getOctreeNodePairData(VkCommandBuffer cmd) {
 }
 void Octree2_FzbPG::getNearbyClusterInfo(VkCommandBuffer cmd) {
 #ifdef NEARBYNODE_JITTER_FZBPG
+	if (ditherSample == false) return;
 	NVVK_DBG_SCOPE(cmd);
 
 	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
@@ -1493,7 +1511,7 @@ void Octree2_FzbPG::lightTreeDebug(VkCommandBuffer cmd) {
 
 	vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(mesh.indexType));
 
-	uint32_t instanceCount = debugPushConstant.curLayerNodeCount_E;
+	uint32_t instanceCount = debugPushConstant.curLayerNodeCount_E; //pushConstant.octreeNodeTotalCount * 6;
 	vkCmdDrawIndexed(cmd, triMesh.indices.count, instanceCount, 0, 0, 0);
 
 	vkCmdEndRendering(cmd);

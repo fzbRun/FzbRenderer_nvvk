@@ -51,7 +51,7 @@
 			<up value = "0.000, 1.000, 0.000" />
 		</transform>
 		-->
-		<fov value="30"/>
+		<fov value="35"/>
 
 		<transform type = "lookAt">
 			<eye value = "0.104, 1.373, 4.737" />
@@ -4939,7 +4939,7 @@
 			<materialRef id = "BrassBSDF" /> <!--WoodLampBSDF-->
 		</instance>
 
-		<!--
+
 		<instance>
 			<transform name="to_world">
 				<matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" />
@@ -5004,7 +5004,7 @@
 			<meshRef id = "Brass_0010" />
 			<materialRef id = "BrassBSDF" />
 		</instance>
-		-->
+		
 		<instance>
 			<transform name="to_world">
 				<matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" />

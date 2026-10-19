@@ -65,6 +65,12 @@ public:
 	nvvk::Buffer nearbyNodeInfoBuffer;
 
 	nvvk::Buffer octreeNodePairDataBuffer;
+
+	nvvk::Buffer clusterPairInfoBuffer;
+	nvvk::Buffer clusterPairHitInfoBuffer;
+	nvvk::Buffer clusterPairDataBuffer;
+
+	bool ditherSample = true;
 private:
 	OctreeCreateInfo_FzbPG setting;
 
@@ -102,6 +108,9 @@ private:
 
 	VkShaderEXT computeShader_getNearbyNodes1{};
 	VkShaderEXT computeShader_getNearbyNodes2{};
+
+	VkShaderEXT computeShader_getStochasticLeafNode{};
+	VkShaderEXT computeShader_getWeight{};
 
 	VkBindDescriptorSetsInfo bindDescriptorSetsInfo;
 	VkPushConstantsInfo pushInfo;

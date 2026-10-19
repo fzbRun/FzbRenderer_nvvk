@@ -81,12 +81,12 @@
 		<bsdf type="roughDielectric" id="Pot2BSDF_RoughDieletric">
 			<roughness value="0.2" />
 			<int_ior value="1.5" />
-			<ext_Ior value="1.0" />
+			<ext_ior value="1.0" />
 		</bsdf>
 		<bsdf type="roughPlastic" id="Pot2BSDF_RoughPlastic">
 			<roughness value="0.05" />
 			<int_ior value="1.5" />
-			<ext_Ior value="1.0" />
+			<ext_ior value="1.0" />
 			<albedo value="1, 1, 1" />
 			<albedo_diffuse value="1.0, 0.48235294118, 0.48235294118" />
 		</bsdf>
@@ -95,6 +95,10 @@
 			<roughness value="0.01" />
 			<eta value="1.91, 1.31, 0.82" />
 			<k value="8.05, 6.93, 5.99" />
+		</bsdf>
+		<bsdf type="dielectric" id="Pot3BSDF_Dieletric">
+			<int_ior value="1.5" />
+			<ext_ior value="1.0" />
 		</bsdf>
 	</bsdfs>
 	<meshes>

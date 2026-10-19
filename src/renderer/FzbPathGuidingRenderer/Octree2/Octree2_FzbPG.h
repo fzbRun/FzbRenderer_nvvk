@@ -76,6 +76,7 @@ public:
 	nvvk::Buffer nearbyNodeInfoBuffer;
 
 	bool spatialReuse = false;
+	bool ditherSample = true;
 private:
 	Octree2CreateInfo_FzbPG setting;
 
@@ -103,9 +104,11 @@ private:
 	VkShaderEXT computeShader_getCandidateNodes{};
 	VkShaderEXT computeShader_dispatchGetCandidateLeafNodes{};
 	VkShaderEXT computeShader_getCandidateLeafNodes{};
+	VkShaderEXT computeShader_getCandidateNodes_noLightcuts{};
 	VkShaderEXT computeShader_clusterPairHitTest{};
 	VkShaderEXT computeShader_getCandidateNodeWeights{};;
 	VkShaderEXT computeShader_createCandidatePrefixWSum{};;
+
 
 	VkShaderEXT computeShader_getAdjClusterG{};
 

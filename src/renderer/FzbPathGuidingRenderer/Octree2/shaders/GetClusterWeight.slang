@@ -58,7 +58,14 @@ void computeMain_initCandidateNodes(uint threadIndex: SV_DispatchThreadID, uint 
 
     if (threadIndex == 0) {
         clusterPairGlobalInfoBuffer[0].clusterPairCount = 0;
-        GlobalInfoBuffer[0].cmd.x = (indivisibleNodeCount_G + GET_CANDIDATE_NODES_CS_THREADGROUP_SIZE - 1) / GET_CANDIDATE_NODES_CS_THREADGROUP_SIZE;
+        DispatchIndirectCommand cmd;
+        #ifdef NoLightcuts
+        cmd.x = indivisibleNodeCount_G;
+        #else
+        cmd.x = (indivisibleNodeCount_G + GET_CANDIDATE_NODES_CS_THREADGROUP_SIZE - 1) / GET_CANDIDATE_NODES_CS_THREADGROUP_SIZE;
+        #endif
+        cmd.y = 1; cmd.z = 1;
+        GlobalInfoBuffer[0].cmd = cmd;
         bool hasLightNode = false;
         for (int i = 0; i < 6; ++i) {
             if (any(OctreeNodeDataBuffer_E[0][i].radiance > 0.0f)) {
@@ -67,7 +74,7 @@ void computeMain_initCandidateNodes(uint threadIndex: SV_DispatchThreadID, uint 
             }
         }
         if (!hasLightNode) GlobalInfoBuffer[0].cmd.x = 0;
-    } 
+    }
 }
 //-------------------------------------------------------------------------------------------------------------------------
 struct HitPayload_FzbWeight {
@@ -159,6 +166,119 @@ float getLightGUpperBound(OctreeNodeData_E_FzbPG lightNode, float3 pos) {
     if (thetaMin <= lightNode.halfAngle) return 1.0;
     else return max(0.0, cos(thetaMin - lightNode.halfAngle));
 }
+//-------------------------------------------------------------------------------------------------------------------------
+groupshared uint groupCandidateNodeCount;
+groupshared uint groupOffsetInGlobal;
+
+groupshared uint2 groupNodeInfoG;
+groupshared OctreeNodeData_G_FzbPG groupNodeDataG;
+
+[numthreads(Candidate_Samples_Count, 1, 1)]
+[shader("compute")]
+void computeMain_getCandidateNodes_NoLightcuts(uint threadIndex: SV_DispatchThreadID, uint threadGroupIndex: SV_GroupID, uint groupThreadIndex: SV_GroupThreadID) {
+    if (groupThreadIndex == 0){
+        groupIndivisibleNodeCount_G = GlobalInfoBuffer[0].indivisibleNodeCount_G;
+
+        uint2 nodeInfo = IndivisibleNodeInfoBuffer_G[threadGroupIndex];
+        groupNodeInfoG = nodeInfo;
+        groupNodeDataG = OctreeNodeDataBuffer_G[nodeInfo.x][nodeInfo.y];
+
+        groupCandidateNodeCount = 0;
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    int indivisibleNodeIndex = threadGroupIndex;
+    //if (indivisibleNodeIndex >= groupIndivisibleNodeCount_G) return;
+    int candidateNodeIndex = groupThreadIndex;
+
+    OctreeNodeData_G_FzbPG node_G = groupNodeDataG;
+    float3 nodePos_G = (node_G.aabb.maximum + node_G.aabb.minimum) * 0.5;
+
+    int seed = xxhash32(uint3(indivisibleNodeIndex, candidateNodeIndex, uint(pushConst.frameIndex)));
+    int layerIndex = 0; int nodeIndex_E = 0; float p = 1.0f;
+    for (; layerIndex <= pushConst.octreeMaxLayer; ++layerIndex) {
+        float ws[8]; float wSum = 0.0f;
+        for (int subNodeIndex = 0; subNodeIndex < 8; ++subNodeIndex) {
+            ws[subNodeIndex] = 0.0f;
+            if (layerIndex == 0 && subNodeIndex >= 6) break;
+
+            int nodeIndex = nodeIndex_E * 8 + subNodeIndex;
+            OctreeNodeData_E_FzbPG node_E = OctreeNodeDataBuffer_E[layerIndex][nodeIndex];
+
+            float I = dot(node_E.radiance, 1.0f);
+            float3 MUpperBound = MaxCosToAABB(nodePos_G, node_G.meanNormal.xyz, node_E.aabb.minimum, node_E.aabb.maximum);
+            float GUpperBound = getLightGUpperBound(node_E, nodePos_G);
+            float3 center = (node_E.aabb.maximum + node_E.aabb.minimum) * 0.5f;
+            float diagonalLength = length(node_E.aabb.maximum - node_E.aabb.minimum);
+            float d = max(length(nodePos_G - center), diagonalLength + 1e-3f);
+            // float d = max(length(nodePos_G - center), 1.0f);
+
+            ws[subNodeIndex] = I * dot(MUpperBound, 1.0f) * GUpperBound / (d * d);
+            wSum += ws[subNodeIndex];
+
+            //if (pushConst.frameIndex == 0 && indivisibleNodeIndex == 0 && candidateNodeIndex == 0)
+            //    printf("layerIndex: %d, nodeIndex: %d, w: %f, radiance: %f %f %f\n",
+            //        layerIndex, nodeIndex,
+            //        ws[subNodeIndex],
+            //        node_E.radiance.x, node_E.radiance.y, node_E.radiance.z
+            //    );
+        }
+        if (wSum == 0.0f) break;
+
+        float randomNumber = rand(seed);
+        for (int subNodeIndex = 0; subNodeIndex < 8; ++subNodeIndex) {
+            float pSelect = ws[subNodeIndex] / wSum;
+            if (pSelect >= randomNumber) {
+                nodeIndex_E = nodeIndex_E * 8 + subNodeIndex;
+                p *= pSelect;
+                break;
+            }
+            randomNumber -= pSelect;
+        }
+    }
+    bool getCandidate = layerIndex == pushConst.octreeMaxLayer + 1;
+
+    uint warpIndex = groupThreadIndex / 32;
+    uint warpLane = groupThreadIndex & 31;
+
+    int candidateNodeCount = WaveActiveSum(getCandidate);
+    int offsetInWarp = WavePrefixSum(getCandidate);
+
+    int offsetInGroup;
+    if (warpLane == 0) InterlockedAdd(groupCandidateNodeCount, candidateNodeCount, offsetInGroup);
+    offsetInGroup = WaveReadLaneFirst(offsetInGroup);
+    GroupMemoryBarrierWithGroupSync();
+
+    if (groupThreadIndex == 0) InterlockedAdd(clusterPairGlobalInfoBuffer[0].clusterPairCount, groupCandidateNodeCount, groupOffsetInGlobal);
+    GroupMemoryBarrierWithGroupSync();
+
+    if (getCandidate) {
+        int clusterPairStartIndex = offsetInWarp + offsetInGroup + groupOffsetInGlobal;
+
+        ClusterPairInfo pairInfo;
+        pairInfo.layerIndex_G = groupNodeInfoG.x;
+        pairInfo.nodeIndex_G = groupNodeInfoG.y;
+        pairInfo.indivisibleNodeLabel = indivisibleNodeIndex;
+        pairInfo.candidateNodeIndex = candidateNodeIndex;
+        pairInfo.leafNodeIndex_E = nodeIndex_E;
+        pairInfo.leafNodePdf = p;
+        clusterPairInfoBuffer[clusterPairStartIndex] = pairInfo;
+
+        OctreeNodeData_E_FzbPG node_E = OctreeNodeDataBuffer_E[pushConst.octreeMaxLayer][nodeIndex_E];
+        CandidateLeafNodeData leafNodeData;
+        leafNodeData.radiance = node_E.radiance;
+        leafNodeData.aabb = node_E.aabb;
+        #ifdef SpatialReuse_FzbPG
+        leafNodeData.normal = node_E.normal;
+        #endif
+
+        candidateLeafNodeDataBuffer[indivisibleNodeIndex * Candidate_Samples_Count + candidateNodeIndex] = leafNodeData;
+    }
+    //if (pushConst.frameIndex == 0) printf("getCandidate = %d\n", getCandidate);
+
+    if (threadIndex == 0) GlobalInfoBuffer[0].cmd.x = (groupIndivisibleNodeCount_G * Candidate_Samples_Count * HITTEST_COUNT_FZBPG + CLUSTER_PAIR_HITTEST_CS_THREADGROUP_SIZE - 1) / CLUSTER_PAIR_HITTEST_CS_THREADGROUP_SIZE;
+}
+//-------------------------------------------------------------------------------------------------------------------------
 
 #define LIGHTCUT_RELATIVE_ERROR 0.001f
 struct LightCutNode {
@@ -167,9 +287,6 @@ struct LightCutNode {
     float error;
     float I;
 };
-
-groupshared uint groupCandidateNodeCount;
-groupshared uint groupOffsetInGlobal;
 
 [numthreads(GET_CANDIDATE_NODES_CS_THREADGROUP_SIZE, 1, 1)]
 [shader("compute")]
@@ -436,6 +553,7 @@ void computeMain_clusterPairHitTest(uint threadIndex: SV_DispatchThreadID, uint 
     //    clusterPairHitTestInfoBuffer[clusterPairIndex * HITTEST_COUNT_FZBPG + hitTestIndex].isHit = -1.0f;
     //    return;
     //}
+    bool isPrintf = pushConst.frameIndex == 65 && clusterPairInfo.indivisibleNodeLabel == 49;
 
     float3 randXYZ = float3(rand(seed), rand(seed), rand(seed));
     float3 samplePoint_G = randXYZ * (nodeData_G.aabb.maximum - nodeData_G.aabb.minimum) + nodeData_G.aabb.minimum;
@@ -474,6 +592,8 @@ void computeMain_clusterPairHitTest(uint threadIndex: SV_DispatchThreadID, uint 
             if (!check) hitPayload.hit = -2.0f;
         }
     }
+
+    //if (pushConst.frameIndex == 0) printf("%f %f\n", samplePoint_E.x, samplePoint_G.x);
 
     ClusterPairHitInfo hitInfo;
     hitInfo.pos_G = hitPayload.hitPos;
@@ -579,10 +699,14 @@ void computeMain_getCandidateNodeWeight(uint threadIndex: SV_DispatchThreadID, u
     if (warpLane == clusterPairFirstWarpLane) {
         f /= HITTEST_COUNT_FZBPG;
         float p_hat = dot(f, 1.0f);
-        if (p_hat == 0.0f) return; 
+        if (p_hat == 0.0f) return;
 
         float p = groupClusterPairInfo.leafNodePdf;
+        #ifdef NoLightcuts
+        float m = 1.0f / Candidate_Samples_Count;
+        #else
         float m = 1.0f;
+        #endif
         float w = m * p_hat / max(p, 1e-6f);
 
         CandidateSampleData_FzbPG candidateNodeData;

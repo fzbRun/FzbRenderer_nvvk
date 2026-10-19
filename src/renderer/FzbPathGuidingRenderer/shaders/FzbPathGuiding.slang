@@ -22,6 +22,8 @@
 [[vk::binding(StaticBindingPoints_FzbPG::ePGVarianceImage, 0)]] RWTexture2D<float4> pgVarianceImage;
 #endif
 
+[[vk::binding(StaticBindingPoints_FzbPG::eClusterPairData)]] RWStructuredBuffer<ClusterPairData_FzbPG, ScalarDataLayout> CluterPairDataBuffer;
+
 typedef CallablePayload HitPayload_FzbPG;
 //---------------------------------------------groupsharedMemory-----------------------------------------
 groupshared OctreeGlobalInfo_FzbPG groupGlobalInfo;
@@ -369,7 +371,7 @@ bool getNodeAABB_E_FzbPG(inout AABB aabb, inout HitPayload_FzbPG payload, inout 
     uint weightStartIndex = outgoingIndex * indivisibleNodeCount_G * CLUSTER_LAYER_NODECOUNT_E_FZBPG +
                             nodeLabel_G * CLUSTER_LAYER_NODECOUNT_E_FZBPG;
 
-    float weightSum = pushConst.weightSumBufferAddress[outgoingIndex * indivisibleNodeCount_G + nodeLabel_G];
+    weightSum = pushConst.weightSumBufferAddress[outgoingIndex * indivisibleNodeCount_G + nodeLabel_G];
     float randomNumber = rand(payload.randomSeed);
     int sampleIndex = -1; float sampleWeight = 0.0f;
     for (int i = 0; i < groupGlobalInfo.indivisibleNodeCount_E; ++i) {
@@ -386,9 +388,15 @@ bool getNodeAABB_E_FzbPG(inout AABB aabb, inout HitPayload_FzbPG payload, inout 
     }
     if (sampleIndex == -1) return false;
 
+    #ifdef StochasticSample
+    ClusterPairData_FzbPG nodeInfo_E = CluterPairDataBuffer[nodeLabel_G * CLUSTER_LAYER_NODECOUNT_E_FZBPG + sampleIndex];
+    aabb = nodeInfo_E.aabb;
+    float p_hat = sampleWeight * nodeInfo_E.p; // 1/m = CLUSTER_LAYER_NODECOUNT_E_FZBPG
+    #else
     OctreeNodeData_E_FzbPG nodeInfo_E = groupClusterLayerNodeData_E[sampleIndex];
     aabb = nodeInfo_E.aabb;
     float p_hat = sampleWeight * nodeInfo_E.pdf;
+    #endif
     nodeEPdf = p_hat / max(weightSum, 1e-10f);   //weightSum / max(p_hat, 1e-10f);
 
     return true;
@@ -401,8 +409,13 @@ float getPgPdf(uint nodeLabel_G, uint outgoingIndex, float3 hitPos, float3 hitNo
     uint nodeIndex_E = getNodeIndex_E(hitPos, hitNormal);
     float weight = OctreeNodePairWeightBuffer[weightStartIndex + nodeIndex_E];
     float weightSum = pushConst.weightSumBufferAddress[outgoingIndex * indivisibleNodeCount_G + nodeLabel_G];
+    #ifdef StochasticSample
+    ClusterPairData_FzbPG nodeInfo_E = CluterPairDataBuffer[nodeLabel_G * CLUSTER_LAYER_NODECOUNT_E_FZBPG + nodeIndex_E];
+    float p_hat = weight * nodeInfo_E.p;
+    #else
     OctreeNodeData_E_FzbPG nodeInfo_E = groupClusterLayerNodeData_E[nodeIndex_E];
     float p_hat = weight * nodeInfo_E.pdf;
+    #endif
     float pg_Pdf = p_hat / max(weightSum, 1e-10f);
 
     #define aabb_getPgPdf nodeInfo_E.aabb
@@ -721,7 +734,7 @@ void computeMain_FzbPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
         groupOctreeNodeData_G[i] = OctreeDataBuffer_G[layerIndex][nodeIndex];
     }
 
-    #ifndef ADAPTIVE_IMPORTANCE_SAMPLING
+    #if !defined(ADAPTIVE_IMPORTANCE_SAMPLING) && !defined(StochasticSample)
     for (int i = groupThreadIndex_linear; i < CLUSTER_LAYER_NODECOUNT_E_FZBPG; i += threadGroupThreadTotalCount)
         groupClusterLayerNodeData_E[i] = ClusterlayerDataBuffer_E[i];
     #endif

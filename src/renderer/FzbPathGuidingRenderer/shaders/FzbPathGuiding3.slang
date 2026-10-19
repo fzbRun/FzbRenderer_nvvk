@@ -7,7 +7,6 @@
 [[vk::binding(StaticBindingPoints_FzbPG::eOctreeNodeInfo_G)]] RWStructuredBuffer<OctreeNodeInfo_G_FzbPG, ScalarDataLayout> OctreeNodeInfoBuffer_G[];
 [[vk::binding(StaticBindingPoints_FzbPG::eOctreeNodeData_E)]] RWStructuredBuffer<OctreeNodeData_E_FzbPG, ScalarDataLayout> OctreeNodeDataBuffer_E[];
 
-[[vk::binding(StaticBindingPoints_FzbPG::eCandidateSubTreeInfo)]] RWStructuredBuffer<CandidateSubTreeInfo, ScalarDataLayout> candidateSubTreeInfoBuffer;
 [[vk::binding(StaticBindingPoints_FzbPG::eCandidateLeafNodeData)]] RWStructuredBuffer<CandidateLeafNodeData, ScalarDataLayout> candidateLeafNodeDataBuffer;
 
 [[vk::binding(StaticBindingPoints_FzbPG::eCandidateSampleData)]] RWStructuredBuffer<CandidateSampleData_FzbPG, ScalarDataLayout> candidateSampleDataBuffer;
@@ -205,6 +204,9 @@ int getNodeIndex_E(float3 hitPos, float3 hitNormal) {
 }
 
 bool getNodeAABB_E_FzbPG(inout PGSampleData sampleData, inout HitPayload_FzbPG payload, uint2 threadIndex) {
+    if (payload.material.type == uint(MaterialType::Dielectric) ||
+        payload.material.type == uint(MaterialType::RoughDielectric)) return false;
+
     float3 geoNormal = payload.isExt ? payload.hitNormal : -payload.hitNormal;
     uint normalIndex = getNormalIndex(geoNormal);
     float3 hitPos = payload.hitPos;
@@ -257,50 +259,52 @@ bool getNodeAABB_E_FzbPG(inout PGSampleData sampleData, inout HitPayload_FzbPG p
     if (!hitIndivisible) return false;
 
     #ifdef NEARBYNODE_JITTER_FZBPG
-    OctreeNodeData_G_FzbPG nodeData_G = OctreeNodeDataBuffer_G[layerIndex_G][nodeIndex_G];
-    float weights[NEARBY_NODE_COUNT_FZBPG + 1];
+    if (pushConst.ditherSample == 1) {
+        OctreeNodeData_G_FzbPG nodeData_G = OctreeNodeDataBuffer_G[layerIndex_G][nodeIndex_G];
+        float weights[NEARBY_NODE_COUNT_FZBPG + 1];
 
-    float3 center = (nodeData_G.aabb.maximum + nodeData_G.aabb.minimum) * 0.5f;
-    float3 centerToPos = abs(center - hitPos) + 1e-16f;
-    float distance = length(centerToPos);
-    float maxDistance = 5.0f;
-    weights[0] = max(0.0f, 1.0f - distance / maxDistance);
-    float weightSum = weights[0];
+        float3 center = (nodeData_G.aabb.maximum + nodeData_G.aabb.minimum) * 0.5f;
+        float3 centerToPos = abs(center - hitPos) + 1e-16f;
+        float distance = length(centerToPos);
+        float maxDistance = 5.0f;
+        weights[0] = max(0.0f, 1.0f - distance / maxDistance);
+        float weightSum = weights[0];
 
-    int2 nearbyNodeInfos[NEARBY_NODE_COUNT_FZBPG] = NearbyNodeInfoBuffer[nodeLabel_G].nearbyNodeInfos;
-    int nearbyNodeCount = 0;
-    for (; nearbyNodeCount < NEARBY_NODE_COUNT_FZBPG; ++nearbyNodeCount) {
-        int2 nearbyNodeInfo = nearbyNodeInfos[nearbyNodeCount];
-        if (nearbyNodeInfo.x == -1) {
-            weights[nearbyNodeCount + 1] = 0.0f;
-            continue;
-        }
-        OctreeNodeData_G_FzbPG nearbyNodeData = OctreeNodeDataBuffer_G[nearbyNodeInfo.x][nearbyNodeInfo.y];
-
-        center = (nearbyNodeData.aabb.maximum + nearbyNodeData.aabb.minimum) * 0.5f;
-        centerToPos = abs(center - hitPos) + 1e-16f;
-        distance = length(centerToPos);
-        weights[nearbyNodeCount + 1] = max(0.0f, 1.0f - distance / maxDistance);
-
-        weightSum += weights[nearbyNodeCount + 1];
-    }
-    if (weightSum > 0.0f) {
-        float nearbyNodeSampleProbability = rand(payload.randomSeed);
-        int selectNodeIndex = 0;
-        for (; selectNodeIndex < nearbyNodeCount + 1; ++selectNodeIndex) {
-            float selectProbability = weights[selectNodeIndex] / weightSum;
-            if (nearbyNodeSampleProbability <= selectProbability) break;
-            nearbyNodeSampleProbability -= selectProbability;
-        }
-        if (selectNodeIndex > 0 && selectNodeIndex != nearbyNodeCount + 1) {
-            int2 nearbyNodeInfo = nearbyNodeInfos[selectNodeIndex - 1];
-            nodeLabel_G = 0; uint nodeSum = 0;
-            for (int l = 0; l < nearbyNodeInfo.x; ++l) {
-                nodeLabel_G += groupGlobalInfo.layerInfos_G[l].indivisibleNodeCount;
-                nodeSum += 6 * (1u << (l * 3));
+        int2 nearbyNodeInfos[NEARBY_NODE_COUNT_FZBPG] = NearbyNodeInfoBuffer[nodeLabel_G].nearbyNodeInfos;
+        int nearbyNodeCount = 0;
+        for (; nearbyNodeCount < NEARBY_NODE_COUNT_FZBPG; ++nearbyNodeCount) {
+            int2 nearbyNodeInfo = nearbyNodeInfos[nearbyNodeCount];
+            if (nearbyNodeInfo.x == -1) {
+                weights[nearbyNodeCount + 1] = 0.0f;
+                continue;
             }
-            if (nearbyNodeInfo.x < 4) nodeLabel_G += (groupOctreeNodeInfo_G[nodeSum + nearbyNodeInfo.y].label_indivisible >> 1) - 1;
-            else nodeLabel_G += (OctreeNodeInfoBuffer_G[nearbyNodeInfo.x][nearbyNodeInfo.y].label_indivisible >> 1) - 1;
+            OctreeNodeData_G_FzbPG nearbyNodeData = OctreeNodeDataBuffer_G[nearbyNodeInfo.x][nearbyNodeInfo.y];
+
+            center = (nearbyNodeData.aabb.maximum + nearbyNodeData.aabb.minimum) * 0.5f;
+            centerToPos = abs(center - hitPos) + 1e-16f;
+            distance = length(centerToPos);
+            weights[nearbyNodeCount + 1] = max(0.0f, 1.0f - distance / maxDistance);
+
+            weightSum += weights[nearbyNodeCount + 1];
+        }
+        if (weightSum > 0.0f) {
+            float nearbyNodeSampleProbability = rand(payload.randomSeed);
+            int selectNodeIndex = 0;
+            for (; selectNodeIndex < nearbyNodeCount + 1; ++selectNodeIndex) {
+                float selectProbability = weights[selectNodeIndex] / weightSum;
+                if (nearbyNodeSampleProbability <= selectProbability) break;
+                nearbyNodeSampleProbability -= selectProbability;
+            }
+            if (selectNodeIndex > 0 && selectNodeIndex != nearbyNodeCount + 1) {
+                int2 nearbyNodeInfo = nearbyNodeInfos[selectNodeIndex - 1];
+                nodeLabel_G = 0; uint nodeSum = 0;
+                for (int l = 0; l < nearbyNodeInfo.x; ++l) {
+                    nodeLabel_G += groupGlobalInfo.layerInfos_G[l].indivisibleNodeCount;
+                    nodeSum += 6 * (1u << (l * 3));
+                }
+                if (nearbyNodeInfo.x < 4) nodeLabel_G += (groupOctreeNodeInfo_G[nodeSum + nearbyNodeInfo.y].label_indivisible >> 1) - 1;
+                else nodeLabel_G += (OctreeNodeInfoBuffer_G[nearbyNodeInfo.x][nearbyNodeInfo.y].label_indivisible >> 1) - 1;
+            }
         }
     }
     #endif
@@ -517,9 +521,9 @@ void computeMain_FzbPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
                 bool end = any(bsdf_cosine_pdf < 0.0f) || all(bsdf_cosine_pdf == 0.0f) || any(isnan(bsdf_cosine_pdf)) || any(isinf(bsdf_cosine_pdf));
                 if (end) break;
 
-                //randomNumber = rand(payload.randomSeed);
-                //if (randomNumber >= RR) break;
-                //bsdf_cosine_pdf /= RR;
+                randomNumber = rand(payload.randomSeed);
+                if (randomNumber >= RR) break;
+                bsdf_cosine_pdf /= RR;
 
                 payload.outgoing = -payload.incidence;
                 if (!useBsdfSample) {
