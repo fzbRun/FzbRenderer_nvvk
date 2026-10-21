@@ -7,7 +7,7 @@
 NAMESPACE_SHADERIO_BEGIN()
 
 #define RIS_Version
-#define StochasticSample
+//#define StochasticSample
 
 //#define StochasticLightcuts_RIS
 //#define NoLightcuts

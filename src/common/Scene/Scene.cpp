@@ -127,7 +127,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 			cameraManip->setLookat(eye, center, up, true);
 		}
 		
-		VkExtent2D resolution = Application::app->getWindowSize();
+		VkExtent2D resolution = Application::renderResolution;// Application::app->getWindowSize();
 		cameraManip->setWindowSize(glm::uvec2(resolution.width, resolution.height));
 
 		glm::vec2 plane = glm::vec2(0.1f, 100.0f);

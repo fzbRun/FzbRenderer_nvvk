@@ -665,7 +665,7 @@ void FzbPathGuidingRenderer::pathGuiding(VkCommandBuffer cmd) {
 		.pValues = &pushConstant,
 	};
 
-	VkExtent2D sceneSize = Application::app->getViewportSize();
+	VkExtent2D sceneSize = Application::renderResolution;// Application::app->getViewportSize();
 	VkExtent2D groupSize = nvvk::getGroupCounts(sceneSize, VkExtent2D{ FZB_PATHGUIDING_THREADGROUP_SIZE_X, FZB_PATHGUIDING_THREADGROUP_SIZE_Y });
 
 	pushConstant.sceneSize = shaderio::uint2(sceneSize.width, sceneSize.height);
@@ -678,4 +678,10 @@ void FzbPathGuidingRenderer::pathGuiding(VkCommandBuffer cmd) {
 	vkCmdPushConstants2(cmd, &pushInfo);
 
 	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
+}
+
+void FzbPathGuidingRenderer::getFLIP(VkCommandBuffer cmd) {
+#ifndef NDEBUG
+
+#endif
 }

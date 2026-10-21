@@ -81,6 +81,8 @@ public:
 	inline static ImVec2 viewportScreenPos = ImVec2(0, 0);
 	inline static ImVec2 viewportContentSize = ImVec2(0, 0);
 
+	inline static VkExtent2D renderResolution{ 1280, 720 };
+
 	static void uploadResource();
 private:
 	void getAppInfoFromXML(nvapp::ApplicationCreateInfo& appInfo);

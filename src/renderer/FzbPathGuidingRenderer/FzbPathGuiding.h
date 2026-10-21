@@ -11,6 +11,7 @@
 #include "Octree/Octree_FzbPG.h"
 #endif
 #include <feature/ShadowMap/ShadowMap.h>
+#include <feature/FLIP/FLIP.h>
 
 #ifndef FZBRENDERER_FZB_PATHGUIDING_H
 #define FZBRENDERER_FZB_PATHGUIDING_H
@@ -67,6 +68,9 @@ private:
 #ifndef NDEBUG
 	std::map<uint32_t, bool> showDebugImages;
 #endif
+
+	std::shared_ptr<FLIP> Flip;
+	void getFLIP(VkCommandBuffer cmd);
 };
 }
 
