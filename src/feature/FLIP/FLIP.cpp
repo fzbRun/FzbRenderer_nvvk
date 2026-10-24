@@ -153,11 +153,11 @@ void FLIP::init(FLIPCreateInfo createInfo) {
 	}
 
 	resolution = { 1, 1 };
-	if (setting.testImage.image != VK_NULL_HANDLE) {
-		resolution = { setting.testImage.extent.width, setting.testImage.extent.height };
-	}
-	else if (setting.referenceImage.image != VK_NULL_HANDLE) {
+	if (setting.referenceImage.image != VK_NULL_HANDLE) {
 		resolution = { setting.referenceImage.extent.width, setting.referenceImage.extent.height };
+	}
+	else if (setting.testImage.image != VK_NULL_HANDLE) {
+		resolution = { setting.testImage.extent.width, setting.testImage.extent.height };
 	}
 	else {
 		const VkExtent2D viewportSize = Application::app->getViewportSize();
@@ -413,7 +413,11 @@ void FLIP::compileAndCreateShaders() {
 	};
 
 	const auto createShader = [&](const char* fileName, const char* entryPoint, VkShaderEXT& shader) {
-		VkShaderModuleCreateInfo shaderCode = FzbRenderer::compileSlangShader(shaderPath / fileName, {});
+		// Use the cached .spv overload. The Debug Slang compiler can take
+		// minutes on flipEvaluate.slang, which blocks app startup.
+		std::filesystem::path sourcePath = shaderPath / fileName;
+		std::vector<uint32_t> shaderBuffer;
+		VkShaderModuleCreateInfo shaderCode = FzbRenderer::compileSlangShader(sourcePath, shaderBuffer);
 		vkDestroyShaderEXT(device, shader, nullptr);
 		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
 		shaderInfo.nextStage = 0;

@@ -6,8 +6,8 @@
 #ifndef FZBRENDERER_OCTREE_2_FZBPG_SHADERIO_H
 #define FZBRENDERER_OCTREE_2_FZBPG_SHADERIO_H
 
-#define MAX_OCTREE_LAYER_FZBPG 7
-#define IndivisibleNodeCount_G_FZBPG 2000
+#define MAX_OCTREE_LAYER_FZBPG 8
+#define IndivisibleNodeCount_G_FZBPG 2500
 
 NAMESPACE_SHADERIO_BEGIN()
 
@@ -143,7 +143,7 @@ struct AdjClusterTempInfo_FzbPG {
 //------------------------------------------------------------------------------------------
 //don't change!!!!!
 #define OCTREE_CLUSTER_LAYER_FZBPG 2
-static const uint OctreeLayerNodeCount_FzbPG[MAX_OCTREE_LAYER_FZBPG] = { 6, 48, 384, 3072, 24576, 196608 };
+static const uint OctreeLayerNodeCount_FzbPG[MAX_OCTREE_LAYER_FZBPG] = { 6, 48, 384, 3072, 24576, 196608, 1572864 };
 static const uint OctreeLayerStartIndex_FzbPG[3] = { 0, 8, 56 };
 
 struct OctreeNodeData_G_FzbPG {
@@ -166,6 +166,7 @@ struct OctreeNodeData_E_FzbPG {
 
 //------------------------------------------------------------------------------------------
 struct CandidateSubTreeInfo {
+	float ESum;
 	int subTreeNodeIndex_layer;
 };
 struct CandidateLeafNodeData {
@@ -203,7 +204,7 @@ struct OctreeThreadGroupInfo_FzbPG {
 	uint threadGroupIndivisibleNodeCount_G;
 };
 //------------------------------------------------------------------------------------------
-#define OUTGOING_COUNT_FZBPG 32		//not smaller than 8
+#define OUTGOING_COUNT_FZBPG 64		//not smaller than 8
 #define HITTEST_COUNT_FZBPG 8		//not bigger than 32 or smaller than 8
 
 #define OUTGOING_TYPE_FZBPG 0

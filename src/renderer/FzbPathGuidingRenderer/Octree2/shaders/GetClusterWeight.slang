@@ -269,7 +269,7 @@ void computeMain_getCandidateNodes_NoLightcuts(uint threadIndex: SV_DispatchThre
         leafNodeData.radiance = node_E.radiance;
         leafNodeData.aabb = node_E.aabb;
         #ifdef SpatialReuse_FzbPG
-        leafNodeData.normal = node_E.normal;
+        leafNodeData.normal = node_E.meanNormal.xyz;
         #endif
 
         candidateLeafNodeDataBuffer[indivisibleNodeIndex * Candidate_Samples_Count + candidateNodeIndex] = leafNodeData;
@@ -450,7 +450,7 @@ LightLeafNode getLightLeafNode(int warpLane, int layer, uint subTreeNodeIndex, f
             float diagonalLength = length(node.aabb.maximum - node.aabb.minimum);
             float3 center = (node.aabb.maximum + node.aabb.minimum) * 0.5f;
             float d = max(length(pos - center), diagonalLength + 1e-3f);
-            weight = M * G * dot(node.radiance, 1.0f) / (d * d);
+            weight = dot(node.radiance, 1.0f);  //M * G * dot(node.radiance, 1.0f) / (d * d);
         }
 
         int blockLane = warpLane & 7;
@@ -503,8 +503,11 @@ void computeMain_getCandidateLeafNodes(uint threadIndex: SV_DispatchThreadID, ui
         clusterPairInfoBuffer[clusterPairIndex].leafNodeIndex_E = nodeData_E.nodeIndex;
         clusterPairInfoBuffer[clusterPairIndex].leafNodePdf = nodeData_E.pdf;
 
+        CandidateSubTreeInfo subTreeData;
         int candidateNodeIndex = clusterPairInfo.indivisibleNodeLabel * Candidate_Samples_Count + clusterPairInfo.candidateNodeIndex;
-        candidateSubTreeInfoBuffer[candidateNodeIndex] .subTreeNodeIndex_layer = (clusterPairInfo.nodeIndex_E << 4) | clusterPairInfo.layerIndex_E;
+        subTreeData.subTreeNodeIndex_layer = (clusterPairInfo.nodeIndex_E << 4) | clusterPairInfo.layerIndex_E;
+        subTreeData.ESum = dot(OctreeNodeDataBuffer_E[clusterPairInfo.layerIndex_E][clusterPairInfo.nodeIndex_E].radiance, 1.0f);
+        candidateSubTreeInfoBuffer[candidateNodeIndex] = subTreeData;
 
         CandidateLeafNodeData leafNodeData;
         leafNodeData.radiance = nodeData_E.radiance;
@@ -639,6 +642,7 @@ void computeMain_getCandidateNodeWeight(uint threadIndex: SV_DispatchThreadID, u
 
     int warpIndex = groupThreadIndex / 32;
     int warpLane = groupThreadIndex & 31;
+    #if GET_CANDIDATE_NODE_WEIGHTS_CS_THREADGROUP_SIZE > 160
     if (warpIndex < 4 && warpLane == 0) {
         if (warpIndex == 0) groupSceneInfo = pushConst.sceneInfoAddress[0];
         else if (warpIndex == 1) groupIndivisibleNodeCount_G = GlobalInfoBuffer[0].indivisibleNodeCount_G;
@@ -655,6 +659,21 @@ void computeMain_getCandidateNodeWeight(uint threadIndex: SV_DispatchThreadID, u
         int hitInfoIndex = clusterPairIndex * HITTEST_COUNT_FZBPG + warpLane;
         groupClusterPairHitInfo[warpLane] = clusterPairHitTestInfoBuffer[hitInfoIndex];
     }
+    #else
+    if (groupThreadIndex == 0) {
+        groupSceneInfo = pushConst.sceneInfoAddress[0];
+        groupIndivisibleNodeCount_G = GlobalInfoBuffer[0].indivisibleNodeCount_G;
+        ClusterPairInfo clusterPairInfo = clusterPairInfoBuffer[threadGroupIndex];
+        groupClusterPairInfo = clusterPairInfo;
+        if (clusterPairInfo.leafNodeIndex_E >= 0)
+            groupLeafNodeData_E = OctreeNodeDataBuffer_E[pushConst.octreeMaxLayer][clusterPairInfo.leafNodeIndex_E];
+        else groupLeafNodeData_E.radiance = 0.0f;
+    }
+    if (groupThreadIndex < HITTEST_COUNT_FZBPG) {
+        int hitInfoIndex = clusterPairIndex * HITTEST_COUNT_FZBPG + groupThreadIndex;
+        groupClusterPairHitInfo[groupThreadIndex] = clusterPairHitTestInfoBuffer[hitInfoIndex];
+    }
+    #endif
     GroupMemoryBarrierWithGroupSync();
     int clusterPairCount = groupClusterPairCount;
     if (threadIndex >= clusterPairCount * OUTGOING_COUNT_FZBPG * HITTEST_COUNT_FZBPG) return;

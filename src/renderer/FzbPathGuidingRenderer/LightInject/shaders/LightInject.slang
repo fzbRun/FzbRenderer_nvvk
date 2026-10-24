@@ -295,7 +295,7 @@ void computeMain_LightInject(uint threadIndex: SV_DispatchThreadID, uint groupTh
         uint bounceDepth = 0;
         float3 bsdf_cosine_pdf = float3(1.0f);
 
-        const uint maxPathDepth = 1;
+        const uint maxPathDepth = 6;
         while (bounceDepth < maxPathDepth) {
             bool hit = traceRay(ray, payload);
             if (hit) {

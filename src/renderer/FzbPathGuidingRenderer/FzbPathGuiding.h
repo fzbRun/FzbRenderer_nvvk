@@ -69,8 +69,19 @@ private:
 	std::map<uint32_t, bool> showDebugImages;
 #endif
 
+	FzbRenderer::Image refImage;
 	std::shared_ptr<FLIP> Flip;
+
+	float lastFLIP = 0.0f;
+	double flipSum = 0.0;
+	int flipFrameCount = 0;
+	bool flipReadbackPending = false;
+	nvvk::Buffer flipReadbackBuffer{};
+	VkExtent2D flipReadbackExtent{ 0, 0 };
+
+	void createFlipReadbackBuffer();
 	void getFLIP(VkCommandBuffer cmd);
+	void readFLIP();
 };
 }
 

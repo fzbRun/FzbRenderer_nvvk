@@ -3,10 +3,10 @@
 
 [[vk::push_constant]] ConstantBuffer<FLIPPushConstant> pushConst;
 
-[[vk::binding(BindingPoints_FLIP::eHorizontalReference)]] Texture2D<float4> horizontalReference;
-[[vk::binding(BindingPoints_FLIP::eHorizontalReferenceCz)]] Texture2D<float4> horizontalReferenceCz;
-[[vk::binding(BindingPoints_FLIP::eHorizontalTest)]] Texture2D<float4> horizontalTest;
-[[vk::binding(BindingPoints_FLIP::eHorizontalTestCz)]] Texture2D<float4> horizontalTestCz;
+[[vk::binding(BindingPoints_FLIP::eHorizontalReference)]] RWTexture2D<float4> horizontalReference;
+[[vk::binding(BindingPoints_FLIP::eHorizontalReferenceCz)]] RWTexture2D<float4> horizontalReferenceCz;
+[[vk::binding(BindingPoints_FLIP::eHorizontalTest)]] RWTexture2D<float4> horizontalTest;
+[[vk::binding(BindingPoints_FLIP::eHorizontalTestCz)]] RWTexture2D<float4> horizontalTestCz;
 
 [[vk::binding(BindingPoints_FLIP::eResultImage)]] RWTexture2D<float4> resultImage;
 

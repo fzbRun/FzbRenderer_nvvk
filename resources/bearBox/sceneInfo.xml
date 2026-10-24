@@ -2,9 +2,14 @@
 	<sensor type="perspective">
 		<fov value="60"/>
 		<transform type = "lookAt">
+			<!--
 			<matrix value="-1 0 0 0 0 1 0 1 0 0 -1 4 0 0 0 1"/>
 			<eye value = "0, 1.0, 3.0" />
 			<center value = "0, 1.0, 0.0" />
+			<up value = "0.00000, 1.00000, 0.00000" />
+			-->
+			<eye value = "-0.183, 1.759, 0.451" />
+			<center value = "-0.434, 0.635, -2.319" />
 			<up value = "0.00000, 1.00000, 0.00000" />
 		</transform>
 	</sensor>
@@ -21,7 +26,7 @@
 	</bsdfs>
 	
 	<lights>
-		<useSky value = "true" />
+		<useSky value = "false" />
 		<backgroundColor value = "0.0, 0.0, 0.0" />
 		<!--
 		<light type = "direction" id = "lightDirection">

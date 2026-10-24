@@ -6,10 +6,10 @@
 #define FZBRENDERER_FZB_PATHGUIDING_SHADER_IO_H
 NAMESPACE_SHADERIO_BEGIN()
 
-#define RIS_Version
+//#define RIS_Version
 //#define StochasticSample
 
-//#define StochasticLightcuts_RIS
+#define StochasticLightcuts_RIS
 //#define NoLightcuts
 #define Candidate_Samples_Count 128
 
@@ -67,6 +67,7 @@ enum class StaticBindingPoints_FzbPG
 	eOctreeNodeInfo_G = 2,
 	eOctreeNodeData_E,
 
+	eCandidateSubTreeData,
 	eCandidateLeafNodeData,
 
 	eCandidateSampleData,

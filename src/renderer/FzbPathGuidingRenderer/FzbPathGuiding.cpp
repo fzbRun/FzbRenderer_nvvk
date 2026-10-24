@@ -26,6 +26,9 @@ FzbPathGuidingRenderer::FzbPathGuidingRenderer(pugi::xml_node& rendererNode) {
 #endif
 
 	shadowMap = std::make_shared<ShadowMap>();
+#ifndef NDEBUG
+	Flip = std::make_shared<FLIP>();
+#endif
 }
 void FzbPathGuidingRenderer::init() {
 	renderStaticScene = Application::sceneResource.isStaticScene;
@@ -61,18 +64,31 @@ void FzbPathGuidingRenderer::init() {
 	};
 	octree->init(octreeCreateInfo);
 
-	IF_DEBUG(Feature::createGBuffer(true, true, (uint32_t)ImageType_FzbPG::eImgTonemapped), Feature::createGBuffer(false, true, 1));
+	IF_DEBUG(Feature::createGBuffer(true, true,(uint32_t)ImageType_FzbPG::eImgTonemapped,Application::renderResolution),
+		Feature::createGBuffer(false, true, 1, Application::renderResolution));
 	createDescriptorSetLayout();
 	createDescriptorSet();
 	createPipelineLayout();
 	compileAndCreateShaders();
 
-	Renderer::init();
-
 #ifndef NDEBUG
 	showDebugImages.clear();
 	showDebugImages.insert({ (uint32_t)ImageType_FzbPG::eImgPGVariance, false });
+
+	{
+		std::filesystem::path refImagePath = "C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/result/bearBox.png";
+		refImage.init(refImagePath);
+
+		FLIPCreateInfo flipCreateInfo{
+			.referenceImage = refImage.image,
+			.testImage = gBuffers.m_res.gBufferColor[((uint32_t)ImageType_FzbPG::eImgTonemapped)],
+		};
+		Flip->init(flipCreateInfo);
+		createFlipReadbackBuffer();
+	}
 #endif
+
+	Renderer::init();
 }
 void FzbPathGuidingRenderer::clean() {
 	if (renderStaticScene) shadowMap->clean();
@@ -83,6 +99,12 @@ void FzbPathGuidingRenderer::clean() {
 
 	VkDevice device = Application::app->getDevice();
 	vkDestroyShaderEXT(device, computeShader_FzbPathGuiding, nullptr);
+
+#ifndef NDEBUG
+	Flip->clean();
+	refImage.clean();
+	Application::allocator.destroyBuffer(flipReadbackBuffer);
+#endif
 
 	PathTracingRenderer::clean();
 };
@@ -170,6 +192,16 @@ void FzbPathGuidingRenderer::uiRender() {
 	lightInject->uiRender();
 	octree->uiRender();
 
+#ifndef NDEBUG
+	Flip->uiRender();
+	if (UIModified) {
+		lastFLIP = 0.0f;
+		flipSum = 0.0;
+		flipFrameCount = 0;
+		flipReadbackPending = false;
+	}
+#endif
+
 	if (UIModified) resetFrame();
 
 #ifndef NDEBUG
@@ -248,8 +280,17 @@ void FzbPathGuidingRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size)
 #else
 	IF_DEBUG(octree->resize(cmd, size, gBuffers, (uint32_t)ImageType_FzbPG::eImgTonemapped), octree->resize(cmd, size));
 #endif
+	
+#ifndef NDEBUG
+	if (Flip) {
+		Flip->resize(cmd, size, Flip->setting.referenceImage, gBuffers.m_res.gBufferColor[((uint32_t)ImageType_FzbPG::eImgTonemapped)]);
+	}
+	createFlipReadbackBuffer();
+#endif
 };
 void FzbPathGuidingRenderer::preRender() {
+	readFLIP();
+
 	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
 
 	Scene& scene = Application::sceneResource;
@@ -281,6 +322,16 @@ void FzbPathGuidingRenderer::preRender() {
 	pushConstant.randomRotateMatrix = octree->pushConstant.randomRotateMatrix;
 
 	Application::app->submitAndWaitTempCmdBuffer(cmd);
+
+#ifndef NDEBUG
+	Flip->preRender();
+	if (scene.cameraChange) {
+		lastFLIP = 0.0f;
+		flipSum = 0.0;
+		flipFrameCount = 0;
+		flipReadbackPending = false;
+	}
+#endif
 }
 void FzbPathGuidingRenderer::render(VkCommandBuffer* cmdPtr) {
 	VkCommandBuffer cmd = cmdPtr[0];
@@ -306,6 +357,8 @@ void FzbPathGuidingRenderer::render(VkCommandBuffer* cmdPtr) {
 	Application::tonemapper.runCompute(cmd, gBuffers.getSize(), Application::tonemapperData, gBuffers.getDescriptorImageInfo((uint32_t)ImageType_FzbPG::eImgRendered), gBuffers.getDescriptorImageInfo((uint32_t)ImageType_FzbPG::eImgTonemapped));
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
 		VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+
+	getFLIP(cmd);
 	
 	//if(renderStaticScene) shadowMap->postProcess(cmd);
 	//rasterVoxelization->postProcess(cmd);
@@ -339,6 +392,12 @@ void FzbPathGuidingRenderer::createDescriptorSetLayout() {
 		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodeData_E,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = (uint32_t)octree->octreeNodeDataBuffer_E.size(),
+		.stageFlags = VK_SHADER_STAGE_ALL });
+
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateSubTreeData,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
 
 	bindings.addBinding({
@@ -500,6 +559,10 @@ void FzbPathGuidingRenderer::createDescriptorSet() {
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodeData_E, 0, 0, octree->octreeNodeDataBuffer_E.size());
 	octreeArraysPtr = octree->octreeNodeDataBuffer_E.data();
 	write.append(OctreeArrayWrite, octreeArraysPtr);
+
+	OctreeArrayWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateSubTreeData, 0, 0, 1);
+	write.append(OctreeArrayWrite, octree->candidateSubTreeInfoBuffer, 0, octree->candidateSubTreeInfoBuffer.bufferSize);
 
 	OctreeArrayWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateLeafNodeData, 0, 0, 1);
@@ -680,8 +743,80 @@ void FzbPathGuidingRenderer::pathGuiding(VkCommandBuffer cmd) {
 	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
 }
 
+void FzbPathGuidingRenderer::createFlipReadbackBuffer() {
+	if (flipReadbackBuffer.buffer != VK_NULL_HANDLE)
+		Application::allocator.destroyBuffer(flipReadbackBuffer);
+
+	flipReadbackExtent = Application::renderResolution;
+
+	VkDeviceSize size = VkDeviceSize(flipReadbackExtent.width) *
+		flipReadbackExtent.height * sizeof(float) * 4;
+
+	NVVK_CHECK(Application::allocator.createBuffer(
+		flipReadbackBuffer, size,
+		VK_BUFFER_USAGE_2_TRANSFER_DST_BIT,
+		VMA_MEMORY_USAGE_AUTO_PREFER_HOST,
+		VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT));
+
+	NVVK_DBG_NAME(flipReadbackBuffer.buffer);
+	flipReadbackPending = false;
+}
 void FzbPathGuidingRenderer::getFLIP(VkCommandBuffer cmd) {
 #ifndef NDEBUG
+	if (!Flip || !Flip->hasValidInputs())
+		return;
 
+	// 1. 算 FLIP error map
+	Flip->evaluate(cmd);
+
+	// 2. 结果图拷到 host visible buffer
+	VkImage result = Flip->getResultImage().image;
+	VkExtent2D extent = { Flip->getResultImage().extent.width, Flip->getResultImage().extent.height };
+
+	nvvk::cmdImageMemoryBarrier(cmd, { result,
+		VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL });
+
+	VkBufferImageCopy copy{};
+	copy.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+	copy.imageExtent = { extent.width, extent.height, 1 };
+
+	vkCmdCopyImageToBuffer(cmd, result,
+		VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		flipReadbackBuffer.buffer, 1, &copy);
+
+	nvvk::cmdImageMemoryBarrier(cmd, { result,
+		VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
+
+	flipReadbackPending = true;
+#endif
+}
+void FzbPathGuidingRenderer::readFLIP() {
+#ifndef NDEBUG
+	if (!flipReadbackPending || flipReadbackBuffer.mapping == nullptr)
+		return;
+
+	// 简单起见，等上一帧 GPU 完成；离线测量可以接受
+	vkQueueWaitIdle(Application::app->getQueue(0).queue);
+
+	const float* data = reinterpret_cast<const float*>(flipReadbackBuffer.mapping);
+	const size_t count = size_t(flipReadbackExtent.width) * flipReadbackExtent.height;
+
+	double sum = 0.0;
+	for (size_t i = 0; i < count; ++i)
+		sum += data[i * 4 + 3];   // A channel 永远存最终 FLIP 值，不受 debugView 影响
+
+	lastFLIP = float(sum / count);
+	flipSum += lastFLIP;
+	++flipFrameCount;
+	flipReadbackPending = false;
+
+	LOGI("FLIP frame %d: %.6f\n", flipFrameCount, lastFLIP);
+
+	static int maxSumCount = 300; 
+	auto getAverageFLIP = [&]() {
+		return flipFrameCount > 0 ? float(flipSum / flipFrameCount) : 0.0f;
+	};
+	if(flipFrameCount == maxSumCount)
+		LOGI("FLIP average over %d frames: %.6f\n", flipFrameCount, getAverageFLIP());
 #endif
 }

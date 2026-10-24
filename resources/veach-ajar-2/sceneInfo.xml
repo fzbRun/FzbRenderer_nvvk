@@ -90,7 +90,7 @@
 		</bsdf>
 		
 		<bsdf type="roughConductor" id="Pot3BSDF">
-			<roughness value="0.01" />
+			<roughness value="0.1" />
 			<eta value="1.91, 1.31, 0.82" />
 			<k value="8.05, 6.93, 5.99" />
 		</bsdf>

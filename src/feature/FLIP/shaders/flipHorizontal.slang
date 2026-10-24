@@ -3,8 +3,8 @@
 
 [[vk::push_constant]] ConstantBuffer<FLIPPushConstant> pushConst;
 
-[[vk::binding(BindingPoints_FLIP::eOpponentReference)]] Texture2D<float4> opponentReference;
-[[vk::binding(BindingPoints_FLIP::eOpponentTest)]] Texture2D<float4> opponentTest;
+[[vk::binding(BindingPoints_FLIP::eOpponentReference)]] RWTexture2D<float4> opponentReference;
+[[vk::binding(BindingPoints_FLIP::eOpponentTest)]] RWTexture2D<float4> opponentTest;
 
 [[vk::binding(BindingPoints_FLIP::eHorizontalReference)]] RWTexture2D<float4> horizontalReference;
 [[vk::binding(BindingPoints_FLIP::eHorizontalReferenceCz)]] RWTexture2D<float4> horizontalReferenceCz;

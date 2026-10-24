@@ -524,6 +524,8 @@ void getDirectionLight(inout CallablePayload payload, SceneInfo sceneInfo) {
 }
 
 //------------------------------------------Material BSDF---------------------------------------------------
+//#define NVPRO_CORE_MATERIAL_FUNTION
+
 float GTR2_NDF(float cosineNH, float roughness) {
     const float alpha = roughness * roughness;
     const float a2 = alpha * alpha;
@@ -544,6 +546,8 @@ float FresnelDielectric(float n_dot_i, float n_dot_t, float eta) {
     return F;
 }
 float FresnelDielectric(float cosineOH, float eta) {
+    //eta = 1.0f / eta;
+
     const float n_dot_t_sq = 1 - (1 - cosineOH * cosineOH) / (eta * eta);
     if (n_dot_t_sq < 0) {
         // total internal reflection
@@ -635,6 +639,7 @@ float3 getBSDF_RoughConductor(float3 albedo, float roughness, float3 incidence, 
     float cosineIN = dot(incidence, normal);
     float cosineON = dot(outgoing, normal);
     if (cosineIN <= 0.0f || cosineON <= 0.0f) return float3(0.0f);
+    float alpha = roughness * roughness;
 
     float3 h = normalize(incidence + outgoing);
     float3 h_tangentSpace = mul(TBN, h);
@@ -646,8 +651,11 @@ float3 getBSDF_RoughConductor(float3 albedo, float roughness, float3 incidence, 
     float cosineOH = dot(h_tangentSpace, outgoing_tangentSpace);
 
     float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h_tangentSpace);
-    //float D = D_costhetaNH / h_tangentSpace.z;
+    #ifdef NVPRO_CORE_MATERIAL_FUNTION
+    float D = D_costhetaNH / h_tangentSpace.z;
+    #else
     float D = GTR2_NDF(h_tangentSpace.z, roughness);
+    #endif
 
     float3 F = schlickFresnel(albedo, float3(1.0F), cosineOH);
 
@@ -657,7 +665,11 @@ float3 getBSDF_RoughConductor(float3 albedo, float roughness, float3 incidence, 
                 G1_incidence,
                 outgoing_tangentSpace,
                 incidence_tangentSpace,
+                #ifdef NVPRO_CORE_MATERIAL_FUNTION
                 float2(roughness));
+                #else
+                float2(alpha));
+                #endif
     if (G2 <= 0.0f) return float3(0.0f);
 
     return (D * G2 * F) / (4.0f * cosineIN * cosineON + 1e-10f);
@@ -852,12 +864,25 @@ float getPdf_RoughConductor(float roughness, float3 incidence, float3 normal, fl
 
     float cosineOH = dot(h, outgoing);
 
+    //#ifdef NVPRO_CORE_MATERIAL_FUNTION
     //float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h_tangentSpace); // h需要在切线空间中
     //float D = D_costhetaNH / h_tangentSpace.z;                                   // max(h.z, 1e-6f);
     //return D_costhetaNH / (abs(4.0f * cosineOH) + 1e-10f);
+    //#else
+    //float D = GTR2_NDF(h_tangentSpace.z, roughness);
+    //return D * h_tangentSpace.z / (abs(4.0f * cosineOH) + 1e-10f);
+    //#endif
 
+    float3 o_t = mul(TBN, outgoing);
+    #ifdef NVPRO_CORE_MATERIAL_FUNTION
+    float D = hvd_ggx_eval(float2(1.0f / roughness), h_tangentSpace) / max(h_tangentSpace.z, 1e-6f);
+    float G1 = smith_shadow_or_mask(o_t, float2(roughness));
+    #else
+    float alpha = roughness * roughness;
     float D = GTR2_NDF(h_tangentSpace.z, roughness);
-    return D * h_tangentSpace.z / (abs(4.0f * cosineOH) + 1e-10f);
+    float G1 = IsotropicGGX_Masking(o_t, roughness);
+    #endif
+    return G1 * D / (4.0f * max(cosineON, 1e-4f));
 }
 float getPdf_RoughDielectric(float eta, float3 albedo, float roughness, float3 incidence, float3 normal, float3 outgoing, float3x3 TBN) {
     /*
@@ -948,7 +973,7 @@ float getPdf_RoughPlastic(float3 albedo_diffuse, float3 albedo_specular, float r
     //float3 F0 = FresnelDielectric(1.0f, 1.0f / eta);
     float lS = 0.299 * albedo_specular.x + 0.587 * albedo_specular.y + 0.114 * albedo_specular.z; //luminance( F0 * albedo_specular);
     float lR = 0.299 * albedo_diffuse.x + 0.587 * albedo_diffuse.y + 0.114 * albedo_diffuse.z;
-    float specular_prob = lS / (lS + lR);
+    float specular_prob = lS / max(lS + lR, 1e-6f);
     float diffuse_prob = 1.0f - specular_prob;
 
     float3 outgoing_tangentSpace = mul(TBN, outgoing);
@@ -1067,6 +1092,7 @@ void PopulateCallablePayload_DielectricMaterial(inout CallablePayload payload) {
         }
     }
 }
+
 void PopulateCallablePayload_RoughConductorMaterial(inout CallablePayload payload) {
     float randomNumber1 = rand(payload.randomSeed);
     float randomNumber2 = rand(payload.randomSeed);
@@ -1074,8 +1100,11 @@ void PopulateCallablePayload_RoughConductorMaterial(inout CallablePayload payloa
     float alpha = roughness * roughness;
 
     float3 outgoing_tangentSpace = mul(payload.TBN, payload.outgoing);
-    //float3 h_tangentSpace = hvd_ggx_sample_vndf(outgoing_tangentSpace, float2(roughness), float2(randomNumber1, randomNumber2));
+    #ifdef NVPRO_CORE_MATERIAL_FUNTION
+    float3 h_tangentSpace = hvd_ggx_sample_vndf(outgoing_tangentSpace, float2(roughness), float2(randomNumber1, randomNumber2));
+    #else
     float3 h_tangentSpace = SampleVisibleNormals(outgoing_tangentSpace, alpha, float2(randomNumber1, randomNumber2));
+    #endif
     if (h_tangentSpace.z == 0.0f) {
         payload.bsdf = float3(0.0f);
         payload.pdf = 1.0f;
@@ -1098,8 +1127,11 @@ void PopulateCallablePayload_RoughConductorMaterial(inout CallablePayload payloa
     payload.incidence = mul(incidence_tangentSpace, payload.TBN);
 
     float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h_tangentSpace); // h需要在切线空间中
-    //float D = D_costhetaNH / h_tangentSpace.z;                                   // max(h.z, 1e-6f);
+    #ifdef NVPRO_CORE_MATERIAL_FUNTION
+    float D = D_costhetaNH / h_tangentSpace.z; // max(h.z, 1e-6f);
+    #else
     float D = GTR2_NDF(h_tangentSpace.z, roughness);
+    #endif
     payload.pdf = D * h_tangentSpace.z / (4.0f * cosineOH);
 
     float G1_outgoing, G1_incidence;
@@ -1108,7 +1140,11 @@ void PopulateCallablePayload_RoughConductorMaterial(inout CallablePayload payloa
         G1_incidence,
         outgoing_tangentSpace,
         incidence_tangentSpace,
-        float2(roughness)
+        #ifdef NVPRO_CORE_MATERIAL_FUNTION
+        float2(roughness),
+        #else
+        float2(alpha),
+        #endif
     );
     if (G2 <= 0.0f) {
         payload.bsdf = float3(0.0f);
@@ -1243,7 +1279,7 @@ void PopulateCallablePayload_RoughPlasticMaterial(inout CallablePayload payload)
     float lS = 0.299 * payload.material.albedo_specular.x + 0.587 * payload.material.albedo_specular.y + 0.114 * payload.material.albedo_specular.z; // luminance(F0 * payload.material.albedo_specular);
     float lR = 0.299 * payload.material.albedo.x + 0.587 * payload.material.albedo.y + 0.114 * payload.material.albedo.z;
 
-    float specular_prob = lS / (lS + lR);
+    float specular_prob = lS / max(lS + lR, 1e-6f);
     float randomNumber = rand(payload.randomSeed);
     float randomNumber1 = rand(payload.randomSeed);
     float randomNumber2 = rand(payload.randomSeed);

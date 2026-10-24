@@ -7,6 +7,7 @@
 [[vk::binding(StaticBindingPoints_FzbPG::eOctreeNodeInfo_G)]] RWStructuredBuffer<OctreeNodeInfo_G_FzbPG, ScalarDataLayout> OctreeNodeInfoBuffer_G[];
 [[vk::binding(StaticBindingPoints_FzbPG::eOctreeNodeData_E)]] RWStructuredBuffer<OctreeNodeData_E_FzbPG, ScalarDataLayout> OctreeNodeDataBuffer_E[];
 
+[[vk::binding(StaticBindingPoints_FzbPG::eCandidateSubTreeData)]] RWStructuredBuffer<CandidateSubTreeInfo, ScalarDataLayout> candidateSubTreeDataBuffer;
 [[vk::binding(StaticBindingPoints_FzbPG::eCandidateLeafNodeData)]] RWStructuredBuffer<CandidateLeafNodeData, ScalarDataLayout> candidateLeafNodeDataBuffer;
 
 [[vk::binding(StaticBindingPoints_FzbPG::eCandidateSampleData)]] RWStructuredBuffer<CandidateSampleData_FzbPG, ScalarDataLayout> candidateSampleDataBuffer;
@@ -33,13 +34,16 @@
 
 typedef CallablePayload HitPayload_FzbPG;
 
-struct PGSampleData {
+struct VRSampleData {
     float pdf;
     float wSum;
     float3 sampleDir;
 
     int nodeLabel_G;
     int outgoingIndex;
+
+    AABB aabb;
+    int normalIndex;
 }
 //---------------------------------------------groupsharedMemory-----------------------------------------
 groupshared OctreeGlobalInfo_FzbPG groupGlobalInfo;
@@ -203,7 +207,7 @@ int getNodeIndex_E(float3 hitPos, float3 hitNormal) {
     return nodeIndex_E;
 }
 
-bool getNodeAABB_E_FzbPG(inout PGSampleData sampleData, inout HitPayload_FzbPG payload, uint2 threadIndex) {
+bool getNodeAABB_E_FzbPG(inout VRSampleData sampleData, inout HitPayload_FzbPG payload, uint2 threadIndex) {
     if (payload.material.type == uint(MaterialType::Dielectric) ||
         payload.material.type == uint(MaterialType::RoughDielectric)) return false;
 
@@ -327,21 +331,28 @@ bool getNodeAABB_E_FzbPG(inout PGSampleData sampleData, inout HitPayload_FzbPG p
         if (randomNumber < candidateSamplePrefixWSumBuffer[candidateNodeStartIndex + mid]) hi = mid;
         else lo = mid + 1;
     }
+    int candidateIndex = lo;
 
     sampleData.wSum = wSum;
     #ifdef SpatialReuse_FzbPG
-    sampleData.pdf = (pushConst.spatialRuse == 1 ? candidateSampleData2Buffer[candidateNodeStartIndex + lo].p_hat : candidateSampleDataBuffer[candidateNodeStartIndex + lo].p_hat) / wSum;
-    AABB aabb = pushConst.spatialRuse == 1 ? candidateSampleAABBBuffer[candidateNodeStartIndex + lo] : 
-                                             candidateLeafNodeDataBuffer[nodeLabel_G * Candidate_Samples_Count + lo].aabb;
+    sampleData.pdf = (pushConst.spatialRuse == 1 ? candidateSampleData2Buffer[candidateNodeStartIndex + candidateIndex].p_hat : candidateSampleDataBuffer[candidateNodeStartIndex + candidateIndex].p_hat) / wSum;
+    sampleData.aabb = pushConst.spatialRuse == 1 ? candidateSampleAABBBuffer[candidateNodeStartIndex + candidateIndex] : 
+                                             candidateLeafNodeDataBuffer[nodeLabel_G * Candidate_Samples_Count + candidateIndex].aabb;
     #else
-    sampleData.pdf = candidateSampleDataBuffer[candidateNodeStartIndex + lo].p_hat / wSum;
-    AABB aabb = candidateLeafNodeDataBuffer[nodeLabel_G * Candidate_Samples_Count + lo].aabb;
+    sampleData.pdf = candidateSampleDataBuffer[candidateNodeStartIndex + candidateIndex].p_hat / wSum;
+    sampleData.aabb = candidateLeafNodeDataBuffer[nodeLabel_G * Candidate_Samples_Count + candidateIndex].aabb;
     #endif
     
     sampleData.nodeLabel_G = nodeLabel_G;
     sampleData.outgoingIndex = outgoingIndex;
 
-    return SphericalRectangleSample(aabb, payload.hitPos, payload.randomSeed, sampleData.sampleDir, sampleData.pdf);
+    int subTreeNodeIndex_layer = candidateSubTreeDataBuffer[nodeLabel_G * Candidate_Samples_Count + candidateIndex].subTreeNodeIndex_layer;
+    int subTreeLayer = subTreeNodeIndex_layer & 15;
+    int subTreeIndex = subTreeNodeIndex_layer >> 4;
+    int subTreeLayerNodeCount = (1 << (3 * subTreeLayer));
+    sampleData.normalIndex = subTreeIndex / subTreeLayerNodeCount;
+
+    return SphericalRectangleSample(sampleData.aabb, payload.hitPos, payload.randomSeed, sampleData.sampleDir, sampleData.pdf);
 }
 
 float getPgPdf(float wSum, float3 bsdfSamplePos, float3 bsdfSampleNormal, float3 hitPos, float3 sampleDir, float3 bsdf_cosine, uint2 threadIndex) {
@@ -352,7 +363,6 @@ float getPgPdf(float wSum, float3 bsdfSamplePos, float3 bsdfSampleNormal, float3
     float3 f = nodeData_E.radiance * bsdf_cosine * cosine_Light / max(d * d, 1e-3f);
     float p_hat = dot(f, 1.0f);
     if (p_hat == 0.0f) return 0.0f;
-
     float pdf = p_hat / wSum;
 
     // getPdf from Sphere sample
@@ -385,7 +395,77 @@ float getPgPdf(float wSum, float3 bsdfSamplePos, float3 bsdfSampleNormal, float3
 
     return pdf;
 }
+
+float getPgPdf2(float wSum, int label_G, int outgoingIndex, float3 bsdfSamplePos, float3 bsdfSampleNormal, float3 hitPos, float3 sampleDir, float3 bsdf_cosine) {
+    uint nodeIndex_E = getNodeIndex_E(hitPos, bsdfSampleNormal);
+
+    float ESum = 0.0f; float wi_ori = 0.0f;
+    for (int i = 0; i < Candidate_Samples_Count; ++i) {
+        int subTreeIndex = label_G * Candidate_Samples_Count + i;
+        CandidateSubTreeInfo subTreeInfo = candidateSubTreeDataBuffer[subTreeIndex];
+        int subTreeNodeIndex_layer = subTreeInfo.subTreeNodeIndex_layer;
+        if (subTreeNodeIndex_layer == -1) break;
+
+        subTreeIndex = subTreeNodeIndex_layer >> 4;
+        int subTreeLayer = subTreeNodeIndex_layer & 15;
+        int subTreeLeafNodeCount = (1 << (3 * (pushConst.maxOctreeLayer - subTreeLayer)));
+        int subTreeLeafNodeStartIndex = subTreeLeafNodeCount * subTreeIndex;
+        int subTreeLeafNodeEndIndex = subTreeLeafNodeStartIndex + subTreeLeafNodeCount;
+        if (nodeIndex_E >= subTreeLeafNodeStartIndex && nodeIndex_E < subTreeLeafNodeEndIndex) {
+            ESum = subTreeInfo.ESum;
+            int candidateIndex = outgoingIndex * groupGlobalInfo.indivisibleNodeCount_G * Candidate_Samples_Count + label_G * Candidate_Samples_Count + i;
+            wi_ori = candidateSampleDataBuffer[candidateIndex].w;
+            break;
+        }
+    }
+    if (ESum == 0.0f) return 0.0f;
+
+    OctreeNodeData_E_FzbPG nodeData_E = OctreeNodeDataBuffer_E[pushConst.maxOctreeLayer][nodeIndex_E];
+    float p = dot(nodeData_E.radiance, 1.0f) / ESum;
+    if (p == 0.0f) return 0.0f;
+
+    float cosine_Light = max(dot(bsdfSampleNormal, -sampleDir), 0.0f);
+    float d = distance(bsdfSamplePos, hitPos);
+    float3 f = nodeData_E.radiance * bsdf_cosine * cosine_Light / max(d * d, 1e-3f);
+    float p_hat = dot(f, 1.0f);
+
+    float wi = p_hat / p;
+    wSum = wSum + wi - wi_ori;
+    float pdf = p_hat / max(wSum, 1e-3f);
+    if (pdf == 0.0f) return 0.0f;
+
+    // getPdf from Sphere sample
+    {
+        float3 distance = nodeData_E.aabb.maximum - nodeData_E.aabb.minimum;
+        float3 nodeDirection = (nodeData_E.aabb.maximum + nodeData_E.aabb.minimum) * 0.5f - hitPos;
+
+        float3 edge0 = float3(distance.x, 0.0f, 0.0f);
+        float3 edge1 = float3(0.0f, distance.y, 0.0f);
+        float3 edge2 = float3(0.0f, 0.0f, distance.z);
+
+        float3 face0StartPos = nodeData_E.aabb.minimum;
+        face0StartPos.x += nodeDirection.x < 0 ? distance.x : 0.0f; // in left
+        float3 face1StartPos = nodeData_E.aabb.minimum;
+        face1StartPos.y += nodeDirection.y < 0 ? distance.y : 0.0f; // in bottom
+        float3 face2StartPos = nodeData_E.aabb.minimum;
+        face2StartPos.z += nodeDirection.z < 0 ? distance.z : 0.0f; // in back
+
+        Quadrilateral_initialization quad0 = initQuadrilateral(hitPos, face0StartPos, edge2, edge1);
+        quad0.S = isnan(quad0.S) ? 0.0f : quad0.S;
+        Quadrilateral_initialization quad1 = initQuadrilateral(hitPos, face1StartPos, edge0, edge2);
+        quad1.S = isnan(quad1.S) ? 0.0f : quad1.S;
+        Quadrilateral_initialization quad2 = initQuadrilateral(hitPos, face2StartPos, edge0, edge1);
+        quad2.S = isnan(quad2.S) ? 0.0f : quad2.S;
+
+        float solidAngleSum = quad0.S + quad1.S + quad2.S;
+        if (solidAngleSum == 0.0f) pdf = 0.0f;
+        else pdf /= solidAngleSum;
+    }
+
+    return pdf;
+}
 //---------------------------------------------PathGuiding-----------------------------------------
+/*
 [numthreads(FZB_PATHGUIDING_THREADGROUP_SIZE_X, FZB_PATHGUIDING_THREADGROUP_SIZE_Y, 1)]
 [shader("compute")]
 void computeMain_FzbPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 groupThreadIndex: SV_GroupThreadID) {
@@ -493,8 +573,8 @@ void computeMain_FzbPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
 
                 float bsdfSample_pgPdf = 0.0f;
                 if (useFzbPG && hit) {
-                    bsdfSample_pgPdf = getPgPdf(pgSampleData.wSum, payload.hitPos, payload.hitNormal, hitPos, bsdfSampleDir, bsdfSample_bsdf_cosine, threadIndex);
-                    //bsdfSample_pgPdf = getPgPdf3(pgSampleData.nodeLabel_G, pgSampleData.outgoingIndex, payload.hitPos, payload.hitNormal, hitPos, threadIndex);
+                    // bsdfSample_pgPdf = getPgPdf(pgSampleData.wSum, payload.hitPos, payload.hitNormal, hitPos, bsdfSampleDir, bsdfSample_bsdf_cosine, threadIndex);
+                    bsdfSample_pgPdf = getPgPdf2(pgSampleData.wSum, pgSampleData.nodeLabel_G, pgSampleData.outgoingIndex, payload.hitPos, payload.hitNormal, hitPos, bsdfSampleDir, bsdfSample_bsdf_cosine);
                 }
                     
                 float bsdfSample_weight = bsdfSample_bsdfPdf / max(bsdfSample_pgPdf + bsdfSample_bsdfPdf, 1e-16f);
@@ -553,6 +633,230 @@ void computeMain_FzbPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 gr
 
     // When the maximum frame rate is reached, the original image will decay by ((maxframe-1)/maxframe)^k < 1, and the final image will turn black
     if (pushConst.maxFrameCount > 1 && pushConst.frameIndex > 0){
+        float a = 1.0f / float(pushConst.frameIndex + 1);
+        float3 old_color = outImage[int2(launchID)].xyz;
+        outImage[int2(launchID)] = float4(lerp(old_color, accumulatedRadiance, a), 1.0f);
+    }
+    else outImage[int2(launchID)] = float4(accumulatedRadiance, 1.0f);
+}
+*/
+[numthreads(FZB_PATHGUIDING_THREADGROUP_SIZE_X, FZB_PATHGUIDING_THREADGROUP_SIZE_Y, 1)]
+[shader("compute")]
+void computeMain_FzbPathGuiding(uint2 threadIndex: SV_DispatchThreadID, uint2 groupThreadIndex: SV_GroupThreadID) {
+    uint groupThreadIndex_linear = groupThreadIndex.y * FZB_PATHGUIDING_THREADGROUP_SIZE_X + groupThreadIndex.x;
+    uint threadGroupThreadTotalCount = FZB_PATHGUIDING_THREADGROUP_SIZE_X * FZB_PATHGUIDING_THREADGROUP_SIZE_Y;
+    if (groupThreadIndex_linear == 0) groupGlobalInfo = GlobalInfoBuffer[0];
+    for (int i = groupThreadIndex_linear; i < 3510; i += threadGroupThreadTotalCount) {
+        int layerIndex = 0; int nodeIndex = i; int layerNodeCount = 6;
+        for (; layerIndex < 4; ++layerIndex) {
+            if (nodeIndex < layerNodeCount) break;
+            nodeIndex -= layerNodeCount;
+            layerNodeCount *= 8;
+        }
+        groupOctreeNodeInfo_G[i] = OctreeNodeInfoBuffer_G[layerIndex][nodeIndex];
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    float2 launchID = (float2)threadIndex;
+    float2 launchSize = (float2)pushConst.sceneSize;
+    if (threadIndex.x >= pushConst.sceneSize.x || threadIndex.y >= pushConst.sceneSize.y) return;
+
+    SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+
+    const uint rayFlags = 0;
+    RayDesc ray;
+    ray.TMin = 0.001;
+    ray.TMax = INFINITE;
+
+    HitPayload_FzbPG payload;
+    HitPayload_FzbPG vrPayload;
+    HitPayload_FzbPG bsdfPayload;
+
+    uint pgSeed = xxhash32(uint3(threadIndex, pushConst.frameIndex));
+
+    float3 accumulatedRadiance = float3(0.0f);
+    float RR = 0.8f;
+
+    #ifndef NDEBUG
+    float3 pgValue = 0.0f;
+    float3 pgValue2 = 0.0f;
+    #endif
+
+    for (int sampleIndex = 0; sampleIndex < pushConst.spp; ++sampleIndex) {
+        float r1 = rand(pgSeed);
+        float r2 = rand(pgSeed);
+        float2 subpixel_jitter = pushConst.frameIndex == 0 && sampleIndex == 0 ? float2(0.5f, 0.5f) : float2(r1, r2);
+
+        const float2 pixelCenter = launchID + subpixel_jitter;
+        const float2 clipCoords = pixelCenter / launchSize * 2.0 - 1.0;
+        float4 viewCoords = mul(float4(clipCoords, 1.0, 1.0), sceneInfo.projInvMatrix);
+        viewCoords /= viewCoords.w;
+
+        ray.Origin = sceneInfo.cameraPosition;
+        ray.Direction = normalize(mul(float4(normalize(viewCoords.xyz), 0.0), sceneInfo.viewInvMatrix).xyz);
+
+        payload.bsdf = float3(1.0f);
+        payload.pdf = 1.0f;
+        payload.outgoing = -ray.Direction;
+        payload.isExt = true;
+        payload.randomSeed = pgSeed;
+
+        float3 bsdf_cosine_pdf = float3(1.0f);
+        uint bounceDepth = 0;
+        bool hit = traceRay(ray, payload);
+
+        while (bounceDepth < pushConst.maxDepth) {
+            #ifndef NDEBUG
+            if (bounceDepth == 0 && sampleIndex == 0) {
+                if (hit) {
+                    float3 hitPos = payload.hitPos + 0.01f * ray.Direction;
+                    float4 clipPos = mul(float4(hitPos, 1.0f), sceneInfo.viewProjMatrix);
+                    depthImage[int2(launchID)] = clipPos.z / clipPos.w;
+                }
+                else {
+                    depthImage[int2(launchID)] = 1.0f;
+                }
+            }
+            #endif
+
+            if (!hit) {
+                accumulatedRadiance += RayMiss(ray.Direction) * bsdf_cosine_pdf;
+                break;
+            }
+
+            //-------------------------------------------------- PG candidate --------------------------------------------------
+            payload.randomSeed = pgSeed;
+
+            VRSampleData vrSampleData;
+            bool getVrSample = getNodeAABB_E_FzbPG(vrSampleData, payload, threadIndex);
+            pgSeed = payload.randomSeed;
+
+            vrPayload = payload;
+            vrPayload.randomSeed = pgSeed;
+
+            bool vrHit = false;
+            bool validSample = false;
+
+            if (getVrSample) {
+                vrPayload.incidence = vrSampleData.sampleDir;
+
+                ray.Origin = offsetRay(payload.hitPos, payload.hitNormal);
+                ray.Direction = vrSampleData.sampleDir;
+                vrHit = traceRay(ray, vrPayload);
+
+                if (vrHit) {
+                    validSample = checkPointInAABB(vrPayload.hitPos, vrSampleData.aabb);
+                    validSample = validSample && (getNormalIndex(vrPayload.hitNormal) == vrSampleData.normalIndex);
+                    validSample = validSample && (vrSampleData.pdf > 0.0f);
+                }
+            }
+
+            //-------------------------------------------------- BSDF candidate -------------------------------------------------
+            bsdfPayload = payload;
+            bsdfPayload.randomSeed = pgSeed;
+
+            getDirectionLight(bsdfPayload, sceneInfo);
+            BSDF_SAMPLE(bsdfPayload);
+
+            // Direct lighting at the current hit is independent of which outgoing direction is selected.
+            accumulatedRadiance += (bsdfPayload.material.emissive + bsdfPayload.directionLightRadiance) * bsdf_cosine_pdf;
+
+            float3 bsdfSampleDir = bsdfPayload.incidence;
+            float3 bsdfSample_bsdf_cosine = bsdfPayload.bsdf * abs(dot(bsdfSampleDir, bsdfPayload.hitNormal));
+            float bsdfSample_bsdfPdf = bsdfPayload.pdf;
+            if (!(bsdfSample_bsdfPdf >= 0.0f) || isinf(bsdfSample_bsdfPdf)) bsdfSample_bsdfPdf = 0.0f;
+
+            ray.Origin = offsetRay(payload.hitPos, payload.hitNormal);
+            ray.Direction = bsdfSampleDir;
+            bool bsdfHit = traceRay(ray, bsdfPayload);
+            pgSeed = bsdfPayload.randomSeed;
+
+            //-------------------------------------------------- MIS weights ----------------------------------------------------
+            float3 pgSample_bsdf_cosine = float3(0.0f);
+            float pgSample_bsdfPdf = 0.0f;
+            float pgSample_weight = 0.0f;
+
+            if (validSample) {
+                float cosine = abs(dot(payload.hitNormal, vrSampleData.sampleDir));
+                pgSample_bsdf_cosine = cosine * getBSDF(payload.material, vrSampleData.sampleDir, payload.hitNormal, payload.outgoing, payload.TBN, payload.isExt);
+                pgSample_bsdfPdf = getPdf(payload.material, vrSampleData.sampleDir, payload.hitNormal, payload.outgoing, payload.TBN, payload.isExt);
+                if (!(pgSample_bsdfPdf >= 0.0f) || isinf(pgSample_bsdfPdf)) pgSample_bsdfPdf = 0.0f;
+                pgSample_weight = vrSampleData.pdf / max(vrSampleData.pdf + pgSample_bsdfPdf, 1e-16f);
+            }
+
+            float bsdfSample_pgPdf = 0.0f;
+            if (validSample && bsdfHit) {
+                bsdfSample_pgPdf = getPgPdf2(vrSampleData.wSum, vrSampleData.nodeLabel_G, vrSampleData.outgoingIndex,
+                                             bsdfPayload.hitPos, bsdfPayload.hitNormal, payload.hitPos,
+                                             bsdfSampleDir, bsdfSample_bsdf_cosine);
+                if (!(bsdfSample_pgPdf >= 0.0f) || isinf(bsdfSample_pgPdf)) bsdfSample_pgPdf = 0.0f;
+            }
+
+            float bsdfSample_weight = bsdfSample_bsdfPdf / max(bsdfSample_pgPdf + bsdfSample_bsdfPdf, 1e-16f);
+
+            #ifndef NDEBUG
+            if (bounceDepth > 0) {
+                float3 pgValue_temp = (bsdfPayload.material.emissive + bsdfPayload.directionLightRadiance) * bsdf_cosine_pdf;
+                pgValue += pgValue_temp;
+                pgValue2 += pgValue_temp * pgValue_temp;
+            }
+            #endif
+
+            //-------------------------------------------------- choose sample -------------------------------------------------
+            // A technique whose contribution or MIS weight is zero cannot contribute; do not waste a path on it.
+            bool pgAvailable = validSample && (pgSample_weight > 0.0f) && any(pgSample_bsdf_cosine > 0.0f);
+            bool bsdfAvailable = (bsdfSample_bsdfPdf > 0.0f) && (bsdfSample_weight > 0.0f) && any(bsdfSample_bsdf_cosine > 0.0f);
+            if (!pgAvailable && !bsdfAvailable) break;
+
+            float pgSample_selectProbability = pgAvailable ? (bsdfAvailable ? 0.5f : 1.0f) : 0.0f;
+            float randomNumber = rand(pgSeed);
+
+            if (randomNumber < pgSample_selectProbability) {
+                payload = vrPayload;
+                payload.incidence = vrSampleData.sampleDir;
+                bsdf_cosine_pdf *= pgSample_weight * pgSample_bsdf_cosine / max(vrSampleData.pdf, 1e-16f) / max(pgSample_selectProbability, 1e-16f);
+                hit = vrHit;
+            }
+            else {
+                payload = bsdfPayload;
+                bsdf_cosine_pdf *= bsdfSample_weight * bsdfSample_bsdf_cosine / max(bsdfSample_bsdfPdf, 1e-16f) / max(1.0f - pgSample_selectProbability, 1e-16f);
+                hit = bsdfHit;
+            }
+
+            if (!hit) {
+                // Let the next iteration add the sky contribution with the selected direction.
+                ray.Direction = payload.incidence;
+            }
+
+            bool end = any(bsdf_cosine_pdf < 0.0f) || all(bsdf_cosine_pdf == 0.0f) || any(isnan(bsdf_cosine_pdf)) || any(isinf(bsdf_cosine_pdf));
+            if (end) break;
+
+            randomNumber = rand(pgSeed);
+            if (randomNumber >= RR) break;
+            bsdf_cosine_pdf /= RR;
+
+            payload.randomSeed = pgSeed;
+            payload.outgoing = -payload.incidence;
+            ++bounceDepth;
+        }
+    }
+    accumulatedRadiance /= pushConst.spp;
+
+    #ifndef NDEBUG
+    uint n = max(pushConst.spp, 1);
+    pgValue /= n;
+    pgValue2 /= n;
+    if (pushConst.frameIndex > 0) {
+        pgValue = (pgValue + pgValueImage[threadIndex].xyz * (pushConst.frameIndex - 1)) / pushConst.frameIndex;
+        pgValue2 = (pgValue2 + pgValue2Image[threadIndex].xyz * (pushConst.frameIndex - 1)) / pushConst.frameIndex;
+
+        pgVarianceImage[threadIndex].x = luminance(pgValue2 - pgValue * pgValue);
+    }
+    pgValueImage[threadIndex].xyz = pgValue;
+    pgValue2Image[threadIndex].xyz = pgValue2;
+    #endif
+
+    if (pushConst.maxFrameCount > 1 && pushConst.frameIndex > 0) {
         float a = 1.0f / float(pushConst.frameIndex + 1);
         float3 old_color = outImage[int2(launchID)].xyz;
         outImage[int2(launchID)] = float4(lerp(old_color, accumulatedRadiance, a), 1.0f);

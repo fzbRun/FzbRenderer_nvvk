@@ -216,6 +216,44 @@ void FzbRenderer::Scene::createSceneFromXML() {
 		sceneInfo.numLights = 0;
 		if (pugi::xml_node useSkyNode = lightsNode.child("useSky")) {
 			sceneInfo.useSky = std::string(useSkyNode.attribute("value").value()) == "true";
+
+			float azimuthDeg = 0.0f;
+			float elevationDeg = 0.0f;
+			bool  hasAzimuth = false;
+			bool  hasElevation = false;
+
+			if (pugi::xml_node node = lightsNode.child("Azimuth")) {
+				azimuthDeg = node.attribute("value").as_float();
+				hasAzimuth = true;
+			}
+			if (pugi::xml_node node = lightsNode.child("Elevation")) {
+				elevationDeg = node.attribute("value").as_float();
+				hasElevation = true;
+			}
+			if (pugi::xml_node node = lightsNode.child("Irradiance")) {
+				sceneInfo.skySimpleParam.sunIntensity = node.attribute("value").as_float();
+			}
+
+			if (hasAzimuth || hasElevation) {
+				glm::vec3 dir = glm::normalize(sceneInfo.skySimpleParam.sunDirection);
+
+				// 只给了一个角度时，从当前 sunDirection 反推另一个
+				if (!hasAzimuth)
+					azimuthDeg = glm::degrees(std::atan2(dir.z, dir.x));
+				if (!hasElevation)
+					elevationDeg = glm::degrees(std::asin(glm::clamp(dir.y, -1.0f, 1.0f)));
+
+				const float az = glm::radians(azimuthDeg);
+				const float el = glm::radians(elevationDeg);
+				const float ce = std::cos(el);
+
+				// Y-up：Azimuth 绕 Y，Elevation 从水平面向上
+				sceneInfo.skySimpleParam.sunDirection =
+					glm::normalize(glm::vec3(std::cos(az) * ce,
+						std::sin(el),
+						std::sin(az) * ce));
+			}
+
 			if (sceneInfo.useSky) {
 				LightInstance lightInstance;
 				lightInstances.push_back(lightInstance);
@@ -265,7 +303,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 					light.coneAngle = std::stof(coneAngleNode.attribute("value").value());
 			}
 			else if (lightType == "sun") {
-				light.type == shaderio::Direction;
+				light.type = shaderio::Direction;
 				if (sceneInfo.numLights < LIGHT_COUNT) sceneInfo.useSky = true;
 			}
 			else if (lightType == "area") {		//默认是矩形光源

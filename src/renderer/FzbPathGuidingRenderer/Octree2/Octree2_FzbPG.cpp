@@ -360,8 +360,18 @@ void Octree2_FzbPG::preRender() {
 	pushConstant.VGBStartPos_Size = glm::vec4(setting.VGBStartPos, setting.VGBSize);
 	pushConstant.VGBVoxelSize = glm::vec4(setting.VGBVoxelSize, 1.0f);
 
-	float angle = FzbRenderer::rand(Application::frameIndex) * glm::two_pi<float>();
-	pushConstant.randomRotateMatrix = glm::mat3(1.0f);	// glm::mat3(glm::rotate(glm::mat4(1.0f), angle, glm::vec3(0, 0, 1)));
+	{
+		//float angle = FzbRenderer::rand(Application::frameIndex) * glm::two_pi<float>();
+		//pushConstant.randomRotateMatrix = glm::mat4(1.0f); //glm::mat3(glm::rotate(glm::mat4(1.0f), angle, glm::vec3(0, 0, 1)));
+
+		static constexpr float GOLDEN = 0.6180339887498949f; // 1/¦Õ
+
+		float t = static_cast<float>(Application::frameIndex);
+		float angle = glm::two_pi<float>() * glm::fract(t * GOLDEN + 0.5f);
+
+		pushConstant.randomRotateMatrix =
+			glm::rotate(glm::mat4(1.0f), angle, glm::vec3(0, 0, 1));
+	}
 
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 }
