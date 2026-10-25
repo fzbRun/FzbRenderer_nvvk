@@ -41,8 +41,6 @@ struct OctreePushConstant_VRPG {
 	float clusterNormalThreshold;
 	float clusterFillRateThreshold;
 	float clusterVolumeTolerance;
-	int lightBackfaceCull;
-	int stableCandidateCut;
 
 	float4x4 padding1;
 };

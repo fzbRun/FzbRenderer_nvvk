@@ -47,8 +47,9 @@ public:
 private:
 	bool renderStaticScene = true;
 	bool rebuildPerFrame = false;
-	float jitterRadiusScale = 1.0f;
-	int nearbyNodeCount = NEARBY_NODE_COUNT_VRPG;
+	bool octreeDirty = true;
+	float jitterRadiusScale = 0.5f;
+
 	inline static int frameIndex = 0;
 
 	std::shared_ptr<ShadowMap> shadowMap;

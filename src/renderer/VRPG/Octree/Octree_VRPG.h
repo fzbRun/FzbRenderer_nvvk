@@ -33,7 +33,8 @@ public:
 	void uiRender();
 	void resize(VkCommandBuffer cmd, const VkExtent2D& size) override;
 	void preRender();
-	void render(VkCommandBuffer cmd);
+	void renderStatic(VkCommandBuffer cmd);
+	void renderCandidates(VkCommandBuffer cmd);
 	void postProcess(VkCommandBuffer cmd);
 
 	void createOctreeArray();
@@ -58,8 +59,7 @@ public:
 	float clusterNormalThreshold = 0.707f;
 	float clusterFillRateThreshold = 0.75f;
 	float clusterVolumeTolerance = 0.3f;
-	bool lightBackfaceCull = true;
-	bool stableCandidateCut = false;
+
 
 	std::vector<nvvk::Buffer> octreeNodeDataBuffer_G;
 	std::vector<nvvk::Buffer> octreeNodeInfoBuffer_G;			//label_indivisible,  label: indivisible node闂傚倸鍊搁崐鎼佸磹妞嬪孩顐芥慨姗嗗墻閻掍粙鏌ゆ慨鎰偓鏍偓姘煼閺岋綁寮崒姘粯缂備讲鍋撳璺哄閸嬫捇宕楁径濠佸闂備線鈧偛鑻晶鐗堜繆閸欏濮嶉柟顔界懅閸犲﹤螣鏉炴澘顥氶梻浣瑰缁诲倹顨ラ幖浣稿嚑婵炴垶姘ㄧ壕濂告煃瑜滈崜鐔风暦婵傜鐓戦柍杞版婢规洖螖閻橀潧浠滈柣蹇旂箞瀹曟繂顫濋懜鐢靛幍闂佹儳娴氶崑鍕叏閸ヮ剚鐓ラ柡鍥悘鍙夘殽閻愯揪鑰挎い銏＄懇閹墽浠﹂挊澶岊唶闂傚倸鍊风粈渚€骞夐垾瓒佹椽鎮㈡總澶屽姺閻熸粍妫冮獮鍐潨閳ь剟寮幇鏉垮耿闁归偊浜為惄搴ㄦ⒒娴ｇ儤鍤€闁宦板妿閹广垽宕橀鑲╃崶濠碘槅鍨伴惃鐑藉磻閹捐埖鍠嗛柛鏇ㄥ墰椤︺劑姊洪懡銈呮毐闁哄懐濞€閻涱噣宕橀鑲╁幐闂佸憡渚楅崰姘跺礉閸洘鍊垫鐐茬仢閸旀岸鏌熼崘鑼闁诡喗瀵х粚閬嶆儍閳х惄ivisibleNode闂傚倸鍊搁崐鎼佸磹閻戣姤鍊块柨鏃堟暜閸嬫挾绮☉妯诲櫧闁活厽鐟╅弻鐔衡偓鐢殿焾娴犙囨⒒閸曨偄顏柡宀嬬節瀹曟﹢濡搁妷銏犱壕闁归棿绀侀崹?闂傚倸鍊峰ù鍥敋瑜忛埀顒佺▓閺呯娀銆佸▎鎾冲唨妞ゆ挾鍋熼悰銉╂⒑閸︻厼鍔嬫い銊ユ噽婢规洘绻濆顓犲幍闂佺粯鍔﹂崜姘舵倶闁秵鐓涢柍褜鍓熼幊鐐哄Ψ閿濆嫮鐩庨梻浣告惈閸燁偊宕愰悽绋跨闁跨喓濮甸悡鏇㈠箹濞ｎ剙鐏柣顓炵灱缁辨帗娼忛妸銉х懖濠电偟鍘х换姗€宕洪敓鐘茬＜婵犲﹤鎳忓鏉梔ivisible闂傚倸鍊搁崐鎼佸磹閻戣姤鍊块柨鏃堟暜閸嬫挾绮☉妯诲櫧闁活厽鐟╅弻鐔兼倻濮楀棙鐣烽梺鎼炲€曢懟顖濈亙闂佹寧绻傞幊搴ㄥ汲濞嗘挻鐓曢柕濞垮劚閳ь剚鎮傚﹢渚€姊虹紒妯忣亜螣婵犲洤纾块煫鍥ㄦ煣缁诲棙銇勯幇鍓佺Ф闁兼澘娼￠弻鈥崇暆鐎ｎ剛袦闂佽鍠掗弲娑㈠煝閹捐绠伴幖绮光偓鏂ュ彠de闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾妤犵偞鐗犻、鏇㈠Χ閸屾矮澹曞┑顔矫畷顒勫储鐎电硶鍋撶憴鍕缂傚秴锕妴浣糕槈濮楀棛鍙嗛梺鍛婁緱閸ㄦ娊寮抽妷銉㈡斀闁绘﹩鍠栭悘閬嶆煕閳哄倻澧电€规洘绻堝鎾閻樼數鍘┑鐘垫暩婵潙煤閿曞倹鍋傞柣鏂垮悑閻撳繐顭跨拠鈥崇仩闁哥喓澧楃粋宥夊级娑旂晬isible闂?
@@ -91,12 +91,12 @@ public:
 	nvvk::Buffer nearbyNodeTempInfoBuffer;
 	nvvk::Buffer nearbyNodeInfoBuffer;
 
-	bool spatialReuse = false;
-	bool temporalReuse = false;
+	bool spatialReuse = (VRPG_SPATIAL_REUSE != 0);
+	bool temporalReuse = (VRPG_TEMPORAL_REUSE != 0);
 	bool temporalReset = false;
 	uint32_t temporalFrameIndex = 0;
 	float temporalBlend = 0.1f;
-	bool ditherSample = true;
+	bool ditherSample = (VRPG_JITTER_SAMPLING != 0);
 	bool rotateOutgoing = true;
 private:
 	OctreeCreateInfo_VRPG setting;

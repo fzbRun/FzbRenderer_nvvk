@@ -46,10 +46,16 @@ struct VRSampleData {
 }
 //---------------------------------------------groupsharedMemory-----------------------------------------
 groupshared OctreeGlobalInfo_VRPG groupGlobalInfo;
-groupshared OctreeNodeInfo_G_VRPG groupOctreeNodeInfo_G[3510];
 //----------------------------------------------Hit Function----------------------------------------------
 bool traceRay(RayDesc ray, inout HitPayload_VRPG payload)
 {
+#ifndef NDEBUG
+    // A NaN/Inf ray can hang the ray traversal and surface as DEVICE_LOST.
+    if (any(isnan(ray.Origin)) || any(isinf(ray.Origin)) ||
+        any(isnan(ray.Direction)) || any(isinf(ray.Direction)))
+        return false;
+#endif
+
     // Initialize inline ray query with no special flags
     RayQuery<RAY_FLAG_NONE> q;
     q.TraceRayInline(topLevelAS, RAY_FLAG_NONE, 0xFF, ray);
@@ -209,22 +215,16 @@ int getNodeIndex_E(float3 hitPos, float3 hitNormal) {
 int getGlobalGLabelFromInfo(int2 info) {
     if (info.x < 0) return -1;
     int label = 0;
-    uint nodeSum = 0;
     for (int l = 0; l < info.x; ++l) {
         label += groupGlobalInfo.layerInfos_G[l].indivisibleNodeCount;
-        nodeSum += 6 * (1u << (l * 3));
     }
-    if (info.x < 4)
-        label += (groupOctreeNodeInfo_G[nodeSum + info.y].label_indivisible >> 1) - 1;
-    else
-        label += (OctreeNodeInfoBuffer_G[info.x][info.y].label_indivisible >> 1) - 1;
+    label += (OctreeNodeInfoBuffer_G[info.x][info.y].label_indivisible >> 1) - 1;
     return label;
 }
 
 // Uniform disk sample in the tangent plane of the current G cluster, then
 // choose the candidate G cluster containing the jittered point.
-int sampleJitteredClusterG(int currentNodeLabel, int currentLayer, int currentNodeIndex,
-                           float3 hitPos, float materialRoughness, inout uint randomSeed) {
+int sampleJitteredClusterG(int currentNodeLabel, int currentLayer, int currentNodeIndex, float3 hitPos, float materialRoughness, inout uint randomSeed) {
     OctreeNodeData_G_VRPG currentNode = OctreeNodeDataBuffer_G[currentLayer][currentNodeIndex];
     float3 normal = normalize(currentNode.meanNormal.xyz + float3(1e-8f));
 
@@ -258,7 +258,7 @@ int sampleJitteredClusterG(int currentNodeLabel, int currentLayer, int currentNo
     }
 
     int2 nearbyNodeInfos[NEARBY_NODE_COUNT_VRPG] = NearbyNodeInfoBuffer[currentNodeLabel].nearbyNodeInfos;
-    int nearbyNodeLimit = clamp(pushConst.nearbyNodeCount, 0, NEARBY_NODE_COUNT_VRPG);
+    int nearbyNodeLimit = clamp(VRPG_NEARBY_NODE_COUNT, 0, NEARBY_NODE_COUNT_VRPG);
     for (int i = 0; i < nearbyNodeLimit; ++i) {
         int2 nearbyInfo = nearbyNodeInfos[i];
         if (nearbyInfo.x < 0) continue;
@@ -310,7 +310,7 @@ bool getNodeAABB_E_VRPG(inout VRSampleData sampleData, inout HitPayload_VRPG pay
     uint normalIndex = getNormalIndex(geoNormal);
     float3 hitPos = payload.hitPos;
 
-    OctreeNodeInfo_G_VRPG nodeInfo_G = groupOctreeNodeInfo_G[normalIndex];
+    OctreeNodeInfo_G_VRPG nodeInfo_G = OctreeNodeInfoBuffer_G[0][normalIndex];
     int nodeLabel_G = int(nodeInfo_G.label_indivisible >> 1) - 1;
     bool hasData = nodeLabel_G >= 0;
     if (!hasData) return false;
@@ -325,7 +325,6 @@ bool getNodeAABB_E_VRPG(inout VRSampleData sampleData, inout HitPayload_VRPG pay
         float3 nodeSize = pushConst.VGBVoxelSize * (1 << (pushConst.maxOctreeLayer - 1));
         float3 nodeStartPos = pushConst.VGBStartPos_Size.xyz;
 
-        int nodeSum = 6; int layerNodeCount = 6;
         for (layerIndex_G = 1; layerIndex_G <= pushConst.maxOctreeLayer; ++layerIndex_G) {
             int3 nodeIndex3 = min(int3((hitPos - nodeStartPos) / nodeSize), 1);
             int subNodeIndex = nodeIndex3.z * 4 + nodeIndex3.y * 2 + nodeIndex3.x;
@@ -334,11 +333,7 @@ bool getNodeAABB_E_VRPG(inout VRSampleData sampleData, inout HitPayload_VRPG pay
             hasData = true;
             indivisible = false;
             int nodeLayerLabel = 0;
-            if (layerIndex_G < 4) {
-                nodeInfo_G = groupOctreeNodeInfo_G[nodeSum + nodeIndex_G];
-                layerNodeCount *= 8;
-                nodeSum += layerNodeCount;
-            } else nodeInfo_G = OctreeNodeInfoBuffer_G[layerIndex_G][nodeIndex_G];
+            nodeInfo_G = OctreeNodeInfoBuffer_G[layerIndex_G][nodeIndex_G];
 
             nodeLayerLabel = int(nodeInfo_G.label_indivisible >> 1) - 1;
             hasData = nodeLayerLabel >= 0;
@@ -357,13 +352,15 @@ bool getNodeAABB_E_VRPG(inout VRSampleData sampleData, inout HitPayload_VRPG pay
     }
     if (!hitIndivisible) return false;
 
-    if (pushConst.ditherSample == 1) {
+#if VRPG_JITTER_SAMPLING == 1
+    {
         float materialRoughness = payload.material.roughness;
         if (payload.material.type == uint(MaterialType::Diffuse))
             materialRoughness = 1.0f;
         nodeLabel_G = sampleJitteredClusterG(nodeLabel_G, layerIndex_G, nodeIndex_G,
                                              hitPos, materialRoughness, payload.randomSeed);
     }
+#endif
 
     float weightSampleProbability = rand(payload.randomSeed);
     float3 outgoing = mul(pushConst.randomRotateMatrix, payload.outgoing);
@@ -373,7 +370,7 @@ bool getNodeAABB_E_VRPG(inout VRSampleData sampleData, inout HitPayload_VRPG pay
     uint indivisibleNodeCount_G = groupGlobalInfo.indivisibleNodeCount_G;
 
     // Spatiotemporal reservoir: one selected sample per (outgoing, G).
-    if (pushConst.spatialRuse == 1) {
+    if ((VRPG_SPATIAL_REUSE || VRPG_TEMPORAL_REUSE) == 1) {
         int reservoirIndex = nodeLabel_G * OUTGOING_COUNT_VRPG + outgoingIndex;
         ReservoirSample_VRPG reservoir = ReservoirBuffer[reservoirIndex];
         if (reservoir.weight <= 0.0f || reservoir.p_hat <= 0.0f) return false;
@@ -404,8 +401,8 @@ bool getNodeAABB_E_VRPG(inout VRSampleData sampleData, inout HitPayload_VRPG pay
 
     sampleData.wSum = wSum;
     #ifdef SpatialReuse_VRPG
-    sampleData.pdf = (pushConst.spatialRuse == 1 ? candidateSampleData2Buffer[candidateNodeStartIndex + candidateIndex].p_hat : candidateSampleDataBuffer[candidateNodeStartIndex + candidateIndex].p_hat) / wSum;
-    sampleData.aabb = pushConst.spatialRuse == 1 ? candidateSampleAABBBuffer[candidateNodeStartIndex + candidateIndex] : 
+    sampleData.pdf = ((VRPG_SPATIAL_REUSE || VRPG_TEMPORAL_REUSE) == 1 ? candidateSampleData2Buffer[candidateNodeStartIndex + candidateIndex].p_hat : candidateSampleDataBuffer[candidateNodeStartIndex + candidateIndex].p_hat) / wSum;
+    sampleData.aabb = (VRPG_SPATIAL_REUSE || VRPG_TEMPORAL_REUSE) == 1 ? candidateSampleAABBBuffer[candidateNodeStartIndex + candidateIndex] : 
                                              candidateLeafNodeDataBuffer[nodeLabel_G * Candidate_Samples_Count + candidateIndex].aabb;
     #else
     sampleData.pdf = candidateSampleDataBuffer[candidateNodeStartIndex + candidateIndex].p_hat / wSum;
@@ -466,6 +463,11 @@ float getPgPdf_SPReuse(float wSum, float3 bsdfSamplePos, float3 bsdfSampleNormal
 }
 
 float getPgPdf2(float wSum, int label_G, int outgoingIndex, float3 bsdfSamplePos, float3 bsdfSampleNormal, float3 hitPos, float3 sampleDir, float3 bsdf_cosine) {
+    int gCount = int(GlobalInfoBuffer[0].indivisibleNodeCount_G);
+    if (label_G < 0 || label_G >= gCount ||
+        outgoingIndex < 0 || outgoingIndex >= OUTGOING_COUNT_VRPG)
+        return 0.0f;
+
     uint nodeIndex_E = getNodeIndex_E(hitPos, bsdfSampleNormal);
 
     float ESum = 0.0f; float wi_ori = 0.0f;
@@ -542,15 +544,6 @@ void computeMain_VRPG(uint2 threadIndex: SV_DispatchThreadID, uint2 groupThreadI
     uint groupThreadIndex_linear = groupThreadIndex.y * FZB_PATHGUIDING_THREADGROUP_SIZE_X + groupThreadIndex.x;
     uint threadGroupThreadTotalCount = FZB_PATHGUIDING_THREADGROUP_SIZE_X * FZB_PATHGUIDING_THREADGROUP_SIZE_Y;
     if (groupThreadIndex_linear == 0) groupGlobalInfo = GlobalInfoBuffer[0];
-    for (int i = groupThreadIndex_linear; i < 3510; i += threadGroupThreadTotalCount) {
-        int layerIndex = 0; int nodeIndex = i; int layerNodeCount = 6;
-        for (; layerIndex < 4; ++layerIndex) {
-            if (nodeIndex < layerNodeCount) break;
-            nodeIndex -= layerNodeCount;
-            layerNodeCount *= 8;
-        }
-        groupOctreeNodeInfo_G[i] = OctreeNodeInfoBuffer_G[layerIndex][nodeIndex];
-    }
     GroupMemoryBarrierWithGroupSync();
 
     float2 launchID = (float2)threadIndex;
@@ -643,7 +636,7 @@ void computeMain_VRPG(uint2 threadIndex: SV_DispatchThreadID, uint2 groupThreadI
 
                 float bsdfSample_pgPdf = 0.0f;
                 if (useVRPG && hit) {
-                    if (pushConst.spatialRuse == 1) {
+                    if ((VRPG_SPATIAL_REUSE || VRPG_TEMPORAL_REUSE) == 1) {
                         bsdfSample_pgPdf = getPgPdf_SPReuse(pgSampleData.wSum,
                             payload.hitPos, payload.hitNormal, hitPos,
                             bsdfSampleDir, bsdfSample_bsdf_cosine, threadIndex);
@@ -723,15 +716,6 @@ void computeMain_VRPG(uint2 threadIndex: SV_DispatchThreadID, uint2 groupThreadI
     uint groupThreadIndex_linear = groupThreadIndex.y * FZB_PATHGUIDING_THREADGROUP_SIZE_X + groupThreadIndex.x;
     uint threadGroupThreadTotalCount = FZB_PATHGUIDING_THREADGROUP_SIZE_X * FZB_PATHGUIDING_THREADGROUP_SIZE_Y;
     if (groupThreadIndex_linear == 0) groupGlobalInfo = GlobalInfoBuffer[0];
-    for (int i = groupThreadIndex_linear; i < 3510; i += threadGroupThreadTotalCount) {
-        int layerIndex = 0; int nodeIndex = i; int layerNodeCount = 6;
-        for (; layerIndex < 4; ++layerIndex) {
-            if (nodeIndex < layerNodeCount) break;
-            nodeIndex -= layerNodeCount;
-            layerNodeCount *= 8;
-        }
-        groupOctreeNodeInfo_G[i] = OctreeNodeInfoBuffer_G[layerIndex][nodeIndex];
-    }
     GroupMemoryBarrierWithGroupSync();
 
     float2 launchID = (float2)threadIndex;
@@ -747,7 +731,6 @@ void computeMain_VRPG(uint2 threadIndex: SV_DispatchThreadID, uint2 groupThreadI
 
     HitPayload_VRPG payload;
     HitPayload_VRPG vrPayload;
-    HitPayload_VRPG bsdfPayload;
 
     uint pgSeed = xxhash32(uint3(threadIndex, pushConst.frameIndex));
 
@@ -804,108 +787,261 @@ void computeMain_VRPG(uint2 threadIndex: SV_DispatchThreadID, uint2 groupThreadI
             //-------------------------------------------------- PG candidate --------------------------------------------------
             payload.randomSeed = pgSeed;
 
+#if VRPG_PATH_SAMPLE_MODE == 0
             VRSampleData vrSampleData;
+#else
+            VRSampleData vrSampleData = {};
+#endif
             bool getVrSample = getNodeAABB_E_VRPG(vrSampleData, payload, threadIndex);
             pgSeed = payload.randomSeed;
 
-            vrPayload = payload;
-            vrPayload.randomSeed = pgSeed;
+            float randomNumber = 0.0f;
+            #if VRPG_PATH_SAMPLE_MODE == 1
+            {
+                HitPayload_VRPG bsdfPayload;
+                // One-sample MIS mixture: choose guide or BSDF with probability
+                // q, trace only that ray, then apply the balance-heuristic
+                // weight for the chosen technique.
+                getDirectionLight(payload, sceneInfo);
+                accumulatedRadiance += (payload.material.emissive + payload.directionLightRadiance) * bsdf_cosine_pdf;
 
-            bool vrHit = false;
-            bool validSample = false;
+                float3 previousHitPos = payload.hitPos;
+                bsdfPayload = payload;
+                bsdfPayload.randomSeed = pgSeed;
+                getDirectionLight(bsdfPayload, sceneInfo);
+                BSDF_SAMPLE(bsdfPayload);
 
-            if (getVrSample) {
-                vrPayload.incidence = vrSampleData.sampleDir;
+                float3 bsdfDir = bsdfPayload.incidence;
+                float3 bsdfCos = bsdfPayload.bsdf * abs(dot(bsdfDir, bsdfPayload.hitNormal));
+                float bsdfPdf = bsdfPayload.pdf;
+                if (!(bsdfPdf >= 0.0f) || isinf(bsdfPdf)) bsdfPdf = 0.0f;
 
-                ray.Origin = offsetRay(payload.hitPos, payload.hitNormal);
-                ray.Direction = vrSampleData.sampleDir;
-                vrHit = traceRay(ray, vrPayload);
+                float guidePdf = vrSampleData.pdf;
+                if (!(guidePdf >= 0.0f) || isinf(guidePdf)) guidePdf = 0.0f;
 
-                if (vrHit) {
-                    validSample = checkPointInAABB(vrPayload.hitPos, vrSampleData.aabb);
-                    validSample = validSample && (getNormalIndex(vrPayload.hitNormal) == vrSampleData.normalIndex);
-                    validSample = validSample && (vrSampleData.pdf > 0.0f);
+                float3 guideDir = vrSampleData.sampleDir;
+                float3 guideBsdfCos = float3(0.0f);
+                float guideBsdfPdf = 0.0f;
+                bool guideValid = getVrSample && guidePdf > 0.0f;
+                if (guideValid) {
+                    float cosine = abs(dot(payload.hitNormal, guideDir));
+                    guideBsdfCos = cosine * getBSDF(payload.material, guideDir,
+                                                     payload.hitNormal, payload.outgoing,
+                                                     payload.TBN, payload.isExt);
+                    if (any(isnan(guideBsdfCos)) || any(isinf(guideBsdfCos)))
+                        guideBsdfCos = float3(0.0f);
+                    if (!any(guideBsdfCos > 0.0f))
+                        guideValid = false;
+
+                    guideBsdfPdf = getPdf(payload.material, guideDir, payload.hitNormal,
+                                          payload.outgoing, payload.TBN, payload.isExt);
+                    if (!(guideBsdfPdf >= 0.0f) || isinf(guideBsdfPdf)) guideBsdfPdf = 0.0f;
+                }
+
+                bool bsdfValid = bsdfPdf > 0.0f && any(bsdfCos > 0.0f);
+                float q = guideValid ? (bsdfValid ? 0.5f : 1.0f) : 0.0f;
+                if (!(q >= 0.0f) || isinf(q)) q = 0.0f;
+                q = clamp(q, 0.0f, 1.0f);
+                bool chooseGuide = guideValid && rand(pgSeed) < q;
+
+                if (chooseGuide) {
+                    vrPayload = payload;
+                    vrPayload.incidence = guideDir;
+                    ray.Origin = offsetRay(payload.hitPos, payload.hitNormal);
+                    ray.Direction = guideDir;
+                    bool guideHit = traceRay(ray, vrPayload);
+                    if (guideHit) {
+                        float wg = guidePdf / max(guidePdf + guideBsdfPdf, 1e-16f);
+                        payload = vrPayload;
+                        payload.incidence = guideDir;
+                        bsdf_cosine_pdf *= wg * guideBsdfCos / max(guidePdf * q, 1e-16f);
+                        hit = true;
+                    }
+                    else {
+                        payload.incidence = guideDir;
+                        ray.Direction = guideDir;
+                        bsdf_cosine_pdf *= 1.0f / max(q, 1e-16f);
+                        hit = false;
+                    }
+                }
+                else {
+                    ray.Origin = offsetRay(payload.hitPos, payload.hitNormal);
+                    ray.Direction = bsdfDir;
+                    bool bsdfHit = traceRay(ray, bsdfPayload);
+                    payload = bsdfPayload;
+                    payload.incidence = bsdfDir;
+
+                    float pgPdf = 0.0f;
+                    if (bsdfHit) {
+                        if ((VRPG_SPATIAL_REUSE || VRPG_TEMPORAL_REUSE) == 1) {
+                            pgPdf = getPgPdf_SPReuse(vrSampleData.wSum,
+                                payload.hitPos, payload.hitNormal, previousHitPos,
+                                bsdfDir, bsdfCos, threadIndex);
+                        }
+                        else {
+                            pgPdf = getPgPdf2(vrSampleData.wSum, vrSampleData.nodeLabel_G,
+                                vrSampleData.outgoingIndex, payload.hitPos, payload.hitNormal,
+                                previousHitPos, bsdfDir, bsdfCos);
+                        }
+                        if (!(pgPdf >= 0.0f) || isinf(pgPdf)) pgPdf = 0.0f;
+                    }
+
+                    if (bsdfHit) {
+                        float wb = bsdfPdf / max(bsdfPdf + pgPdf, 1e-16f);
+                        bsdf_cosine_pdf *= wb * bsdfCos / max(bsdfPdf * (1.0f - q), 1e-16f);
+                    }
+                    else {
+                        bsdf_cosine_pdf *= 1.0f / max(1.0f - q, 1e-16f);
+                    }
+                    hit = bsdfHit;
                 }
             }
+            #elif VRPG_PATH_SAMPLE_MODE == 2
+            {
+                HitPayload_VRPG bsdfPayload;
+                // Single-ray mixture: use guide sampling when available,
+                // otherwise fall back to BSDF sampling.
+                getDirectionLight(payload, sceneInfo);
+                accumulatedRadiance += (payload.material.emissive + payload.directionLightRadiance) * bsdf_cosine_pdf;
 
-            //-------------------------------------------------- BSDF candidate -------------------------------------------------
-            bsdfPayload = payload;
-            bsdfPayload.randomSeed = pgSeed;
+                bool oneHit = false;
+                if (getVrSample && vrSampleData.pdf > 0.0f) {
+                    vrPayload = payload;
+                    vrPayload.incidence = vrSampleData.sampleDir;
+                    ray.Origin = offsetRay(payload.hitPos, payload.hitNormal);
+                    ray.Direction = vrSampleData.sampleDir;
+                    oneHit = traceRay(ray, vrPayload);
 
-            getDirectionLight(bsdfPayload, sceneInfo);
-            BSDF_SAMPLE(bsdfPayload);
-
-            // Direct lighting at the current hit is independent of which outgoing direction is selected.
-            accumulatedRadiance += (bsdfPayload.material.emissive + bsdfPayload.directionLightRadiance) * bsdf_cosine_pdf;
-
-            float3 bsdfSampleDir = bsdfPayload.incidence;
-            float3 bsdfSample_bsdf_cosine = bsdfPayload.bsdf * abs(dot(bsdfSampleDir, bsdfPayload.hitNormal));
-            float bsdfSample_bsdfPdf = bsdfPayload.pdf;
-            if (!(bsdfSample_bsdfPdf >= 0.0f) || isinf(bsdfSample_bsdfPdf)) bsdfSample_bsdfPdf = 0.0f;
-
-            ray.Origin = offsetRay(payload.hitPos, payload.hitNormal);
-            ray.Direction = bsdfSampleDir;
-            bool bsdfHit = traceRay(ray, bsdfPayload);
-            pgSeed = bsdfPayload.randomSeed;
-
-            //-------------------------------------------------- MIS weights ----------------------------------------------------
-            float3 pgSample_bsdf_cosine = float3(0.0f);
-            float pgSample_bsdfPdf = 0.0f;
-            float pgSample_weight = 0.0f;
-
-            if (validSample) {
-                float cosine = abs(dot(payload.hitNormal, vrSampleData.sampleDir));
-                pgSample_bsdf_cosine = cosine * getBSDF(payload.material, vrSampleData.sampleDir, payload.hitNormal, payload.outgoing, payload.TBN, payload.isExt);
-                pgSample_bsdfPdf = getPdf(payload.material, vrSampleData.sampleDir, payload.hitNormal, payload.outgoing, payload.TBN, payload.isExt);
-                if (!(pgSample_bsdfPdf >= 0.0f) || isinf(pgSample_bsdfPdf)) pgSample_bsdfPdf = 0.0f;
-                pgSample_weight = vrSampleData.pdf / max(vrSampleData.pdf + pgSample_bsdfPdf, 1e-16f);
-            }
-
-            float bsdfSample_pgPdf = 0.0f;
-            if (validSample && bsdfHit) {
-                if (pushConst.spatialRuse == 1) {
-                    bsdfSample_pgPdf = getPgPdf_SPReuse(vrSampleData.wSum,
-                        bsdfPayload.hitPos, bsdfPayload.hitNormal, payload.hitPos,
-                        bsdfSampleDir, bsdfSample_bsdf_cosine, threadIndex);
-                } else {
-                    bsdfSample_pgPdf = getPgPdf2(vrSampleData.wSum, vrSampleData.nodeLabel_G, vrSampleData.outgoingIndex,
-                        bsdfPayload.hitPos, bsdfPayload.hitNormal, payload.hitPos,
-                        bsdfSampleDir, bsdfSample_bsdf_cosine);
+                    if (oneHit) {
+                        float3 guideBsdfCosine = abs(dot(payload.hitNormal, vrSampleData.sampleDir)) *
+                            getBSDF(payload.material, vrSampleData.sampleDir, payload.hitNormal,
+                                    payload.outgoing, payload.TBN, payload.isExt);
+                        payload = vrPayload;
+                        payload.incidence = vrSampleData.sampleDir;
+                        bsdf_cosine_pdf *= guideBsdfCosine / max(vrSampleData.pdf, 1e-16f);
+                        hit = true;
+                    }
+                    else {
+                        payload.incidence = vrSampleData.sampleDir;
+                        ray.Direction = vrSampleData.sampleDir;
+                        hit = false;
+                    }
                 }
-                if (!(bsdfSample_pgPdf >= 0.0f) || isinf(bsdfSample_pgPdf)) bsdfSample_pgPdf = 0.0f;
+                else {
+                    bsdfPayload = payload;
+                    bsdfPayload.randomSeed = pgSeed;
+                    getDirectionLight(bsdfPayload, sceneInfo);
+                    BSDF_SAMPLE(bsdfPayload);
+                    float3 bsdfDir = bsdfPayload.incidence;
+                    float3 bsdfCos = bsdfPayload.bsdf * abs(dot(bsdfDir, bsdfPayload.hitNormal));
+                    float bsdfPdf = bsdfPayload.pdf;
+                    ray.Origin = offsetRay(payload.hitPos, payload.hitNormal);
+                    ray.Direction = bsdfDir;
+                    oneHit = traceRay(ray, bsdfPayload);
+                    payload = bsdfPayload;
+                    payload.incidence = bsdfDir;
+                    bsdf_cosine_pdf *= bsdfCos / max(bsdfPdf, 1e-16f);
+                    hit = oneHit;
+                }
             }
+            #else
+            {
+                vrPayload = payload;
+                vrPayload.randomSeed = pgSeed;
 
-            float bsdfSample_weight = bsdfSample_bsdfPdf / max(bsdfSample_pgPdf + bsdfSample_bsdfPdf, 1e-16f);
+                bool vrHit = false;
+                bool validSample = false;
 
-            #ifndef NDEBUG
-            if (bounceDepth > 0) {
-                float3 pgValue_temp = (bsdfPayload.material.emissive + bsdfPayload.directionLightRadiance) * bsdf_cosine_pdf;
-                pgValue += pgValue_temp;
-                pgValue2 += pgValue_temp * pgValue_temp;
+                if (getVrSample) {
+                    vrPayload.incidence = vrSampleData.sampleDir;
+
+                    ray.Origin = offsetRay(payload.hitPos, payload.hitNormal);
+                    ray.Direction = vrSampleData.sampleDir;
+                    vrHit = traceRay(ray, vrPayload);
+
+                    if (vrHit) {
+                        validSample = checkPointInAABB(vrPayload.hitPos, vrSampleData.aabb);
+                        validSample = validSample && (getNormalIndex(vrPayload.hitNormal) == vrSampleData.normalIndex);
+                        validSample = validSample && (vrSampleData.pdf > 0.0f);
+                    }
+                }
+
+                //-------------------------------------------------- BSDF candidate -------------------------------------------------
+                float3 previousHitPos = payload.hitPos;
+
+                float3 pgSample_bsdf_cosine = float3(0.0f);
+                float pgSample_bsdfPdf = 0.0f;
+                float pgSample_weight = 0.0f;
+                if (validSample) {
+                    float cosine = abs(dot(payload.hitNormal, vrSampleData.sampleDir));
+                    pgSample_bsdf_cosine = cosine * getBSDF(payload.material, vrSampleData.sampleDir,
+                                                            payload.hitNormal, payload.outgoing,
+                                                            payload.TBN, payload.isExt);
+                    pgSample_bsdfPdf = getPdf(payload.material, vrSampleData.sampleDir,
+                                              payload.hitNormal, payload.outgoing,
+                                              payload.TBN, payload.isExt);
+                    if (!(pgSample_bsdfPdf >= 0.0f) || isinf(pgSample_bsdfPdf)) pgSample_bsdfPdf = 0.0f;
+                    pgSample_weight = vrSampleData.pdf / max(vrSampleData.pdf + pgSample_bsdfPdf, 1e-16f);
+                }
+
+                getDirectionLight(payload, sceneInfo);
+
+                // BSDF_SAMPLE scales directionLightRadiance by the material
+                // BRDF, so it must run before the direct-light contribution.
+                BSDF_SAMPLE(payload);
+
+                // Direct lighting at the current hit is independent of which outgoing direction is selected.
+                accumulatedRadiance += (payload.material.emissive + payload.directionLightRadiance) * bsdf_cosine_pdf;
+
+                // Reuse `payload` for the BSDF trace. Keep only the previous hit
+                // position needed by the guide-PDF evaluation below.
+
+                float3 bsdfSampleDir = payload.incidence;
+                float3 bsdfSample_bsdf_cosine = payload.bsdf * abs(dot(bsdfSampleDir, payload.hitNormal));
+                float bsdfSample_bsdfPdf = payload.pdf;
+                if (!(bsdfSample_bsdfPdf >= 0.0f) || isinf(bsdfSample_bsdfPdf)) bsdfSample_bsdfPdf = 0.0f;
+
+                ray.Origin = offsetRay(previousHitPos, payload.hitNormal);
+                ray.Direction = bsdfSampleDir;
+                bool bsdfHit = traceRay(ray, payload);
+                pgSeed = payload.randomSeed;
+
+                float bsdfSample_pgPdf = 0.0f;
+                if (validSample && bsdfHit) {
+                    if ((VRPG_SPATIAL_REUSE || VRPG_TEMPORAL_REUSE) == 1) {
+                        bsdfSample_pgPdf = getPgPdf_SPReuse(vrSampleData.wSum,
+                            payload.hitPos, payload.hitNormal, previousHitPos,
+                            bsdfSampleDir, bsdfSample_bsdf_cosine, threadIndex);
+                    } else {
+                        bsdfSample_pgPdf = getPgPdf2(vrSampleData.wSum, vrSampleData.nodeLabel_G, vrSampleData.outgoingIndex,
+                            payload.hitPos, payload.hitNormal, previousHitPos,
+                            bsdfSampleDir, bsdfSample_bsdf_cosine);
+                    }
+                    if (!(bsdfSample_pgPdf >= 0.0f) || isinf(bsdfSample_pgPdf)) bsdfSample_pgPdf = 0.0f;
+                }
+
+                float bsdfSample_weight = bsdfSample_bsdfPdf / max(bsdfSample_pgPdf + bsdfSample_bsdfPdf, 1e-16f);                //-------------------------------------------------- choose sample -------------------------------------------------
+                // A technique whose contribution or MIS weight is zero cannot contribute; do not waste a path on it.
+                bool pgAvailable = validSample && (pgSample_weight > 0.0f) && any(pgSample_bsdf_cosine > 0.0f);
+                bool bsdfAvailable = (bsdfSample_bsdfPdf > 0.0f) && (bsdfSample_weight > 0.0f) && any(bsdfSample_bsdf_cosine > 0.0f);
+                if (!pgAvailable && !bsdfAvailable) break;
+
+                float pgSample_selectProbability = pgAvailable ? (bsdfAvailable ? 0.5f : 1.0f) : 0.0f;
+                randomNumber = rand(pgSeed);
+
+                if (randomNumber < pgSample_selectProbability) {
+                    payload = vrPayload;
+                    payload.incidence = vrSampleData.sampleDir;
+                    bsdf_cosine_pdf *= pgSample_weight * pgSample_bsdf_cosine / max(vrSampleData.pdf, 1e-16f) / max(pgSample_selectProbability, 1e-16f);
+                    hit = vrHit;
+                }
+                else {
+                    // payload already contains the BSDF trace result.
+                    bsdf_cosine_pdf *= bsdfSample_weight * bsdfSample_bsdf_cosine / max(bsdfSample_bsdfPdf, 1e-16f) / max(1.0f - pgSample_selectProbability, 1e-16f);
+                    hit = bsdfHit;
+                }
             }
             #endif
-
-            //-------------------------------------------------- choose sample -------------------------------------------------
-            // A technique whose contribution or MIS weight is zero cannot contribute; do not waste a path on it.
-            bool pgAvailable = validSample && (pgSample_weight > 0.0f) && any(pgSample_bsdf_cosine > 0.0f);
-            bool bsdfAvailable = (bsdfSample_bsdfPdf > 0.0f) && (bsdfSample_weight > 0.0f) && any(bsdfSample_bsdf_cosine > 0.0f);
-            if (!pgAvailable && !bsdfAvailable) break;
-
-            float pgSample_selectProbability = pgAvailable ? (bsdfAvailable ? 0.5f : 1.0f) : 0.0f;
-            float randomNumber = rand(pgSeed);
-
-            if (randomNumber < pgSample_selectProbability) {
-                payload = vrPayload;
-                payload.incidence = vrSampleData.sampleDir;
-                bsdf_cosine_pdf *= pgSample_weight * pgSample_bsdf_cosine / max(vrSampleData.pdf, 1e-16f) / max(pgSample_selectProbability, 1e-16f);
-                hit = vrHit;
-            }
-            else {
-                payload = bsdfPayload;
-                bsdf_cosine_pdf *= bsdfSample_weight * bsdfSample_bsdf_cosine / max(bsdfSample_bsdfPdf, 1e-16f) / max(1.0f - pgSample_selectProbability, 1e-16f);
-                hit = bsdfHit;
-            }
-
             if (!hit) {
                 // Let the next iteration add the sky contribution with the selected direction.
                 ray.Direction = payload.incidence;
@@ -939,7 +1075,12 @@ void computeMain_VRPG(uint2 threadIndex: SV_DispatchThreadID, uint2 groupThreadI
     pgValue2Image[threadIndex].xyz = pgValue2;
     #endif
 
-    if (pushConst.maxFrameCount > 1 && pushConst.frameIndex > 0) {
+    if (pushConst.frameIndex >= pushConst.maxFrameCount && pushConst.maxFrameCount > 1) {
+        float a = 0.5f;
+        float3 old_color = outImage[int2(launchID)].xyz;
+        outImage[int2(launchID)] = float4(lerp(old_color, accumulatedRadiance, a), 1.0f);
+    }
+    else if (pushConst.maxFrameCount > 1 && pushConst.frameIndex > 0) {
         float a = 1.0f / float(pushConst.frameIndex + 1);
         float3 old_color = outImage[int2(launchID)].xyz;
         outImage[int2(launchID)] = float4(lerp(old_color, accumulatedRadiance, a), 1.0f);

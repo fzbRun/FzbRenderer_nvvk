@@ -68,6 +68,7 @@ bool traceRay(RayDesc ray, inout CallablePayload payload)
 
         // payload.hitNormal = normalize(mul(worldToObject, geoNormal).xyz);
         payload.hitNormal = normalize(mul(geoNormal, transpose(worldToObject)).xyz);
+
         return true;
     }
     return false;
@@ -151,8 +152,9 @@ void computeMain_GetDebugClusterG(uint threadIndex: SV_DispatchThreadID) {
     if (nodeLabel_G >= 0 && nodeLabel_G < int(GlobalInfoBuffer[0].indivisibleNodeCount_G)) {
         uint2 debugClusterInfo = IndivisibleNodeInfoBuffer_G[nodeLabel_G];
         OctreeNodeData_G_VRPG debugClusterData = OctreeNodeDataBuffer_G[debugClusterInfo.x][debugClusterInfo.y];
-        printf("cluster debug: layer=%d node=%d aabb=(%f %f %f)-(%f %f %f)\n",
+        printf("cluster debug: layer=%d node=%d\nnormal: %f %f %f\naabb=(%f %f %f)-(%f %f %f)\n",
                debugClusterInfo.x, debugClusterInfo.y,
+               debugClusterData.meanNormal.x, debugClusterData.meanNormal.y, debugClusterData.meanNormal.z,
                debugClusterData.aabb.minimum.x, debugClusterData.aabb.minimum.y, debugClusterData.aabb.minimum.z,
                debugClusterData.aabb.maximum.x, debugClusterData.aabb.maximum.y, debugClusterData.aabb.maximum.z);
     }
@@ -219,13 +221,6 @@ VSout vertexMain(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID
             CandidateSampleData_VRPG candidateNodeData = candidateSampleDataBuffer[candidateIndex];
             CandidateSubTreeInfo_VRPG candidateSubTree = candidateSubTreeInfoBuffer[pushConst.globalInfoAddress.clusterIndex_G * Candidate_Samples_Count + instanceIndex];
 
-            if (pushConst.frameIndex == 2 && instanceIndex == 0) {
-                printf("CAND cluster=%d out=%d subTree=%d w=%f p_hat=%f\n",
-                       pushConst.globalInfoAddress.clusterIndex_G,
-                       pushConst.outgoingIndex,
-                       candidateSubTree.subTreeNodeIndex_layer,
-                       candidateNodeData.w, candidateNodeData.p_hat);
-            }
             show = candidateSubTree.subTreeNodeIndex_layer >= 0;
             if (pushConst.mode2 == 1) show &= candidateNodeData.w > 0.0f;
             if (!show) {

@@ -60,3 +60,5 @@ _downloaded_resources/
 *.exr
 *.bin
 #.vscode/settings.json
+
+result/nsight*

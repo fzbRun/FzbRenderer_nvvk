@@ -4,6 +4,7 @@
 #include <common/Shader/Shader.h>
 #include <nvvk/compute_pipeline.hpp>
 #include <nvvk/default_structs.hpp>
+#include <cstdlib>
 
 using namespace FzbRenderer;
 
@@ -132,18 +133,12 @@ void VRPGRenderer::uiRender() {
 		PE::end();
 		ImGui::TextDisabled("Frame: %d", pushConstant.frameIndex);
 
-		// Optional VRPG components. M/K/S are compile-time capacities in this first port.
-		UIModified |= ImGui::Checkbox("Spatial Reuse", &octree->spatialReuse);
-		if (ImGui::Checkbox("Temporal Reuse", &octree->temporalReuse)) {
-			octree->temporalReset = true;
-			UIModified = true;
-		}
-		ImGui::BeginDisabled(!octree->temporalReuse);
-		UIModified |= ImGui::SliderFloat("Temporal Blend", &octree->temporalBlend, 0.01f, 1.0f, "%.2f");
-		ImGui::EndDisabled();
-		UIModified |= ImGui::Checkbox("Jitter Sampling", &octree->ditherSample);
-		UIModified |= ImGui::SliderFloat("Jitter Radius", &jitterRadiusScale, 0.0f, 5.0f, "%.1f");
-		UIModified |= ImGui::SliderInt("Nearby Clusters", &nearbyNodeCount, 1, NEARBY_NODE_COUNT_VRPG);
+		// Compile-time VRPG components.
+		ImGui::TextDisabled("Spatial Reuse: %d  Temporal Reuse: %d", VRPG_SPATIAL_REUSE, VRPG_TEMPORAL_REUSE);
+		ImGui::TextDisabled("Jitter: %d  Nearby: %d",
+			VRPG_JITTER_SAMPLING, VRPG_NEARBY_NODE_COUNT);
+		UIModified |= ImGui::SliderFloat("Jitter Radius", &jitterRadiusScale, 0.0f, 10.0f, "%.2f");
+		ImGui::TextDisabled("Path Sampling Mode: %d", VRPG_PATH_SAMPLE_MODE);
 		UIModified |= ImGui::Checkbox("Rotate Outgoing", &octree->rotateOutgoing);
 		UIModified |= ImGui::Checkbox("Rebuild Per Frame", &rebuildPerFrame);
 		ImGui::TextDisabled("M=%d  K=%d  S=%d  (compile-time)",
@@ -310,6 +305,11 @@ void VRPGRenderer::preRender() {
 	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
 
 	Scene& scene = Application::sceneResource;
+	if (Application::UIModified || scene.cameraChange || rebuildPerFrame ||
+		!renderStaticScene || frameIndex == 0 ||
+		octree->spatialReuse || octree->temporalReuse) {
+		octreeDirty = true;
+	}
 	if (scene.cameraChange) {
 		resetFrame();
 		octree->temporalReset = true;
@@ -338,9 +338,10 @@ void VRPGRenderer::preRender() {
 	octree->preRender();
 	pushConstant.spatialRuse = (octree->spatialReuse || octree->temporalReuse) ? 1 : 0;
 
-	pushConstant.ditherSample = octree->ditherSample;
+	pushConstant.ditherSample = VRPG_JITTER_SAMPLING;
 	pushConstant.jitterRadiusScale = jitterRadiusScale;
-	pushConstant.nearbyNodeCount = nearbyNodeCount;
+	pushConstant.nearbyNodeCount = VRPG_NEARBY_NODE_COUNT;
+	pushConstant.pathSampleMode = VRPG_PATH_SAMPLE_MODE;
 
 	pushConstant.randomRotateMatrix = octree->pushConstant.randomRotateMatrix;
 
@@ -361,7 +362,7 @@ void VRPGRenderer::render(VkCommandBuffer* cmdPtr) {
 	NVVK_DBG_SCOPE(cmd);
 
 	updateDataPerFrame(cmd);
-	if (pushConstant.frameIndex >= maxFrames && maxFrames > 1) return;
+	//if (pushConstant.frameIndex >= maxFrames && maxFrames > 1) return;
 
 	if (rebuildPerFrame || !renderStaticScene || frameIndex == 0) {
 		rasterVoxelization->render(cmd);
@@ -375,10 +376,19 @@ void VRPGRenderer::render(VkCommandBuffer* cmdPtr) {
 		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 		lightInject->render(cmd);
 		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+		octreeDirty = true;
 	}
 	++frameIndex;
 
-	octree->render(cmd);
+	if (octreeDirty) {
+		octree->renderStatic(cmd);
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+		octreeDirty = false;
+	}
+
+	// Leaf selection, hit tests and weights contain per-frame random sampling,
+	// so they must run even when the structural tree is cached.
+	octree->renderCandidates(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	
 	pathGuiding(cmd);

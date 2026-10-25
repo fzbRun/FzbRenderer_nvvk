@@ -189,7 +189,7 @@ groupshared OctreeNodeData_G_VRPG groupNodeDataG;
 
 //-------------------------------------------------------------------------------------------------------------------------
 
-#define LIGHTCUT_RELATIVE_ERROR 0.0005f
+#define LIGHTCUT_RELATIVE_ERROR 0.0001f
 struct LightCutNode {
     int layerIndex;
     int nodeIndex;
@@ -211,11 +211,8 @@ void computeMain_getCandidateNodes(uint threadIndex: SV_DispatchThreadID, uint t
 
     uint2 indivisibleNodeInfo = IndivisibleNodeInfoBuffer_G[threadIndex];
     OctreeNodeData_G_VRPG nodeData_G = OctreeNodeDataBuffer_G[indivisibleNodeInfo.x][indivisibleNodeInfo.y];
-    // float3 nodePos_G = (nodeData_G.aabb.maximum + nodeData_G.aabb.minimum) * 0.5f;
-    uint cutFrame = pushConst.stableCandidateCut != 0 ? 0u : (uint)pushConst.frameIndex;
-    uint seed = xxhash32(uint3(threadIndex, 0, cutFrame));
-    float3 randXYZ = 0.5f;//float3(rand(seed), rand(seed), rand(seed));
-    float3 nodePos_G = randXYZ * (nodeData_G.aabb.maximum - nodeData_G.aabb.minimum) + nodeData_G.aabb.minimum;
+    // Candidate cut always uses the cluster center.
+    float3 nodePos_G = (nodeData_G.aabb.maximum + nodeData_G.aabb.minimum) * 0.5f;
 
     LightCutNode cutNodes[Candidate_Samples_Count];
     cutNodes[0].layerIndex = -1;
@@ -243,7 +240,7 @@ void computeMain_getCandidateNodes(uint threadIndex: SV_DispatchThreadID, uint t
             // The minimum AABB projection along the light normal is the
             // near corner per axis. If even that projection is >= dot(n, G),
             // every point of the node is in front of G along n.
-            if (pushConst.lightBackfaceCull != 0 && length(node_E.meanNormal.xyz) > 1e-6f) {
+            if (length(node_E.meanNormal.xyz) > 1e-6f) {
                 float3 lightNormal = normalize(node_E.meanNormal.xyz);
                 float3 lightMin = node_E.aabb.minimum;
                 float3 lightMax = node_E.aabb.maximum;
@@ -483,11 +480,11 @@ void computeMain_clusterPairHitTest(uint threadIndex: SV_DispatchThreadID, uint 
     }
     OctreeNodeData_G_VRPG nodeData_G = groupNodeData_G[groupThreadIndex / HITTEST_COUNT_VRPG];
     OctreeNodeData_E_VRPG nodeData_E = OctreeNodeDataBuffer_E[pushConst.lightOctreeMaxLayer][clusterPairInfo.leafNodeIndex_E];
-    //if (all(nodeData_E.radiance == 0.0f)) {
-    //    clusterPairHitTestInfoBuffer[clusterPairIndex * HITTEST_COUNT_VRPG + hitTestIndex].isHit = -1.0f;
-    //    return;
-    //}
-    bool isPrintf = pushConst.frameIndex == 65 && clusterPairInfo.indivisibleNodeLabel == 49;
+    // if (all(nodeData_E.radiance == 0.0f)) {
+    //     clusterPairHitTestInfoBuffer[clusterPairIndex * HITTEST_COUNT_VRPG + hitTestIndex].isHit = -1.0f;
+    //     return;
+    // }
+    bool isPrintf = pushConst.frameIndex == 0 && clusterPairInfo.indivisibleNodeLabel == 1459;
 
     float3 randXYZ = float3(rand(seed), rand(seed), rand(seed));
     float3 samplePoint_G = randXYZ * (nodeData_G.aabb.maximum - nodeData_G.aabb.minimum) + nodeData_G.aabb.minimum;
@@ -527,15 +524,6 @@ void computeMain_clusterPairHitTest(uint threadIndex: SV_DispatchThreadID, uint 
         }
     }
 
-    //if (pushConst.frameIndex == 2 && clusterPairInfo.indivisibleNodeLabel == 46) {
-    //    printf("hit: %f, normal: %f %f %f\n hitNormal: %f %f %f\n",
-    //        hitPayload.hit, normal_G.x, normal_G.y, normal_G.z,
-    //        hitPayload.normal.x, hitPayload.normal.y, hitPayload.normal.z,
-    //    );
-    //}
-
-    //if (pushConst.frameIndex == 0) printf("%f %f\n", samplePoint_E.x, samplePoint_G.x);
-
     ClusterPairHitInfo_VRPG hitInfo;
     hitInfo.pos_G = hitPayload.hitPos;
     hitInfo.isHit = hitPayload.hit;
@@ -547,7 +535,6 @@ void computeMain_clusterPairHitTest(uint threadIndex: SV_DispatchThreadID, uint 
     hitInfo.cosine_Light = max(dot(hitPayload.sampleDir, nodeData_E.meanNormal.xyz), 0.0f);
     clusterPairHitTestInfoBuffer[clusterPairIndex * HITTEST_COUNT_VRPG + hitTestIndex] = hitInfo;
 
-    //bool isPrintf = pushConst.frameIndex == 65 && clusterPairInfo.indivisibleNodeLabel == 49;
     //if (isPrintf) {
     //    float3 normalE = nodeData_E.meanNormal.xyz;
     //    printf("leaftNodeIndexE: %d, hitTesIndex: %d, hit: %f\n normalE: %f %f %f, samplePosE: %f %f %f\n normalG: %f %f %f, samplePosG: %f %f %f\n hitNormalG: %f %f %f, hitPos: %f %f %f\nAABB_E: %f %f %f %f %f %f\nAABB_G: %f %f %f %f %f %f\n\n", 

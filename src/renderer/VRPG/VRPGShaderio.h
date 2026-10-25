@@ -8,6 +8,13 @@ NAMESPACE_SHADERIO_BEGIN()
 
 #define Candidate_Samples_Count 128
 
+// Compile-time VRPG switches (change requires rebuilding the app).
+#define VRPG_PATH_SAMPLE_MODE 0   // 0 double MIS, 1 one-sample MIS, 2 guide only
+#define VRPG_JITTER_SAMPLING 1
+#define VRPG_NEARBY_NODE_COUNT 4
+#define VRPG_SPATIAL_REUSE false
+#define VRPG_TEMPORAL_REUSE false
+
 //#define SpatialReuse_VRPG
 #define Pairwise_MIS
 
@@ -16,7 +23,7 @@ NAMESPACE_SHADERIO_BEGIN()
 
 #define HITTEST_COUNT_PER_CHILDNODE_VRPG 4		//must <= 4
 
-#define NEARBY_NODE_COUNT_VRPG 4	//dont't change!!!
+#define NEARBY_NODE_COUNT_VRPG VRPG_NEARBY_NODE_COUNT	// compile-time count
 //#define COMMON_NEARBYNODE_JITTER
 
 #define FZB_PATHGUIDING_THREADGROUP_SIZE_X 16
@@ -34,7 +41,7 @@ struct VRPGPushConstant
 	int spatialRuse = 0;
 	int ditherSample = 1;
 	int nearbyNodeCount = NEARBY_NODE_COUNT_VRPG;
-	int padding;
+	int pathSampleMode = 2;
 	float jitterRadiusScale = 1.5f;
 
 	float3 VGBVoxelSize;

@@ -1,4 +1,4 @@
-﻿#define TINYGLTF_IMPLEMENTATION         // Implementation of the GLTF loader library
+#define TINYGLTF_IMPLEMENTATION         // Implementation of the GLTF loader library
 #define STB_IMAGE_IMPLEMENTATION        // Implementation of the image loading library
 #define STB_IMAGE_WRITE_IMPLEMENTATION  // Implementation of the image writing library
 #define VMA_DYNAMIC_VULKAN_FUNCTIONS 1  // Use dynamic Vulkan functions for VMA (Vulkan Memory Allocator)
@@ -180,8 +180,10 @@ void FzbRenderer::Application::initSlangCompiler() {
 		.value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = slangIncludes[1].c_str()}
 		});
 
+#ifndef NDEBUG
 	slangCompiler.addOption({ slang::CompilerOptionName::DebugInformation,
 		{slang::CompilerOptionValueKind::Int, SLANG_DEBUG_INFO_LEVEL_MAXIMAL} });
+#endif
 
 	slangCompiler.addOption({
 			.name = slang::CompilerOptionName::GLSLForceScalarLayout,
