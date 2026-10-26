@@ -294,46 +294,47 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
             AABB mergeAABB = nodeData_G.aabb;
             atomicMergeAABB(mergeAABB);
 
-            float3 mergeNormal = nodeData_G.meanNormal.xyz; // get mergeNormal
+            // Normal consistency + surface coverage.
+            float3 mergeNormal = nodeData_G.meanNormal.xyz;
             for (int offset = 4; offset > 0; offset /= 2) {
                 uint targetLane = warpLane + offset;
                 mergeNormal.x += WaveReadLaneAt(mergeNormal.x, targetLane);
                 mergeNormal.y += WaveReadLaneAt(mergeNormal.y, targetLane);
                 mergeNormal.z += WaveReadLaneAt(mergeNormal.z, targetLane);
             }
-            mergeNormal /= blockHasDataNodeCount;
+            mergeNormal = normalize(mergeNormal / max(float(blockHasDataNodeCount), 1.0f) +
+                                    float3(1e-8f));
 
-            float mergeAABBVolume = 0.0f; // get mergeAABB's surfaceArea
-            if (warpLane == blockFirstWarpLane) {
-                float3 length = mergeAABB.maximum - mergeAABB.minimum;
-                length += float3(int3(1) - sign(length)) * 0.0001f; // if x == 0.0, then x = 1.0 else x = x
-                mergeAABBVolume = length.x * length.y * length.z;
-            }
+            float3 nodeNormal = normalize(nodeData_G.meanNormal.xyz + float3(1e-8f));
+            float minNormalCos = hasData ? dot(nodeNormal, mergeNormal) : 1.0f;
+            for (int offset = 4; offset > 0; offset /= 2)
+                minNormalCos = min(minNormalCos, WaveReadLaneAt(minNormalCos, warpLane + offset));
 
-            float aabbVolume = 0.0f;
-            if (hasData) {
-                // The volume is needed to calculate the scaling factor only when there is lighting.
-                // Although it is said that where there is lighting, there must be geometry, rasterization may not be injected
-                float3 length = nodeData_G.aabb.maximum - nodeData_G.aabb.minimum;
-                int3 axisSign = sign(length);
-                length += float3(int3(1) - axisSign) * 0.0001f; // if x == 0.0, then x = 1.0 else x = x
-                if (all(axisSign == 0)) length = float3(0.0f);
-                aabbVolume = length.x * length.y * length.z;
-                aabbVolume *= nodeData_G.fillRate;
-            }
-
-            float aabbVolumeSum = aabbVolume; // get merge node's aabb volume
-            for (int offset = 4; offset > 0; offset /= 2) {
-                uint targetLane = warpLane + offset;
-                aabbVolumeSum += WaveReadLaneAt(aabbVolumeSum, targetLane);
-            }
+            float3 childExtent = max(nodeData_G.aabb.maximum - nodeData_G.aabb.minimum, 0.0f);
+            float childSurfaceArea = hasData
+                ? 2.0f * (childExtent.x * childExtent.y +
+                          childExtent.x * childExtent.z +
+                          childExtent.y * childExtent.z)
+                : 0.0f;
+            // fillRate is the child's surface coverage, so an empty child
+            // contributes less than its full AABB surface area.
+            float childContribution = childSurfaceArea * clamp(nodeData_G.fillRate, 0.0f, 1.0f);
+            float surfaceAreaSum = childContribution;
+            for (int offset = 4; offset > 0; offset /= 2)
+                surfaceAreaSum += WaveReadLaneAt(surfaceAreaSum, warpLane + offset);
 
             bool indivisible = true;
             if (warpLane == blockFirstWarpLane) {
-                nodeData_G.fillRate = aabbVolumeSum / mergeAABBVolume;
-                indivisible &= length(mergeNormal) > pushConst.clusterNormalThreshold &&
-                    (nodeData_G.fillRate >= pushConst.clusterFillRateThreshold ||
-                    (mergeAABBVolume - aabbVolumeSum) < pushConst.voxelVolume * (pushConst.octreeMaxLayer - OCTREE_CLUSTER_LAYER_VRPG) * pushConst.clusterVolumeTolerance);
+                float3 mergeExtent = max(mergeAABB.maximum - mergeAABB.minimum, float3(1e-5f));
+                float mergeSurfaceArea = 2.0f * (mergeExtent.x * mergeExtent.y +
+                                                 mergeExtent.x * mergeExtent.z +
+                                                 mergeExtent.y * mergeExtent.z);
+                float surfaceFill = clamp(surfaceAreaSum / max(mergeSurfaceArea, 1e-8f), 0.0f, 1.0f);
+
+                float score = clamp(minNormalCos, 0.0f, 1.0f) * surfaceFill;
+                // Keep fillRate as pure surface coverage for the next layer.
+                nodeData_G.fillRate = surfaceFill;
+                indivisible = score >= pushConst.clusterFillRateThreshold;
 
                 nodeData_G.indivisible = indivisible;
                 nodeData_G.aabb = mergeAABB;

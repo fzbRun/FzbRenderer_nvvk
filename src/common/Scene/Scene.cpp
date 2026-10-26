@@ -469,6 +469,7 @@ void FzbRenderer::Scene::preRender() {
 
 	const glm::mat4& viewMatrix = cameraManip->getViewMatrix();
 	const glm::mat4& projMatrix = cameraManip->getPerspectiveMatrix();
+	sceneInfo.prevViewProjMatrix = sceneInfo.viewProjMatrix;
 	sceneInfo.viewMatrix = viewMatrix;
 	sceneInfo.projMatrix = projMatrix;
 	sceneInfo.viewProjMatrix = projMatrix * viewMatrix;

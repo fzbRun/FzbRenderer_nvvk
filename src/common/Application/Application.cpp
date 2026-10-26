@@ -303,6 +303,7 @@ void FzbRenderer::Application::onResize(VkCommandBuffer cmd, const VkExtent2D& s
 }
 void FzbRenderer::Application::onPreRender() {
 	frameIndex = std::min(++frameIndex, MAX_FRAME);
+	++randomFrameIndex;
 	sceneResource.preRender();
 	renderer->preRender();
 }

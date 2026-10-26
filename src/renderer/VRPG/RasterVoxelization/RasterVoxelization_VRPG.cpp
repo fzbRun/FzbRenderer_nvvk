@@ -61,7 +61,7 @@ RasterVoxelization_VRPG::RasterVoxelization_VRPG(pugi::xml_node& featureNode) {
 void RasterVoxelization_VRPG::init() {
 	if (Application::sceneResource.isStaticScene && forceStaticHighResolution) setting.resolution = { 4096, 4096 };
 #ifndef NDEBUG
-	Feature::createGBuffer(true, true, 2, setting.resolution);		//缂佹鍏涚粩鏉戭嚕閻樺弶绂堥柨娑欘劗hreeView闁挎稑鑻ˇ璺ㄦ喆閸℃缍撻柨娑欑〒椤戝洦绂嶇仦鐣岀倞闁搞儲鎷濈槐鐧坲be闁挎稒绋撻鍥ㄧ▔婢跺﹦鐐婇柛?闁告艾楠搁ˇ鈺呮偠閸℃绂?闁挎稒顒眎reframe	//濞戞挸绉瑰▓銏㈢玻濡も偓瑜版盯宕氶崱姘跺摵闁?
+	Feature::createGBuffer(true, true, 2, setting.resolution);		//缂備焦顨忛崗娑氱博閺夋埈鍤曢柣妯哄级缁傚牓鏌ㄥ☉娆樺姉hreeView闂佹寧绋戦懟顖炈囩捄銊﹀枂闁糕剝顨呯紞鎾绘煥濞戞瑧銆掓い鎴濇处缁傚秶浠﹂悾宀€鍊為梺鎼炲劜閹锋繄妲愰惂鍧瞓e闂佹寧绋掔粙鎾活敄閸ャ劎鈻斿璺猴功閻愬﹪鏌?闂佸憡鑹炬鎼佀囬埡鍛仩闁糕剝顨嗙粋?闂佹寧绋掗鐪巖eframe	//婵炴垶鎸哥粔鐟扳枔閵忋垻鐜绘俊銈傚亾鐟滅増鐩畷姘跺幢濮樿泛鎽甸梺?
 	//---------------------------------------------cube----------------------------------------
 	nvutils::PrimitiveMesh primitive = FzbRenderer::MeshSet::createCube(false, false);
 	FzbRenderer::MeshSet mesh = FzbRenderer::MeshSet("Cube", primitive);
@@ -75,10 +75,10 @@ void RasterVoxelization_VRPG::init() {
 #endif
 	//---------------------------------------------------------------------------------------------
 	createVGBs();
-	createDescriptorSetLayout();	//闁告帗绋戠紓鎾诲箵韫囨艾鐗氱紒妤嬬畵濞夛箓宕ラ崼婵堫伌閻忕偐鍋?
+	createDescriptorSetLayout();	//闂佸憡甯楃粙鎴犵磽閹捐绠甸煫鍥ㄨ壘閻楁氨绱掑Δ瀣暤婵炲绠撳畷銉╁醇濠靛牜浼岄柣蹇曞亹閸?
 	createDescriptorSet();
-	Feature::createPipelineLayout(sizeof(shaderio::RasterVoxelizationPushConstant));	//闁告帗绋戠紓鎾剁不閿涘嫬娈犻悽顖氬暙閻剟鏁嶅鐪渟hConstant+闁硅绻楅崼顏嗙箔閿曞倹鑲犻柛姘墕缁旈浠﹂埀?
-	compileAndCreateShaders();		//缂傚倹鐗為惁顪筯ader濞寸姰鍎卞鐑藉礆濞戞绱﹂梻鍫熺懄閳ь兛鍨peline
+	Feature::createPipelineLayout(sizeof(shaderio::RasterVoxelizationPushConstant));	//闂佸憡甯楃粙鎴犵磽閹惧墎涓嶉柨娑樺濞堢娀鎮介姘殭闁活亶鍓熼弫宥咁潰閻笩hConstant+闂佺顕х换妤呭醇椤忓棛绠旈柨鏇炲€归懖鐘绘煕濮橆剛澧曠紒鏃堫棑娴狅箓鍩€?
+	compileAndCreateShaders();		//缂傚倸鍊归悧鐐烘儊椤ader婵炲濮伴崕鍗烆嚕閻戣棄绀嗘繛鎴烆焽缁憋箓姊婚崼鐔烘噭闁逞屽厸閸晱peline
 }
 void RasterVoxelization_VRPG::clean() {
 	Feature::clean();
@@ -126,7 +126,7 @@ void RasterVoxelization_VRPG::uiRender() {
 				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(5, 5));
 
 				bool result = ImGui::ImageButton("##but", (ImTextureID)gBuffers.getDescriptorSet(0),
-					ImVec2(100 * gBuffers.getAspectRatio(), 100));		//閺夆晜鐟╅崳閿嬫償閺冨浂鍤夐柡鍫濐槷缁斿瓨绋夐鍫燁€栭梺鎻掓处閻?
+					ImVec2(100 * gBuffers.getAspectRatio(), 100));		//闁哄鏅滈悷鈺呭闯闁垮鍎熼柡鍐ㄦ祩閸ゅ鏌￠崼婵愭Х缂佹柨鐡ㄧ粙澶愵敂閸噥鈧牠姊洪幓鎺撳闁?
 
 				ImGui::PopStyleColor(2);
 				ImGui::PopStyleVar();
@@ -197,7 +197,7 @@ void RasterVoxelization_VRPG::uiRender() {
 	}
 	ImGui::End();
 
-	//闁稿繐鐗愮换妯兼偘鐎碘偓iRender闁告劕绉风换妯兼偘鐎圭nder闁挎稑鏈晶宥嗙閵夈劎绠瑰☉鎾亾閻㈩垎鍛化闁告垼顕ч幃妤呮晬鐏炵晫瀹夐悹鍥ュ劥椤╋附绋夌€ｂ晝顏遍悽顖嗗嫭闄嶉柡鍕⒔閵囨岸鏁嶇仦鎯ь暡濞寸姰鍎查弬渚€宕烽妸銉ヮ枀闂?
+	//闂佺绻愰悧鎰崲濡吋鍋橀悗纰樺亾iRender闂佸憡鍔曠粔椋庢崲濡吋鍋橀悗鍦嚠nder闂佹寧绋戦張顒佹櫠瀹ュ棛顩烽柕澶堝妿缁犵懓鈽夐幘顖氫壕闁汇埄鍨庨崨顓濆寲闂佸憡鍨奸褔骞冨Δ鍛櫖閻忕偟鏅€瑰鎮归崶銉ュ姤妞も晪闄勭粙澶屸偓锝傛櫇椤忛亶鎮介鍡楀闂勫秹鏌￠崟顐⑩挃闁靛洦宀搁弫宥囦沪閹屾殹婵炲濮伴崕鏌ュ棘娓氣偓瀹曠兘濡搁妷銉瀫闂?
 	if (showThreeViewMap) Application::viewportImage = gBuffers.getDescriptorSet(0);
 	else if (showCubeMap) Application::viewportImage = gBuffers.getDescriptorSet(1);
 	else if (showWireframeMap) Application::viewportImage = gBuffers.getDescriptorSet(2);
@@ -282,7 +282,7 @@ void RasterVoxelization_VRPG::createVGBs() {
 		for (int i = 0; i < sceneResource.instances.size(); ++i) {
 			uint32_t meshIndex = sceneResource.instances[i].meshIndex;
 			MeshInfo meshInfo = sceneResource.getMeshInfo(meshIndex);
-			shaderio::AABB meshAABB = meshInfo.getAABB(sceneResource.instances[i].transform);	//閻庣敻鈧稓鑹鹃柛鏂诲妽閳ь兛鑳舵晶鎸庢媴閹垮嫮绀夐弶鈺傜懇閸ｇ兘妫侀埀顒傛啺娴ｉ攱鍙忛柡鈧?
+			shaderio::AABB meshAABB = meshInfo.getAABB(sceneResource.instances[i].transform);	//闁诲海鏁婚埀顒佺〒閼归箖鏌涢弬璇插闁逞屽厸閼宠埖鏅堕幐搴㈠闁瑰灝瀚粈澶愬级閳哄倻鎳囬柛锝囧厴濡線鍩€椤掑倹鍟哄ù锝夋敱閸欏繘鏌￠埀?
 
 			aabb.minimum.x = std::min(meshAABB.minimum.x, aabb.minimum.x);
 			aabb.minimum.y = std::min(meshAABB.minimum.y, aabb.minimum.y);
@@ -295,7 +295,7 @@ void RasterVoxelization_VRPG::createVGBs() {
 		setting.sceneSize = aabb.maximum - aabb.minimum;
 		setting.sceneStartPos = aabb.minimum;
 
-		//闁衡偓閹佷海濞戞挴鍋撻柣鎰缁辨繈姊奸崣澶樺壘閺夊牆婀遍弲顐ｅ緞閸曨厽鐣遍柡浣哄瀹撲線鏌ㄥ▎鎺濆殩闁挎稑鐗婇惁顕€寮涵鍜佸殯2濞戞挾宕乷xel闁挎稑鐭傞崑鍛▕閸繂绀侀弶鍫濇贡閺咁偊鎯冮崟顓炲亶鐎殿喗娲樺Σ?濞戞挸绉靛Σ?;濞戞挸绉堕崝褎瀵煎顒夊殼闁?->0闁?voxel闁哄牜鍓氶惀鍛村嫉婢跺娈堕柟璇″枛閸樻盯寮垫径澶屽晩闁轰胶澧楀畵渚€鏁?
+		//闂佽　鍋撻柟顖嗕椒娴锋繛鎴炴尨閸嬫捇鏌ｉ幇顔筋仧缂佽鲸绻堝濂稿矗婢舵ê澹橀柡澶婄墕濠€閬嶅疾椤愶絽绶為柛鏇ㄥ幗閻ｉ亶鏌℃担鍝勵暭鐎规挷绶氶弻銊モ枎閹烘繂娈╅梺鎸庣☉閻楀﹪鎯侀鈧顒傛兜閸滀礁娈?婵炴垶鎸惧畷涔穢el闂佹寧绋戦惌鍌炲磻閸涱喚鈻曢柛顐ｇ箓缁€渚€寮堕崼婵囪础闁哄拋鍋婇幆鍐礋椤撶偛浜堕悗娈垮枟濞叉ê危?婵炴垶鎸哥粔闈浳?;婵炴垶鎸哥粔鍫曞礉瑜庣€电厧顫濋澶婃闂?->0闂?voxel闂佸搫鐗滈崜姘舵儉閸涙潙瀚夊璺侯儐濞堝爼鏌熺拠鈥虫灈闁告ɑ鐩鍨緞婢跺苯鏅╅梺杞拌兌婢ф鐣垫笟鈧弫?
 		glm::vec3 distance = setting.sceneSize * 1.1f;
 		//float maxDistance = std::max(distance.x, std::max(distance.y, distance.z));
 		glm::vec3 center = (aabb.maximum + aabb.minimum) * 0.5f;
@@ -303,19 +303,19 @@ void RasterVoxelization_VRPG::createVGBs() {
 		glm::vec3 maximum = center + distance * 0.5f;
 
 		glm::mat4 VP[3];
-		//闁告挸绉瑰?
-		glm::vec3 viewPoint = glm::vec3(center.x, center.y, maximum.z + 0.1f);	//濞戞挻鐗滈弲顐﹀锤閹邦厾鍨奸柛娆掓珪婢ф粓鎽堕悜妯活棆闁挎稑鑻畵?z闁哄牊绻傞幃?
+		//闂佸憡鎸哥粔鐟邦焽?
+		glm::vec3 viewPoint = glm::vec3(center.x, center.y, maximum.z + 0.1f);	//婵炴垶鎸婚悧婊堝疾椤愶箑閿ら柟閭﹀幘閸ㄥジ鏌涘▎鎺撶彧濠⒀勭矒閹藉爼鎮滃Ο娲绘闂佹寧绋戦懟顖氱暤?z闂佸搫鐗婄换鍌炲箖?
 		glm::mat4 viewMatrix = glm::lookAt(viewPoint, viewPoint + glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 		glm::mat4 orthoMatrix = glm::orthoRH_ZO(-0.5f * distance.x, 0.5f * distance.x, -0.5f * distance.y, 0.5f * distance.y, 0.1f, distance.z + 0.1f);
 		orthoMatrix[1][1] *= -1;
 		VP[0] = orthoMatrix * viewMatrix;
-		//鐎归潻绠掔粩?
+		//閻庡綊娼荤粻鎺旂博?
 		viewPoint = glm::vec3(minimum.x - 0.1f, center.y, center.z);
 		viewMatrix = glm::lookAt(viewPoint, viewPoint + glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 		orthoMatrix = glm::orthoRH_ZO(-0.5f * distance.z, 0.5f * distance.z, -0.5f * distance.y, 0.5f * distance.y, 0.1f, distance.x + 0.1f);
 		orthoMatrix[1][1] *= -1;
 		VP[1] = orthoMatrix * viewMatrix;
-		//濞戞挸顑夊?
+		//婵炴垶鎸搁澶婎焽?
 		viewPoint = glm::vec3(center.x, minimum.y - 0.1f, center.z);
 		viewMatrix = glm::lookAt(viewPoint, viewPoint + glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 		orthoMatrix = glm::orthoRH_ZO(-0.5f * distance.x, 0.5f * distance.x, -0.5f * distance.z, 0.5f * distance.z, 0.1f, distance.y + 0.1f);
@@ -423,7 +423,7 @@ void RasterVoxelization_VRPG::createDescriptorSet() {
 void RasterVoxelization_VRPG::compileAndCreateShaders() {
 	SCOPED_TIMER(__FUNCTION__);
 
-	//缂傚倹鐗為惁褔宕ユ惔锝嗙暠闁轰胶澧楀畵渚€寮ㄩ幆褎韬ù婊冩晞langCompiler濞?
+	//缂傚倸鍊归悧鐐烘儊瑜斿畷銉︽償閿濆棛鏆犻梺杞拌兌婢ф鐣垫笟鈧銊╁箚瑜庨煬顒€霉濠婂啯鏅瀕angCompiler婵?
 	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
 	std::filesystem::path shaderSource = shaderPath / "RasterVoxelization.slang";
 	shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
@@ -587,10 +587,10 @@ void RasterVoxelization_VRPG::createVGB(VkCommandBuffer cmd) {
 
 	vkCmdBeginRendering(cmd, &renderingInfo);
 
-	//濞达綀娉曢弫顥糑_EXT_SHADER_OBJECT_EXTENSION_NAME闁告艾楠歌ぐ鍙夌閵夈倗鐟濋梻鍥ｅ亾閻熸洑鍨peline闁挎稑鐬煎ú鍧楀箳閵夆斁鍋撳宕囩畺闁告稒鍨濋幎銈囨媼閸撗呮瀭婵炴挸寮堕悡瀣媼閸撗呮瀭闁告粌鐬煎鍐嚌閹绘帗鐝?
+	//婵炶揪缍€濞夋洟寮ˉ绯慱EXT_SHADER_OBJECT_EXTENSION_NAME闂佸憡鑹炬姝屻亹閸欏顩烽柕澶堝€楅悷婵嬫⒒閸ワ絽浜鹃柣鐔告磻閸晱peline闂佹寧绋戦惉鐓幟洪崸妤€绠抽柕澶嗘杹閸嬫挸顫濆畷鍥╃暫闂佸憡绋掗崹婵嬪箮閵堝洦濯奸柛鎾楀懏鐎┑鐐存尭瀵爼鎮＄€ｎ剚濯奸柛鎾楀懏鐎梺鍛婄矊閻厧顭囬崘顔藉殞闁圭粯甯楅悵?
 	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;
 	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_FALSE;
-	graphicsDynamicPipeline.depthStencilState.depthBoundsTestEnable = VK_FALSE;		//depthBoundsTestEnable闁哄嫷鍨遍悧鎾箲閻㈢袱n闁靛棔娌焌x depth閺夆晜绋栭、鎴澝圭€ｎ厾妲搁柨娑樼灱濞村銇愰幘鑼壘闁煎浜滈悾鐐▕婢跺寒姊块柛鎿冧簽濞堟啇闁汇劌瀚€垫牠宕?
+	graphicsDynamicPipeline.depthStencilState.depthBoundsTestEnable = VK_FALSE;		//depthBoundsTestEnable闂佸搫瀚烽崹閬嶆偋閹绢喖绠查柣銏㈣⒈n闂侀潧妫斿▽鐒寈 depth闁哄鏅滅粙鏍€侀幋婢濆湱鈧綆鍘惧Σ鎼佹煥濞戞鐏辨繛鏉戭槼閵囨劙骞橀懠顒冨闂佺厧顨庢禍婊堟偩閻愵剛鈻曞璺哄瘨濮婂潡鏌涢幙鍐х敖婵炲牊鍟囬梺姹囧妼鐎氼垳鈧灚鐗犲畷?
 	graphicsDynamicPipeline.cmdApplyAllStates(cmd);
 	vkCmdSetDepthBoundsTestEnable(cmd, VK_FALSE);
 	graphicsDynamicPipeline.cmdSetViewportAndScissor(cmd, setting.resolution);
@@ -662,7 +662,7 @@ void RasterVoxelization_VRPG::createVGB_ThreeView(VkCommandBuffer cmd) {
 	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(0), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
 
 	VkRenderingAttachmentInfo colorAttachment = DEFAULT_VkRenderingAttachmentInfo;
-	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;		//闁活亞鍠愰婊冦€掗崣澶屽帬闂傚洠鍋撻悷鏇氱劍閻楁挳骞戦悾濡攅sky闁告帇鍊栭弻鍥及椤栨碍绀堝☉鎾虫惈閵囧绮氶搹瑙勭＊濞村吋淇洪々顐︽儎閺嶏妇鐟愬☉鎾亾閻㈩垎鍐ㄦ暥閻庡湱娅㈢槐婵嬪箥閳ь剚绂掗妷銈囩憹闂傚洠鍋撻悷鏇氭伃lear
+	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;		//闂佹椿浜為崰鎰邦敆濠婂啨鈧帡宕ｆ径灞藉脯闂傚倸娲犻崑鎾绘偡閺囨氨鍔嶉柣妤佹尦楠炴垿鎮炬俊鏀卻ky闂佸憡甯囬崐鏍蓟閸ヮ剙鍙婃い鏍ㄧ缁€鍫濃槈閹捐櫕鎯堥柕鍥ь槺缁岸鎼圭憴鍕紛婵炴潙鍚嬫穱娲€呴锔藉剮闁哄稄濡囬悷鎰槈閹绢垰浜鹃柣銏╁瀻閸愩劍鏆ラ柣搴℃贡濞呫垻妲愬┑瀣闁逞屽墯缁傛帡濡烽妶鍥╂喒闂傚倸娲犻崑鎾绘偡閺囨碍浼僱ear
 	colorAttachment.imageView = gBuffers.getColorImageView(0);
 	colorAttachment.clearValue = { .color = {Application::sceneResource.sceneInfo.backgroundColor.x,
 											Application::sceneResource.sceneInfo.backgroundColor.y,
@@ -679,7 +679,7 @@ void RasterVoxelization_VRPG::createVGB_ThreeView(VkCommandBuffer cmd) {
 
 	vkCmdBeginRendering(cmd, &renderingInfo);
 
-	//濞达綀娉曢弫顥糑_EXT_SHADER_OBJECT_EXTENSION_NAME闁告艾楠歌ぐ鍙夌閵夈倗鐟濋梻鍥ｅ亾閻熸洑鍨peline闁挎稑鐬煎ú鍧楀箳閵夆斁鍋撳宕囩畺闁告稒鍨濋幎銈囨媼閸撗呮瀭婵炴挸寮堕悡瀣媼閸撗呮瀭闁告粌鐬煎鍐嚌閹绘帗鐝?
+	//婵炶揪缍€濞夋洟寮ˉ绯慱EXT_SHADER_OBJECT_EXTENSION_NAME闂佸憡鑹炬姝屻亹閸欏顩烽柕澶堝€楅悷婵嬫⒒閸ワ絽浜鹃柣鐔告磻閸晱peline闂佹寧绋戦惉鐓幟洪崸妤€绠抽柕澶嗘杹閸嬫挸顫濆畷鍥╃暫闂佸憡绋掗崹婵嬪箮閵堝洦濯奸柛鎾楀懏鐎┑鐐存尭瀵爼鎮＄€ｎ剚濯奸柛鎾楀懏鐎梺鍛婄矊閻厧顭囬崘顔藉殞闁圭粯甯楅悵?
 	graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
 	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;
 	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_FALSE;
@@ -687,7 +687,7 @@ void RasterVoxelization_VRPG::createVGB_ThreeView(VkCommandBuffer cmd) {
 	graphicsDynamicPipeline.cmdApplyAllStates(cmd);
 	//vkCmdSetConservativeRasterizationModeEXT(cmd, VK_CONSERVATIVE_RASTERIZATION_MODE_OVERESTIMATE_EXT);
 	//vkCmdSetExtraPrimitiveOverestimationSizeEXT(cmd, 0.75f);
-	vkCmdSetDepthBoundsTestEnable(cmd, VK_FALSE);	//depthBoundsTestEnable闁哄嫷鍨遍悧鎾箲閻㈢袱n闁靛棔娌焌x depth閺夆晜绋栭、鎴澝圭€ｎ厾妲搁柨娑樼灱濞村銇愰幘鑼壘闁煎浜滈悾鐐▕婢跺寒姊块柛鎿冧簽濞堟啇闁汇劌瀚€垫牠宕?
+	vkCmdSetDepthBoundsTestEnable(cmd, VK_FALSE);	//depthBoundsTestEnable闂佸搫瀚烽崹閬嶆偋閹绢喖绠查柣銏㈣⒈n闂侀潧妫斿▽鐒寈 depth闁哄鏅滅粙鏍€侀幋婢濆湱鈧綆鍘惧Σ鎼佹煥濞戞鐏辨繛鏉戭槼閵囨劙骞橀懠顒冨闂佺厧顨庢禍婊堟偩閻愵剛鈻曞璺哄瘨濮婂潡鏌涢幙鍐х敖婵炲牊鍟囬梺姹囧妼鐎氼垳鈧灚鐗犲畷?
 
 	float width = float(setting.resolution.width) * 0.5f;
 	float height = float(setting.resolution.height) * 0.5f;
@@ -740,23 +740,18 @@ void RasterVoxelization_VRPG::debug_Cube(VkCommandBuffer cmd) {
 	colorAttachment.clearValue = { .color = {Application::sceneResource.sceneInfo.backgroundColor.x,
 											Application::sceneResource.sceneInfo.backgroundColor.y,
 											Application::sceneResource.sceneInfo.backgroundColor.z, 1.0f} };
-	VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
-	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-	depthAttachment.imageView = gBuffers.getDepthImageView();
-	depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
-
 	VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
 	renderingInfo.renderArea = { {0, 0}, setting.resolution };
 	renderingInfo.colorAttachmentCount = 1;
 	renderingInfo.pColorAttachments = &colorAttachment;
-	renderingInfo.pDepthAttachment = &depthAttachment;
+	renderingInfo.pDepthAttachment = nullptr;
 
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1,
 		staticDescPack.getSetPtr(), 0, nullptr);
 
 	vkCmdBeginRendering(cmd, &renderingInfo);
 
-	//濠碘€冲€归悘澶娾柦閳╁啯绠掓繛锝呭船鐎瑰啿霉鐎ｎ厾妲搁柨娑樻湰閸ㄦ粍绂掗鈧悿鍕瑹鐎ｎ亜顕ч柡鍕靛灟缁?-n閺夆晜绋栭、鎴濄€掗崣澶屽帬闁汇劌瀚哥槐婵嬫焽閿濆嫮鐤勫ù?闂侇叏绲肩粩鎾閵忋垺绠欓弶鈺佹搐楠炴挻瀵煎鎰佹蕉n闂侇叏绲肩粩鎾閵忥綆娲柣鈺傜墬鐢偓闁挎稒绋愮徊鐐瀹告帡鏌囬敐鍕伇闂傚牄鍨诲﹢鍛村及椤栨稓姊鹃柡鍫濐樀濡埖锛愬Ο鍏肩暠
+	//婵犵鈧啿鈧綊鎮樻径濞炬煢闁斥晛鍟粻鎺撶箾閿濆懎鑸归悗鐟板暱闇夐悗锝庡幘濡叉悂鏌ㄥ☉妯绘拱闁搞劍绮嶇粋鎺楊敆閳ь剟鎮块崟顒傜懝閻庯綆浜滈褔鏌￠崟闈涚仧缂?-n闁哄鏅滅粙鏍€侀幋婵勨偓鎺楀矗婢跺苯甯梺姹囧妼鐎氬摜妲愬┑瀣劷闁挎繂瀚悿鍕?闂備緡鍙忕徊鑲╃博閹绢喗顥堥柕蹇嬪灪缁犳瑩寮堕埡浣规悙妤犵偞鎸荤€电厧顫濋幇浣硅晧n闂備緡鍙忕徊鑲╃博閹绢喗顥堥柕蹇ョ秵濞差剟鏌ｉ埡鍌滃閻㈩垪鍋撻梺鎸庣⊕缁嬫劗寰婇悙顒傤浄鐎瑰憡甯￠弻鍥晲閸曨収浼囬梻鍌氱墑閸ㄨ锕㈤崨鏉戝強妞ゆ牗绋撳楣冩煛閸繍妯€婵☆偉鍩栭敍鎰熼崗鑲╂殸
 	graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
 	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
 	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_TRUE;
@@ -810,12 +805,12 @@ void RasterVoxelization_VRPG::debug_Wireframe(VkCommandBuffer cmd) {
 	vkCmdBeginRendering(cmd, &renderingInfo);
 
 	graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
-	graphicsDynamicPipeline.inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;		//濠碘€冲€归悘澶愬箚閸忓懎鈻忛柣顫姀濞呭嫮鐥崹顔艰濞寸姰鍎撮鏇犵磾閻ｅ摳sterizationLineState
+	graphicsDynamicPipeline.inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;		//婵犵鈧啿鈧綊鎮樻径鎰畾闁稿繐鎳庨埢蹇涙煟椤剙濮€婵炲懎瀚惀顏堝垂椤旇壈顔夋繛瀵稿О閸庢挳顢欓弴鐘电＞闁伙絽鎽硈terizationLineState
 	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;
 	graphicsDynamicPipeline.rasterizationState.lineWidth = 2.0f;
 	graphicsDynamicPipeline.rasterizationState.polygonMode = VK_POLYGON_MODE_LINE;
 	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_TRUE;
-	graphicsDynamicPipeline.depthStencilState.depthWriteEnable = VK_FALSE;	//闁稿繗娉涢悿鍕礃濞嗗繐寮抽柛鎰懃閸欏棝鏌堥崐鐕佹斀闁挎稑鑻ぐ褏鎲版担鍝勵暬闁稿繐鍟板鍐嚌閹绘帗鐝ゅ☉鎾崇С閹便劑寮ㄧ憴鍕畳閹艰揪璁ｇ槐婵堜焊鏉堫偄鍘撮柟缁樺姇婢х姴菐閸楃偛顔婃繛鏉戭儓閻?
+	graphicsDynamicPipeline.depthStencilState.depthWriteEnable = VK_FALSE;	//闂佺绻楀▔娑㈡偪閸曨垰绀冩繛鍡楃箰瀵娊鏌涢幇顓犳噧闁告瑥妫濋弻鍫ュ磹閻曚焦鏂€闂佹寧绋戦懟顖濄亹瑜忛幉鐗堟媴閸濆嫷鏆梺绋跨箰閸熸澘顭囬崘顔藉殞闁圭粯甯楅悵銈呪槈閹惧磭小闁逛究鍔戝銊ф喆閸曨厾鐣抽柟鑹版彧鐠侊絿妲愬┑鍫滅剨閺夊牜鍋勯崢鎾煙缂佹ê濮囧褏濮磋彁闁告鍋涢濠冪箾閺夋埈鍎撻柣?
 	graphicsDynamicPipeline.cmdApplyAllStates(cmd);
 	graphicsDynamicPipeline.cmdSetViewportAndScissor(cmd, setting.resolution);
 	graphicsDynamicPipeline.cmdBindShaders(cmd, { .vertex = vertexShader_Cube, .fragment = fragmentShader_Wireframe });
@@ -844,7 +839,7 @@ void RasterVoxelization_VRPG::debug_Wireframe(VkCommandBuffer cmd) {
 void RasterVoxelization_VRPG::debug_MergeWireframe(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
 
-	//閻忓繐鏁媔reframeMap濞戞挸姘﹂惃鐔兼偨閵娿劉鍋撻崨顖涚暠tonemapping闁告艾娴峰▓鎴犵磼閹惧浜弶鈺傜椤㈡垹绱掗幘铏€?
+	//闁诲繐绻愰弫濯攔eframeMap婵炴垶鎸稿锕傛儍閻斿吋鍋ㄩ柕濞垮妷閸嬫捇宕ㄩ娑氭殸tonemapping闂佸憡鑹惧ù宄扳枔閹寸姷纾奸柟鎯ь嚟娴滎垶寮堕埡鍌滎灱妞ゃ垺鍨圭槐鎺楀箻閾忣偄鈧?
 	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_postProcess);
 

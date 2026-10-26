@@ -7,12 +7,13 @@
 #define FZBRENDERER_OCTREE_2_VRPG_SHADERIO_H
 
 #define MAX_OCTREE_LAYER_VRPG 8
-#define IndivisibleNodeCount_G_VRPG 4000
+#define IndivisibleNodeCount_G_VRPG 3000
 
 NAMESPACE_SHADERIO_BEGIN()
 
 struct OctreePushConstant_VRPG {
 	int frameIndex;
+	int randomFrameIndex = 0;
 
 	int candidateSampleBufferIndex = 0;
 
@@ -38,9 +39,7 @@ struct OctreePushConstant_VRPG {
 
 	SceneInfo* sceneInfoAddress;
 
-	float clusterNormalThreshold;
 	float clusterFillRateThreshold;
-	float clusterVolumeTolerance;
 
 	float4x4 padding1;
 };

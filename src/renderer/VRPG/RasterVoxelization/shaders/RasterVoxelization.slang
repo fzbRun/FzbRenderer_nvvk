@@ -121,16 +121,19 @@ void geometryMain(
     outputStream.RestartStrip();
 }
 
-void atomicAABB(float3 worldPos, int voxelIndexU, int VGBIndex) {
-    int worldPosX = FloatToOrderedInt(worldPos.x);
-    int worldPosY = FloatToOrderedInt(worldPos.y);
-    int worldPosZ = FloatToOrderedInt(worldPos.z);
-    InterlockedMin<int>(VGBs[VGBIndex][voxelIndexU].aabbI.minimum.x, worldPosX);
-    InterlockedMin<int>(VGBs[VGBIndex][voxelIndexU].aabbI.minimum.y, worldPosY);
-    InterlockedMin<int>(VGBs[VGBIndex][voxelIndexU].aabbI.minimum.z, worldPosZ);
-    InterlockedMax<int>(VGBs[VGBIndex][voxelIndexU].aabbI.maximum.x, worldPosX);
-    InterlockedMax<int>(VGBs[VGBIndex][voxelIndexU].aabbI.maximum.y, worldPosY);
-    InterlockedMax<int>(VGBs[VGBIndex][voxelIndexU].aabbI.maximum.z, worldPosZ);
+void atomicAABB(float3 aabbMin, float3 aabbMax, int voxelIndexU, int VGBIndex) {
+    int minX = FloatToOrderedInt(aabbMin.x);
+    int minY = FloatToOrderedInt(aabbMin.y);
+    int minZ = FloatToOrderedInt(aabbMin.z);
+    int maxX = FloatToOrderedInt(aabbMax.x);
+    int maxY = FloatToOrderedInt(aabbMax.y);
+    int maxZ = FloatToOrderedInt(aabbMax.z);
+    InterlockedMin<int>(VGBs[VGBIndex][voxelIndexU].aabbI.minimum.x, minX);
+    InterlockedMin<int>(VGBs[VGBIndex][voxelIndexU].aabbI.minimum.y, minY);
+    InterlockedMin<int>(VGBs[VGBIndex][voxelIndexU].aabbI.minimum.z, minZ);
+    InterlockedMax<int>(VGBs[VGBIndex][voxelIndexU].aabbI.maximum.x, maxX);
+    InterlockedMax<int>(VGBs[VGBIndex][voxelIndexU].aabbI.maximum.y, maxY);
+    InterlockedMax<int>(VGBs[VGBIndex][voxelIndexU].aabbI.maximum.z, maxZ);
 }
 void atomicNormalG(float3 normal, int voxelIndexU, int VGBIndex) {
     float3 normal_G = normalize(normal);
@@ -185,11 +188,10 @@ void fragmentMain(GSout input) {
     voxelRange.minimum = voxelIndex * pushConst.voxelSize_Count.xyz + pushConst.voxelGroupStartPos;
     voxelRange.maximum = voxelRange.minimum + pushConst.voxelSize_Count.xyz;
 
-    bool pixelXInVoxel = checkPointInAABB2(maximum, voxelRange);
-    if (pixelXInVoxel) atomicAABB(maximum, voxelIndexU, VGBIndex);
-    bool pixelYInVoxel = checkPointInAABB2(minimum, voxelRange);
-    if (pixelYInVoxel) atomicAABB(minimum, voxelIndexU, VGBIndex);
-    if (!pixelXInVoxel || !pixelYInVoxel) atomicAABB(input.worldPos, voxelIndexU, VGBIndex);
+    // One pixel-level AABB update instead of up to three 6-atomic updates.
+    float3 aabbMin = max(minimum, voxelRange.minimum);
+    float3 aabbMax = min(maximum, voxelRange.maximum);
+    atomicAABB(aabbMin, aabbMax, voxelIndexU, VGBIndex);
 
     atomicNormalG(input.worldNormal, voxelIndexU, VGBIndex);
 }
@@ -256,11 +258,10 @@ PSout_ThreeView fragmentMain_ThreeView(GSout_ThreeView input) {
     voxelRange.minimum = voxelIndex * pushConst.voxelSize_Count.xyz + pushConst.voxelGroupStartPos;
     voxelRange.maximum = voxelRange.minimum + pushConst.voxelSize_Count.xyz;
 
-    bool pixelXInVoxel = checkPointInAABB2(maximum, voxelRange);
-    if (pixelXInVoxel) atomicAABB(maximum, voxelIndexU, VGBIndex);
-    bool pixelYInVoxel = checkPointInAABB2(minimum, voxelRange);
-    if (pixelYInVoxel) atomicAABB(minimum, voxelIndexU, VGBIndex);
-    if (!pixelXInVoxel || !pixelYInVoxel) atomicAABB(input.worldPos, voxelIndexU, VGBIndex);
+    // One pixel-level AABB update instead of up to three 6-atomic updates.
+    float3 aabbMin = max(minimum, voxelRange.minimum);
+    float3 aabbMax = min(maximum, voxelRange.maximum);
+    atomicAABB(aabbMin, aabbMax, voxelIndexU, VGBIndex);
 
     atomicNormalG(input.worldNormal, voxelIndexU, VGBIndex);
 

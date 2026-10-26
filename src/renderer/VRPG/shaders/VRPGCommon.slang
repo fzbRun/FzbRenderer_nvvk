@@ -1,3 +1,4 @@
+#pragma once
 int getVoxelIndex(float3 worldPos, float3 voxelGroupStartPos, float3 voxelSize, int voxelCount) {
     /*
     We determine whether a pos is located in a node by checking whether it is contained within the aabb of the node in the order of 0-7.

@@ -425,7 +425,7 @@ void computeMain_getCandidateLeafNodes(uint threadIndex: SV_DispatchThreadID, ui
     OctreeNodeData_G_VRPG nodeData_G = OctreeNodeDataBuffer_G[clusterPairInfo.layerIndex_G][clusterPairInfo.nodeIndex_G];
     float3 centerPos_G = (nodeData_G.aabb.maximum + nodeData_G.aabb.minimum) * 0.5f;
 
-    uint seed = xxhash32(uint3(clusterPairIndex, groupThreadIndex, (uint)pushConst.frameIndex));
+    uint seed = xxhash32(uint3(clusterPairIndex, groupThreadIndex, (uint)pushConst.randomFrameIndex));
     LightLeafNode nodeData_E = getLightLeafNode(groupThreadIndex & 31, clusterPairInfo.layerIndex_E, clusterPairInfo.nodeIndex_E, centerPos_G, seed);
     if ((groupThreadIndex & 7) == 0) {
         clusterPairInfoBuffer[clusterPairIndex].leafNodeIndex_E = nodeData_E.nodeIndex;
@@ -471,7 +471,7 @@ void computeMain_clusterPairHitTest(uint threadIndex: SV_DispatchThreadID, uint 
 
     int clusterPairIndex = threadIndex / HITTEST_COUNT_VRPG;
     int hitTestIndex = threadIndex & (HITTEST_COUNT_VRPG - 1);
-    uint seed = xxhash32(uint3(clusterPairIndex, hitTestIndex, (uint)pushConst.frameIndex));
+    uint seed = xxhash32(uint3(clusterPairIndex, hitTestIndex, (uint)pushConst.randomFrameIndex));
 
     ClusterPairInfo_VRPG clusterPairInfo = groupClusterPairInfo_VRPGs[groupThreadIndex / HITTEST_COUNT_VRPG];
     if (clusterPairInfo.leafNodeIndex_E == -1) {
@@ -605,7 +605,7 @@ void computeMain_getCandidateNodeWeight(uint threadIndex: SV_DispatchThreadID, u
     if (threadIndex == 0) GlobalInfoBuffer[0].cmd.x = OUTGOING_COUNT_VRPG * groupIndivisibleNodeCount_G;
     if (all(groupLeafNodeData_E.radiance == 0.0f)) return;
 
-    uint seed = xxhash32(uint3(clusterPairIndex, hitTestIndex, (uint)pushConst.frameIndex));
+    uint seed = xxhash32(uint3(clusterPairIndex, hitTestIndex, (uint)pushConst.randomFrameIndex));
 
     ClusterPairHitInfo_VRPG hitInfo = groupClusterPairHitInfo_VRPG[hitTestIndex];
     float3 f = 0.0f;
@@ -677,7 +677,7 @@ void computeMain_buildSpatialReservoir(uint threadIndex: SV_DispatchThreadID) {
 
     ReservoirSample_VRPG reservoir = { emptyAABB(), 0.0f, 0.0f, 0, 0 };
     if (wSum > 0.0f) {
-        uint seed = xxhash32(uint3(g, outgoing, uint(pushConst.frameIndex)));
+        uint seed = xxhash32(uint3(g, outgoing, uint(pushConst.randomFrameIndex)));
         float target = rand(seed) * wSum;
         int lo = 0, hi = Candidate_Samples_Count - 1;
         while (lo < hi) {
@@ -728,7 +728,7 @@ void computeMain_reuseReservoir(uint threadIndex: SV_DispatchThreadID) {
     int outgoing = threadIndex - g * OUTGOING_COUNT_VRPG;
     ReservoirSample_VRPG selected = spatialReservoirBuffer[threadIndex];
     float totalWeight = selected.weight;
-    uint seed = xxhash32(uint3(g, outgoing, uint(pushConst.frameIndex)));
+    uint seed = xxhash32(uint3(g, outgoing, uint(pushConst.randomFrameIndex)));
 
     int2 nearby[NEARBY_NODE_COUNT_VRPG] = NearbyNodeInfoBuffer[g].nearbyNodeInfos;
     for (int i = 0; i < NEARBY_NODE_COUNT_VRPG; ++i) {
@@ -841,7 +841,7 @@ void computeMain_reservoirSample(uint threadIndex: SV_DispatchThreadID, uint thr
         return;
     }
 
-    uint seed = xxhash32(uint3(candidateNodeStartIndex, candidateSampleIndex, (uint)pushConst.frameIndex));
+    uint seed = xxhash32(uint3(candidateNodeStartIndex, candidateSampleIndex, (uint)pushConst.randomFrameIndex));
     float randomNumber = rand(seed) * wSum;
     int lo = 0;
     int hi = Candidate_Samples_Count - 1;
@@ -884,7 +884,7 @@ void computeMain_SpatialReuse(uint threadIndex: SV_DispatchThreadID, uint thread
     }
     //-------------------------------------------
     float validCandidateCount = WaveActiveCountBits(adjClusterIndex < indivisibleNodeCount);
-    uint seed = xxhash32(uint3(threadGroupIndex, candidateLocalIndex, (uint)pushConst.frameIndex));
+    uint seed = xxhash32(uint3(threadGroupIndex, candidateLocalIndex, (uint)pushConst.randomFrameIndex));
 
     const int sampleCount = 1;
 
@@ -1041,7 +1041,7 @@ void computeMain_SpatialReuse(uint threadIndex: SV_DispatchThreadID, uint thread
     candidateSampleData2Buffer[candidateGlobalIndex] = ycData;
     candidateSampleAABBBuffer[candidateGlobalIndex] = nonCanonicalSampleData.aabb;
 #else
-    printf("computeMain_SpatialReuse闂傚鍋勫ú锕傗€﹂崼銉晩闁搞儺鍓欑粈鍐╂叏濡ゅ啫澹僴didate_Samples_Count != 32闂備焦鐪归崝宀€鈧凹鍙冨畷鏇＄疀濞戞顦ㄩ梺绋跨箰閹芥粓宕?");
+    printf("computeMain_SpatialReuse闂傚倸鍊搁…顒勫磻閸曨個娲晝閸屾せ鍋撻敃鍌氶唶闁靛鍠楅弲鈺呮⒑閹肩偛鍔撮柛鎾寸懅缁牓宕橀埡鍌氬伎濠德板€曢崯顐ｇ珶閸嶇idate_Samples_Count != 32闂傚倸鍊烽悞锕傛儑瑜版帒绀夌€光偓閳ь剟鍩€椤掍礁鍤柛娆忓暙閻ｇ兘寮撮敍鍕澑濠电偞鍨堕…鍥囬妸鈺傗拺缂佸娉曠粻浼存煙閼恒儳鐭掔€?");
 #endif
  
 }

@@ -1,4 +1,5 @@
 #include "./LightInject_VRPG.h"
+#include "renderer/VRPG/VRPGShaderio.h"
 #include <common/Shader/Shader.h>
 #include <nvutils/timers.hpp>
 #include <common/Application/Application.h>
@@ -129,6 +130,9 @@ void LightInject_VRPG::preRender() {
 	pushConstant.geometryVGBVoxelSize = glm::vec4(setting.geometryVGBVoxelSize, setting.geometryVGBSize);
 	pushConstant.geometryVGBStartPos = glm::vec3(setting.geometryVGBStartPos);
 	pushConstant.frameIndex = Application::frameIndex;
+	pushConstant.randomFrameIndex = (VRPG_RANDOM_FRAME_SOURCE != 0)
+		? int(Application::randomFrameIndex)
+		: Application::frameIndex;
 	pushConstant.voxelCount = (uint32_t)pow(setting.VGBSize, 3);
 	pushConstant.lightVoxelCount = (uint32_t)setting.VGBSize;
 	pushConstant.time = Application::sceneResource.time;
@@ -137,7 +141,7 @@ void LightInject_VRPG::preRender() {
 		? LIGHTINJECT_SAMPLE_COUNT_STATIC_SCENE
 		: LIGHTINJECT_SAMPLE_COUNT;
 
-	float angle = FzbRenderer::rand(Application::frameIndex) * glm::two_pi<float>();
+	float angle = FzbRenderer::rand(pushConstant.randomFrameIndex) * glm::two_pi<float>();
 	pushConstant.randomRotateMatrix = glm::mat3(glm::rotate(glm::mat4(1.0f), angle, glm::vec3(0, 0, 1)));
 }
 void LightInject_VRPG::render(VkCommandBuffer cmd) {

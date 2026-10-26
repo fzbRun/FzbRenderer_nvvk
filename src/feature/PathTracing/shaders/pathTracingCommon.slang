@@ -524,7 +524,7 @@ void getDirectionLight(inout CallablePayload payload, SceneInfo sceneInfo) {
 }
 
 //------------------------------------------Material BSDF---------------------------------------------------
-//#define NVPRO_CORE_MATERIAL_FUNTION
+#define NVPRO_CORE_MATERIAL_FUNTION
 
 float GTR2_NDF(float cosineNH, float roughness) {
     const float alpha = roughness * roughness;

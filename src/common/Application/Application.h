@@ -76,6 +76,8 @@ public:
 
 	inline static uint32_t cmdCount = 1;
 	inline static int frameIndex = -1;
+	// Monotonic frame counter for stochastic seeds. Never reset by camera/UI.
+	inline static uint32_t randomFrameIndex = 0;
 	inline static bool UIModified = false;
 	inline static VkDescriptorSet viewportImage = nullptr;
 	inline static ImVec2 viewportScreenPos = ImVec2(0, 0);

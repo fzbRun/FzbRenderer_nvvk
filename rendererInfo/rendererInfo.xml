@@ -1,7 +1,7 @@
 <rendererInfo>
-	<name value = "SLPG" />
+	<name value = "VRPG" />
 	<resolution width = "1280" height = "720" />
-	<sceneXML path = "veach-ajar-2" />	<!--simpleTest bearBox veach-ajar-dynamic  veach-ajar-2  veach-mis staircase dining-room yanYun ReSTIR_Test_Scene-->
+	<sceneXML path = "veach-ajar-2" />	<!--simpleTest bearBox veach-ajar-dynamic  veach-ajar-2  veach-mis staircase dining-room veach-bidir yanYun ReSTIR_Test_Scene-->
 
 	<renderer type = "VRPG">  <!--VRPG FzbPathGuiding NPMPathGuiding PathTracing PathTracing_KPCNNDenoising VolumetricFog StochasticLightcuts ReSTIR_GI Deferred  Mesh ZhiHuCode-->
 		<maxDepth value = "4" />

@@ -10,10 +10,14 @@
 			<eye value = "1.162, 1.316, -3.183" />
 			<center value = "0.265, 1.272, -3.265" />
 			<up value = "0.00000, 1.00000, 0.00000" />
+			
+						<eye value = "3.213, 1.558, -3.091" />
+			<center value = "2.323, 1.475, -3.208" />
+			<up value = "0.00000, 1.00000, 0.00000" />
 			-->
 
-			<eye value = "3.213, 1.558, -3.091" />
-			<center value = "2.323, 1.475, -3.208" />
+			<eye value = "-0.409, 1.219, -2.729" />
+			<center value = "-1.303, 1.105, -2.736" />
 			<up value = "0.00000, 1.00000, 0.00000" />
 		</transform>
 	</sensor>
@@ -90,7 +94,7 @@
 		</bsdf>
 		
 		<bsdf type="roughConductor" id="Pot3BSDF">
-			<roughness value="0.1" />
+			<roughness value="0.01" />
 			<eta value="1.91, 1.31, 0.82" />
 			<k value="8.05, 6.93, 5.99" />
 		</bsdf>
@@ -338,6 +342,7 @@
 			<emissive value = "1.0, 1.0, 1.0" />
 			<intensity value = "100.0" />
 			<pos value="-5.0, 0.5, 5.0" />
+			<!--direction value="1.083350441, -0.133, -0.909038955" /-->
 			<direction value="1.0, -0.133, -1.0" />
 		</light>
 	</lights>

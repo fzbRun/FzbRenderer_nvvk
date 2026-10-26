@@ -76,6 +76,11 @@ void VRPGRenderer::init() {
 
 	IF_DEBUG(Feature::createGBuffer(true, true,(uint32_t)ImageType_VRPG::eImgTonemapped,Application::renderResolution),
 		Feature::createGBuffer(false, true, 1, Application::renderResolution));
+
+	// Keep a tiny placeholder alive so the static descriptor write is always valid.
+	// The full W*H path-state buffer is only allocated when wavefront mode is enabled.
+	ensureWavefrontPathStateBuffer({ 1u, 1u });
+
 	createDescriptorSetLayout();
 	createDescriptorSet();
 	createPipelineLayout();
@@ -111,6 +116,13 @@ void VRPGRenderer::clean() {
 	VkDevice device = Application::app->getDevice();
 	vkDestroyShaderEXT(device, computeShader_VRPG, nullptr);
 
+	// Experimental wavefront prototype resources.
+	vkDestroyShaderEXT(device, computeShader_WavefrontInit, nullptr);
+	vkDestroyShaderEXT(device, computeShader_WavefrontBounce, nullptr);
+	vkDestroyShaderEXT(device, computeShader_WavefrontResolve, nullptr);
+	if (wavefrontPathStateBuffer.buffer != VK_NULL_HANDLE)
+		Application::allocator.destroyBuffer(wavefrontPathStateBuffer);
+
 #ifndef NDEBUG
 	Flip->clean();
 	refImage.clean();
@@ -125,11 +137,13 @@ void VRPGRenderer::uiRender() {
 	namespace PE = nvgui::PropertyEditor;
 	Application::viewportImage = gBuffers.getDescriptorSet((uint32_t)ImageType_VRPG::eImgTonemapped);
 
+	//static int maxFrames_temp = (MAX_FRAME) / 2;
 	if (ImGui::Begin("VRPGSettings"))
 	{
 		ImGui::SeparatorText("VRPG");
 		PE::begin();
 		UIModified |= PE::DragInt("Max Frames", &maxFrames);
+		//maxFrames = maxFrames_temp + 1;
 		PE::end();
 		ImGui::TextDisabled("Frame: %d", pushConstant.frameIndex);
 
@@ -160,6 +174,11 @@ void VRPGRenderer::uiRender() {
 			PE::end();
 		}
 
+		/*
+		ImGui::SeparatorText("Wavefront (Experimental)");
+		ImGui::TextDisabled("Compile-time: VRPG_USE_WAVEFRONT = %d", VRPG_USE_WAVEFRONT);
+		ImGui::TextDisabled("Bounced guide + BSDF double MIS path state prototype");
+
 		if (ptContext.rtPosFetchFeature.rayTracingPositionFetch == VK_FALSE){
 			ImGui::TextColored({ 1, 0, 0, 1 }, "ERROR: Position Fetch not supported!");
 			ImGui::Text("This hardware does not support");
@@ -169,6 +188,7 @@ void VRPGRenderer::uiRender() {
 			ImGui::TextColored({ 0, 1, 0, 1 }, "Position Fetch: SUPPORTED");
 			ImGui::Separator();
 		}
+		*/
 
 #ifndef NDEBUG
 		if (PE::begin()) {
@@ -228,13 +248,17 @@ void VRPGRenderer::uiRender() {
 void VRPGRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 	NVVK_CHECK(gBuffers.update(cmd, size));
 
+	// Resize the wavefront path-state buffer with the render target. When the prototype
+	// is disabled only the 1-element placeholder is kept.
+	ensureWavefrontPathStateBuffer(wavefront ? size : VkExtent2D{ 1u, 1u });
+
 	nvvk::WriteSetContainer write{};
 	VkWriteDescriptorSet    OutImageWrite =
 		staticDescPack.makeWrite(shaderio::StaticSetBindingPoints_PT::eOutImage_PT, 0, 0, 1);
 	write.append(OutImageWrite, gBuffers.getColorImageView((uint32_t)ImageType_VRPG::eImgRendered), VK_IMAGE_LAYOUT_GENERAL);
 
 #ifndef NDEBUG
-	//濠电偞鎸搁幊鎰板箖婵犲伋搴ㄥ础閻愬樊鍞虹紓浣瑰劤濠€閬嶅箖?
+	//濠电姷鏁搁崑鐐哄箰閹间礁绠犻柟鐗堟緲缁犳牕鈹戦悩韫礈閹兼番鍔岀涵鈧梺缁樺姇濡﹪宕搹鍦＝濞达絿鎳撻崝銈嗙節閳ь剟鏌嗗鍛暫?
 	{
 		VkSamplerCreateInfo samplerInfo = DEFAULT_VkSamplerCreateInfo;
 		samplerInfo.magFilter = VK_FILTER_NEAREST;
@@ -283,6 +307,13 @@ void VRPGRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 	write.append(pgVarianceImageWrite, gBuffers.getColorImageView((uint32_t)ImageType_VRPG::eImgPGVariance), VK_IMAGE_LAYOUT_GENERAL);
 #endif
 
+	// The wavefront prototype keeps its per-pixel path state in the same static set.
+	{
+		VkWriteDescriptorSet wavefrontPathStateWrite =
+			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VRPGWavefront::ePathState, 0, 0, 1);
+		write.append(wavefrontPathStateWrite, wavefrontPathStateBuffer, 0, wavefrontPathStateBuffer.bufferSize);
+	}
+
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 
 	if (renderStaticScene) shadowMap->resize(cmd, size);
@@ -305,18 +336,23 @@ void VRPGRenderer::preRender() {
 	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
 
 	Scene& scene = Application::sceneResource;
-	if (Application::UIModified || scene.cameraChange || rebuildPerFrame ||
+	bool cameraChange = scene.cameraChange;
+	if (Application::UIModified || cameraChange || rebuildPerFrame ||
 		!renderStaticScene || frameIndex == 0 ||
 		octree->spatialReuse || octree->temporalReuse) {
 		octreeDirty = true;
 	}
-	if (scene.cameraChange) {
+	if (cameraChange) {
 		resetFrame();
 		octree->temporalReset = true;
-	}	//婵犵鈧啿鈧綊鎮樻径鎰剮闁告稑锕ョ花姘舵煕濞嗗繐鈧綊寮抽悢鐓庣煑婵☆垰鎼褔鏌ㄥ☉妯垮闁割煈鍨辩粋鎺撴償閵忥紕鍘愮紓渚€纭搁崹鐢割敇閸濄儲鏆?
+	}	//婵犵數濮烽。浠嬪焵椤掆偓閸熷潡鍩€椤掆偓缂嶅﹪骞冨Ο璇茬窞闁归偊鍘奸崜顕€姊洪崨濠勨槈闁挎洏鍎抽懞鍗烆潩閼哥數鍘卞┑鐐叉缁绘劙鍩€椤掆偓缂嶅﹤顕ｉ幎鑺ュ亜闁绘挸娴烽悡鎴濃攽閳藉棗鐏犻柟纰卞亰椤㈡俺顦归柡灞诲妼閳藉螣閸噮浼冮梻浣稿閻撳牓宕规潏鈺冪焿闁圭儤鎸婚崕鐔兼煏韫囥儳纾块柛妯诲姉缁辨挻绗熼埀顒傛兜閹间礁鍨傞柣銏犲閺佸洭鏌涘┑鍕姕闁?
 	if (scene.periodInstanceCount + scene.randomInstanceCount > 0 || scene.hasDynamicLight) maxFrames = 1;
 	pushConstant.VGBStartPos_Size = shaderio::float4(rasterVoxelization->setting.pushConstant.voxelGroupStartPos, rasterVoxelization->setting.pushConstant.voxelSize_Count.w);
 	pushConstant.frameIndex = Application::frameIndex;
+	pushConstant.randomFrameIndex = (VRPG_RANDOM_FRAME_SOURCE != 0)
+		? int(Application::randomFrameIndex)
+		: Application::frameIndex;
+	pushConstant.staticScene = renderStaticScene ? 1 : 0;
 	pushConstant.maxFrameCount = maxFrames;
 	pushConstant.time = Application::sceneResource.time;
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
@@ -349,7 +385,7 @@ void VRPGRenderer::preRender() {
 
 #ifndef NDEBUG
 	Flip->preRender();
-	if (scene.cameraChange) {
+	if (cameraChange) {
 		lastFLIP = 0.0f;
 		flipSum = 0.0;
 		flipFrameCount = 0;
@@ -362,15 +398,20 @@ void VRPGRenderer::render(VkCommandBuffer* cmdPtr) {
 	NVVK_DBG_SCOPE(cmd);
 
 	updateDataPerFrame(cmd);
-	//if (pushConstant.frameIndex >= maxFrames && maxFrames > 1) return;
+	if (pushConstant.frameIndex >= maxFrames && maxFrames > 2) return;
 
-	if (rebuildPerFrame || !renderStaticScene || frameIndex == 0) {
+	const bool rebuildGeometryVGB = rebuildPerFrame || !renderStaticScene || frameIndex == 0;
+	const bool rebuildLightVGB = rebuildGeometryVGB;
+
+	if (rebuildGeometryVGB) {
 		rasterVoxelization->render(cmd);
 		// Geometry VGB is written by the fragment shader; make it visible to the
 		// cluster/light-injection compute shaders.
 		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	}
 
-		// Rebuild the light VGB every frame by clustering the geometry VGB.
+	if (rebuildLightVGB) {
+		// Rebuild the light VGB by clustering the existing geometry VGB.
 		// No second scene rasterization is needed.
 		lightRasterVoxelization->clearVGB(cmd);
 		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
@@ -391,7 +432,8 @@ void VRPGRenderer::render(VkCommandBuffer* cmdPtr) {
 	octree->renderCandidates(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	
-	pathGuiding(cmd);
+	if (wavefront) wavefrontPathTracing(cmd);
+	else pathGuiding(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	
 	Application::tonemapper.runCompute(cmd, gBuffers.getSize(), Application::tonemapperData, gBuffers.getDescriptorImageInfo((uint32_t)ImageType_VRPG::eImgRendered), gBuffers.getDescriptorImageInfo((uint32_t)ImageType_VRPG::eImgTonemapped));
@@ -491,6 +533,13 @@ void VRPGRenderer::createDescriptorSetLayout() {
 
 	bindings.addBinding({
 		.binding = (uint32_t)shaderio::StaticBindingPoints_VRPG::eGlobalInfo,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+
+	// Experimental wavefront path tracer: one path-state entry per pixel.
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_VRPGWavefront::ePathState,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
@@ -602,6 +651,11 @@ void VRPGRenderer::createDescriptorSet() {
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VRPG::eGlobalInfo, 0, 0, 1);
 	write.append(GlobalInfoWrite, octree->globalInfoBuffer, 0, octree->globalInfoBuffer.bufferSize);
 
+	// Placeholder (1x1) until the experimental wavefront mode is enabled.
+	VkWriteDescriptorSet wavefrontPathStateWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VRPGWavefront::ePathState, 0, 0, 1);
+	write.append(wavefrontPathStateWrite, wavefrontPathStateBuffer, 0, wavefrontPathStateBuffer.bufferSize);
+
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }
 void VRPGRenderer::createPipelineLayout() {
@@ -659,6 +713,17 @@ void VRPGRenderer::compileAndCreateShaders() {
 		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_VRPG);
 		NVVK_DBG_NAME(computeShader_VRPG);
 	}
+	//--------------------------------------------------------------------------------------
+	// Experimental wavefront path tracer: one module, three compute entry points.
+	// Failure here must not affect the stable path, so it is reported and skipped.
+	{
+		std::filesystem::path wavefrontSource = shaderPath / "VRPGWavefront.slang";
+		VkShaderModuleCreateInfo wavefrontCode = FzbRenderer::compileSlangShader(wavefrontSource, {});
+		if (wavefrontCode.codeSize > 0 && wavefrontCode.pCode != nullptr)
+			createWavefrontShaders(wavefrontCode);
+		else
+			LOGE("Wavefront prototype shader failed to compile; the toggle will fall back to the stable VRPG path.\n");
+	}
 };
 void VRPGRenderer::updateDataPerFrame(VkCommandBuffer cmd) {}
 
@@ -710,6 +775,160 @@ void VRPGRenderer::pathGuiding(VkCommandBuffer cmd) {
 	}
 }
 
+//------------------------------------------------------------------------------------------
+// Experimental wavefront path tracer
+//------------------------------------------------------------------------------------------
+bool VRPGRenderer::wavefrontShadersValid() const {
+	return computeShader_WavefrontInit != VK_NULL_HANDLE &&
+		computeShader_WavefrontBounce != VK_NULL_HANDLE &&
+		computeShader_WavefrontResolve != VK_NULL_HANDLE;
+}
+
+void VRPGRenderer::ensureWavefrontPathStateBuffer(const VkExtent2D& extent) {
+	const uint32_t width = std::max(extent.width, 1u);
+	const uint32_t height = std::max(extent.height, 1u);
+	const VkDeviceSize requiredSize =
+		VkDeviceSize(width) * VkDeviceSize(height) * sizeof(shaderio::WavefrontPathState);
+
+	if (wavefrontPathStateBuffer.buffer != VK_NULL_HANDLE && wavefrontPathStateBufferSize == requiredSize)
+		return;
+
+	if (wavefrontPathStateBuffer.buffer != VK_NULL_HANDLE)
+		Application::allocator.destroyBuffer(wavefrontPathStateBuffer);
+
+	NVVK_CHECK(Application::allocator.createBuffer(
+		wavefrontPathStateBuffer, requiredSize,
+		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT));
+	NVVK_DBG_NAME(wavefrontPathStateBuffer.buffer);
+
+	wavefrontPathStateBufferSize = requiredSize;
+	wavefrontPathStateExtent = { width, height };
+	LOGI("Wavefront path state buffer: %ux%u (%.2f MB)\n", width, height,
+		double(requiredSize) / (1024.0 * 1024.0));
+}
+
+void VRPGRenderer::writeWavefrontPathStateDescriptor() {
+	if (wavefrontPathStateBuffer.buffer == VK_NULL_HANDLE) return;
+
+	nvvk::WriteSetContainer write{};
+	VkWriteDescriptorSet pathStateWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VRPGWavefront::ePathState, 0, 0, 1);
+	write.append(pathStateWrite, wavefrontPathStateBuffer, 0, wavefrontPathStateBuffer.bufferSize);
+	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
+}
+
+void VRPGRenderer::createWavefrontShaders(const VkShaderModuleCreateInfo& shaderCode) {
+	VkDevice device = Application::app->getDevice();
+
+	vkDestroyShaderEXT(device, computeShader_WavefrontInit, nullptr);
+	vkDestroyShaderEXT(device, computeShader_WavefrontBounce, nullptr);
+	vkDestroyShaderEXT(device, computeShader_WavefrontResolve, nullptr);
+
+	const VkPushConstantRange pushConstantRange{
+		.stageFlags = VK_SHADER_STAGE_ALL,
+		.offset = 0,
+		.size = sizeof(shaderio::VRPGPushConstant),
+	};
+	std::array<VkDescriptorSetLayout, 2> layouts = { {staticDescPack.getLayout(), dynamicDescPack.getLayout()} };
+
+	// Same layouts/push constants as the stable VRPG shader object, but the module
+	// exposes three compute entry points and we select them by name.
+	VkShaderCreateInfoEXT shaderInfo{
+		.sType = VK_STRUCTURE_TYPE_SHADER_CREATE_INFO_EXT,
+		.codeType = VK_SHADER_CODE_TYPE_SPIRV_EXT,
+		.pName = "wavefrontInitMain",
+		.setLayoutCount = layouts.size(),
+		.pSetLayouts = layouts.data(),
+		.pushConstantRangeCount = 1,
+		.pPushConstantRanges = &pushConstantRange,
+	};
+	shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	shaderInfo.nextStage = 0;
+	shaderInfo.codeSize = shaderCode.codeSize;
+	shaderInfo.pCode = shaderCode.pCode;
+
+	VkResult result = vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_WavefrontInit);
+	if (result != VK_SUCCESS) {
+		LOGE("Failed to create wavefront init shader (VkResult %d).\n", int(result));
+		return;
+	}
+
+	shaderInfo.pName = "wavefrontBounceMain";
+	result = vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_WavefrontBounce);
+	if (result != VK_SUCCESS) {
+		LOGE("Failed to create wavefront bounce shader (VkResult %d).\n", int(result));
+		return;
+	}
+
+	shaderInfo.pName = "wavefrontResolveMain";
+	result = vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_WavefrontResolve);
+	if (result != VK_SUCCESS)
+		LOGE("Failed to create wavefront resolve shader (VkResult %d).\n", int(result));
+
+	NVVK_DBG_NAME(computeShader_WavefrontInit);
+	NVVK_DBG_NAME(computeShader_WavefrontBounce);
+	NVVK_DBG_NAME(computeShader_WavefrontResolve);
+}
+
+void VRPGRenderer::wavefrontPathTracing(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
+
+	const VkExtent2D sceneSize = Application::renderResolution;
+	const VkDeviceSize requiredSize =
+		VkDeviceSize(sceneSize.width) * VkDeviceSize(sceneSize.height) * sizeof(shaderio::WavefrontPathState);
+
+	// Never dispatch the prototype against an undersized buffer or missing shaders;
+	// fall back to the stable path so the renderer stays usable.
+	if (sceneSize.width == 0 || sceneSize.height == 0 || !wavefrontShadersValid() ||
+		wavefrontPathStateBuffer.buffer == VK_NULL_HANDLE || wavefrontPathStateBufferSize < requiredSize) {
+		LOGW("Wavefront prototype not ready (state buffer %llu/%llu bytes, shaders %d); falling back to stable VRPG.\n",
+			(unsigned long long)wavefrontPathStateBufferSize, (unsigned long long)requiredSize,
+			wavefrontShadersValid() ? 1 : 0);
+		pathGuiding(cmd);
+		return;
+	}
+
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1,
+		staticDescPack.getSetPtr(), 0, nullptr);
+
+	nvvk::WriteSetContainer write{};
+	write.append(dynamicDescPack.makeWrite(shaderio::DynamicSetBindingPoints_PT::eTlas_PT), asManager.asBuilder.tlas);
+	vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 1, write.size(), write.data());
+
+	const VkExtent2D groupSize = nvvk::getGroupCounts(
+		sceneSize, VkExtent2D{ FZB_WAVEFRONT_THREADGROUP_SIZE_X, FZB_WAVEFRONT_THREADGROUP_SIZE_Y });
+
+	pushConstant.sceneSize = shaderio::uint2(sceneSize.width, sceneSize.height);
+	pushConstant.threadGroupCount = shaderio::uint2(groupSize.width, groupSize.height);
+	pushConstant.dispatchOffset = shaderio::uint2(0, 0);
+
+	VkPushConstantsInfo pushInfo = {
+		.sType = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
+		.layout = pipelineLayout,
+		.stageFlags = VK_SHADER_STAGE_ALL,
+		.offset = 0,
+		.size = sizeof(shaderio::VRPGPushConstant),
+		.pValues = &pushConstant,
+	};
+	vkCmdPushConstants2(cmd, &pushInfo);
+
+	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	auto dispatchPass = [&](VkShaderEXT shader) {
+		vkCmdBindShadersEXT(cmd, 1, &stage, &shader);
+		vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
+		// Path states are read by the next pass, so order the passes with a barrier.
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	};
+
+	dispatchPass(computeShader_WavefrontInit);
+
+	const int bounceCount = std::max(pushConstant.maxDepth, 1);
+	for (int bounce = 0; bounce < bounceCount; ++bounce)
+		dispatchPass(computeShader_WavefrontBounce);
+
+	dispatchPass(computeShader_WavefrontResolve);
+}
+
 void VRPGRenderer::createFlipReadbackBuffer() {
 	if (flipReadbackBuffer.buffer != VK_NULL_HANDLE)
 		Application::allocator.destroyBuffer(flipReadbackBuffer);
@@ -736,7 +955,7 @@ void VRPGRenderer::getFLIP(VkCommandBuffer cmd) {
 	// 1. 缂?FLIP error map
 	Flip->evaluate(cmd);
 
-	// 2. 缂傚倷鐒﹂幐濠氭倶婢舵劕鐐婇柣鎰靛墮椤忓爼鏌?host visible buffer
+	// 2. 缂傚倸鍊搁崐鐑芥倿閿曞倸绠板┑鐘崇閸婅泛顭块懜闈涘闁绘劕锕弻锝夊箛闂堟稑顫╁銈呯箰閻栧ジ寮?host visible buffer
 	VkImage result = Flip->getResultImage().image;
 	VkExtent2D extent = { Flip->getResultImage().extent.width, Flip->getResultImage().extent.height };
 
@@ -762,7 +981,7 @@ void VRPGRenderer::readFLIP() {
 	if (!flipReadbackPending || flipReadbackBuffer.mapping == nullptr)
 		return;
 
-	// 缂備胶濮崑鎾绘煕濡や焦绀夐柟鐧哥悼閹插瓨绗熸繝鍕槷缂備焦绋戦ˇ顔剧箔閸屾稓鈻旈柍褜鍓涢弫?GPU 闁诲海鎳撻張顒勫垂濮樿埖鏅繛鎴炲嚬閻庤尙绱掗悙顒€顕滅紒浣规尦閺屽矁绠涢幘瀹狀唹婵炲濮伴崕鑼暜閹绢喖鐭?
+	// 缂傚倸鍊烽懗鑸垫叏椤撱垹纾婚柟鍓х帛閻撴洘淇婇妶鍕妽缂佲偓婢舵劖鐓欓柣褍鎽滈幃濂告煙閹绘帞鎽犵紒妤冨枑缁绘繈宕熼褎啸缂傚倸鍊烽悞锔剧矙閹次诲洭顢欓崜褏鐣堕梺绋挎湰缁嬫捇鍩㈤弮鍫熺厓鐟滄粓宕滃☉銏犳瀬?GPU 闂備浇顕уù鐑藉箠閹捐瀚夋い鎺戝閸ㄥ倹鎱ㄥΟ鍨厫闁哄拋鍓氱换娑㈠箣閻愭彃姣堥梺璇叉唉鐏忔瑧妲愰幒妤佸€锋い鎺嗗亾妞ゆ洘绮庣槐鎺撴媴鐟欏嫬鍞夐梺鍝勮嫰閻胶绮诲☉銏犵閻庡湱濯崬鐟扳攽閻愬樊鍤熷┑顔诲嵆瀹曟洟鎳犻浣规闂佸湱铏庨崰鏍儗?
 	vkQueueWaitIdle(Application::app->getQueue(0).queue);
 
 	const float* data = reinterpret_cast<const float*>(flipReadbackBuffer.mapping);
@@ -770,7 +989,7 @@ void VRPGRenderer::readFLIP() {
 
 	double sum = 0.0;
 	for (size_t i = 0; i < count; ++i)
-		sum += data[i * 4 + 3];   // A channel 濠殿喗蓱閻℃洜鎹㈠▎鎴斿亾濞戞鎴濄€掗崜浣虹＜?FLIP 闂佺锕﹂妴瀣濠靛洨鈻旂€广儱鎳庣紞鈧?debugView 閻熸粍婢樺畷顒勫箹?
+		sum += data[i * 4 + 3];   // A channel 濠电姵顔栭崰妤勬懌闂佺儵鍓濆ú婊堝箲閵忕姭鏋庨柟瀛樻煥娴滅偓绻涢幋鐑嗕紗闁瑰瓨绺块埀顒佸浮瀹曟粍鎷呴搹鐧哥床?FLIP 闂傚倷鑳堕…鍫ユ晝閿曞倸违閻庯綆鍓氶～鏇熺節闂堟稒宸濋柍缁樻⒒閳ь剙绠嶉崕閬嶅箠鎼达絿绀婇柍?debugView 闂佽崵鍠愮划宥咁熆濡櫣鏆︽い鎺戝缁?
 
 	lastFLIP = float(sum / count);
 	flipSum += lastFLIP;

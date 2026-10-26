@@ -348,7 +348,7 @@ void computeMain_LightInject(uint threadIndex: SV_DispatchThreadID, uint groupTh
 
     LightInjectHitPayload payload;
     for (int sampleIndex = 0; sampleIndex < pushConst.sampleCount; ++sampleIndex) {
-        payload.randomSeed = xxhash32(uint3(voxelIndex_atAll, pushConst.frameIndex, sampleIndex));
+        payload.randomSeed = xxhash32(uint3(voxelIndex_atAll, pushConst.randomFrameIndex, sampleIndex));
 
         float3 sampleDir = fibSpherePoint(sampleIndex, pushConst.sampleCount);
         sampleDir = mul(sampleDir, pushConst.randomRotateMatrix);
@@ -362,7 +362,7 @@ void computeMain_LightInject(uint threadIndex: SV_DispatchThreadID, uint groupTh
         uint bounceDepth = 0;
         float3 bsdf_cosine_pdf = float3(1.0f);
 
-        const uint maxPathDepth = 6;
+        const uint maxPathDepth = 1;
         while (bounceDepth < maxPathDepth) {
             bool hit = traceRay(ray, payload);
             if (hit) {
@@ -395,7 +395,7 @@ void computeMain_LightInject(uint threadIndex: SV_DispatchThreadID, uint groupTh
                 ++bounceDepth;
 
                 {
-                    // bool printfAble = pushConst.frameIndex == 2;
+                    // bool printfAble = pushConst.randomFrameIndex == 2;
                     // printfAble &= normalIndex == 3;
                     ////printfAble &= voxelIndex == 1150;
                     // printfAble &= any(accumulatedRadiance > 0.0f);
@@ -419,7 +419,7 @@ void computeMain_LightInject(uint threadIndex: SV_DispatchThreadID, uint groupTh
     accumulatedRadiance /= pushConst.sampleCount;
 
     // any(accumulatedRadiance > 0.0f)
-    //if (pushConst.frameIndex == 1 && abs(voxelNormal.z - 1.0f) < 0.001f && voxelIndex == 1034) {
+    //if (pushConst.randomFrameIndex == 1 && abs(voxelNormal.z - 1.0f) < 0.001f && voxelIndex == 1034) {
     //    printf("voxelIndex: %d\naabb: %f %f %f %f %f %f\n\n",
     //        voxelIndex,
     //        voxelAabb.minimum.x, voxelAabb.minimum.y, voxelAabb.minimum.z,

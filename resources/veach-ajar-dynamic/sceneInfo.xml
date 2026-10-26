@@ -369,16 +369,17 @@
 		<instance id="Light" type="periodMotion">
 			<transform name="to_world">
 				<translate value ="0, 0, 0" />
-				<rotate value = "0, 0, 0" />
+				<rotate value = "0, 180, 0" />
 				<scale value = "1, 1, 1" />
 				
 				<period time="100">
-					<rotate value = "0, 180, 0" />
+					<translate value ="2, 0, 0" />
 				</period>
 			</transform>
 			<meshRef id="custom" type="plane" />
 			<materialRef id="LightBSDF"/>
 		</instance>
+		
 	</instances>
 
 	<lights>
@@ -395,7 +396,7 @@
 				</period>
 			</transform>
 		</light>
-
+		
 		<light type="area" id="Light">
 			<emissive value = "1.0, 1.0, 1.0" />
 			<intensity value = "100.0" />

@@ -14,6 +14,7 @@ struct LightInjectPushConstant_VRPG {
 	float4 VGBVoxelSize;       // light VGB: xyz size, w unused
 	float3 VGBStartPos;        // light VGB
 	int frameIndex = 0;
+	int randomFrameIndex = 0;
 	float3 sceneSize;
 	int voxelCount;            // light VGB total voxel count (count^3)
 	int lightVoxelCount;       // light VGB count per axis

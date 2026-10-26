@@ -54,6 +54,10 @@ VSout vertexMain(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID
         nodeAABB = node.aabb;
 
         color = float3(rand(instanceIndex), rand(instanceIndex), rand(instanceIndex));
+        if (indivisibleNodeInfo.x == 5) color = float3(1.0f, 0.0f, 0.0f);
+        else if (indivisibleNodeInfo.x == 4) color = float3(0.0f, 1.0f, 0.0f);
+        else if (indivisibleNodeInfo.x == 3) color = float3(0.0f, 0.0f, 1.0f);
+        else if (indivisibleNodeInfo.x == 2) color = float3(1.0f, 1.0f, 1.0f);
     }
 
     VSout output;
