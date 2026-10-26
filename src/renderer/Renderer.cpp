@@ -12,6 +12,7 @@
 #include "MeshRenderer/MeshRenderer.h"
 #include "ReSTIRGI/ReSTIR_GI.h"
 #include "StochasticLightcuts/StochasticLightcuts.h"
+#include "VXPG/VXPG.h"
 
 enum FzbRendererType {
 	FZB_RENDERER_FORWARD,
@@ -22,6 +23,7 @@ enum FzbRendererType {
 	FZB_FEATURE_COMPONENT_SVO_DEBUG,
 	FZB_FEATURE_COMPONENT_SVO_PG_DEBUG,
 	FZB_RENDERER_FZB_PATH_GUIDING,
+	FZB_RENDERER_VXPG,
 	FZB_RENDERER_VRPG,
 	FZB_RENDERER_PATH_TRACING_KPCNN_DENOISING,
 	FZB_RENDERER_RESTIR_GI,
@@ -37,6 +39,7 @@ std::map<std::string, FzbRendererType> RendererTypeMap{
 	{ "PathTracing_soft", FZB_RENDERER_PATH_TRACING_SOFT },
 	{ "NPMPathGuiding", FZB_RENDERER_NPM_PATH_GUIDING },
 	{ "FzbPathGuiding", FZB_RENDERER_FZB_PATH_GUIDING },
+	{ "VXPG", FZB_RENDERER_VXPG },
 	{ "VRPG", FZB_RENDERER_VRPG },
 	{ "PathTracing_KPCNNDenoising", FZB_RENDERER_PATH_TRACING_KPCNN_DENOISING },
 	{ "ReSTIR_GI", FZB_RENDERER_RESTIR_GI },
@@ -54,6 +57,7 @@ std::shared_ptr<FzbRenderer::Renderer> FzbRenderer::createRenderer(RendererCreat
 			case FZB_RENDERER_DEFERRED: return std::make_shared<DeferredRenderer>(createInfo.rendererNode);
 			case FZB_RENDERER_PATH_TRACING: return std::make_shared<PathTracingRenderer>(createInfo.rendererNode);
 			case FZB_RENDERER_FZB_PATH_GUIDING: return std::make_shared<FzbPathGuidingRenderer>(createInfo.rendererNode);
+			case FZB_RENDERER_VXPG: return std::make_shared<VXPGRenderer>(createInfo.rendererNode);
 			case FZB_RENDERER_VRPG: return std::make_shared<VRPGRenderer>(createInfo.rendererNode);
 			//case FZB_RENDERER_NPM_PATH_GUIDING: return std::make_shared<NPMPathGuiding>(createInfo.rendererNode);
 			case FZB_RENDERER_PATH_TRACING_KPCNN_DENOISING: return std::make_shared<PathTracing_KPCNNDenoising>(createInfo.rendererNode);

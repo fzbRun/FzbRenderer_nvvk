@@ -1,9 +1,9 @@
 <rendererInfo>
 	<name value = "VRPG" />
 	<resolution width = "1280" height = "720" />
-	<sceneXML path = "veach-ajar-2" />	<!--simpleTest bearBox veach-ajar-dynamic  veach-ajar-2  veach-mis staircase dining-room veach-bidir yanYun ReSTIR_Test_Scene-->
+	<sceneXML path = "veach-ajar-2" />	<!--simpleTest bearBox veach-ajar-dynamic  veach-ajar-2  veach-mis staircase staircase-dynamic dining-room veach-bidir yanYun ReSTIR_Test_Scene-->
 
-	<renderer type = "VRPG">  <!--VRPG FzbPathGuiding NPMPathGuiding PathTracing PathTracing_KPCNNDenoising VolumetricFog StochasticLightcuts ReSTIR_GI Deferred  Mesh ZhiHuCode-->
+	<renderer type = "VXPG">  <!--VRPG VXPG FzbPathGuiding NPMPathGuiding PathTracing PathTracing_KPCNNDenoising VolumetricFog StochasticLightcuts ReSTIR_GI Deferred  Mesh ZhiHuCode-->
 		<maxDepth value = "4" />
 		<useNEE value = "false" />
 		<spp value = "1" />
@@ -17,14 +17,16 @@
 			     the same spatial detail as the previous upsampled version. -->
 			<voxelCount value="16" />
 		</LightVGB>
-		<LightInject>
-		</LightInject>
-		<Octree>
-		</Octree>
-		<SVO>
-		</SVO>
-		<SVOWeight>
-		</SVOWeight>
+		<VXPG>
+			<voxelResolution value = "64" />
+			<!-- 8..128，2 的幂 -->
+			<spixelSize value = "32" />
+			<!-- 4..256；会自动放大以免网格过大 -->
+			<bounce value = "3" />
+			<!-- 首个间接顶点后的额外 BSDF+NEE 弹射 -->
+			<misMode value = "0" />
+			<!-- 0 = balance, 1 = power -->
+		</VXPG>
 	</renderer>
 	
 </rendererInfo>
