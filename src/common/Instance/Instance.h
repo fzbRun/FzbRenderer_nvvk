@@ -29,6 +29,9 @@ public:
 	glm::mat4 translateMatrix = glm::mat4(1.0f);
 	glm::mat4 rotateMatrix = glm::mat4(1.0f);
 	glm::mat4 scaleMatrix = glm::mat4(1.0f);
+	// Raw period-rotation angles (radians), used to keep 360-degree
+	// rotations continuous instead of interpolating to an identity matrix.
+	glm::vec3 periodRotateAngles = glm::vec3(0.0f);
 
 	glm::mat4 transform = glm::mat4(1.0f);
 	glm::mat4 transform_lastTime = glm::mat4(1.0f);

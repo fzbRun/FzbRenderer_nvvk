@@ -128,6 +128,23 @@ HitState getHitStateWithPositionFetch(const float3 barycentrics, float3 rayDirec
     return hitState;
 }
 //-------------------------------------------------获取纹理数据------------------------------------------------
+void getBSDFTextureData(inout BSDFMaterial material, float2 texCoords) {
+    int albedoMapIndex = material.materialMapIndex.y;
+    if (albedoMapIndex == int(AlbedoMapType::Checkerboard)) {
+        float2 uv = float2(texCoords.x * 8.0f, texCoords.y * 32.0f) * 2.0f;
+        float2 checker = floor(uv) % 2.0f;
+        float pattern = (checker.x + checker.y) % 2.0f;
+        material.albedo *= lerp(float3(0.8f), float3(0.2f), pattern);
+    }
+    else if (albedoMapIndex >= 0) material.albedo *= textures[albedoMapIndex].SampleLevel(texCoords, 0).xyz;
+
+    int bsdfParamMapIndex = material.materialMapIndex.z;
+    if (bsdfParamMapIndex >= 0) {
+        float4 bsdfParam = textures[bsdfParamMapIndex].SampleLevel(texCoords, 0);
+        material.eta = bsdfParam.xyz;
+        material.roughness = bsdfParam.w;
+    }
+}
 void getTextueData(inout CallablePayload payload, float2 texCoords) {
     if (texCoords.x == 0.0f && texCoords.y == 0.0f) return;
 
@@ -140,21 +157,7 @@ void getTextueData(inout CallablePayload payload, float2 texCoords) {
         payload.TBN = float3x3(tangent, bitangent, payload.hitNormal);
     }
 
-    int albedoMapIndex = payload.material.materialMapIndex.y;
-    if (albedoMapIndex == int(AlbedoMapType::Checkerboard)) {
-        float2 uv = float2(texCoords.x * 8.0f, texCoords.y * 32.0f) * 2.0f;
-        float2 checker = floor(uv) % 2.0f;
-        float pattern = (checker.x + checker.y) % 2.0f;
-        payload.material.albedo *= lerp(float3(0.8f), float3(0.2f), pattern);
-    }
-    else if (albedoMapIndex >= 0) payload.material.albedo *= textures[albedoMapIndex].SampleLevel(texCoords, 0).xyz;
-
-    int bsdfParamMapIndex = payload.material.materialMapIndex.z;
-    if (bsdfParamMapIndex >= 0) {
-        float4 bsdfParam = textures[bsdfParamMapIndex].SampleLevel(texCoords, 0);
-        payload.material.eta = bsdfParam.xyz;
-        payload.material.roughness = bsdfParam.w;
-    }
+    getBSDFTextureData(payload.material, texCoords);
 }
 //---------------------------------------------closethit variable setting------------------------------------
 void initCallableShader(inout CallablePayload callablePayload, 
@@ -254,6 +257,9 @@ void getDirectionalLight(inout CallablePayload payload, SceneInfo sceneInfo, int
             if (tempPayload.distance != MISS_DISTANCE) continue;
             payload.directionLightDir = light.direction;
             payload.directionLightRadiance = light.color * light.intensity * cosine;
+
+            //float3 bsdf = getBSDF(payload.material, sampleDir, payload.hitNormal, payload.outgoing, payload.TBN, payload.isExt);
+            //payload.directionLightRadiance *= bsdf * cosine;
         }
     }
 }
@@ -510,13 +516,16 @@ void getDirectionLight(inout CallablePayload payload, SceneInfo sceneInfo) {
 
             if (tempPayload.distance != MISS_DISTANCE) continue;
             payload.directionLightDir = light.direction;
-            payload.directionLightRadiance = light.color * light.intensity * cosine;
+            payload.directionLightRadiance = light.color * light.intensity * abs(cosine);
+
             break;
         }
     }
 }
 
 //------------------------------------------Material BSDF---------------------------------------------------
+#define NVPRO_CORE_MATERIAL_FUNTION
+
 float GTR2_NDF(float cosineNH, float roughness) {
     const float alpha = roughness * roughness;
     const float a2 = alpha * alpha;
@@ -537,6 +546,8 @@ float FresnelDielectric(float n_dot_i, float n_dot_t, float eta) {
     return F;
 }
 float FresnelDielectric(float cosineOH, float eta) {
+    //eta = 1.0f / eta;
+
     const float n_dot_t_sq = 1 - (1 - cosineOH * cosineOH) / (eta * eta);
     if (n_dot_t_sq < 0) {
         // total internal reflection
@@ -628,6 +639,7 @@ float3 getBSDF_RoughConductor(float3 albedo, float roughness, float3 incidence, 
     float cosineIN = dot(incidence, normal);
     float cosineON = dot(outgoing, normal);
     if (cosineIN <= 0.0f || cosineON <= 0.0f) return float3(0.0f);
+    float alpha = roughness * roughness;
 
     float3 h = normalize(incidence + outgoing);
     float3 h_tangentSpace = mul(TBN, h);
@@ -639,8 +651,11 @@ float3 getBSDF_RoughConductor(float3 albedo, float roughness, float3 incidence, 
     float cosineOH = dot(h_tangentSpace, outgoing_tangentSpace);
 
     float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h_tangentSpace);
+    #ifdef NVPRO_CORE_MATERIAL_FUNTION
     float D = D_costhetaNH / h_tangentSpace.z;
-    // float D = GTR2_NDF(h_tangentSpace.z, roughness);
+    #else
+    float D = GTR2_NDF(h_tangentSpace.z, roughness);
+    #endif
 
     float3 F = schlickFresnel(albedo, float3(1.0F), cosineOH);
 
@@ -650,12 +665,17 @@ float3 getBSDF_RoughConductor(float3 albedo, float roughness, float3 incidence, 
                 G1_incidence,
                 outgoing_tangentSpace,
                 incidence_tangentSpace,
+                #ifdef NVPRO_CORE_MATERIAL_FUNTION
                 float2(roughness));
+                #else
+                float2(alpha));
+                #endif
     if (G2 <= 0.0f) return float3(0.0f);
 
     return (D * G2 * F) / (4.0f * cosineIN * cosineON + 1e-10f);
 }
 float3 getBSDF_RoughDielectric(float eta, float3 albedo, float roughness, float3 incidence, float3 normal, float3 outgoing, float3x3 TBN) {
+    /*
     float cosineIN = dot(incidence, normal);
     if (cosineIN < 0.0f) {
         normal = -normal;
@@ -700,11 +720,48 @@ float3 getBSDF_RoughDielectric(float eta, float3 albedo, float roughness, float3
         return D * G2 * (1.0f - F) * abs(cosineIH * cosineOH)
                         / (weight * weight * abs(cosineON * cosineIN) + 1e-10f) / (eta * eta);
     } else return (D * G2 * (totalReflection ? 1.0f : F)) / (4.0f * abs(cosineON * cosineIN) + 1e-10f);
+    */
+    bool isRefraction = dot(incidence, normal) * dot(outgoing, normal) < 0.0f;
+    float co_n = abs(dot(outgoing, normal));
+    float ci_n = abs(dot(incidence, normal));
+    if (co_n <= 1e-6f || ci_n <= 1e-6f) return float3(0.0f);
+
+    float3 h;
+    if (isRefraction) h = normalize(outgoing * eta + incidence); // ★ 原来写成 incidence*eta + outgoing
+    else h = normalize(incidence + outgoing);
+    if (dot(h, outgoing) < 0.0f) h = -h; // ★ 与采样器同一个半向量
+
+    float co_h = abs(dot(outgoing, h));
+    float ci_h = abs(dot(incidence, h));
+    if (co_h <= 1e-6f) return float3(0.0f);
+
+    bool TIR = (eta * eta * (1.0f - co_h * co_h)) >= 1.0f; // ★ 微面角，不是宏观角
+    if (isRefraction && TIR) return float3(0.0f);
+
+    float3 h_tangentSpace = mul(TBN, h);
+    if (abs(h_tangentSpace.z) <= 1e-6f) return float3(0.0f); // ★ 不再用 <=0 早退
+    float D = hvd_ggx_eval(float2(1.0f / roughness), h_tangentSpace) / h_tangentSpace.z;
+
+    float3 F = schlickFresnel(albedo, float3(1.0F), co_h); // ★ 用 co_h，不用 cosineIH
+
+    float G1_outgoing, G1_incidence;
+    float G2 = ggx_smith_shadow_mask(G1_outgoing, G1_incidence,
+                                     mul(TBN, outgoing), mul(TBN, incidence), float2(roughness));
+    if (G2 <= 0.0f) return float3(0.0f);
+
+    if (isRefraction) {
+        float jac = eta * co_h - ci_h;
+        float jac2 = jac * jac + 1e-10f;
+        return (1.0f - F) * D * G2 * ci_h * co_h * (eta * eta)
+               / (ci_n * co_n * jac2 + 1e-10f);
+    } else {
+        return D * G2 * (TIR ? 1.0f : F) / (4.0f * co_n * ci_n + 1e-10f);
+    }
 }
-float3 getBSDF_RoughtPlastic(float eta, float3 albedo_diffuse, float3 albedo_specular, float roughness, float3 incidence, float3 normal, float3 outgoing, float3x3 TBN) {
+float3 getBSDF_RoughPlastic(float eta, float3 albedo_diffuse, float3 albedo_specular, float roughness, float3 incidence, float3 normal, float3 outgoing, float3x3 TBN) {
     float cosineIN = dot(incidence, normal);
     float cosineON = dot(outgoing, normal);
-    if (cosineIN <= 0.0f || cosineON <= 0.0f) return float3(1.0f);
+    if (cosineIN <= 0.0f || cosineON <= 0.0f) return float3(0.0f);
 
     float3 h = normalize(incidence + outgoing);
     float3 h_tangentSpace = mul(TBN, h);
@@ -730,7 +787,7 @@ float3 getBSDF_RoughtPlastic(float eta, float3 albedo_diffuse, float3 albedo_spe
     float3 F_o = FresnelDielectric(cosineOH, eta);
     float3 diffuse_contrib = albedo_diffuse * (1.0f - F_o) * (1.0f - F_i) / M_PI;
 
-    return (specular_contib + diffuse_contrib) * cosineON;
+    return specular_contib + diffuse_contrib;  //(specular_contib + diffuse_contrib) * cosineON;
 }
 float3 getBSDF(BSDFMaterial material, float3 incidence, float3 normal, float3 outgoing, float3x3 TBN, bool isExt) {
     float3 bsdf = float3(0.0f);
@@ -738,7 +795,7 @@ float3 getBSDF(BSDFMaterial material, float3 incidence, float3 normal, float3 ou
     else if (material.type == MaterialType::RoughConductor)
         bsdf = getBSDF_RoughConductor(material.albedo, material.roughness, incidence, normal, outgoing, TBN);
     else if (material.type == MaterialType::RoughPlastic)
-        bsdf = getBSDF_RoughtPlastic(material.eta.x, material.albedo, material.albedo_specular, material.roughness, incidence, normal, outgoing, TBN);
+        bsdf = getBSDF_RoughPlastic(material.eta.x, material.albedo, material.albedo_specular, material.roughness, incidence, normal, outgoing, TBN);
     else if (material.type == MaterialType::Conductor) bsdf = getBSDF_Conductor(material.albedo, incidence, normal, outgoing);
     else if (material.type == MaterialType::Dielectric) {
         float eta = material.eta.x;
@@ -755,7 +812,7 @@ float3 getBSDF(BSDFMaterial material, float3 incidence, float3 normal, float3 ou
 
 float getPdf_Diffuse(float3 incidence, float3 normal) {
     float cosineIN = dot(incidence, normal);
-    return M_1_PI * max(cosineIN, 1e-10f);
+    return M_1_PI * max(cosineIN, 0.0f);
 }
 float getPdf_Conductor(float3 incidence, float3 normal, float3 outgoing) {
     float cosineIN = dot(incidence, normal);
@@ -807,14 +864,28 @@ float getPdf_RoughConductor(float roughness, float3 incidence, float3 normal, fl
 
     float cosineOH = dot(h, outgoing);
 
-    float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h_tangentSpace); // h需要在切线空间中
-    float D = D_costhetaNH / h_tangentSpace.z;                                   // max(h.z, 1e-6f);
-    return D_costhetaNH / (abs(4.0f * cosineOH) + 1e-10f);
-
+    //#ifdef NVPRO_CORE_MATERIAL_FUNTION
+    //float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h_tangentSpace); // h需要在切线空间中
+    //float D = D_costhetaNH / h_tangentSpace.z;                                   // max(h.z, 1e-6f);
+    //return D_costhetaNH / (abs(4.0f * cosineOH) + 1e-10f);
+    //#else
     //float D = GTR2_NDF(h_tangentSpace.z, roughness);
     //return D * h_tangentSpace.z / (abs(4.0f * cosineOH) + 1e-10f);
+    //#endif
+
+    float3 o_t = mul(TBN, outgoing);
+    #ifdef NVPRO_CORE_MATERIAL_FUNTION
+    float D = hvd_ggx_eval(float2(1.0f / roughness), h_tangentSpace) / max(h_tangentSpace.z, 1e-6f);
+    float G1 = smith_shadow_or_mask(o_t, float2(roughness));
+    #else
+    float alpha = roughness * roughness;
+    float D = GTR2_NDF(h_tangentSpace.z, roughness);
+    float G1 = IsotropicGGX_Masking(o_t, roughness);
+    #endif
+    return G1 * D / (4.0f * max(cosineON, 1e-4f));
 }
 float getPdf_RoughDielectric(float eta, float3 albedo, float roughness, float3 incidence, float3 normal, float3 outgoing, float3x3 TBN) {
+    /*
     float cosineIN = dot(incidence, normal);
     if (cosineIN < 0.0f) {
         normal = -normal;
@@ -852,8 +923,45 @@ float getPdf_RoughDielectric(float eta, float3 albedo, float roughness, float3 i
         float weight = cosineIH * eta + cosineOH;
         return (1.0f - F_oneChanel) * D_costhetaNH * cosineIH / (weight * weight + 1e-10f);
     } else return F_oneChanel * D_costhetaNH / (abs(4.0f * cosineOH) + 1e-10f);
+    */
+    bool isRefraction = dot(incidence, normal) * dot(outgoing, normal) < 0.0f;
+    float co_n = abs(dot(outgoing, normal));
+    float ci_n = abs(dot(incidence, normal));
+    if (co_n <= 1e-6f || ci_n <= 1e-6f) return 0.0f;
+
+    float3 h;
+    if (isRefraction) h = normalize(outgoing * eta + incidence); // η·o + i
+    else h = normalize(incidence + outgoing);
+    if (dot(h, outgoing) < 0.0f) h = -h; // 可见微面朝 outgoing
+
+    float co_h = abs(dot(outgoing, h));
+    float ci_h = abs(dot(incidence, h));
+    if (co_h <= 1e-6f) return 0.0f;
+
+    bool TIR = (eta * eta * (1.0f - co_h * co_h)) >= 1.0f;
+    if (isRefraction && TIR) return 0.0f;
+
+    float3 h_tangentSpace = mul(TBN, h);
+    if (abs(h_tangentSpace.z) <= 1e-6f) return 0.0f;
+    float D = hvd_ggx_eval(float2(1.0f / roughness), h_tangentSpace) / h_tangentSpace.z;
+
+    float G1_outgoing, G1_incidence;
+    ggx_smith_shadow_mask(G1_outgoing, G1_incidence,
+                          mul(TBN, outgoing), mul(TBN, incidence), float2(roughness));
+
+    float3 F = schlickFresnel(albedo, float3(1.0F), co_h);
+    float F1 = 0.299 * F.x + 0.587 * F.y + 0.114 * F.z;
+
+    if (isRefraction) {
+        float jac = eta * co_h - ci_h;
+        float jac2 = jac * jac + 1e-10f;
+        return (1.0f - F1) * G1_outgoing * co_h * D / (co_n * jac2 + 1e-10f);
+    } else {
+        float PR = TIR ? 1.0f : F1; // TIR 时只剩反射
+        return PR * G1_outgoing * D / (4.0f * co_n + 1e-10f);
+    }
 }
-float getPdf_RoughPlastic(float3 albedo_diffuse, float3 albedo_specular, float roughness, float3 incidence, float3 normal, float3 outgoing, float3x3 TBN) {
+float getPdf_RoughPlastic(float3 albedo_diffuse, float3 albedo_specular, float roughness, float3 incidence, float3 normal, float3 outgoing, float3x3 TBN, float eta) {
     float cosineIN = dot(incidence, normal);
     float cosineON = dot(outgoing, normal);
     if (cosineIN <= 0.0f || cosineON <= 0.0f) return 0.0f;
@@ -862,9 +970,10 @@ float getPdf_RoughPlastic(float3 albedo_diffuse, float3 albedo_specular, float r
     float3 h_tangentSpace = mul(TBN, h);
     if (h_tangentSpace.z == 0.0f) return 0.0f;
 
-    float lS = 0.299 * albedo_specular.x + 0.587 * albedo_specular.y + 0.114 * albedo_specular.z;
+    //float3 F0 = FresnelDielectric(1.0f, 1.0f / eta);
+    float lS = 0.299 * albedo_specular.x + 0.587 * albedo_specular.y + 0.114 * albedo_specular.z; //luminance( F0 * albedo_specular);
     float lR = 0.299 * albedo_diffuse.x + 0.587 * albedo_diffuse.y + 0.114 * albedo_diffuse.z;
-    float specular_prob = lS / (lS + lR);
+    float specular_prob = lS / max(lS + lR, 1e-6f);
     float diffuse_prob = 1.0f - specular_prob;
 
     float3 outgoing_tangentSpace = mul(TBN, outgoing);
@@ -881,7 +990,7 @@ float getPdf(BSDFMaterial material, float3 incidence, float3 normal, float3 outg
     else if (material.type == MaterialType::RoughConductor)
         pdf = getPdf_RoughConductor(material.roughness, incidence, normal, outgoing, TBN);
     else if (material.type == MaterialType::RoughPlastic)
-        pdf = getPdf_RoughPlastic(material.albedo, material.albedo_specular, material.roughness, incidence, normal, outgoing, TBN);
+        pdf = getPdf_RoughPlastic(material.albedo, material.albedo_specular, material.roughness, incidence, normal, outgoing, TBN, material.eta.x);
     else if (material.type == MaterialType::Conductor) pdf = getPdf_Conductor(incidence, normal, outgoing);
     else if (material.type == MaterialType::Dielectric) {
         float eta = material.eta.x;
@@ -983,6 +1092,7 @@ void PopulateCallablePayload_DielectricMaterial(inout CallablePayload payload) {
         }
     }
 }
+
 void PopulateCallablePayload_RoughConductorMaterial(inout CallablePayload payload) {
     float randomNumber1 = rand(payload.randomSeed);
     float randomNumber2 = rand(payload.randomSeed);
@@ -990,8 +1100,11 @@ void PopulateCallablePayload_RoughConductorMaterial(inout CallablePayload payloa
     float alpha = roughness * roughness;
 
     float3 outgoing_tangentSpace = mul(payload.TBN, payload.outgoing);
-    // float3 h_tangentSpace = hvd_ggx_sample_vndf(outgoing_tangentSpace, float2(roughness), float2(randomNumber1, randomNumber2));
+    #ifdef NVPRO_CORE_MATERIAL_FUNTION
+    float3 h_tangentSpace = hvd_ggx_sample_vndf(outgoing_tangentSpace, float2(roughness), float2(randomNumber1, randomNumber2));
+    #else
     float3 h_tangentSpace = SampleVisibleNormals(outgoing_tangentSpace, alpha, float2(randomNumber1, randomNumber2));
+    #endif
     if (h_tangentSpace.z == 0.0f) {
         payload.bsdf = float3(0.0f);
         payload.pdf = 1.0f;
@@ -1014,10 +1127,12 @@ void PopulateCallablePayload_RoughConductorMaterial(inout CallablePayload payloa
     payload.incidence = mul(incidence_tangentSpace, payload.TBN);
 
     float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h_tangentSpace); // h需要在切线空间中
-    float D = D_costhetaNH / h_tangentSpace.z;                                   // max(h.z, 1e-6f);
-    payload.pdf = D_costhetaNH / (4.0f * cosineOH);
-    //float D = GTR2_NDF(h_tangentSpace.z, roughness);
-    //payload.pdf = D * h_tangentSpace.z / (4.0f * cosineOH);
+    #ifdef NVPRO_CORE_MATERIAL_FUNTION
+    float D = D_costhetaNH / h_tangentSpace.z; // max(h.z, 1e-6f);
+    #else
+    float D = GTR2_NDF(h_tangentSpace.z, roughness);
+    #endif
+    payload.pdf = D * h_tangentSpace.z / (4.0f * cosineOH);
 
     float G1_outgoing, G1_incidence;
     float G2 = ggx_smith_shadow_mask(
@@ -1025,15 +1140,23 @@ void PopulateCallablePayload_RoughConductorMaterial(inout CallablePayload payloa
         G1_incidence,
         outgoing_tangentSpace,
         incidence_tangentSpace,
-        float2(roughness)
+        #ifdef NVPRO_CORE_MATERIAL_FUNTION
+        float2(roughness),
+        #else
+        float2(alpha),
+        #endif
     );
     if (G2 <= 0.0f) {
         payload.bsdf = float3(0.0f);
         payload.pdf = 1.0f;
         return;
     }
+
+    payload.pdf = G1_outgoing * D / (4.0f * outgoing_tangentSpace.z + 1e-10f);
     float3 F = schlickFresnel(payload.material.albedo, float3(1.0F), cosineOH);
     payload.bsdf = (D * G2 * F) / (4.0f * outgoing_tangentSpace.z * incidence_tangentSpace.z);
+
+    //payload.pdf = D_costhetaNH * G1_outgoing / (4.0f * outgoing_tangentSpace.z);
 
     if (any(payload.directionLightRadiance > 0.001f)) {
         payload.directionLightRadiance *= 
@@ -1050,7 +1173,7 @@ void PopulateCallablePayload_RoughDielectricMaterial(inout CallablePayload paylo
 
     float3 outgoing_tangentSpace = mul(payload.TBN, payload.outgoing);
     float3 h_tangentSpace = hvd_ggx_sample_vndf(outgoing_tangentSpace, float2(roughness), float2(randomNumber1, randomNumber2));
-    if (h_tangentSpace.z == 0.0f || outgoing_tangentSpace.z == 0.0f) {
+    if (abs(h_tangentSpace.z) <= 1e-6f || abs(outgoing_tangentSpace.z) <= 1e-6f) {
         payload.bsdf = float3(0.0f);
         payload.pdf = 1.0f;
         return;
@@ -1085,12 +1208,17 @@ void PopulateCallablePayload_RoughDielectricMaterial(inout CallablePayload paylo
         payload.pdf = 1.0f;
         return;
     }
-    if (incidence_tangentSpace.z == 0.0f) {
+    if (abs(incidence_tangentSpace.z) <= 1e-6f) {
         payload.bsdf = float3(0.0f);
         payload.pdf = 1.0f;
         return;
     }
     payload.incidence = mul(incidence_tangentSpace, payload.TBN);
+
+    if (any(payload.directionLightRadiance > 0.001f)) {
+        payload.directionLightRadiance *=
+            getBSDF_RoughDielectric(payload.material.eta.x, payload.material.albedo, payload.material.roughness, -payload.directionLightDir, payload.hitNormal, payload.outgoing, payload.TBN);
+    }
 
     float D_costhetaNH = hvd_ggx_eval(float2(1.0f / roughness), h_tangentSpace); // h需要在切线空间中
     float D = D_costhetaNH / h_tangentSpace.z;
@@ -1109,6 +1237,7 @@ void PopulateCallablePayload_RoughDielectricMaterial(inout CallablePayload paylo
         return;
     }
 
+    /*
     if (refraction) {
         float weight = dot(incidence_tangentSpace, h_tangentSpace) / eta + cosineOH;
         payload.pdf = (1.0f - F_oneChanel) * D_costhetaNH * cosineOH / (weight * weight + 1e-10f);
@@ -1122,10 +1251,23 @@ void PopulateCallablePayload_RoughDielectricMaterial(inout CallablePayload paylo
         payload.pdf = (totalReflection ? 1.0f : F_oneChanel) * D_costhetaNH / (4.0f * cosineOH + 1e-10f);
         payload.bsdf = D * G2 * (totalReflection ? 1.0f : F) / (abs(4.0f * outgoing_tangentSpace.z * incidence_tangentSpace.z) + 1e-10f);
     }
+    */
+    if (refraction) {
+        float ci_h = abs(dot(incidence_tangentSpace, h_tangentSpace));
+        float jac = eta * cosineOH - ci_h; // cosineOH = o·h > 0
+        float jac2 = jac * jac + 1e-10f;
 
-    if (any(payload.directionLightRadiance > 0.001f)) {
-        payload.directionLightRadiance *=
-            getBSDF_RoughDielectric(payload.material.eta.x, payload.material.albedo, payload.material.roughness, -payload.directionLightDir, payload.hitNormal, payload.outgoing, payload.TBN);
+        payload.pdf = (1.0f - F_oneChanel) * G1_outgoing * cosineOH * D
+                       / (outgoing_tangentSpace.z * jac2 + 1e-10f);
+        payload.bsdf = (1.0f - F) * D * G2 * ci_h * cosineOH * (eta * eta)
+                       / (abs(incidence_tangentSpace.z) * outgoing_tangentSpace.z * jac2 + 1e-10f);
+
+        payload.isExt = !payload.isExt;
+    } else {
+        payload.pdf = (totalReflection ? 1.0f : F_oneChanel) * G1_outgoing * D
+                       / (4.0f * outgoing_tangentSpace.z + 1e-10f);
+        payload.bsdf = D * G2 * (totalReflection ? 1.0f : F)
+                       / (4.0f * outgoing_tangentSpace.z * abs(incidence_tangentSpace.z) + 1e-10f);
     }
 }
 
@@ -1133,10 +1275,11 @@ void PopulateCallablePayload_RoughPlasticMaterial(inout CallablePayload payload)
     float roughness = payload.material.roughness;
     float alpha = roughness * roughness;
 
-    float lS = 0.299 * payload.material.albedo_specular.x + 0.587 * payload.material.albedo_specular.y + 0.114 * payload.material.albedo_specular.z;
+    //float3 F0 = FresnelDielectric(1.0f, 1.0f / payload.material.eta.x);
+    float lS = 0.299 * payload.material.albedo_specular.x + 0.587 * payload.material.albedo_specular.y + 0.114 * payload.material.albedo_specular.z; // luminance(F0 * payload.material.albedo_specular);
     float lR = 0.299 * payload.material.albedo.x + 0.587 * payload.material.albedo.y + 0.114 * payload.material.albedo.z;
 
-    float specular_prob = lS / (lS + lR);
+    float specular_prob = lS / max(lS + lR, 1e-6f);
     float randomNumber = rand(payload.randomSeed);
     float randomNumber1 = rand(payload.randomSeed);
     float randomNumber2 = rand(payload.randomSeed);
@@ -1204,11 +1347,11 @@ void PopulateCallablePayload_RoughPlasticMaterial(inout CallablePayload payload)
 
     float3 F_o = FresnelDielectric( cosineOH, payload.material.eta.x);  //schlickFresnel(payload.material.albedo_specular, float3(1.0F), cosineOH);
     float3 diffuse_contrib = payload.material.albedo * (1.0f - F_o) * (1.0f - F_i) / M_PI;
-    payload.bsdf = (specular_contib + diffuse_contrib) * incidence_tangentSpace.z;
+    payload.bsdf = (specular_contib + diffuse_contrib); // * incidence_tangentSpace.z;
 
     if (any(payload.directionLightRadiance > 0.001f)) {
         payload.directionLightRadiance *=
-            getBSDF_RoughtPlastic(payload.material.eta.x, payload.material.albedo, payload.material.albedo_specular, payload.material.roughness, -payload.directionLightDir, payload.hitNormal, payload.outgoing, payload.TBN);
+            getBSDF_RoughPlastic(payload.material.eta.x, payload.material.albedo, payload.material.albedo_specular, payload.material.roughness, -payload.directionLightDir, payload.hitNormal, payload.outgoing, payload.TBN);
     }
 }
 //------------------------------------------BSDF Sample---------------------------------------------------

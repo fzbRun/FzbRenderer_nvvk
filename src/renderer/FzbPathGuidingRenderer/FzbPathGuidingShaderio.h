@@ -6,13 +6,25 @@
 #define FZBRENDERER_FZB_PATHGUIDING_SHADER_IO_H
 NAMESPACE_SHADERIO_BEGIN()
 
+//#define RIS_Version
+//#define StochasticSample
+
+#define StochasticLightcuts_RIS
+//#define NoLightcuts
+#define Candidate_Samples_Count 128
+
+//#define SpatialReuse_FzbPG
+#define Pairwise_MIS
+
+#define OCTREE_E_CLUSTER
+
 //#define GEOMETRY_CLUSTER_WITH_E
 
 //#define ADAPTIVE_IMPORTANCE_SAMPLING	//Adaptive importance sampling
 #define HITTEST_COUNT_PER_CHILDNODE_FZBPG 4		//must <= 4
 #define ADAPTIVE_IMPORTANCE_SAMPLING_MAX_LAYER 3
 
-//#define NEARBYNODE_JITTER_FZBPG
+#define NEARBYNODE_JITTER_FZBPG
 #define NEARBY_NODE_COUNT_FZBPG 4	//dont't change!!!
 //#define COMMON_NEARBYNODE_JITTER
 
@@ -21,20 +33,64 @@ NAMESPACE_SHADERIO_BEGIN()
 
 struct FzbPathGuidingPushConstant
 {
-	float3x3 randomRotateMatrix;
-	float3 VGBVoxelSize;
-	int maxDepth = 6;
-	int spp = 1;
-	float time;
-	int maxOctreeLayer;
-	float4 VGBStartPos_Size;
 	int maxFrameCount;
 	int frameIndex = 0;
+	float time;
+
+	int maxDepth = 6;
+	int spp = 1;
+
+	int spatialRuse = 0;
+	int ditherSample = 1;
+	int padding;
+
+	float3 VGBVoxelSize;
+	int maxOctreeLayer;
+	float4 VGBStartPos_Size;
+
+	float3x3 randomRotateMatrix;
+	int3 padding1;
+
 	SceneInfo* sceneInfoAddress;
 	uint2 sceneSize;
 	uint2 threadGroupCount;
+
+#ifndef StochasticLightcuts_RIS
+	uint* indivisibleNodeInfoBufferAddress_E;
+	float* weightSumBufferAddress;
+#endif
 };
 
+#ifdef StochasticLightcuts_RIS
+enum class StaticBindingPoints_FzbPG
+{
+	eOctreeNodeInfo_G = 2,
+	eOctreeNodeData_E,
+
+	eCandidateSubTreeData,
+	eCandidateLeafNodeData,
+
+	eCandidateSampleData,
+	eCandidateSamplePrefixWSum,
+
+	eGlobalInfo,
+
+	eCandidateSampleData2,
+	eCandidateSampleAABB,
+
+#ifdef NEARBYNODE_JITTER_FZBPG
+	eOctreeNodeData_G,
+	eNearbyNodeInfos,
+#endif
+
+#ifndef NDEBUG
+	eDepthImage,
+	ePGValueImage,
+	ePGValue2Image,
+	ePGVarianceImage,
+#endif
+};
+#else
 enum class StaticBindingPoints_FzbPG
 {
 	//eTextures = 0,
@@ -56,7 +112,10 @@ enum class StaticBindingPoints_FzbPG
 	ePGValue2Image,
 	ePGVarianceImage,
 #endif
+
+	eClusterPairData,
 };
+#endif
 enum class DynamicBindingPoints_FzbPG {
 	//eTlas_SVOPG = 0,
 	eSVOTlas_SVOPG = 1,

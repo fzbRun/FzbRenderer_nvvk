@@ -151,7 +151,7 @@
 	</instances>
 
 	<lights>
-		<useSky value = "true" />
+		<useSky value = "false" />
 		<backgroundColor value = "0.0, 0.0, 0.0" />
 	</lights>
 </scene>

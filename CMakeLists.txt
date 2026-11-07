@@ -119,6 +119,11 @@ target_include_directories(${PROJECT_NAME} PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
 #)
 
 set_target_properties(${PROJECT_NAME} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+
+# Visual Studio's "Fast Up-To-Date Check" misjudges this project (CUDA sources, custom commands and
+# the ZERO_CHECK reference), which makes Build Solution a no-op while Rebuild Solution recompiles
+# everything. Turning it off lets MSBuild do a normal incremental build instead.
+set_target_properties(${PROJECT_NAME} PROPERTIES VS_GLOBAL_DisableFastUpToDateCheck "true")
 #--------------------------------------------------------------------------------------
 target_include_directories(${PROJECT_NAME} PRIVATE ${TensorRTPath}/include)
 target_link_directories(${PROJECT_NAME} PRIVATE ${TensorRTPath}/lib)

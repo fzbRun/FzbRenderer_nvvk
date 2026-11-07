@@ -127,7 +127,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 			cameraManip->setLookat(eye, center, up, true);
 		}
 		
-		VkExtent2D resolution = Application::app->getWindowSize();
+		VkExtent2D resolution = Application::renderResolution;// Application::app->getWindowSize();
 		cameraManip->setWindowSize(glm::uvec2(resolution.width, resolution.height));
 
 		glm::vec2 plane = glm::vec2(0.1f, 100.0f);
@@ -181,24 +181,7 @@ void FzbRenderer::Scene::createSceneFromXML() {
 	pugi::xml_node instancesNode = sceneInfoNode.child("instances");
 	for (pugi::xml_node instanceNode : instancesNode.children("instance")) {
 		InstanceSet instanceSet = InstanceSet(instanceNode);
-		if (instanceSet.instanceID != "defaultInstanceID") {
-			//instanceIDToInstance.insert({ instanceSet.instanceID, {instanceSet.type, getInstanceSetSize(instanceSet.type)} });
-			instanceIDToInstanceSet.insert({ instanceSet.instanceID, {instanceSet.type, getInstanceSetSize(instanceSet.type)} });
-		}
-			
 		addInstanceSet(instanceSet);
-		if (instanceSet.type == Static) {
-			staticInstanceCount += instanceSet.childInstances.size();
-			++staticInstanceSetCount;
-		}
-		else if (instanceSet.type == PeriodMotion) {
-			periodInstanceCount += instanceSet.childInstances.size();
-			++periodInstanceSetCount;
-		}
-		else if (instanceSet.type == RandomMotion) {
-			randomInstanceCount += instanceSet.childInstances.size();
-			++randomInstanceSetCount;
-		}
 	}
 
 	uint32_t offset = 0;
@@ -233,6 +216,44 @@ void FzbRenderer::Scene::createSceneFromXML() {
 		sceneInfo.numLights = 0;
 		if (pugi::xml_node useSkyNode = lightsNode.child("useSky")) {
 			sceneInfo.useSky = std::string(useSkyNode.attribute("value").value()) == "true";
+
+			float azimuthDeg = 0.0f;
+			float elevationDeg = 0.0f;
+			bool  hasAzimuth = false;
+			bool  hasElevation = false;
+
+			if (pugi::xml_node node = lightsNode.child("Azimuth")) {
+				azimuthDeg = node.attribute("value").as_float();
+				hasAzimuth = true;
+			}
+			if (pugi::xml_node node = lightsNode.child("Elevation")) {
+				elevationDeg = node.attribute("value").as_float();
+				hasElevation = true;
+			}
+			if (pugi::xml_node node = lightsNode.child("Irradiance")) {
+				sceneInfo.skySimpleParam.sunIntensity = node.attribute("value").as_float();
+			}
+
+			if (hasAzimuth || hasElevation) {
+				glm::vec3 dir = glm::normalize(sceneInfo.skySimpleParam.sunDirection);
+
+				// 只给了一个角度时，从当前 sunDirection 反推另一个
+				if (!hasAzimuth)
+					azimuthDeg = glm::degrees(std::atan2(dir.z, dir.x));
+				if (!hasElevation)
+					elevationDeg = glm::degrees(std::asin(glm::clamp(dir.y, -1.0f, 1.0f)));
+
+				const float az = glm::radians(azimuthDeg);
+				const float el = glm::radians(elevationDeg);
+				const float ce = std::cos(el);
+
+				// Y-up：Azimuth 绕 Y，Elevation 从水平面向上
+				sceneInfo.skySimpleParam.sunDirection =
+					glm::normalize(glm::vec3(std::cos(az) * ce,
+						std::sin(el),
+						std::sin(az) * ce));
+			}
+
 			if (sceneInfo.useSky) {
 				LightInstance lightInstance;
 				lightInstances.push_back(lightInstance);
@@ -254,8 +275,6 @@ void FzbRenderer::Scene::createSceneFromXML() {
 			sceneInfo.backgroundColor = FzbRenderer::getRGBFromString(backgroudColorNode.attribute("value").value());
 
 		for (pugi::xml_node lightNode : lightsNode.children("light")) {
-			if (sceneInfo.numLights >= LIGHT_COUNT) break;
-
 			LightInstance lightInstance = LightInstance(lightNode);
 			lightInstances.push_back(lightInstance);
 
@@ -284,8 +303,8 @@ void FzbRenderer::Scene::createSceneFromXML() {
 					light.coneAngle = std::stof(coneAngleNode.attribute("value").value());
 			}
 			else if (lightType == "sun") {
-				light.type == shaderio::Direction;
-				sceneInfo.useSky = true;
+				light.type = shaderio::Direction;
+				if (sceneInfo.numLights < LIGHT_COUNT) sceneInfo.useSky = true;
 			}
 			else if (lightType == "area") {		//默认是矩形光源
 				light.type = shaderio::Area;
@@ -327,8 +346,10 @@ void FzbRenderer::Scene::createSceneFromXML() {
 					lightInstances[lightInstances.size() - 1].getTransformMatrixFromXML(transformNode);
 			}
 
-			sceneInfo.lights[sceneInfo.numLights] = light;
-			++sceneInfo.numLights;
+			if (sceneInfo.numLights < LIGHT_COUNT) {
+				sceneInfo.lights[sceneInfo.numLights] = light;
+				++sceneInfo.numLights;
+			}
 		}
 	}
 
@@ -355,6 +376,7 @@ void FzbRenderer::Scene::createSceneInfoBuffer() {
 	nvvk::ResourceAllocator* allocator = stagingUploader.getResourceAllocator();
 
 	// Create all mesh buffers
+	allocator->destroyBuffer(bMeshes);
 	if (meshes.size() > 0) {
 		allocator->createBuffer(bMeshes, std::span(meshes).size_bytes(),
 			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
@@ -363,6 +385,7 @@ void FzbRenderer::Scene::createSceneInfoBuffer() {
 	}
 
 	// Create all instance buffers
+	allocator->destroyBuffer(bInstances);
 	if (instances.size() > 0) {
 		allocator->createBuffer(bInstances, std::span(instances).size_bytes(),
 			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
@@ -372,6 +395,7 @@ void FzbRenderer::Scene::createSceneInfoBuffer() {
 	}
 
 	// Create all material buffers
+	allocator->destroyBuffer(bMaterials);
 	if (materials.size() > 0) {
 		allocator->createBuffer(bMaterials, std::span(materials).size_bytes(),
 			VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT);
@@ -381,6 +405,7 @@ void FzbRenderer::Scene::createSceneInfoBuffer() {
 	}
 
 	// Create the scene info buffer
+	allocator->destroyBuffer(bSceneInfo);
 	NVVK_CHECK(allocator->createBuffer(bSceneInfo,
 		std::span<const shaderio::SceneInfo>(&sceneInfo, 1).size_bytes(),
 		VK_BUFFER_USAGE_2_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT));
@@ -444,6 +469,7 @@ void FzbRenderer::Scene::preRender() {
 
 	const glm::mat4& viewMatrix = cameraManip->getViewMatrix();
 	const glm::mat4& projMatrix = cameraManip->getPerspectiveMatrix();
+	sceneInfo.prevViewProjMatrix = sceneInfo.viewProjMatrix;
 	sceneInfo.viewMatrix = viewMatrix;
 	sceneInfo.projMatrix = projMatrix;
 	sceneInfo.viewProjMatrix = projMatrix * viewMatrix;
@@ -483,6 +509,7 @@ void FzbRenderer::Scene::preRender() {
 
 }
 void FzbRenderer::Scene::UIRender() {
+	return;
 	uint32_t randomSeed = 0;
 
 	if (ImGui::Begin("Scene Resources")) {
@@ -549,10 +576,29 @@ uint32_t FzbRenderer::Scene::getInstanceSetSize(InstanceType type) {
 	return 0;
 }
 void FzbRenderer::Scene::addInstanceSet(InstanceSet& instanceSet) {
+	if (instanceSet.instanceID != "defaultInstanceID") {
+		//instanceIDToInstance.insert({ instanceSet.instanceID, {instanceSet.type, getInstanceSetSize(instanceSet.type)} });
+		instanceIDToInstanceSet.insert({ instanceSet.instanceID, {instanceSet.type, getInstanceSetSize(instanceSet.type)} });
+	}
 	switch (instanceSet.type) {
-		case Static: return staticInstanceSets.push_back(instanceSet); break;
-		case PeriodMotion: return periodInstanceSets.push_back(instanceSet); break;
-		case RandomMotion: return randomInstanceSets.push_back(instanceSet); break;
+		case Static: {
+			staticInstanceSets.push_back(instanceSet); 
+			staticInstanceCount += instanceSet.childInstances.size();
+			++staticInstanceSetCount;
+			break;
+		}
+		case PeriodMotion: {
+			periodInstanceSets.push_back(instanceSet); 
+			periodInstanceCount += instanceSet.childInstances.size();
+			++periodInstanceSetCount;
+			break;
+		}
+		case RandomMotion: {
+			randomInstanceSets.push_back(instanceSet); 
+			randomInstanceCount += instanceSet.childInstances.size();
+			++randomInstanceSetCount;
+			break;
+		}
 		default: printf("实例没有相应类型");
 	}
 }

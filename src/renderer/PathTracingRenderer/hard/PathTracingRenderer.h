@@ -56,7 +56,7 @@ private:
 	shaderio::PathTracingPushConstant pushValues{};
 
 	bool useNEE = true;
-	bool useRCV = true;
+	bool useRCV = false;
 };
 
 }

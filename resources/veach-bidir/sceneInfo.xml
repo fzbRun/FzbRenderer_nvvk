@@ -1,0 +1,92 @@
+<scene>
+	<sensor type="perspective">
+		<fov value="35"/>
+		<transform type="lookAt">
+			<eye value="15.041, 3.912, -0.25" />
+			<center value="15.017, 3.912, -0.25" />
+			<up value="0.0, 1.0, 0.0" />
+		</transform>
+	</sensor>
+
+	<bsdfs>
+		<bsdf type="diffuse" id="DiffuseBSDF">
+			<albedo value="0.5, 0.5, 0.5, 1.0" />
+		</bsdf>
+		<bsdf type="roughConductor" id="LampBSDF">
+			<roughness value="0.25" />
+			<eta value="2.8656, 2.11918, 1.94008" />
+			<k value="3.03233, 2.05611, 1.61629" />
+		</bsdf>
+		<bsdf type="dielectric" id="GlassBSDF">
+			<int_ior value="1.5" />
+			<ext_ior value="1.0" />
+		</bsdf>
+		<bsdf type="diffuse" id="WoodBSDF">
+			<albedo value="0.32963, 0.257976, 0.150292, 1.0" />
+		</bsdf>
+		<bsdf type="diffuse" id="Light0BSDF">
+			<albedo value="0.8, 0.8, 0.8, 1.0" />
+			<emissive value="523.258, 523.258, 523.258" />
+		</bsdf>
+		<bsdf type="diffuse" id="Light1BSDF">
+			<albedo value="0.8, 0.8, 0.8, 1.0" />
+			<emissive value="12048.2, 8605.84, 6196.21" />
+		</bsdf>
+	</bsdfs>
+
+	<meshes>
+		<mesh type="obj" id="Wood"><filename value="models/Mesh000.obj" /></mesh>
+		<mesh type="obj" id="Lamp_0002"><filename value="models/Mesh001.obj" /></mesh>
+		<mesh type="obj" id="Glass"><filename value="models/Mesh002.obj" /></mesh>
+		<mesh type="obj" id="Diffuse_0006"><filename value="models/Mesh003.obj" /></mesh>
+		<mesh type="obj" id="Diffuse_0001"><filename value="models/Mesh004.obj" /></mesh>
+		<mesh type="obj" id="Lamp_0003"><filename value="models/Mesh005.obj" /></mesh>
+		<mesh type="obj" id="Diffuse_0008"><filename value="models/Mesh006.obj" /></mesh>
+		<mesh type="obj" id="Lamp_0001"><filename value="models/Mesh007.obj" /></mesh>
+		<mesh type="obj" id="Diffuse_0004"><filename value="models/Mesh008.obj" /></mesh>
+		<mesh type="obj" id="Diffuse_0007"><filename value="models/Mesh009.obj" /></mesh>
+		<mesh type="obj" id="Diffuse_0009"><filename value="models/Mesh010.obj" /></mesh>
+		<mesh type="obj" id="Diffuse_0005"><filename value="models/Mesh011.obj" /></mesh>
+		<mesh type="plane" id="Plane" />
+	</meshes>
+
+	<instances>
+		<instance><transform name="to_world"><matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" /></transform><meshRef id="Wood" /><materialRef id="WoodBSDF" /></instance>
+		<instance><transform name="to_world"><matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" /></transform><meshRef id="Lamp_0002" /><materialRef id="LampBSDF" /></instance>
+		<instance><transform name="to_world"><matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" /></transform><meshRef id="Glass" /><materialRef id="GlassBSDF" /></instance>
+		<instance><transform name="to_world"><matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" /></transform><meshRef id="Diffuse_0006" /><materialRef id="DiffuseBSDF" /></instance>
+		<instance><transform name="to_world"><matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" /></transform><meshRef id="Diffuse_0001" /><materialRef id="DiffuseBSDF" /></instance>
+		<instance><transform name="to_world"><matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" /></transform><meshRef id="Lamp_0003" /><materialRef id="LampBSDF" /></instance>
+		<instance><transform name="to_world"><matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" /></transform><meshRef id="Diffuse_0008" /><materialRef id="DiffuseBSDF" /></instance>
+		<instance><transform name="to_world"><matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" /></transform><meshRef id="Lamp_0001" /><materialRef id="LampBSDF" /></instance>
+		<instance><transform name="to_world"><matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" /></transform><meshRef id="Diffuse_0004" /><materialRef id="DiffuseBSDF" /></instance>
+		<instance><transform name="to_world"><matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" /></transform><meshRef id="Diffuse_0007" /><materialRef id="DiffuseBSDF" /></instance>
+		<instance><transform name="to_world"><matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" /></transform><meshRef id="Diffuse_0009" /><materialRef id="DiffuseBSDF" /></instance>
+		<instance><transform name="to_world"><matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" /></transform><meshRef id="Diffuse_0005" /><materialRef id="DiffuseBSDF" /></instance>
+		<instance id="Light0">
+			<transform name="to_world"><matrix value="-1.20536e-008 0.275755 1.20536e-008 -2.48161 0 -6.64767e-009 0.152081 6 0.275754 1.20536e-008 5.2688e-016 2.5894 0 0 0 1" /></transform>
+			<meshRef id="Plane" /><materialRef id="Light0BSDF" />
+		</instance>
+		<instance id="Light1">
+			<transform name="to_world"><matrix value="-0.0101082 0.067068 0.00138972 -2.69082 -0.0610016 -0.0070995 -0.00842772 5.10417 -0.0282857 -0.00865658 0.0176788 -3.77057 0 0 0 1" /></transform>
+			<meshRef id="Plane" /><materialRef id="Light1BSDF" />
+		</instance>
+	</instances>
+
+	<lights>
+		<useSky value="false" />
+		<backgroundColor value="0.0, 0.0, 0.0" />
+		<light type="area" id="Light0">
+			<emissive value="1.0, 1.0, 1.0" />
+			<intensity value="523.258" />
+			<SphericalRectangleSample value="true" />
+			<instanceRef id="Light0" />
+		</light>
+		<light type="area" id="Light1">
+			<emissive value="1.0, 1.0, 1.0" />
+			<intensity value="12048.2" />
+			<SphericalRectangleSample value="true" />
+			<instanceRef id="Light1" />
+		</light>
+	</lights>
+</scene>

@@ -334,7 +334,7 @@ void FzbRenderer::PathTracingRenderer::rayTraceScene(VkCommandBuffer cmd) {
 	vkCmdPushConstants2(cmd, &pushInfo);
 
 	const nvvk::SBTGenerator::Regions& regions = sbtGenerator.getSBTRegions();
-	const VkExtent2D& size = Application::app->getViewportSize();
+	const VkExtent2D& size = Application::renderResolution;// Application::app->getViewportSize();
 	vkCmdTraceRaysKHR(cmd, &regions.raygen, &regions.miss, &regions.hit, &regions.callable, size.width, size.height, 1);
 }
 

@@ -25,6 +25,8 @@ struct OctreePushConstant_FzbPG {
 	int maxFrameCount;
 	float4 VGBStartPos_Size;
 	float4 VGBVoxelSize;
+
+	float* OctreeNodePairWeightSumBufferAddress;
 #ifndef NDEBUG
 	int showOctreeNodeTotalCount;
 	int normalIndex;
@@ -62,6 +64,10 @@ enum class BindingPoints_Octree_FzbPG : uint32_t {
 	eNearbyNodeTempInfos,
 	eNearbyNodeInfos,
 #endif
+
+	eClusterPairInfo,
+	eCluterPairHitInfo,
+	eClusterPairData,
 };
 //------------------------------------------------------------------------------------------
 #define OCTREE_CLUSTER_LAYER_FZBPG 2		//don't change!!!!!
@@ -138,6 +144,26 @@ struct OctreeThreadGroupInfo_FzbPG {
 	uint threadGroupIndivisibleNodeCount_G;
 };
 //------------------------------------------------------------------------------------------
+struct ClusterPairInfo_FzbPG {
+	int leafNodeIndex_E;
+};
+struct ClusterPairHitInfo_FzbPG {
+	float3 pos_G;
+	float isHit;
+	float3 normal_G;
+	int materialIndex;
+	float3 sampleDir;
+	float d;
+	float cosine;
+	float cosine_Light;
+	float E;
+};
+
+struct ClusterPairData_FzbPG {
+	AABB aabb;
+	float p;
+};
+//------------------------------------------------------------------------------------------
 #define OUTGOING_COUNT_FZBPG 64
 #define HITTEST_COUNT_FZBPG 16		//not bigger than 32 or smaller than 8
 
@@ -183,6 +209,8 @@ struct OctreeNearbyNodeInfo_FzbPG {
 #define HITTEST_CS_THREADGROUP_SIZE 256
 #define VISIBLEAABB_CLUSTER_CS_THREADGROUP_SIZE 512
 #define GETPROBABILITY_CS_THREADGROUP_SIZE 1024
+
+#define OCTREE_RIS_THREADGROUP_SIZE OUTGOING_COUNT_FZBPG
 
 #define GETNEARBYNODES_CS_THREADGROUP_SIZE 512
 #define GETNEARBYNODES2_CS_THREADGROUP_SIZE 1024

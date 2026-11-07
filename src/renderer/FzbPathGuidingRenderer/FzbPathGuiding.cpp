@@ -19,9 +19,16 @@ FzbPathGuidingRenderer::FzbPathGuidingRenderer(pugi::xml_node& rendererNode) {
 	if (pugi::xml_node lightInjectNode = rendererNode.child("LightInject"))
 		lightInject = std::make_shared<LightInject_FzbPG>(lightInjectNode);
 	if (pugi::xml_node octreeNode = rendererNode.child("Octree"))
-		octree = std::make_shared<Octree_FzbPG>(octreeNode);
+#ifdef StochasticLightcuts_RIS
+		octree = std::make_shared<Octree2_FzbPG>(octreeNode);
+#else
+	octree = std::make_shared<Octree_FzbPG>(octreeNode);
+#endif
 
 	shadowMap = std::make_shared<ShadowMap>();
+#ifndef NDEBUG
+	Flip = std::make_shared<FLIP>();
+#endif
 }
 void FzbPathGuidingRenderer::init() {
 	renderStaticScene = Application::sceneResource.isStaticScene;
@@ -43,27 +50,45 @@ void FzbPathGuidingRenderer::init() {
 	};
 	lightInject->init(lightInjectCreateInfo);
 	
-	OctreeCreateInfo_FzbPG octreeCreateInfo{
+#ifdef StochasticLightcuts_RIS
+	Octree2CreateInfo_FzbPG octreeCreateInfo
+#else
+	OctreeCreateInfo_FzbPG octreeCreateInfo
+#endif
+	{
 		.VGBs = rasterVoxelization->VGBs,
-		.VGBStartPos = rasterVoxelization->setting.pushConstant.voxelGroupStartPos,
-		.VGBVoxelSize = glm::vec3(rasterVoxelization->setting.pushConstant.voxelSize_Count),
-		.VGBSize = rasterVoxelization->setting.pushConstant.voxelSize_Count.w,
-		.asManager = &asManager,
+			.VGBStartPos = rasterVoxelization->setting.pushConstant.voxelGroupStartPos,
+			.VGBVoxelSize = glm::vec3(rasterVoxelization->setting.pushConstant.voxelSize_Count),
+			.VGBSize = rasterVoxelization->setting.pushConstant.voxelSize_Count.w,
+			.asManager = &asManager,
 	};
 	octree->init(octreeCreateInfo);
 
-	IF_DEBUG(Feature::createGBuffer(true, true, (uint32_t)ImageType_FzbPG::eImgTonemapped), Feature::createGBuffer(false, true, 1));
+	IF_DEBUG(Feature::createGBuffer(true, true,(uint32_t)ImageType_FzbPG::eImgTonemapped,Application::renderResolution),
+		Feature::createGBuffer(false, true, 1, Application::renderResolution));
 	createDescriptorSetLayout();
 	createDescriptorSet();
 	createPipelineLayout();
 	compileAndCreateShaders();
 
-	Renderer::init();
-
 #ifndef NDEBUG
 	showDebugImages.clear();
 	showDebugImages.insert({ (uint32_t)ImageType_FzbPG::eImgPGVariance, false });
+
+	{
+		std::filesystem::path refImagePath = "C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/result/bearBox.png";
+		refImage.init(refImagePath);
+
+		FLIPCreateInfo flipCreateInfo{
+			.referenceImage = refImage.image,
+			.testImage = gBuffers.m_res.gBufferColor[((uint32_t)ImageType_FzbPG::eImgTonemapped)],
+		};
+		Flip->init(flipCreateInfo);
+		createFlipReadbackBuffer();
+	}
 #endif
+
+	Renderer::init();
 }
 void FzbPathGuidingRenderer::clean() {
 	if (renderStaticScene) shadowMap->clean();
@@ -74,6 +99,12 @@ void FzbPathGuidingRenderer::clean() {
 
 	VkDevice device = Application::app->getDevice();
 	vkDestroyShaderEXT(device, computeShader_FzbPathGuiding, nullptr);
+
+#ifndef NDEBUG
+	Flip->clean();
+	refImage.clean();
+	Application::allocator.destroyBuffer(flipReadbackBuffer);
+#endif
 
 	PathTracingRenderer::clean();
 };
@@ -104,6 +135,16 @@ void FzbPathGuidingRenderer::uiRender() {
 				"Sample Per Pixel");
 			PE::end();
 		}
+
+		#ifdef StochasticLightcuts_RIS
+		#ifdef SpatialReuse_FzbPG
+		ImGui::Checkbox("Spatial Reuse", &octree->spatialReuse);
+		#endif
+		#endif
+
+#ifdef NEARBYNODE_JITTER_FZBPG
+		ImGui::Checkbox("Cluster G Dither Sample", &octree->ditherSample);
+#endif
 
 		if (ptContext.rtPosFetchFeature.rayTracingPositionFetch == VK_FALSE){
 			ImGui::TextColored({ 1, 0, 0, 1 }, "ERROR: Position Fetch not supported!");
@@ -151,6 +192,16 @@ void FzbPathGuidingRenderer::uiRender() {
 	lightInject->uiRender();
 	octree->uiRender();
 
+#ifndef NDEBUG
+	Flip->uiRender();
+	if (UIModified) {
+		lastFLIP = 0.0f;
+		flipSum = 0.0;
+		flipFrameCount = 0;
+		flipReadbackPending = false;
+	}
+#endif
+
 	if (UIModified) resetFrame();
 
 #ifndef NDEBUG
@@ -162,6 +213,13 @@ void FzbPathGuidingRenderer::uiRender() {
 };
 void FzbPathGuidingRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 	NVVK_CHECK(gBuffers.update(cmd, size));
+
+	nvvk::WriteSetContainer write{};
+	VkWriteDescriptorSet    OutImageWrite =
+		staticDescPack.makeWrite(shaderio::StaticSetBindingPoints_PT::eOutImage_PT, 0, 0, 1);
+	write.append(OutImageWrite, gBuffers.getColorImageView((uint32_t)ImageType_FzbPG::eImgRendered), VK_IMAGE_LAYOUT_GENERAL);
+
+#ifndef NDEBUG
 	//清理深度纹理
 	{
 		VkSamplerCreateInfo samplerInfo = DEFAULT_VkSamplerCreateInfo;
@@ -194,12 +252,6 @@ void FzbPathGuidingRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size)
 		vkCmdPipelineBarrier2(cmd, &depInfo);
 	}
 
-	nvvk::WriteSetContainer write{};
-	VkWriteDescriptorSet    OutImageWrite =
-		staticDescPack.makeWrite(shaderio::StaticSetBindingPoints_PT::eOutImage_PT, 0, 0, 1);
-	write.append(OutImageWrite, gBuffers.getColorImageView((uint32_t)ImageType_FzbPG::eImgRendered), VK_IMAGE_LAYOUT_GENERAL);
-
-#ifndef NDEBUG
 	VkWriteDescriptorSet    depthImageWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eDepthImage, 0, 0, 1);
 	write.append(depthImageWrite, gBuffers.getDepthImageView(), VK_IMAGE_LAYOUT_GENERAL);
@@ -223,9 +275,22 @@ void FzbPathGuidingRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size)
 
 	IF_DEBUG(rasterVoxelization->resize(cmd, size, gBuffers, (uint32_t)ImageType_FzbPG::eImgTonemapped), rasterVoxelization->resize(cmd, size));
 	lightInject->resize(cmd, size);
+#ifdef StochasticLightcuts_RIS
+	octree->resize(cmd, size);
+#else
 	IF_DEBUG(octree->resize(cmd, size, gBuffers, (uint32_t)ImageType_FzbPG::eImgTonemapped), octree->resize(cmd, size));
+#endif
+	
+#ifndef NDEBUG
+	if (Flip) {
+		Flip->resize(cmd, size, Flip->setting.referenceImage, gBuffers.m_res.gBufferColor[((uint32_t)ImageType_FzbPG::eImgTonemapped)]);
+	}
+	createFlipReadbackBuffer();
+#endif
 };
 void FzbPathGuidingRenderer::preRender() {
+	readFLIP();
+
 	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
 
 	Scene& scene = Application::sceneResource;
@@ -244,11 +309,29 @@ void FzbPathGuidingRenderer::preRender() {
 	rasterVoxelization->preRender(cmd);
 	lightInject->preRender();
 	octree->preRender();
+#ifdef StochasticLightcuts_RIS
+	pushConstant.spatialRuse = octree->spatialReuse;
+#else
 	octree->pushConstant.maxFrameCount = maxFrames;
+#endif
+
+#ifdef NEARBYNODE_JITTER_FZBPG
+	pushConstant.ditherSample = octree->ditherSample;
+#endif
 
 	pushConstant.randomRotateMatrix = octree->pushConstant.randomRotateMatrix;
 
 	Application::app->submitAndWaitTempCmdBuffer(cmd);
+
+#ifndef NDEBUG
+	Flip->preRender();
+	if (scene.cameraChange) {
+		lastFLIP = 0.0f;
+		flipSum = 0.0;
+		flipFrameCount = 0;
+		flipReadbackPending = false;
+	}
+#endif
 }
 void FzbPathGuidingRenderer::render(VkCommandBuffer* cmdPtr) {
 	VkCommandBuffer cmd = cmdPtr[0];
@@ -274,11 +357,13 @@ void FzbPathGuidingRenderer::render(VkCommandBuffer* cmdPtr) {
 	Application::tonemapper.runCompute(cmd, gBuffers.getSize(), Application::tonemapperData, gBuffers.getDescriptorImageInfo((uint32_t)ImageType_FzbPG::eImgRendered), gBuffers.getDescriptorImageInfo((uint32_t)ImageType_FzbPG::eImgTonemapped));
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
 		VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+
+	getFLIP(cmd);
 	
 	//if(renderStaticScene) shadowMap->postProcess(cmd);
 	//rasterVoxelization->postProcess(cmd);
-	//lightInject->postProcess(cmd);
-	//octree->postProcess(cmd);
+	lightInject->postProcess(cmd);
+	octree->postProcess(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
 
 	//nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
@@ -296,6 +381,72 @@ void FzbPathGuidingRenderer::createDescriptorSetLayout() {
 			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
 			.descriptorCount = 1,
 			.stageFlags = VK_SHADER_STAGE_ALL });
+#ifdef StochasticLightcuts_RIS
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodeInfo_G,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = (uint32_t)octree->octreeNodeInfoBuffer_G.size(),
+		.stageFlags = VK_SHADER_STAGE_ALL });
+
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodeData_E,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = (uint32_t)octree->octreeNodeDataBuffer_E.size(),
+		.stageFlags = VK_SHADER_STAGE_ALL });
+
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateSubTreeData,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateLeafNodeData,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateSampleData,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateSamplePrefixWSum,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+
+#ifdef NEARBYNODE_JITTER_FZBPG
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodeData_G,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = (uint32_t)octree->octreeNodeDataBuffer_G.size(),
+		.stageFlags = VK_SHADER_STAGE_ALL });
+
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eNearbyNodeInfos,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+#endif
+
+#ifdef SpatialReuse_FzbPG
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateSampleData2,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateSampleAABB,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+#endif
+
+#else
 	bindings.addBinding({
 		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeData_G,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -306,23 +457,12 @@ void FzbPathGuidingRenderer::createDescriptorSetLayout() {
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
-#ifdef ADAPTIVE_IMPORTANCE_SAMPLING
-	bindings.addBinding({
-		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodePairData,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = 1,
-		.stageFlags = VK_SHADER_STAGE_ALL });
-#endif
 	bindings.addBinding({
 		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodePairWeight,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
-	bindings.addBinding({
-		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eGlobalInfo,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		.descriptorCount = 1,
-		.stageFlags = VK_SHADER_STAGE_ALL });
+
 #ifdef NEARBYNODE_JITTER_FZBPG
 	bindings.addBinding({
 		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeClusterData_G,
@@ -335,6 +475,28 @@ void FzbPathGuidingRenderer::createDescriptorSetLayout() {
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
 #endif
+
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eClusterPairData,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+#endif
+
+#ifdef ADAPTIVE_IMPORTANCE_SAMPLING
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodePairData,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+#endif
+
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eGlobalInfo,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
+
 #ifndef NDEBUG
 	bindings.addBinding({
 		.binding = (uint32_t)shaderio::StaticBindingPoints_FzbPG::eDepthImage,
@@ -387,6 +549,55 @@ void FzbPathGuidingRenderer::createDescriptorSet() {
 		write.append(allTextures, allImages);
 	}
 
+#ifdef StochasticLightcuts_RIS
+	VkWriteDescriptorSet	OctreeArrayWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodeInfo_G, 0, 0, octree->octreeNodeInfoBuffer_G.size());
+	nvvk::Buffer* octreeArraysPtr = octree->octreeNodeInfoBuffer_G.data();
+	write.append(OctreeArrayWrite, octreeArraysPtr);
+
+	OctreeArrayWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodeData_E, 0, 0, octree->octreeNodeDataBuffer_E.size());
+	octreeArraysPtr = octree->octreeNodeDataBuffer_E.data();
+	write.append(OctreeArrayWrite, octreeArraysPtr);
+
+	OctreeArrayWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateSubTreeData, 0, 0, 1);
+	write.append(OctreeArrayWrite, octree->candidateSubTreeInfoBuffer, 0, octree->candidateSubTreeInfoBuffer.bufferSize);
+
+	OctreeArrayWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateLeafNodeData, 0, 0, 1);
+	write.append(OctreeArrayWrite, octree->candidateLeafNodeDataBuffer, 0, octree->candidateLeafNodeDataBuffer.bufferSize);
+
+	OctreeArrayWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateSampleData, 0, 0, 1);
+	write.append(OctreeArrayWrite, octree->candidateSampleDataBuffer, 0, octree->candidateSampleDataBuffer.bufferSize);
+
+	OctreeArrayWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateSamplePrefixWSum, 0, 0, 1);
+	write.append(OctreeArrayWrite, octree->candidateSamplePrefixWSumBuffer, 0, octree->candidateSamplePrefixWSumBuffer.bufferSize);
+
+#ifdef SpatialReuse_FzbPG
+	OctreeArrayWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateSampleData2, 0, 0, 1);
+	write.append(OctreeArrayWrite, octree->candidateSampleData2Buffer, 0, octree->candidateSampleData2Buffer.bufferSize);
+
+	OctreeArrayWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eCandidateSampleAABB, 0, 0, 1);
+	write.append(OctreeArrayWrite, octree->candidateSampleAABBBuffer, 0, octree->candidateSampleAABBBuffer.bufferSize);
+#endif
+
+#ifdef NEARBYNODE_JITTER_FZBPG
+	VkWriteDescriptorSet    OctreeNodeDataGWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodeData_G, 0, 0, (uint32_t)octree->octreeNodeDataBuffer_G.size());
+	octreeArraysPtr = octree->octreeNodeDataBuffer_G.data();
+	write.append(OctreeNodeDataGWrite, octreeArraysPtr);
+
+	VkWriteDescriptorSet    NearbyDataWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eNearbyNodeInfos, 0, 0, 1);
+	write.append(NearbyDataWrite, octree->nearbyNodeInfoBuffer, 0, octree->nearbyNodeInfoBuffer.bufferSize);
+#endif
+
+#else
 	VkWriteDescriptorSet	OctreeArrayWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeData_G, 0, 0, octree->octreeDataBuffer_G.size());
 	nvvk::Buffer* octreeArraysPtr = octree->octreeDataBuffer_G.data();
@@ -399,15 +610,6 @@ void FzbPathGuidingRenderer::createDescriptorSet() {
 	VkWriteDescriptorSet NodePairInfoWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodePairWeight, 0, 0, 1);
 	write.append(NodePairInfoWrite, octree->octreeNodePairWeightBuffer, 0, octree->octreeNodePairWeightBuffer.bufferSize);
-#ifdef ADAPTIVE_IMPORTANCE_SAMPLING
-	NodePairInfoWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodePairData, 0, 0, 1);
-	write.append(NodePairInfoWrite, octree->octreeNodePairDataBuffer, 0, octree->octreeNodePairDataBuffer.bufferSize);
-#endif
-
-	VkWriteDescriptorSet    GlobalInfoWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eGlobalInfo, 0, 0, 1);
-	write.append(GlobalInfoWrite, octree->globalInfoBuffer, 0, octree->globalInfoBuffer.bufferSize);
 
 #ifdef NEARBYNODE_JITTER_FZBPG
 	VkWriteDescriptorSet    OctreeClusterDataWrite =
@@ -419,6 +621,22 @@ void FzbPathGuidingRenderer::createDescriptorSet() {
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eNearbyNodeInfos, 0, 0, 1);
 	write.append(NearbyDataWrite, octree->nearbyNodeInfoBuffer, 0, octree->nearbyNodeInfoBuffer.bufferSize);
 #endif
+
+	VkWriteDescriptorSet    ClusterPairDataWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eClusterPairData, 0, 0, 1);
+	write.append(ClusterPairDataWrite, octree->clusterPairDataBuffer, 0, octree->clusterPairDataBuffer.bufferSize);
+#endif
+	
+
+#ifdef ADAPTIVE_IMPORTANCE_SAMPLING
+	NodePairInfoWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eOctreeNodePairData, 0, 0, 1);
+	write.append(NodePairInfoWrite, octree->octreeNodePairDataBuffer, 0, octree->octreeNodePairDataBuffer.bufferSize);
+#endif
+
+	VkWriteDescriptorSet    GlobalInfoWrite =
+		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_FzbPG::eGlobalInfo, 0, 0, 1);
+	write.append(GlobalInfoWrite, octree->globalInfoBuffer, 0, octree->globalInfoBuffer.bufferSize);
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }
@@ -444,7 +662,12 @@ void FzbPathGuidingRenderer::compileAndCreateShaders() {
 	SCOPED_TIMER(__FUNCTION__);
 
 	std::filesystem::path shaderPath = std::filesystem::path(__FILE__).parent_path() / "shaders";
+	#ifdef StochasticLightcuts_RIS
+	std::filesystem::path shaderSource = shaderPath / "FzbPathGuiding3.slang";
+	#else
 	std::filesystem::path shaderSource = shaderPath / "FzbPathGuiding.slang";
+	#endif
+	
 	VkShaderModuleCreateInfo shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
 
 	const VkPushConstantRange pushConstantRange{
@@ -467,7 +690,7 @@ void FzbPathGuidingRenderer::compileAndCreateShaders() {
 	//--------------------------------------------------------------------------------------
 	{
 		vkDestroyShaderEXT(device, computeShader_FzbPathGuiding, nullptr);
-
+	
 		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
 		shaderInfo.nextStage = 0;
 		shaderInfo.pName = "computeMain_FzbPathGuiding";
@@ -505,12 +728,95 @@ void FzbPathGuidingRenderer::pathGuiding(VkCommandBuffer cmd) {
 		.pValues = &pushConstant,
 	};
 
-	VkExtent2D sceneSize = Application::app->getViewportSize();
+	VkExtent2D sceneSize = Application::renderResolution;// Application::app->getViewportSize();
 	VkExtent2D groupSize = nvvk::getGroupCounts(sceneSize, VkExtent2D{ FZB_PATHGUIDING_THREADGROUP_SIZE_X, FZB_PATHGUIDING_THREADGROUP_SIZE_Y });
 
 	pushConstant.sceneSize = shaderio::uint2(sceneSize.width, sceneSize.height);
 	pushConstant.threadGroupCount = shaderio::uint2(groupSize.width, groupSize.height);
+#ifdef StochasticLightcuts_RIS
+#else
+	pushConstant.weightSumBufferAddress = (float*)octree->weightSumBuffer.address;
+	pushConstant.indivisibleNodeInfoBufferAddress_E = (uint32_t*)octree->indivisibleNodeInfosBuffer_E.address;
+#endif
 	vkCmdPushConstants2(cmd, &pushInfo);
 
 	vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
+}
+
+void FzbPathGuidingRenderer::createFlipReadbackBuffer() {
+	if (flipReadbackBuffer.buffer != VK_NULL_HANDLE)
+		Application::allocator.destroyBuffer(flipReadbackBuffer);
+
+	flipReadbackExtent = Application::renderResolution;
+
+	VkDeviceSize size = VkDeviceSize(flipReadbackExtent.width) *
+		flipReadbackExtent.height * sizeof(float) * 4;
+
+	NVVK_CHECK(Application::allocator.createBuffer(
+		flipReadbackBuffer, size,
+		VK_BUFFER_USAGE_2_TRANSFER_DST_BIT,
+		VMA_MEMORY_USAGE_AUTO_PREFER_HOST,
+		VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT));
+
+	NVVK_DBG_NAME(flipReadbackBuffer.buffer);
+	flipReadbackPending = false;
+}
+void FzbPathGuidingRenderer::getFLIP(VkCommandBuffer cmd) {
+#ifndef NDEBUG
+	if (!Flip || !Flip->hasValidInputs())
+		return;
+
+	// 1. 算 FLIP error map
+	Flip->evaluate(cmd);
+
+	// 2. 结果图拷到 host visible buffer
+	VkImage result = Flip->getResultImage().image;
+	VkExtent2D extent = { Flip->getResultImage().extent.width, Flip->getResultImage().extent.height };
+
+	nvvk::cmdImageMemoryBarrier(cmd, { result,
+		VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL });
+
+	VkBufferImageCopy copy{};
+	copy.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+	copy.imageExtent = { extent.width, extent.height, 1 };
+
+	vkCmdCopyImageToBuffer(cmd, result,
+		VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		flipReadbackBuffer.buffer, 1, &copy);
+
+	nvvk::cmdImageMemoryBarrier(cmd, { result,
+		VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
+
+	flipReadbackPending = true;
+#endif
+}
+void FzbPathGuidingRenderer::readFLIP() {
+#ifndef NDEBUG
+	if (!flipReadbackPending || flipReadbackBuffer.mapping == nullptr)
+		return;
+
+	// 简单起见，等上一帧 GPU 完成；离线测量可以接受
+	vkQueueWaitIdle(Application::app->getQueue(0).queue);
+
+	const float* data = reinterpret_cast<const float*>(flipReadbackBuffer.mapping);
+	const size_t count = size_t(flipReadbackExtent.width) * flipReadbackExtent.height;
+
+	double sum = 0.0;
+	for (size_t i = 0; i < count; ++i)
+		sum += data[i * 4 + 3];   // A channel 永远存最终 FLIP 值，不受 debugView 影响
+
+	lastFLIP = float(sum / count);
+	flipSum += lastFLIP;
+	++flipFrameCount;
+	flipReadbackPending = false;
+
+	LOGI("FLIP frame %d: %.6f\n", flipFrameCount, lastFLIP);
+
+	static int maxSumCount = 300; 
+	auto getAverageFLIP = [&]() {
+		return flipFrameCount > 0 ? float(flipSum / flipFrameCount) : 0.0f;
+	};
+	if(flipFrameCount == maxSumCount)
+		LOGI("FLIP average over %d frames: %.6f\n", flipFrameCount, getAverageFLIP());
+#endif
 }

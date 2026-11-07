@@ -1,0 +1,149 @@
+#pragma once
+
+#include "feature/Feature.h"
+#include "./Octree2Shaderio_FzbPG.h"
+#include <renderer/PathTracingRenderer/hard/AccelerationStructure.h>
+
+#ifndef FZBRENDERER_OCTREE_2_FZBPG_H
+#define FZBRENDERER_OCTREE_2_FZBPG_H
+namespace FzbRenderer {
+struct Octree2CreateInfo_FzbPG {
+	std::vector<nvvk::Buffer> VGBs;
+
+	shaderio::float3 VGBStartPos;
+	shaderio::float3 VGBVoxelSize;
+	float VGBSize;
+
+	AccelerationStructureManager* asManager;
+};
+
+class Octree2_FzbPG : public Feature {
+public:
+	Octree2_FzbPG() = default;
+	virtual ~Octree2_FzbPG() = default;
+
+	Octree2_FzbPG(pugi::xml_node& featureNode);
+
+	void init(Octree2CreateInfo_FzbPG createInfo);
+	void clean();
+	void uiRender();
+	void resize(VkCommandBuffer cmd, const VkExtent2D& size) override;
+	void preRender();
+	void render(VkCommandBuffer cmd);
+	void postProcess(VkCommandBuffer cmd);
+
+	void createOctreeArray();
+	void createDescriptorSetLayout() override;
+	void createDescriptorSet();
+	void createPipeline();
+	void compileAndCreateShaders();
+	void updateDataPerFrame(VkCommandBuffer cmd) override;
+
+	void initOctreeArray(VkCommandBuffer cmd);
+	void createOctreeArray(VkCommandBuffer cmd);
+	void getOctreeLabel(VkCommandBuffer cmd);
+	void getOctreeNodePairData(VkCommandBuffer cmd);
+	void getNearbyClusterInfo(VkCommandBuffer cmd);
+
+	shaderio::OctreePushConstant_FzbPG pushConstant{};
+
+	uint32_t octreeMaxLayer = 6;
+
+	std::vector<nvvk::Buffer> octreeNodeDataBuffer_G;
+	std::vector<nvvk::Buffer> octreeNodeInfoBuffer_G;			//label_indivisible,  label: indivisible node在当前层是第几个indivisibleNode，从1开始；indivisible：判断node是不是indivisible的
+	std::vector<nvvk::Buffer> octreeNodeDataBuffer_E;
+
+	nvvk::Buffer globalInfoBuffer;
+	nvvk::Buffer indivisibleNodeInfosBuffer_G;					//所有indivisibleNode按照label排序，存有uint2：layerIndex + nodeIndex
+
+	nvvk::Buffer adjClusterInfoBuffer;
+
+	nvvk::Buffer clusterPairInfoBuffer;
+	nvvk::Buffer clusterPairGlobalInfoBuffer;
+	nvvk::Buffer clusterPairHitInfoBuffer;
+
+	nvvk::Buffer candidateSubTreeInfoBuffer;
+	nvvk::Buffer candidateLeafNodeDataBuffer;
+
+	nvvk::Buffer candidateSampleDataBuffer;
+	nvvk::Buffer candidateSamplePrefixWSumBuffer;
+
+	nvvk::Buffer candidateSampleIndexBuffer;
+	nvvk::Buffer candidateSampleAABBBuffer;
+	nvvk::Buffer candidateSampleData2Buffer;
+
+	nvvk::Buffer nearbyNodeTempInfoBuffer;
+	nvvk::Buffer nearbyNodeInfoBuffer;
+
+	bool spatialReuse = false;
+	bool ditherSample = true;
+private:
+	Octree2CreateInfo_FzbPG setting;
+
+	nvvk::Buffer blockInfoBuffer_G;
+	nvvk::Buffer blockInfoBuffer_E;
+	nvvk::Buffer hasDataBlockIndexBuffer_G;
+	nvvk::Buffer hasDataBlockIndexBuffer_E;
+	nvvk::Buffer hasDataBlockCountBuffer;
+
+	nvvk::Buffer divisibleNodeInfoBuffer_G;
+	nvvk::Buffer threadGroupInfoBuffer;
+
+	VkShaderEXT computeShader_initOctreeArray{};
+	VkShaderEXT computeShader_initHasDataBlockInfo{};
+	VkShaderEXT computeShader_getGlobalInfo{};
+	VkShaderEXT computeShader_createOctreeArray{};
+	VkShaderEXT computeShader_createOctreeArray2{};
+
+	VkShaderEXT computeShader_getOctreeLabel1{};
+	VkShaderEXT computeShader_getOctreeLabel2{};
+	VkShaderEXT computeShader_getOctreeLabel3{};
+	VkShaderEXT computeShader_getOctreeLabel4{};
+
+	VkShaderEXT computeShader_initWeights{};
+	VkShaderEXT computeShader_getCandidateNodes{};
+	VkShaderEXT computeShader_dispatchGetCandidateLeafNodes{};
+	VkShaderEXT computeShader_getCandidateLeafNodes{};
+	VkShaderEXT computeShader_getCandidateNodes_noLightcuts{};
+	VkShaderEXT computeShader_clusterPairHitTest{};
+	VkShaderEXT computeShader_getCandidateNodeWeights{};;
+	VkShaderEXT computeShader_createCandidatePrefixWSum{};;
+
+
+	VkShaderEXT computeShader_getAdjClusterG{};
+
+	VkShaderEXT computeShader_reservoirSample{};;
+	VkShaderEXT computeShader_SpatialReuse{};;
+
+	VkShaderEXT computeShader_dispatchGetNearbyClusterG{};
+	VkShaderEXT computeShader_getNearbyClusterG1{};
+	VkShaderEXT computeShader_getNearbyClusterG2{};
+
+	VkBindDescriptorSetsInfo bindDescriptorSetsInfo;
+	VkPushConstantsInfo pushInfo;
+
+	enum class GBuffers_Octree2_FzbPG {
+		eGeometryClusterResult,
+		eLightClusterResult,
+		eGeometrySVO,
+		eClusterPairResult,
+		eBufferCount,
+	};
+
+	shaderio::OctreeDebugPushConstant_FzbPG debugPushConstant;
+	void geometryTreeDebug(VkCommandBuffer cmd);
+	void lightTreeDebug(VkCommandBuffer cmd);
+	void geometrySVODebug(VkCommandBuffer cmd);
+	VkShaderEXT vertexShader_TreeDebug{};
+	VkShaderEXT fragmentShader_TreeDebug{};
+
+	bool changeClusterG = true;
+	nvvk::Buffer clusterPairDebugGlobalInfoBuffer;
+	shaderio::ClusterPairDebugPushConstant_FzbPG debugPushConstant2;
+	void clusterPairDebug(VkCommandBuffer cmd);
+	VkShaderEXT computeShader_GetDebugClusterG{};
+	VkShaderEXT vertexShader_ClusterPairDebug{};
+	VkShaderEXT fragmentShader_ClusterPairDebug{};
+};
+}
+#endif

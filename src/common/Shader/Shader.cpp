@@ -6,6 +6,7 @@
 
 VkShaderModuleCreateInfo FzbRenderer::compileSlangShader(const std::filesystem::path& shaderSource, const std::span<const uint32_t>& spirv) {
 	SCOPED_TIMER(__FUNCTION__);
+	std::cerr << "[SlangCompile] " << shaderSource.string() << std::endl;
 
 	VkShaderModuleCreateInfo shaderCode = nvsamples::getShaderModuleCreateInfo(spirv);
 	if (spirv.empty()) {
@@ -41,7 +42,7 @@ VkShaderModuleCreateInfo FzbRenderer::compileSlangShader(std::filesystem::path& 
 	else {
 		auto shaderFileCreateTime = std::filesystem::last_write_time(shaderPath);
 		auto spvFileCreateTime = std::filesystem::last_write_time(spvPath);
-		if (spvFileCreateTime < shaderFileCreateTime) getShaderCode(); 		//ËµÃ÷¸üÐÂÁË
+		if (spvFileCreateTime < shaderFileCreateTime) getShaderCode(); 		//è¯´æ˜Žæ›´æ–°äº†
 		else {
 			std::ifstream spvFile(spvPath, std::ios::ate | std::ios::binary);
 			if (spvFile.is_open()) {
@@ -64,7 +65,7 @@ VkShaderModuleCreateInfo FzbRenderer::compileSlangShader(std::filesystem::path& 
 void FzbRenderer::saveShaderToFile(const VkShaderModuleCreateInfo& shaderInfo, std::filesystem::path& shaderSource) {
 	std::ofstream file(shaderSource, std::ios::binary);
 	if (file.is_open()) {
-		// codeSize ÊÇ×Ö½ÚÊý£¬pCode ÊÇ uint32_t*£¬ËùÒÔ°´×Ö½ÚÐ´Èë
+		// codeSize æ˜¯å­—èŠ‚æ•°ï¼ŒpCode æ˜¯ uint32_t*ï¼Œæ‰€ä»¥æŒ‰å­—èŠ‚å†™å…¥
 		file.write(reinterpret_cast<const char*>(shaderInfo.pCode), shaderInfo.codeSize);
 		file.close();
 		printf("Saved shader to : %s\n", shaderSource);
@@ -85,7 +86,7 @@ bool FzbRenderer::validateSPIRVFile(std::filesystem::path& shaderSource) {
 
 	std::vector<char> buffer(size);
 	if (file.read(buffer.data(), size)) {
-		// ¼ì²é SPIR-V Ä§Êý (0x07230203)
+		// æ£€æŸ¥ SPIR-V é­”æ•° (0x07230203)
 		if (size >= 4) {
 			uint32_t magic = *reinterpret_cast<uint32_t*>(buffer.data());
 			bool isValid = (magic == 0x07230203);

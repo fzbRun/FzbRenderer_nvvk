@@ -1,4 +1,4 @@
-﻿#define TINYGLTF_IMPLEMENTATION         // Implementation of the GLTF loader library
+#define TINYGLTF_IMPLEMENTATION         // Implementation of the GLTF loader library
 #define STB_IMAGE_IMPLEMENTATION        // Implementation of the image loading library
 #define STB_IMAGE_WRITE_IMPLEMENTATION  // Implementation of the image writing library
 #define VMA_DYNAMIC_VULKAN_FUNCTIONS 1  // Use dynamic Vulkan functions for VMA (Vulkan Memory Allocator)
@@ -22,6 +22,7 @@
 #include "common/Shader/nvvk/spv/sky_simple.slang.h"
 #include "common/Shader/nvvk/spv/tonemapper.slang.h"
 #include "common/Shader/Shader.h"
+#include <imgui_internal.h>
 
 void FzbRenderer::Application::getAppInfoFromXML(nvapp::ApplicationCreateInfo& appInfo) {
 	std::filesystem::path exePath = nvutils::getExecutablePath().parent_path();
@@ -34,8 +35,12 @@ void FzbRenderer::Application::getAppInfoFromXML(nvapp::ApplicationCreateInfo& a
 	pugi::xml_node rendererInfo = doc.document_element();
 
 	appInfo.name = rendererInfo.child("name").attribute("value").value();
-	appInfo.windowSize.x = std::stoi(rendererInfo.child("resolution").attribute("width").value());
-	appInfo.windowSize.y = std::stoi(rendererInfo.child("resolution").attribute("height").value());
+	//appInfo.windowSize.x = std::stoi(rendererInfo.child("resolution").attribute("width").value());
+	//appInfo.windowSize.y = std::stoi(rendererInfo.child("resolution").attribute("height").value());
+	const uint32_t renderW = uint32_t(std::stoi(rendererInfo.child("resolution").attribute("width").value()));
+	const uint32_t renderH = uint32_t(std::stoi(rendererInfo.child("resolution").attribute("height").value()));
+
+	renderResolution = { renderW, renderH };
 
 	sceneResource.scenePath = rendererInfo.child("sceneXML").attribute("path").value();
 	sceneResource.scenePath = std::filesystem::absolute(exePath / TARGET_EXE_TO_SOURCE_DIRECTORY / "resources") / sceneResource.scenePath;
@@ -49,6 +54,27 @@ void FzbRenderer::Application::getAppInfoFromXML(nvapp::ApplicationCreateInfo& a
 		renderer = FzbRenderer::createRenderer(rendererCreateInfo);
 	}
 	else throw std::runtime_error("sceneInfoXML必须指定一个renderer！");
+
+	{
+		// 左侧面板固定 320，splitter 默认 4
+		const uint32_t leftPanelWidth = 320;
+		const uint32_t splitterSize = 2;
+
+		appInfo.windowSize.x = renderResolution.width + leftPanelWidth + splitterSize;
+		appInfo.windowSize.y = renderResolution.height;   // 不要菜单栏，才能精确 720
+
+		appInfo.useMenu = true;          // 需要菜单栏就改成 renderH + 菜单高度
+		const uint32_t menuBarHeight = 25;
+		appInfo.windowSize.y = renderResolution.height + menuBarHeight;
+
+		const uint32_t width = renderResolution.width;
+		appInfo.dockSetup = [leftPanelWidth, width](ImGuiID dockID) {
+			// nvapp 已经把 Viewport dock 到中央节点
+			float ratio = float(leftPanelWidth) / float(leftPanelWidth + renderResolution.width); // 320 / 1600 = 0.2
+			ImGuiID leftID = ImGui::DockBuilderSplitNode(dockID, ImGuiDir_Left, ratio, nullptr, &dockID);
+			ImGui::DockBuilderDockWindow("Settings", leftID);
+			};
+	}
 
 	appInfo.cmdCount = cmdCount;
 
@@ -155,8 +181,10 @@ void FzbRenderer::Application::initSlangCompiler() {
 		.value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = slangIncludes[1].c_str()}
 		});
 
+#ifndef NDEBUG
 	slangCompiler.addOption({ slang::CompilerOptionName::DebugInformation,
 		{slang::CompilerOptionValueKind::Int, SLANG_DEBUG_INFO_LEVEL_MAXIMAL} });
+#endif
 
 	slangCompiler.addOption({
 			.name = slang::CompilerOptionName::GLSLForceScalarLayout,
@@ -250,18 +278,33 @@ void FzbRenderer::Application::onUIRender() {
 	sceneResource.UIRender();
 	renderer->uiRender();
 
+	//if (ImGui::Begin("Viewport")) {
+	//	viewportScreenPos = ImGui::GetCursorScreenPos();
+	//	viewportContentSize = ImGui::GetContentRegionAvail();
+	//	ImGui::Image(ImTextureID(viewportImage), viewportContentSize);
+	//}
+	//ImGui::End();
+
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
 	if (ImGui::Begin("Viewport")) {
 		viewportScreenPos = ImGui::GetCursorScreenPos();
 		viewportContentSize = ImGui::GetContentRegionAvail();
-		ImGui::Image(ImTextureID(viewportImage), viewportContentSize);
+
+		ImGui::Image(ImTextureID(viewportImage),
+			ImVec2(float(Application::renderResolution.width),
+				float(Application::renderResolution.height)));
 	}
 	ImGui::End();
+	ImGui::PopStyleVar();
 }
 void FzbRenderer::Application::onResize(VkCommandBuffer cmd, const VkExtent2D& size) {
-	renderer->resize(cmd, size);	//这一步会初始化gBuffer
+	renderer->resize(cmd, renderResolution);	//这一步会初始化gBuffer
+	if (sceneResource.cameraManip)
+		sceneResource.cameraManip->setWindowSize({ renderResolution.width, renderResolution.height });
 }
 void FzbRenderer::Application::onPreRender() {
 	frameIndex = std::min(++frameIndex, MAX_FRAME);
+	++randomFrameIndex;
 	sceneResource.preRender();
 	renderer->preRender();
 }

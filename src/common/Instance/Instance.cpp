@@ -71,6 +71,7 @@ void InstanceSet::getTransformMatrixFromXML(pugi::xml_node& transformNode){
 		}
 		if (pugi::xml_node rotateNode = periodNode.child("rotate")) {
 			glm::vec3 rotateAngle = glm::radians(FzbRenderer::getRGBFromString(rotateNode.attribute("value").value()));
+			periodRotateAngles = rotateAngle;
 			if (rotateAngle.x > 0.01f) rotateMatrix = glm::rotate(rotateMatrix, rotateAngle.x, glm::vec3(1, 0, 0));
 			if (rotateAngle.y > 0.01f) rotateMatrix = glm::rotate(rotateMatrix, rotateAngle.y, glm::vec3(0, 1, 0));
 			if (rotateAngle.z > 0.01f) rotateMatrix = glm::rotate(rotateMatrix, rotateAngle.z, glm::vec3(0, 0, 1));
@@ -145,13 +146,38 @@ void InstanceSet::getInstance(std::vector<shaderio::Instance>& instances, int of
 	}
 
 	float phase = time * std::max(speed, 0.0f);
-	time = 1.0f - abs(fmod(phase, 2.0f) - 1.0f);
+	float cycleTime = 1.0f - abs(fmod(phase, 2.0f) - 1.0f);
 
 	transform_lastTime = transform;
 	if (isStatic == 0) {
-		transform = ((1.0f - time) * baseMatrix_translate + time * translateMatrix * baseMatrix_translate) *
-			((1.0f - time) * baseMatrix_rotate + time * rotateMatrix * baseMatrix_rotate) *
-			((1.0f - time) * baseMatrix_scale + time * scaleMatrix * baseMatrix_scale);
+		const float twoPi = 6.28318530718f;
+		bool continuousRotation = abs(periodRotateAngles.x) > twoPi - 1e-4f ||
+			abs(periodRotateAngles.y) > twoPi - 1e-4f ||
+			abs(periodRotateAngles.z) > twoPi - 1e-4f;
+
+		glm::mat4 periodRotation = rotateMatrix;
+		if (continuousRotation) {
+			periodRotation = glm::mat4(1.0f);
+			auto rotationAngle = [&](float angle) {
+				return abs(angle) > twoPi - 1e-4f ? phase * angle : cycleTime * angle;
+			};
+			if (abs(periodRotateAngles.x) > 0.01f)
+				periodRotation = glm::rotate(periodRotation, rotationAngle(periodRotateAngles.x), glm::vec3(1, 0, 0));
+			if (abs(periodRotateAngles.y) > 0.01f)
+				periodRotation = glm::rotate(periodRotation, rotationAngle(periodRotateAngles.y), glm::vec3(0, 1, 0));
+			if (abs(periodRotateAngles.z) > 0.01f)
+				periodRotation = glm::rotate(periodRotation, rotationAngle(periodRotateAngles.z), glm::vec3(0, 0, 1));
+		}
+
+		glm::mat4 rotationTransform = periodRotation * baseMatrix_rotate;
+		if (!continuousRotation) {
+			rotationTransform = (1.0f - cycleTime) * baseMatrix_rotate +
+				cycleTime * rotateMatrix * baseMatrix_rotate;
+		}
+
+		transform = ((1.0f - cycleTime) * baseMatrix_translate + cycleTime * translateMatrix * baseMatrix_translate) *
+			rotationTransform *
+			((1.0f - cycleTime) * baseMatrix_scale + cycleTime * scaleMatrix * baseMatrix_scale);
 	}
 
 	for (int i = 0; i < childInstances.size(); ++i) {
@@ -173,6 +199,7 @@ void LightInstance::copyInstanceInfo(const InstanceSet& instance) {
 	this->time = instance.time;
 	this->translateMatrix = instance.translateMatrix;
 	this->rotateMatrix = instance.rotateMatrix;
+	this->periodRotateAngles = instance.periodRotateAngles;
 	this->scaleMatrix = instance.scaleMatrix;
 	this->useCustomMeshSet = instance.useCustomMeshSet;
 	//this->customMeshSet = instance.customMeshSet;
