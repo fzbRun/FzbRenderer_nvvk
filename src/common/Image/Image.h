@@ -26,7 +26,7 @@ public:
 	~Image() = default;
 
 	VkResult init(ImageCreateInfo createInfo);
-	VkResult init(std::filesystem::path& imagePath);
+	VkResult init(std::filesystem::path& imagePath, VkSamplerCreateInfo* createInfo = nullptr, bool sRGB = true, bool linearizeToFloat = false);
 	void clean();
 
 	std::string name = "image";

@@ -15,27 +15,25 @@
 #include <vector>
 #include <fstream>
 #include <sstream>
+#include <nvvk/default_structs.hpp>
 
 using namespace FzbRenderer;
 
 namespace {
 
-uint32_t vxpgNextPowerOfTwo(uint32_t value)
-{
+uint32_t vxpgNextPowerOfTwo(uint32_t value){
 	uint32_t result = 1;
 	while (result < value)
 		result <<= 1;
 	return result;
 }
 
-uint32_t vxpgStageMask()
-{
+uint32_t vxpgStageMask(){
 	const char* value = std::getenv("VXPG_STAGE_MASK");
 	return value ? uint32_t(std::strtoul(value, nullptr, 0)) : 0xffffffffu;
 }
 
-uint32_t vxpgLog2(uint32_t value)
-{
+uint32_t vxpgLog2(uint32_t value){
 	uint32_t result = 0;
 	while ((1u << result) < value)
 		++result;
@@ -44,8 +42,7 @@ uint32_t vxpgLog2(uint32_t value)
 
 }  // namespace
 
-VXPGRenderer::VXPGRenderer(pugi::xml_node& rendererNode)
-{
+VXPGRenderer::VXPGRenderer(pugi::xml_node& rendererNode){
 	// Ray tracing extensions must be registered before the Vulkan device is created.
 	ptContext.setContextInfo();
 
@@ -63,9 +60,7 @@ VXPGRenderer::VXPGRenderer(pugi::xml_node& rendererNode)
 			break;
 		}
 	}
-	if (!atomicFloatAdded)
-		Application::vkContextInitInfo.deviceExtensions.push_back(
-			{ VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME, &atomicFloatFeatures });
+	if (!atomicFloatAdded) Application::vkContextInitInfo.deviceExtensions.push_back({ VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME, &atomicFloatFeatures });
 
 	if (pugi::xml_node node = rendererNode.child("maxDepth"))
 		pushConstant.maxDepth = std::max(1, std::stoi(node.attribute("value").value()));
@@ -98,6 +93,8 @@ VXPGRenderer::VXPGRenderer(pugi::xml_node& rendererNode)
 	pushConstant.padding0 = 8.0f;
 	pushConstant.padding1 = 0.0f;   // SV injection jitter, off by default (it costs light)
 	pushConstant.fireflyClamp = 0.0f;
+	pushConstant.kmppWeightE = 1.0f;   // Eq. (4) w_E: weight of the irradiance term
+	pushConstant.neeTMin = 1.0e-4f;   // NEE shadow ray epsilon (see VXPG_DirectLight)
 	pushConstant.bounceCount = 1;
 	// Build the guiding structure once instead of every frame: it removes the per frame
 	// flickering of the voxel sized artifacts (the injected set is re-randomised every frame
@@ -144,16 +141,33 @@ VXPGRenderer::VXPGRenderer(pugi::xml_node& rendererNode)
 		pushConstant.jitterRadius = std::stof(v);
 	if (const char* v = std::getenv("VXPG_SPIXEL_JITTER"))
 		pushConstant.padding0 = std::stof(v);
+	if (const char* v = std::getenv("VXPG_KMPP_WE"))
+		pushConstant.kmppWeightE = std::stof(v);
+	if (const char* v = std::getenv("VXPG_NEE_EPS"))
+		pushConstant.neeTMin = std::stof(v);
+	if (const char* v = std::getenv("VXPG_PDFTEST"))
+		pdfTestEnabled = std::atoi(v) != 0;
+	if (const char* v = std::getenv("VXPG_MIS"))
+		pushConstant.misMode = std::clamp(std::atoi(v), 0, 2);
+	if (const char* v = std::getenv("VXPG_SHOW_SPIXELS"))
+		showSuperPixelDebug = std::atoi(v) != 0;
+	if (const char* v = std::getenv("VXPG_SHOW_CLUSTERS"))
+		showClusterDebug = std::atoi(v) != 0;
+	if (const char* v = std::getenv("VXPG_FUZZY"))
+		fuzzySpixel = std::atoi(v) != 0;
+	if (const char* v = std::getenv("VXPG_KMPP"))
+		useVisibilityClustering = std::atoi(v) != 0;
 	if (const char* v = std::getenv("VXPG_SV_JITTER"))
 		pushConstant.padding1 = std::stof(v);
+	if (const char* v = std::getenv("VXPG_MAX_FRAMES"))
+		maxFrames = std::clamp(std::atoi(v), 1, MAX_FRAME);
 
 }
 
 //-------------------------------------------------------------------------------------------------
 // Resolution / scene bounds
 //-------------------------------------------------------------------------------------------------
-void VXPGRenderer::computeResolution()
-{
+void VXPGRenderer::computeResolution(){
 	uint32_t resolution = std::clamp<uint32_t>(uint32_t(std::max(pushConstant.voxelResolution, 8)), 8u,
 	                                           uint32_t(VXPG_MAX_VOXEL_RESOLUTION));
 	resolution = vxpgNextPowerOfTwo(resolution);
@@ -162,7 +176,8 @@ void VXPGRenderer::computeResolution()
 	pushConstant.maxTreeLevel = int(vxpgLog2(resolution));
 	pushConstant.spixelSize = std::max(pushConstant.spixelSize, 1);
 	pushConstant.clusterCount = VXPG_CLUSTER_COUNT;
-	pushConstant.flags = (enableGuiding ? 1 : 0) | (debugMode << 1);
+	pushConstant.flags = (enableGuiding ? 1 : 0) | (debugMode << 1) | (fuzzySpixel ? 2048 : 0)
+	                   | (useVisibilityClustering ? 512 : 0) | (pdfTestEnabled ? 4096 : 0);
 
 	voxelCount = resolution * resolution * resolution;
 	leafCount = voxelCount;
@@ -179,9 +194,8 @@ void VXPGRenderer::computeResolution()
 	auto gridHeightFor = [&](int spixelSize) {
 		return std::max(1u, (currentResolution.height + uint32_t(spixelSize) - 1u) / uint32_t(spixelSize));
 	};
-	while (gridWidthFor(pushConstant.spixelSize) * gridHeightFor(pushConstant.spixelSize) > 8192u &&
-	       pushConstant.spixelSize < 256)
-	{
+	//如果像素块数量太多并且太小，就加倍
+	while (gridWidthFor(pushConstant.spixelSize) * gridHeightFor(pushConstant.spixelSize) > 8192u && pushConstant.spixelSize < 256){
 		pushConstant.spixelSize *= 2;
 		LOGW("VXPG: superpixel size raised to %d to keep the superpixel grid bounded\n", pushConstant.spixelSize);
 	}
@@ -192,14 +206,12 @@ void VXPGRenderer::computeResolution()
 	pushConstant.spixelCount = int(spixelCount);
 }
 
-void VXPGRenderer::updateSceneBounds()
-{
+void VXPGRenderer::updateSceneBounds(){
 	FzbRenderer::Scene& scene = Application::sceneResource;
 
 	glm::vec3 minimum(FLT_MAX);
 	glm::vec3 maximum(-FLT_MAX);
-	for (const shaderio::Instance& instance : scene.instances)
-	{
+	for (const shaderio::Instance& instance : scene.instances){
 		MeshInfo meshInfo = scene.getMeshInfo(instance.meshIndex);
 		shaderio::AABB meshAABB = meshInfo.getAABB(instance.transform);
 		minimum.x = std::min(minimum.x, meshAABB.minimum.x);
@@ -209,8 +221,7 @@ void VXPGRenderer::updateSceneBounds()
 		maximum.y = std::max(maximum.y, meshAABB.maximum.y);
 		maximum.z = std::max(maximum.z, meshAABB.maximum.z);
 	}
-	if (minimum.x > maximum.x)
-	{
+	if (minimum.x > maximum.x){
 		minimum = glm::vec3(-1.0f);
 		maximum = glm::vec3(1.0f);
 	}
@@ -233,8 +244,7 @@ void VXPGRenderer::updateSceneBounds()
 
 // Places the cubic voxel domain around the camera and flags the guiding structure as dirty when
 // the domain moved by more than half a voxel.
-void VXPGRenderer::updateVoxelDomain()
-{
+void VXPGRenderer::updateVoxelDomain(){
 	const float extent = (clipExtentSetting > 0.0f) ? clipExtentSetting : autoClipExtent;
 
 	sceneExtent = extent;
@@ -246,8 +256,7 @@ void VXPGRenderer::updateVoxelDomain()
 	pushConstant.VGBVoxelSize = sceneVoxelSize;
 
 	const float voxel = sceneVoxelSize.x;
-	if (domainExtentBuild <= 0.0f || std::abs(extent - domainExtentBuild) > 0.25f * voxel)
-	{
+	if (domainExtentBuild <= 0.0f || std::abs(extent - domainExtentBuild) > 0.25f * voxel){
 		domainCenterBuild = glm::vec3(sceneCenter.x, sceneCenter.y, sceneCenter.z);
 		domainExtentBuild = extent;
 		guidingDirty = true;
@@ -282,6 +291,25 @@ void VXPGRenderer::createResources()
 	create(spixelInfoBuffer, VkDeviceSize(spixelCount) * sizeof(shaderio::VXPGSpixelInfo), "spixelInfo");
 	create(spixelClusterWeightBuffer, VkDeviceSize(spixelCount) * VXPG_CLUSTER_COUNT * sizeof(int32_t), "spixelClusterWeight");
 	create(spixelClusterTotalBuffer, VkDeviceSize(spixelCount) * sizeof(int32_t), "spixelClusterTotal");
+	create(leafVoxelBuffer, VkDeviceSize(voxelCount) * sizeof(uint32_t), "leafVoxel");
+	create(voxelLeafBuffer, VkDeviceSize(voxelCount) * sizeof(uint32_t), "voxelLeaf");
+	create(clusterRangeBuffer, VkDeviceSize(VXPG_CLUSTER_COUNT) * 2 * sizeof(uint32_t), "clusterRange");
+	create(repSPBuffer, VkDeviceSize(VXPG_REP_SP_COUNT) * sizeof(float) * 4, "repSP");
+	create(voxelSignatureBuffer, VkDeviceSize(voxelCount) * sizeof(uint32_t) * 4, "voxelSignature");
+	create(litVoxelListBuffer, VkDeviceSize(VXPG_KMPP_MAX_VOXELS) * sizeof(uint32_t), "litVoxelList");
+	create(litVoxelCountBuffer, VkDeviceSize(1) * sizeof(uint32_t), "litVoxelCount");
+	create(clusterCentroidBuffer, VkDeviceSize(VXPG_CLUSTER_COUNT) * sizeof(uint32_t) * 4, "clusterCentroid");
+	create(clusterCentroidEBuffer, VkDeviceSize(VXPG_CLUSTER_COUNT) * sizeof(float), "clusterCentroidE");
+	create(voxelClusterBuffer, VkDeviceSize(voxelCount) * sizeof(uint32_t), "voxelCluster");
+	create(spixelAccumBuffer, VkDeviceSize(spixelCount) * sizeof(shaderio::VXPGSpixelAccum), "spixelAccum");
+
+	// Indirect dispatch command + mean accumulator for the two stage supervoxel seeding. The
+	// INDIRECT_BUFFER usage flag is required for vkCmdDispatchIndirect.
+	{
+		const VkBufferUsageFlags infoUsage = usage | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+		allocator->createBuffer(globalInfoBuffer, VkDeviceSize(sizeof(shaderio::VXPGGlobalInfo)), infoUsage);
+		NVVK_DBG_NAME(globalInfoBuffer.buffer);
+	}
 
 	// One shot initialization so that a partially built guiding structure can never be
 	// dereferenced with uninitialized indices.
@@ -291,6 +319,20 @@ void VXPGRenderer::createResources()
 	vkCmdFillBuffer(cmd, clusterRootsBuffer.buffer, 0, VK_WHOLE_SIZE, 0xffffffffu);
 	vkCmdFillBuffer(cmd, topLevelTreeBuffer.buffer, 0, VK_WHOLE_SIZE, 0u);
 	Application::app->submitAndWaitTempCmdBuffer(cmd);
+
+#ifndef NDEBUG
+	{
+		nvutils::PrimitiveMesh primitive = FzbRenderer::MeshSet::createWireframe();
+		FzbRenderer::MeshSet mesh = FzbRenderer::MeshSet("Wireframe", primitive);
+		scene.addMeshSet(mesh);
+
+		primitive = FzbRenderer::MeshSet::createCube(false, false);
+		mesh = FzbRenderer::MeshSet("Cube", primitive);
+		scene.addMeshSet(mesh);
+
+		scene.createSceneInfoBuffer();
+	}
+#endif
 }
 
 void VXPGRenderer::destroyResources()
@@ -304,6 +346,10 @@ void VXPGRenderer::destroyResources()
 		{ &voxelBoundMaxBuffer },        { &pixelDataBuffer },         { &treeNodesBuffer },
 		{ &clusterRootsBuffer },         { &topLevelTreeBuffer },      { &spixelInfoBuffer },
 		{ &spixelClusterWeightBuffer },  { &spixelClusterTotalBuffer },
+		{ &leafVoxelBuffer },          { &voxelLeafBuffer },         { &clusterRangeBuffer },
+		{ &repSPBuffer },              { &voxelSignatureBuffer },    { &litVoxelListBuffer },
+		{ &litVoxelCountBuffer },      { &clusterCentroidBuffer },   { &voxelClusterBuffer },
+		{ &spixelAccumBuffer },        { &globalInfoBuffer },        { &clusterCentroidEBuffer },
 	};
 	for (const BufferRef& ref : buffers)
 	{
@@ -342,8 +388,10 @@ void VXPGRenderer::clean()
 {
 	VkDevice device = Application::app->getDevice();
 	for (VkShaderEXT* shader : { &shaderVBuffer, &shaderLightInject, &shaderGeometryInject, &shaderTreeInit,
-	                             &shaderTreeInternal, &shaderTreeAccumulate, &shaderClusterRoots, &shaderSpixelCenters,
-	                             &shaderSpixelAssign, &shaderSpixelAccum, &shaderTopLevel, &shaderIntegrator })
+	                             &shaderLeafMapInit, &shaderPdfTest, &shaderRepSP, &shaderLitVoxelSort, &shaderSignature, &shaderClusterSeed, &shaderClusterSeed2, &shaderClusterAssign,
+	                             &shaderClusterUpdate, &shaderClusterSort, &shaderTreeInternal, &shaderTreeAccumulate, &shaderClusterRoots, &shaderSpixelCenters,
+	                             &shaderSpixelAssign, &shaderSpixelUpdate, &shaderSpixelAccum, &shaderTopLevel, &shaderIntegrator,
+	                             &shaderDebugCluster_vert, &shaderDebugCluster_frag, &shaderSuperPixelDebug })
 	{
 		if (*shader != VK_NULL_HANDLE)
 		{
@@ -359,6 +407,37 @@ void VXPGRenderer::clean()
 void VXPGRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size)
 {
 	NVVK_CHECK(gBuffers.update(cmd, size));
+	//清理深度纹理
+	{
+		VkSamplerCreateInfo samplerInfo = DEFAULT_VkSamplerCreateInfo;
+		samplerInfo.magFilter = VK_FILTER_NEAREST;
+		samplerInfo.minFilter = VK_FILTER_NEAREST;
+		samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+		Application::samplerPool.acquireSampler(gBuffers.m_res.gBufferDepth.descriptor.sampler, samplerInfo);
+
+		const VkImageLayout layout{ VK_IMAGE_LAYOUT_GENERAL };
+		VkImageMemoryBarrier2 barrier = nvvk::makeImageMemoryBarrier({ .image = gBuffers.m_res.gBufferDepth.image,
+														.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+														.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+														.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
+		const VkDependencyInfo depInfo{ .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+									   .imageMemoryBarrierCount = 1,
+									   .pImageMemoryBarriers = &barrier };
+
+		vkCmdPipelineBarrier2(cmd, &depInfo);
+
+		VkClearDepthStencilValue clearDepth = { 1.0f, 0 };
+		VkImageSubresourceRange range = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 };
+		vkCmdClearDepthStencilImage(cmd, gBuffers.m_res.gBufferDepth.image,
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearDepth, 1, &range);
+
+		// Setting the layout to the final one
+		barrier = nvvk::makeImageMemoryBarrier(
+			{ .image = gBuffers.m_res.gBufferDepth.image, .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			.newLayout = layout, .subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
+		gBuffers.m_res.gBufferDepth.descriptor.imageLayout = layout;
+		vkCmdPipelineBarrier2(cmd, &depInfo);
+	}
 
 	const bool resolutionChanged = (size.width != currentResolution.width) || (size.height != currentResolution.height);
 
@@ -391,7 +470,8 @@ void VXPGRenderer::preRender()
 	pushConstant.maxFrameCount = maxFrames;
 	pushConstant.time = scene.time;
 	pushConstant.mode = int(shaderio::VXPG_SampleMode::eGuidePlusBsdf);
-	pushConstant.flags = (enableGuiding ? 1 : 0) | (debugMode << 1);
+	pushConstant.flags = (enableGuiding ? 1 : 0) | (debugMode << 1) | (fuzzySpixel ? 2048 : 0)
+	                   | (useVisibilityClustering ? 512 : 0) | (pdfTestEnabled ? 4096 : 0);
 	pushConstant.bounceCount = std::clamp(pushConstant.maxDepth - 2, 0, 8);
 	// Radius of the camera centred injection volume (2 scene half extents by default).
 	updateVoxelDomain();
@@ -462,6 +542,7 @@ void VXPGRenderer::dumpGuidingState()
 	enqueue(spixelClusterWeightBuffer, 0, VkDeviceSize(spixelCount) * VXPG_CLUSTER_COUNT * sizeof(int32_t));
 	enqueue(voxelVplCountBuffer, 0, VkDeviceSize(voxelCount) * sizeof(uint32_t));
 	enqueue(pixelDataBuffer, pixelOffset, VkDeviceSize(4) * sizeof(shaderio::VXPGPixelData));
+	enqueue(spixelInfoBuffer, 0, VkDeviceSize(spixelCount) * sizeof(shaderio::VXPGSpixelInfo));
 
 	Application::app->submitAndWaitTempCmdBuffer(cmd);
 
@@ -473,6 +554,7 @@ void VXPGRenderer::dumpGuidingState()
 	const int* weights = reinterpret_cast<const int*>(mapped(4));
 	const uint32_t* vpl = reinterpret_cast<const uint32_t*>(mapped(5));
 	const shaderio::VXPGPixelData* pixels = reinterpret_cast<const shaderio::VXPGPixelData*>(mapped(6));
+	const shaderio::VXPGSpixelInfo* spixels = reinterpret_cast<const shaderio::VXPGSpixelInfo*>(mapped(7));
 
 	uint64_t litVoxels = 0, totalVpls = 0;
 	uint32_t maxVpl = 0;
@@ -496,6 +578,15 @@ void VXPGRenderer::dumpGuidingState()
 	}
 
 	std::ostringstream out;
+	out << "config misMode=" << pushConstant.misMode << " flags=" << pushConstant.flags
+	    << " spp=" << pushConstant.spp << " maxFrames=" << maxFrames
+	    << " voxelRes=" << pushConstant.voxelResolution << " spixel=" << pushConstant.spixelSize
+	    << " domainExtent=" << sceneExtent << " voxelSize=" << sceneVoxelSize.x
+	    << " showClusters=" << (showClusterDebug ? 1 : 0) << " showSpixels=" << (showSuperPixelDebug ? 1 : 0)
+	    << " clusterShader=" << ((shaderDebugCluster_vert != VK_NULL_HANDLE && shaderDebugCluster_frag != VK_NULL_HANDLE) ? 1 : 0)
+	    << " spJitter=" << pushConstant.jitterRadius << " spixelJitter=" << pushConstant.padding0
+	    << " svJitter=" << pushConstant.padding1 << " clamp=" << pushConstant.fireflyClamp
+	    << " neeTMin=" << pushConstant.neeTMin << " wE=" << pushConstant.kmppWeightE << "\n";
 	out << "frame " << pushConstant.frameIndex << " resolution " << currentResolution.width << "x" << currentResolution.height
 	    << " voxels " << pushConstant.voxelResolution << "^3 nodes " << nodeCount << " spixels " << spixelCount << "\n";
 	const FzbRenderer::Scene& scene = Application::sceneResource;
@@ -552,6 +643,26 @@ void VXPGRenderer::dumpGuidingState()
 	    << " primaryVoxel=" << int(int32_t(pixels[0].info.y)) << " vplVoxel=" << int(int32_t(pixels[0].info.z)) << "\n";
 	out << "pixel(row 360, col 1) valid=" << pixels[1].info.w << " spixel=" << int(int32_t(pixels[1].info.x))
 	    << " primaryVoxel=" << int(int32_t(pixels[1].info.y)) << " vplVoxel=" << int(int32_t(pixels[1].info.z)) << "\n";
+	for (int i = 0; i < 3; ++i)
+	{
+		out << "pdf breakdown pixel " << i << ": p_sph=" << pixels[i].vplPos.x
+		    << " p_leaf=" << pixels[i].vplPos.y << " p_cluster=" << pixels[i].vplPos.z
+		    << " guide.pdf=" << pixels[i].vplPos.w << "\n";
+	}
+	{
+		const int probes[4] = { 0, spixelCount / 4, spixelCount / 2, std::max(int(spixelCount) - 1, 0) };
+		for (int pi = 0; pi < 4; ++pi)
+		{
+			const int sp = probes[pi];
+			out << "spixel " << sp << " noPixels=" << spixels[sp].noPixels
+			    << " center=(" << spixels[sp].center.x << "," << spixels[sp].center.y << ")"
+			    << " pos=(" << spixels[sp].pos.x << "," << spixels[sp].pos.y << "," << spixels[sp].pos.z << ")"
+			    << " top=";
+			for (int c = 0; c < 4; ++c)
+				out << c << ":" << topLevel[sp * VXPG_TOP_LEVEL_STRIDE + VXPG_TOP_LEVEL_LEAF_OFFSET + c] << " ";
+			out << "total=" << topLevel[sp * VXPG_TOP_LEVEL_STRIDE + 1] << "\n";
+		}
+	}
 	out << "pixel(row 360, col 2) valid=" << pixels[2].info.w << " spixel=" << int(int32_t(pixels[2].info.x))
 	    << " primaryVoxel=" << int(int32_t(pixels[2].info.y)) << " vplVoxel=" << int(int32_t(pixels[2].info.z)) << "\n";
 
@@ -593,6 +704,18 @@ void VXPGRenderer::createDescriptorSetLayout()
 		(uint32_t)shaderio::VXPGStaticBindingPoints::eSpixelInfo,
 		(uint32_t)shaderio::VXPGStaticBindingPoints::eSpixelClusterWeight,
 		(uint32_t)shaderio::VXPGStaticBindingPoints::eSpixelClusterTotal,
+		(uint32_t)shaderio::VXPGStaticBindingPoints::eLeafVoxel,
+		(uint32_t)shaderio::VXPGStaticBindingPoints::eVoxelLeaf,
+		(uint32_t)shaderio::VXPGStaticBindingPoints::eClusterRange,
+		(uint32_t)shaderio::VXPGStaticBindingPoints::eRepSP,
+		(uint32_t)shaderio::VXPGStaticBindingPoints::eVoxelSignature,
+		(uint32_t)shaderio::VXPGStaticBindingPoints::eLitVoxelList,
+		(uint32_t)shaderio::VXPGStaticBindingPoints::eLitVoxelCount,
+		(uint32_t)shaderio::VXPGStaticBindingPoints::eClusterCentroid,
+		(uint32_t)shaderio::VXPGStaticBindingPoints::eVoxelCluster,
+		(uint32_t)shaderio::VXPGStaticBindingPoints::eSpixelAccum,
+		(uint32_t)shaderio::VXPGStaticBindingPoints::eGlobalInfo,
+		(uint32_t)shaderio::VXPGStaticBindingPoints::eClusterCentroidE,
 	};
 	for (uint32_t binding : bufferBindings)
 	{
@@ -646,6 +769,18 @@ void VXPGRenderer::createDescriptorSet()
 	appendBuffer(shaderio::VXPGStaticBindingPoints::eSpixelInfo, spixelInfoBuffer);
 	appendBuffer(shaderio::VXPGStaticBindingPoints::eSpixelClusterWeight, spixelClusterWeightBuffer);
 	appendBuffer(shaderio::VXPGStaticBindingPoints::eSpixelClusterTotal, spixelClusterTotalBuffer);
+	appendBuffer(shaderio::VXPGStaticBindingPoints::eLeafVoxel, leafVoxelBuffer);
+	appendBuffer(shaderio::VXPGStaticBindingPoints::eVoxelLeaf, voxelLeafBuffer);
+	appendBuffer(shaderio::VXPGStaticBindingPoints::eClusterRange, clusterRangeBuffer);
+	appendBuffer(shaderio::VXPGStaticBindingPoints::eRepSP, repSPBuffer);
+	appendBuffer(shaderio::VXPGStaticBindingPoints::eVoxelSignature, voxelSignatureBuffer);
+	appendBuffer(shaderio::VXPGStaticBindingPoints::eLitVoxelList, litVoxelListBuffer);
+	appendBuffer(shaderio::VXPGStaticBindingPoints::eLitVoxelCount, litVoxelCountBuffer);
+	appendBuffer(shaderio::VXPGStaticBindingPoints::eClusterCentroid, clusterCentroidBuffer);
+	appendBuffer(shaderio::VXPGStaticBindingPoints::eVoxelCluster, voxelClusterBuffer);
+	appendBuffer(shaderio::VXPGStaticBindingPoints::eSpixelAccum, spixelAccumBuffer);
+	appendBuffer(shaderio::VXPGStaticBindingPoints::eGlobalInfo, globalInfoBuffer);
+	appendBuffer(shaderio::VXPGStaticBindingPoints::eClusterCentroidE, clusterCentroidEBuffer);
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }
@@ -715,14 +850,54 @@ void VXPGRenderer::compileAndCreateShaders()
 		createShader(shaderVBuffer, passesCode, "vxpgVBufferMain");
 		createShader(shaderLightInject, passesCode, "vxpgLightInjectMain");
 		createShader(shaderGeometryInject, passesCode, "vxpgGeometryInjectMain");
+		createShader(shaderLeafMapInit, passesCode, "vxpgLeafMapInitMain");
 		createShader(shaderTreeInit, passesCode, "vxpgTreeInitMain");
 		createShader(shaderTreeInternal, passesCode, "vxpgTreeInternalMain");
 		createShader(shaderTreeAccumulate, passesCode, "vxpgTreeAccumulateMain");
 		createShader(shaderClusterRoots, passesCode, "vxpgClusterRootsMain");
+		createShader(shaderPdfTest, passesCode, "vxpgPdfTestMain");
+		createShader(shaderRepSP, passesCode, "vxpgRepSPMain");
+		createShader(shaderLitVoxelSort, passesCode, "vxpgLitVoxelSortMain");
+		createShader(shaderSuperPixelDebug, passesCode, "vxpgSuperPixelDebugMain");
+		createShader(shaderSignature, passesCode, "vxpgSignatureMain");
+		createShader(shaderClusterSeed, passesCode, "vxpgClusterSeedMain_1");
+		createShader(shaderClusterSeed2, passesCode, "vxpgClusterSeedMain_2");
+		createShader(shaderClusterAssign, passesCode, "vxpgClusterAssignMain");
+		createShader(shaderClusterUpdate, passesCode, "vxpgClusterUpdateMain");
+		createShader(shaderClusterSort, passesCode, "vxpgClusterSortMain");
 		createShader(shaderSpixelCenters, passesCode, "vxpgSpixelCentersMain");
 		createShader(shaderSpixelAssign, passesCode, "vxpgSpixelAssignMain");
+		createShader(shaderSpixelUpdate, passesCode, "vxpgSpixelUpdateMain");
 		createShader(shaderSpixelAccum, passesCode, "vxpgSpixelAccumMain");
 		createShader(shaderTopLevel, passesCode, "vxpgTopLevelMain");
+
+		{
+			vkDestroyShaderEXT(device, shaderDebugCluster_vert, nullptr);
+			shaderInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+			// nextStage may only be non-zero when shader linking is used (LINK_STAGE_BIT); with 0 the
+			// object links implicitly through matching IO and creation succeeds.
+			shaderInfo.nextStage = VK_SHADER_STAGE_FRAGMENT_BIT;
+			shaderInfo.pName = "vxpgDebugClusterMain_vert";
+			shaderInfo.codeSize = passesCode.codeSize;
+			shaderInfo.pCode = passesCode.pCode;
+			VkResult vsResult = vkCreateShadersEXT(Application::app->getDevice(), 1U, &shaderInfo, nullptr, &shaderDebugCluster_vert);
+			if (vsResult != VK_SUCCESS)
+				LOGE("VXPG: failed to create the cluster debug vertex shader (%d)\n", int(vsResult));
+			else
+				NVVK_DBG_NAME(shaderDebugCluster_vert);
+
+			vkDestroyShaderEXT(device, shaderDebugCluster_frag, nullptr);
+			shaderInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+			shaderInfo.nextStage = 0;
+			shaderInfo.pName = "vxpgDebugClusterMain_frag";
+			shaderInfo.codeSize = passesCode.codeSize;
+			shaderInfo.pCode = passesCode.pCode;
+			VkResult fsResult = vkCreateShadersEXT(Application::app->getDevice(), 1U, &shaderInfo, nullptr, &shaderDebugCluster_frag);
+			if (fsResult != VK_SUCCESS)
+				LOGE("VXPG: failed to create the cluster debug fragment shader (%d)\n", int(fsResult));
+			else
+				NVVK_DBG_NAME(shaderDebugCluster_frag);
+		}
 	}
 	else
 	{
@@ -773,35 +948,60 @@ void VXPGRenderer::dispatchCompute(VkCommandBuffer cmd, VkShaderEXT shader, uint
 	vkCmdDispatch(cmd, groupCountX, groupCountY, groupCountZ);
 }
 
+void VXPGRenderer::dispatchComputeIndirect(VkCommandBuffer cmd, VkShaderEXT shader, VkBuffer buffer, VkDeviceSize offset)
+{
+	if (shader == VK_NULL_HANDLE || buffer == VK_NULL_HANDLE)
+		return;
+	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	vkCmdBindShadersEXT(cmd, 1, &stage, &shader);
+	vkCmdDispatchIndirect(cmd, buffer, offset);
+}
+
 void VXPGRenderer::clearVoxelGrids(VkCommandBuffer cmd)
 {
+	NVVK_DBG_SCOPE(cmd);
 	vkCmdFillBuffer(cmd, voxelIrradianceBuffer.buffer, 0, VK_WHOLE_SIZE, 0u);
 	vkCmdFillBuffer(cmd, voxelVplCountBuffer.buffer, 0, VK_WHOLE_SIZE, 0u);
 	vkCmdFillBuffer(cmd, voxelBoundMinBuffer.buffer, 0, VK_WHOLE_SIZE, 0xffffffffu);
 	vkCmdFillBuffer(cmd, voxelBoundMaxBuffer.buffer, 0, VK_WHOLE_SIZE, 0u);
+	vkCmdFillBuffer(cmd, leafVoxelBuffer.buffer, 0, VK_WHOLE_SIZE, 0xffffffffu);
+	vkCmdFillBuffer(cmd, voxelLeafBuffer.buffer, 0, VK_WHOLE_SIZE, 0xffffffffu);
+	vkCmdFillBuffer(cmd, clusterRangeBuffer.buffer, 0, VK_WHOLE_SIZE, 0u);
+	vkCmdFillBuffer(cmd, litVoxelCountBuffer.buffer, 0, VK_WHOLE_SIZE, 0u);
+	vkCmdFillBuffer(cmd, repSPBuffer.buffer, 0, VK_WHOLE_SIZE, 0u);
+	vkCmdFillBuffer(cmd, voxelClusterBuffer.buffer, 0, VK_WHOLE_SIZE, 0xffffffffu);
+	vkCmdFillBuffer(cmd, spixelAccumBuffer.buffer, 0, VK_WHOLE_SIZE, 0u);
+	// 1 gives cmd = {1,1,1}: a valid default dispatch for both seeding stages (the mean is
+	// overwritten by the first stage, so the fill value does not matter for it).
+	vkCmdFillBuffer(cmd, globalInfoBuffer.buffer, 0, VK_WHOLE_SIZE, 1u);
+	vkCmdFillBuffer(cmd, clusterCentroidEBuffer.buffer, 0, VK_WHOLE_SIZE, 0u);
 }
 
 // The per superpixel weights are rebuilt from the current frame, so they are always cleared.
 void VXPGRenderer::clearSpixelWeights(VkCommandBuffer cmd)
 {
+	NVVK_DBG_SCOPE(cmd);
 	vkCmdFillBuffer(cmd, spixelClusterWeightBuffer.buffer, 0, VK_WHOLE_SIZE, 0u);
 	vkCmdFillBuffer(cmd, spixelClusterTotalBuffer.buffer, 0, VK_WHOLE_SIZE, 0u);
 }
 
 void VXPGRenderer::runVBufferPass(VkCommandBuffer cmd)
 {
+	NVVK_DBG_SCOPE(cmd);
 	dispatchCompute(cmd, shaderVBuffer, (currentResolution.width + VXPG_THREADGROUP_SIZE_X - 1) / VXPG_THREADGROUP_SIZE_X,
 	                (currentResolution.height + VXPG_THREADGROUP_SIZE_Y - 1) / VXPG_THREADGROUP_SIZE_Y, 1);
 }
 
 void VXPGRenderer::runLightInjectionPass(VkCommandBuffer cmd)
 {
+	NVVK_DBG_SCOPE(cmd);
 	dispatchCompute(cmd, shaderLightInject, (currentResolution.width + VXPG_THREADGROUP_SIZE_X - 1) / VXPG_THREADGROUP_SIZE_X,
 	                (currentResolution.height + VXPG_THREADGROUP_SIZE_Y - 1) / VXPG_THREADGROUP_SIZE_Y, 1);
 }
 
 void VXPGRenderer::runGeometryInjectionPass(VkCommandBuffer cmd)
 {
+	NVVK_DBG_SCOPE(cmd);
 	FzbRenderer::Scene& scene = Application::sceneResource;
 	for (uint32_t instanceIndex = 0; instanceIndex < uint32_t(scene.instances.size()); ++instanceIndex)
 	{
@@ -832,9 +1032,65 @@ void VXPGRenderer::runGeometryInjectionPass(VkCommandBuffer cmd)
 	pushConstant.triangleCount = 0;
 }
 
+void VXPGRenderer::runClusterPasses(VkCommandBuffer cmd)
+{
+	NVVK_DBG_SCOPE(cmd);
+	// vxpgClusterAssignMain runs with numthreads(512, 1, 1) and one warp (32 threads, one lane per
+	// cluster) per lit voxel, so a group handles 16 lit voxels. The lit count is GPU side, hence the
+	// upper bound is dispatched and the surplus warps exit immediately.
+	const VkDeviceSize assignGroups = (VXPG_KMPP_MAX_VOXELS + 15u) / 16u;
+
+	dispatchCompute(cmd, shaderRepSP, 1, 1, 1);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+
+	// Step 1: compact the lit voxels into litVoxelList (numthreads(1024, 1, 1); the group sums its
+	// wave counts so only one global atomic per group is issued).
+	const uint32_t sortGroups = (uint32_t(voxelCount) + 1023u) / 1024u;
+	dispatchCompute(cmd, shaderLitVoxelSort, sortGroups, 1, 1);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+
+	// Step 2: one workgroup per lit voxel, 128 threads = 128 representative SP visibility bits.
+	// The lit count is GPU side, so the upper bound is dispatched; idle groups exit after one
+	// groupshared clear and a barrier.
+	dispatchCompute(cmd, shaderSignature, VXPG_KMPP_MAX_VOXELS, 1, 1);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+
+	// KMPP seeding, split in two stages:
+	//   stage 1 accumulates the mean lit voxel position (group count written by the signature pass),
+	//   stage 2 picks the K-Means++ seeds with a single 32 thread group (stage 1 writes cmd.x = 1).
+	dispatchComputeIndirect(cmd, shaderClusterSeed, globalInfoBuffer.buffer, 0);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	dispatchComputeIndirect(cmd, shaderClusterSeed2, globalInfoBuffer.buffer, 0);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	for (int iter = 0; iter < 2; ++iter)
+	{
+		dispatchCompute(cmd, shaderClusterAssign, assignGroups, 1, 1);
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+		dispatchCompute(cmd, shaderClusterUpdate, 1, 1, 1);
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	}
+
+	// cluster sorted leaf order + per cluster leaf ranges
+	dispatchCompute(cmd, shaderClusterSort, 1, 1, 1);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+}
+
 void VXPGRenderer::runTreePasses(VkCommandBuffer cmd)
 {
+	NVVK_DBG_SCOPE(cmd);
 	const uint32_t treeGroups = (nodeCount + VXPG_TREE_THREADGROUP_SIZE - 1) / VXPG_TREE_THREADGROUP_SIZE;
+	if ((pushConstant.flags & 4096) != 0)
+	{
+		dispatchCompute(cmd, shaderPdfTest, 1, 1, 1);
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	}
+
+	// Leaf order for this frame: the KMPP visibility clustering (which also sorts the lit voxels
+	// by cluster so every cluster is a contiguous leaf range) or the identity Morton order.
+	if (useVisibilityClustering) runClusterPasses(cmd);
+	else dispatchCompute(cmd, shaderLeafMapInit, (voxelCount + 63u) / 64u, 1, 1);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+
 	dispatchCompute(cmd, shaderTreeInit, treeGroups, 1, 1);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
@@ -853,13 +1109,31 @@ void VXPGRenderer::runTreePasses(VkCommandBuffer cmd)
 
 void VXPGRenderer::runSpixelPasses(VkCommandBuffer cmd)
 {
-	dispatchCompute(cmd, shaderSpixelCenters, (spixelGridWidth + VXPG_THREADGROUP_SIZE_X - 1) / VXPG_THREADGROUP_SIZE_X,
-	                (spixelGridHeight + VXPG_THREADGROUP_SIZE_Y - 1) / VXPG_THREADGROUP_SIZE_Y, 1);
+	NVVK_DBG_SCOPE(cmd);
+	// The superpixel passes use numthreads(64, 1, 1): the y extent has to come from the *group*
+	// count, otherwise only row 0 of the superpixel grid is ever touched (that left every cluster
+	// with id >= spixelGridWidth uninitialised and therefore skipped by the assignment).
+	const uint32_t spixelGroupsX = (spixelGridWidth + 63u) / 64u;
+	const uint32_t spixelGroupsY = spixelGridHeight;
+
+	dispatchCompute(cmd, shaderSpixelCenters, spixelGroupsX, spixelGroupsY, 1);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
-	dispatchCompute(cmd, shaderSpixelAssign, (currentResolution.width + VXPG_THREADGROUP_SIZE_X - 1) / VXPG_THREADGROUP_SIZE_X,
-	                (currentResolution.height + VXPG_THREADGROUP_SIZE_Y - 1) / VXPG_THREADGROUP_SIZE_Y, 1);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	// SLIC iterations (assign -> update centre -> assign ...). Two iterations already give most of
+	// the boundary adherence of the paper's converged segmentation at a fraction of the cost.
+	const uint32_t assignGroupsX = (currentResolution.width + VXPG_THREADGROUP_SIZE_X - 1) / VXPG_THREADGROUP_SIZE_X;
+	const uint32_t assignGroupsY = (currentResolution.height + VXPG_THREADGROUP_SIZE_Y - 1) / VXPG_THREADGROUP_SIZE_Y;
+	// assign -> update centre, repeated until the segmentation is close to converged (SLIC uses ~10
+	// iterations; three already give most of the boundary adherence here). The loop has to END with
+	// the update so that the per superpixel position / normal stored for the fuzzy weights are means,
+	// not running sums.
+	for (int iteration = 0; iteration < 3; ++iteration)
+	{
+		dispatchCompute(cmd, shaderSpixelAssign, assignGroupsX, assignGroupsY, 1);
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+		dispatchCompute(cmd, shaderSpixelUpdate, spixelGroupsX, spixelGroupsY, 1);
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	}
 
 	dispatchCompute(cmd, shaderSpixelAccum, (currentResolution.width + VXPG_THREADGROUP_SIZE_X - 1) / VXPG_THREADGROUP_SIZE_X,
 	                (currentResolution.height + VXPG_THREADGROUP_SIZE_Y - 1) / VXPG_THREADGROUP_SIZE_Y, 1);
@@ -869,8 +1143,102 @@ void VXPGRenderer::runSpixelPasses(VkCommandBuffer cmd)
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 }
 
+// Superpixel visualisation (UI: "Show Superpixel Colors"): every pixel is painted with the colour
+// of the superpixel the SLIC passes assigned it to.
+void VXPGRenderer::runSuperPixelDebugPass(VkCommandBuffer cmd)
+{
+	NVVK_DBG_SCOPE(cmd);
+	pushConstant.dispatchOffset = shaderio::uint2(0, 0);
+	const VkPushConstantsInfo pushInfo{
+		.sType = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
+		.layout = pipelineLayout,
+		.stageFlags = VK_SHADER_STAGE_ALL,
+		.offset = 0,
+		.size = sizeof(shaderio::VXPGPushConstant),
+		.pValues = &pushConstant,
+	};
+	vkCmdPushConstants2(cmd, &pushInfo);
+
+	// vxpgSuperPixelDebugMain is declared with numthreads(1, 1, 1), so one group per pixel is
+	// needed; both group dimensions stay below the 65535 limit at the usual resolutions.
+	dispatchCompute(cmd, shaderSuperPixelDebug, currentResolution.width, currentResolution.height, 1);
+}
+
+// Cluster visualisation: one primary ray per pixel, the first-hit voxel is painted with its
+// cluster colour (UI checkbox "Show Cluster Colors").
+void VXPGRenderer::runDebugClusterPass(VkCommandBuffer cmd)
+{
+	NVVK_DBG_SCOPE(cmd);
+
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(uint32_t(ImageType_VXPG::eImgRendered)), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getDepthImage(), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
+
+	VkRenderingAttachmentInfo colorAttachment = DEFAULT_VkRenderingAttachmentInfo;
+	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	colorAttachment.imageView = gBuffers.getColorImageView(uint32_t(ImageType_VXPG::eImgRendered));
+	colorAttachment.clearValue = { .color = {Application::sceneResource.sceneInfo.backgroundColor.x,
+											Application::sceneResource.sceneInfo.backgroundColor.y,
+											Application::sceneResource.sceneInfo.backgroundColor.z, 1.0f} };
+
+	VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
+	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
+	depthAttachment.imageView = gBuffers.getDepthImageView();
+
+	VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
+	renderingInfo.renderArea = { {0, 0}, gBuffers.getSize() };
+	renderingInfo.colorAttachmentCount = 1;
+	renderingInfo.pColorAttachments = &colorAttachment;
+	renderingInfo.pDepthAttachment = &depthAttachment;
+
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, staticDescPack.getSetPtr(), 0, nullptr);
+
+	vkCmdBeginRendering(cmd, &renderingInfo);
+
+	graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
+	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
+	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_TRUE;
+	graphicsDynamicPipeline.depthStencilState.depthWriteEnable = VK_TRUE;
+
+	graphicsDynamicPipeline.cmdApplyAllStates(cmd);
+	graphicsDynamicPipeline.cmdSetViewportAndScissor(cmd, gBuffers.getSize());
+	graphicsDynamicPipeline.cmdBindShaders(cmd, { .vertex = shaderDebugCluster_vert, .fragment = shaderDebugCluster_frag });
+
+	VkVertexInputBindingDescription2EXT bindingDescription{};
+	VkVertexInputAttributeDescription2EXT attributeDescription = {};
+	vkCmdSetVertexInputEXT(cmd, 0, nullptr, 0, nullptr);
+
+	bool useWireframe = false;
+	uint32_t meshIndex = useWireframe ? 0 : 1;
+	const shaderio::Mesh& mesh = scene.meshes[meshIndex];
+	const shaderio::TriangleMesh& triMesh = mesh.triMesh;
+
+	const VkPushConstantsInfo pushInfo{
+		.sType = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
+		.layout = pipelineLayout,
+		.stageFlags = VK_SHADER_STAGE_ALL,
+		.offset = 0,
+		.size = sizeof(shaderio::VXPGPushConstant),
+		.pValues = &pushConstant,
+	};
+	vkCmdPushConstants2(cmd, &pushInfo);
+
+	uint32_t bufferIndex = scene.getMeshBufferIndex(meshIndex);
+	const nvvk::Buffer& v = scene.bDatas[bufferIndex];
+	vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(mesh.indexType));
+
+	uint32_t instanceCount = pushConstant.voxelResolution * pushConstant.voxelResolution * pushConstant.voxelResolution;
+	vkCmdDrawIndexed(cmd, triMesh.indices.count, instanceCount, 0, 0, 0);
+
+	vkCmdEndRendering(cmd);
+
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(uint32_t(ImageType_VXPG::eImgRendered)), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getDepthImage(), VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
+}
+
 void VXPGRenderer::runIntegratorPass(VkCommandBuffer cmd)
 {
+	NVVK_DBG_SCOPE(cmd);
 	const VkPushConstantsInfo pushInfo{
 		.sType = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
 		.layout = pipelineLayout,
@@ -907,38 +1275,37 @@ void VXPGRenderer::render(VkCommandBuffer* cmdPtr)
 	NVVK_DBG_SCOPE(cmd);
 
 	updateDataPerFrame(cmd);
-	if (maxFrames > 1 && pushConstant.frameIndex >= maxFrames)
-		return;
+	// Same as VRPG: a rolling two frame average (maxFrames == 2) keeps rendering, only the
+	// progressive mode stops once the target frame count is reached.
+	if (maxFrames > 2 && pushConstant.frameIndex >= maxFrames) return;
 
-	if (shaderIntegrator == VK_NULL_HANDLE)
-		return;
+	if (shaderIntegrator == VK_NULL_HANDLE) return;
 
 	bindCommonState(cmd);
 
 	const uint32_t stageMask = vxpgStageMask();
 	const bool rebuild = rebuildPerFrame || guidingDirty || Application::frameIndex == 0;
-	if (rebuild)
-	{
-		// The voxel field is accumulated across frames (sum / count is already an average), which
-		// makes the injected distribution dense and temporally stable; it is only reset when the
-		// domain changes or at the very first frame.
-		if (guidingDirty || pushConstant.frameIndex == 0)
-			clearVoxelGrids(cmd);
+	if (rebuild){
+		// The voxel field is rebuilt from the current frame, exactly like VRPG: accumulating it
+		// across frames made the per frame radiance non stationary (the guide kept getting
+		// stronger), which in turn made the temporal accumulation of the image meaningless.
+		clearVoxelGrids(cmd);
 		clearSpixelWeights(cmd);
 		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
-		if (stageMask & 1u)
-		{
-			runVBufferPass(cmd);
-			nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-		}
-		if (stageMask & 2u)
-		{
+		// Light injection runs FIRST so it consumes the previous frame's BSDF samples (supplemental
+		// Eq. 8). The guide distribution is then independent from the samples this frame's MIS
+		// estimator uses, which keeps the balance heuristic unbiased. vBuffer carries the injected
+		// VPL voxel / throughput into this frame's record.
+		if (stageMask & 2u){
 			runLightInjectionPass(cmd);
 			nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 		}
-		if (stageMask & 4u)
-		{
+		if (stageMask & 1u){
+			runVBufferPass(cmd);
+			nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+		}
+		if (stageMask & 4u){
 			runGeometryInjectionPass(cmd);
 			nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 		}
@@ -946,7 +1313,17 @@ void VXPGRenderer::render(VkCommandBuffer* cmdPtr)
 		if (stageMask & 16u) runSpixelPasses(cmd);
 	}
 
-	if (stageMask & 32u) runIntegratorPass(cmd);
+	if (stageMask & 32u)
+	{
+		#ifndef NDEBUG
+		if (showSuperPixelDebug)
+			runSuperPixelDebugPass(cmd);
+		else if (showClusterDebug)
+			runDebugClusterPass(cmd);
+		else
+		#endif
+			runIntegratorPass(cmd);
+	}
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
 	Application::tonemapper.runCompute(cmd, gBuffers.getSize(), Application::tonemapperData,
@@ -1018,6 +1395,12 @@ void VXPGRenderer::uiRender()
 			pushConstant.padding1 = svJitter;
 			uiModified = true;
 		}
+		if (ImGui::Checkbox("Visibility Clustering (KMPP)", &useVisibilityClustering))
+			uiModified = true;
+		if (ImGui::Checkbox("Show Cluster Colors", &showClusterDebug))
+			uiModified = true;
+		if (ImGui::Checkbox("Show Superpixel Colors", &showSuperPixelDebug))
+			uiModified = true;
 		float fireflyClamp = pushConstant.fireflyClamp;
 		if (ImGui::SliderFloat("Indirect Clamp (0 = off)", &fireflyClamp, 0.0f, 500.0f, "%.0f"))
 		{

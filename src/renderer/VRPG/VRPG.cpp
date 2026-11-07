@@ -92,7 +92,7 @@ void VRPGRenderer::init() {
 
 	{
 		std::filesystem::path refImagePath = "C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/result/bearBox.png";
-		refImage.init(refImagePath);
+		refImage.init(refImagePath, nullptr, false);
 
 		FLIPCreateInfo flipCreateInfo{
 			.referenceImage = refImage.image,

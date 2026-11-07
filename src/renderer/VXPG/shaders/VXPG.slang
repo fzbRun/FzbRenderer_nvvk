@@ -83,7 +83,7 @@ void computeMain_VXPG(uint2 threadIndex : SV_DispatchThreadID)
                 uint leaf = VXPG_TraverseTree(uint(clusterRoots[cluster]), rand(seed), bottomProb);
                 blue = (leaf != VXPG_INVALID_INDEX && bottomProb > 0.0f) ? 1.0 : 0.0;
             }
-            VXPGGuideSample guide = VXPG_SampleVoxelGuiding(pixel, primary.position, VXPG_WorldToVoxelID(primary.position), seed);
+            VXPGGuideSample guide = VXPG_SampleVoxelGuiding(pixel, primary.position, primaryPayload.hitNormal, VXPG_WorldToVoxelID(primary.position), seed);
             outImage[pixel] = float4(guide.valid ? 1.0 : 0.0, (cluster >= 0) ? 1.0 : 0.0, blue, 1.0);
             continue;
         }
@@ -110,6 +110,50 @@ void computeMain_VXPG(uint2 threadIndex : SV_DispatchThreadID)
         // Guiding only makes sense for shading points inside the camera centred voxel domain.
         const bool guideUsable = ((pushConst.flags & 1) != 0) && traceIndirect && VXPG_PositionInDomain(primary.position);
 
+        // Guide pdf breakdown (VXPG_DEBUG=512): which factor of guide.pdf is off.
+        //   red   = log2(1 + guide.pdf) / 25
+        //   green = p(leaf | cluster)          (0..1)
+        //   blue  = p(cluster | pixel) * 32    (1 = uniform over the 32 clusters)
+        if ((pushConst.flags & 1024) != 0)
+        {
+            VXPGGuideSample g = VXPG_SampleVoxelGuiding(pixel, primary.position, primaryPayload.hitNormal, primaryVoxel, seed);
+            float leafProb = 0.0;
+            float clusterProb = 0.0;
+            if (g.valid)
+            {
+                int3 gv = g.voxel;
+                uint gflat = VXPG_FlatIndex(gv);
+                uint gslot = voxelLeaf[gflat];
+                if (gslot != VXPG_INVALID_INDEX)
+                {
+                    uint gleaf = VXPG_LeafNodeIndex(gslot);
+                    int gcluster = VXPG_ClusterOfLeafSlot(gslot);
+                    if (gcluster >= 0 && clusterRoots[gcluster] >= 0)
+                        leafProb = VXPG_TreePathProbability(uint(clusterRoots[gcluster]), gleaf);
+                    int ids[4];
+                    float wts[4];
+                    if (VXPG_SpixelMixture(pixel, primary.position, primaryPayload.hitNormal, ids, wts) != 0)
+                        clusterProb = VXPG_TopLevelProbabilityMixture(ids, wts, gcluster);
+                }
+            }
+            // Write the breakdown into the pixel record so it can be read back on the CPU through
+            // the dump (the image goes through the tonemapper and cannot be read quantitatively).
+            //   vplPos.x = p_sph (= 1 / sum S), .y = p(leaf|cluster), .z = p(cluster|pixel),
+            //   .w = guide.pdf
+            {
+                const float denom = max(leafProb * clusterProb, 1e-30);
+                uint dumpIndex = pixel.y * pushConst.screenSize.x + pixel.x;
+                VXPGPixelData dumpRecord = pixelData[dumpIndex];
+                dumpRecord.vplPos = float4(g.valid ? g.pdf / denom : 0.0, leafProb, clusterProb, g.pdf);
+                pixelData[dumpIndex] = dumpRecord;
+            }
+            float pdfView = clamp(log2(1.0 + g.pdf) / 25.0, 0.0, 1.0);
+            outImage[pixel] = float4(g.valid ? pdfView : 0.0,
+                                     clamp(leafProb, 0.0, 1.0),
+                                     clamp(clusterProb * 32.0, 0.0, 1.0), 1.0);
+            continue;
+        }
+
         // MIS mode: 0 = one sample MIS (pick one technique with probability 1/2 and scale by 2).
         // Its weights contain no per voxel pdf ratio, which is what painted the voxel grid onto
         // the shaded surfaces as blocks. 1 = balance, 2 = power heuristic.
@@ -124,7 +168,7 @@ void computeMain_VXPG(uint2 threadIndex : SV_DispatchThreadID)
         //   red: valid sample, green: hit inside the sampled voxel, blue: non zero BSDF weight
         if ((pushConst.flags & 256) != 0)
         {
-            VXPGGuideSample guideDbg = VXPG_SampleVoxelGuiding(pixel, primary.position, primaryVoxel, seed);
+            VXPGGuideSample guideDbg = VXPG_SampleVoxelGuiding(pixel, primary.position, primaryPayload.hitNormal, primaryVoxel, seed);
             float r = 0.0;
             float g = 0.0;
             float b = 0.0;
@@ -188,7 +232,7 @@ void computeMain_VXPG(uint2 threadIndex : SV_DispatchThreadID)
 
                     int3 voxelA = VXPG_WorldToVoxelID(hitA.position);
                     float guidePdfA = VXPG_PositionInDomain(hitA.position)
-                        ? VXPG_PdfVoxelGuidingSmooth(pixel, voxelA, primaryVoxel, primary.position)
+                        ? VXPG_PdfVoxelGuidingSmooth(pixel, voxelA, primaryVoxel, primary.position, primaryPayload.hitNormal)
                         : 0.0;
                     float w1 = bsdfPdf;
                     float w2 = guidePdfA;
@@ -236,13 +280,18 @@ void computeMain_VXPG(uint2 threadIndex : SV_DispatchThreadID)
         //----------------------------------------------------------------------------------
         if (useGuideBranch && guideUsable && (!oneSampleMis || !pickBsdf))
         {
-            VXPGGuideSample guide = VXPG_SampleVoxelGuiding(pixel, primary.position, primaryVoxel, seed);
+            VXPGGuideSample guide = VXPG_SampleVoxelGuiding(pixel, primary.position, primaryPayload.hitNormal, primaryVoxel, seed);
             if (guide.valid && guide.pdf > 0.0)
             {
                 RayDesc rayB = VXPG_SpawnRay(primary.position, primary.normal, guide.direction);
                 VXPGHit hitB = VXPG_TraceRay(rayB);
 
-                if (hitB.hit && all(hitB.position >= guide.aabbMin) && all(hitB.position <= guide.aabbMax))
+                // The hit has to land in the *sampled voxel itself*, not merely inside its AABB: at wall
+    // corners the wall surface lies exactly on the voxel boundary, so an AABB test accepts the
+    // occluder as if it were the VPL and light leaks along every edge (the bright hairlines).
+    const bool hitInVoxel = hitB.hit && all(hitB.position >= guide.aabbMin) && all(hitB.position <= guide.aabbMax)
+                         && all(VXPG_WorldToVoxelID(hitB.position) == guide.voxel);
+    if (hitInVoxel)
                 {
                     float3 bsdfB = getBSDF(primaryPayload.material, guide.direction, primaryPayload.hitNormal,
                                            primaryPayload.outgoing, primaryPayload.TBN, primaryPayload.isExt);
@@ -262,7 +311,7 @@ void computeMain_VXPG(uint2 threadIndex : SV_DispatchThreadID)
 
                         float w1 = getPdf(primaryPayload.material, guide.direction, primaryPayload.hitNormal,
                                           primaryPayload.outgoing, primaryPayload.TBN, primaryPayload.isExt);
-                        float w2 = VXPG_PdfVoxelGuidingSmooth(pixel, guide.voxel, primaryVoxel, primary.position);
+                        float w2 = VXPG_PdfVoxelGuidingSmooth(pixel, guide.voxel, primaryVoxel, primary.position, primaryPayload.hitNormal);
                         if (pushConst.misMode == int(VXPG_MisMode::ePower))
                         {
                             w1 *= w1;
@@ -275,11 +324,11 @@ void computeMain_VXPG(uint2 threadIndex : SV_DispatchThreadID)
             }
         }
 
-        // One sample MIS: the chosen technique was selected with probability selectProb, so its
-        // estimate is scaled by 1/selectProb to stay unbiased (the direct light at the primary
-        // vertex is not part of the selection and is left untouched).
-        if (oneSampleMis)
-            accumulated = indirectBefore + (accumulated - indirectBefore) / selectProb;
+        // One sample MIS: both techniques are unbiased estimators of the same indirect integral, so
+        // randomly picking ONE of them (with probability selectProb) and taking its raw estimate is
+        // already unbiased: E = selectProb * I + (1 - selectProb) * I = I. Scaling the picked
+        // estimate by 1/selectProb would double count and was removed.
+        accumulated = indirectBefore + (accumulated - indirectBefore);
     }
 
     accumulated /= float(spp);
@@ -292,6 +341,19 @@ void computeMain_VXPG(uint2 threadIndex : SV_DispatchThreadID)
         outImage[pixel] = float4(0.5f, 0.5f, 0.5f, 1.0f);
         return;
     }
+    // Self check (VXPG_DEBUG=512): what this shader actually sees for the estimator switch.
+    //   red   = 1 when one sample MIS is active (misMode == 0)
+    //   green = misMode / 4
+    //   blue  = (flags & 255) / 255  (bit0 guiding, bit1 fuzzy, bit3/4 disable branches)
+    if ((pushConst.flags & 1024) != 0)
+    {
+        const float oneSample = (pushConst.misMode == 0) ? 1.0 : 0.0;
+        outImage[pixel] = float4(oneSample,
+                                 float(pushConst.misMode) * 0.25,
+                                 float(pushConst.flags & 255) / 255.0, 1.0);
+        return;
+    }
+
     if ((pushConst.flags & 4) != 0)
     {
         float3 mapped = accumulated / (1.0f + accumulated);
@@ -302,7 +364,19 @@ void computeMain_VXPG(uint2 threadIndex : SV_DispatchThreadID)
     if (any(isnan(accumulated)) || any(isinf(accumulated)))
         accumulated = float3(0.0);
 
-    if (pushConst.maxFrameCount > 1 && pushConst.frameIndex > 0)
+    // Temporal accumulation, identical to the VRPG renderer:
+    //   maxFrames == 1 : current frame only (no accumulation)
+    //   maxFrames == 2 : rolling average of the current and the previous frame (alpha 0.5)
+    //   maxFrames >  2 : progressive average, alpha = 1 / (frameIndex + 1)
+    if (pushConst.maxFrameCount == 2)
+    {
+        const float a = 0.5f;
+        float3 oldColor = outImage[pixel].xyz;
+        if (any(isnan(oldColor)) || any(isinf(oldColor)))
+            oldColor = float3(0.0);
+        outImage[pixel] = float4(lerp(oldColor, accumulated, a), 1.0f);
+    }
+    else if (pushConst.maxFrameCount > 1 && pushConst.frameIndex > 0)
     {
         float a = 1.0f / float(pushConst.frameIndex + 1);
         float3 oldColor = outImage[pixel].xyz;

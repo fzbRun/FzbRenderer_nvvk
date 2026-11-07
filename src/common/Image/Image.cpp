@@ -189,20 +189,57 @@ VkResult FzbRenderer::Image::init(ImageCreateInfo createInfo) {
 
     return VK_SUCCESS;
 }
-VkResult FzbRenderer::Image::init(std::filesystem::path& imagePath) {
+
+inline float srgbToLinear(float c) { return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f); }
+VkResult FzbRenderer::Image::init(std::filesystem::path& imagePath, VkSamplerCreateInfo* samplerCreateInfo, bool sRGB, bool linearizeToFloat) {
+    //clean();
+    //
+    //int            w, h, comp, req_comp{ 4 };
+    //std::string    filenameUtf8 = nvutils::utf8FromPath(imagePath);
+    //const stbi_uc* data = stbi_load(filenameUtf8.c_str(), &w, &h, &comp, req_comp);
+    //assert((data != nullptr) && "Could not load texture image!");
+    //
+    //// Define how to create the image
+    //setting.info = DEFAULT_VkImageCreateInfo;
+    //setting.info.format = sRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+    //setting.info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
+    //    | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    //if (!sRGB) setting.info.usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+    //setting.info.extent = { uint32_t(w), uint32_t(h), 1 };
     clean();
 
-    int            w, h, comp, req_comp{ 4 };
-    std::string    filenameUtf8 = nvutils::utf8FromPath(imagePath);
-    const stbi_uc* data = stbi_load(filenameUtf8.c_str(), &w, &h, &comp, req_comp);
-    assert((data != nullptr) && "Could not load texture image!");
+    int w = 0, h = 0, comp = 0;
+    const int req_comp = 4;
+    const std::string filenameUtf8 = nvutils::utf8FromPath(imagePath);
+    stbi_uc* data = stbi_load(filenameUtf8.c_str(), &w, &h, &comp, req_comp);
+    if (!data) { LOGE("Failed to load image: %s\n", filenameUtf8.c_str()); return VK_ERROR_INITIALIZATION_FAILED; }
 
-    // Define how to create the image
     setting.info = DEFAULT_VkImageCreateInfo;
-    setting.info.format = VK_FORMAT_R8G8B8A8_UNORM;
-    setting.info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT
+    setting.info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
         | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+	if (!sRGB) setting.info.usage |= VK_IMAGE_USAGE_STORAGE_BIT;
     setting.info.extent = { uint32_t(w), uint32_t(h), 1 };
+
+    std::vector<float>       linear;          // 只在 linearizeToFloat 时用
+    std::span<const uint8_t> dataSpan;
+
+    if (linearizeToFloat) {
+        const size_t pixelCount = size_t(w) * size_t(h);
+        linear.resize(pixelCount * 4);
+        for (size_t i = 0; i < pixelCount; ++i) {
+            linear[i * 4 + 0] = srgbToLinear(data[i * 4 + 0] / 255.0f);
+            linear[i * 4 + 1] = srgbToLinear(data[i * 4 + 1] / 255.0f);
+            linear[i * 4 + 2] = srgbToLinear(data[i * 4 + 2] / 255.0f);
+            linear[i * 4 + 3] = 1.0f;                       // alpha 不做转换
+        }
+        setting.info.format = VK_FORMAT_R32G32B32A32_SFLOAT;    // ← 线性 float
+        dataSpan = std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(linear.data()),
+            linear.size() * sizeof(float));
+    }
+    else {
+        setting.info.format = sRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+        dataSpan = std::span<const uint8_t>(data, size_t(w) * size_t(h) * req_comp);
+    }
 
     setting.viewInfo = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -211,8 +248,11 @@ VkResult FzbRenderer::Image::init(std::filesystem::path& imagePath) {
         .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1},
     };
    
+    VkSamplerCreateInfo defaultSampler{ .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+                                        .magFilter = VK_FILTER_LINEAR,
+                                        .minFilter = VK_FILTER_LINEAR };
+    if (!samplerCreateInfo) samplerCreateInfo = &defaultSampler;
     //----------------------------------------------------------------------------------------------------------------
-    const std::span dataSpan(data, w * h * req_comp);
     if (external) {
         nvvk::StagingUploader& staging = Application::stagingUploaderExport;
         nvvk::ResourceAllocatorExport* allocator = dynamic_cast<nvvk::ResourceAllocatorExport*>(staging.getResourceAllocator());
@@ -242,7 +282,7 @@ VkResult FzbRenderer::Image::init(std::filesystem::path& imagePath) {
         NVVK_CHECK(allocator->createImage(image, setting.info, setting.viewInfo));
         //Image will not have data immediately. After the staginguploader submits, the data will be copied in
         NVVK_CHECK(staging.appendImage(image, dataSpan, VK_IMAGE_LAYOUT_GENERAL));
-        Application::samplerPool.acquireSampler(image.descriptor.sampler);
+        Application::samplerPool.acquireSampler(image.descriptor.sampler, *samplerCreateInfo);
 
         VmaAllocationInfo2 allocInfo;
         vmaGetAllocationInfo2(Application::allocator, image.allocation, &allocInfo);
@@ -292,6 +332,7 @@ VkResult FzbRenderer::Image::init(std::filesystem::path& imagePath) {
     };
     vkUpdateDescriptorSets(device, 1, &writeDesc, 0, nullptr);
 
+    stbi_image_free(data);
     return VK_SUCCESS;
 }
 void FzbRenderer::Image::clean() {

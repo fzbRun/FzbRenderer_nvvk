@@ -32,8 +32,35 @@ RWStructuredBuffer<float> topLevelTree;        // spixelCount * VXPG_TOP_LEVEL_S
 RWStructuredBuffer<VXPGSpixelInfo> spixelInfo; // spixelCount entries
 [[vk::binding(VXPGStaticBindingPoints::eSpixelClusterWeight)]]
 RWStructuredBuffer<int> spixelClusterWeight;   // spixelCount * VXPG_CLUSTER_COUNT, fixed point 1/1000
+// Leaf order indirection. The light tree leaves are indexed by "slot"; a slot maps to a voxel
+// through these two buffers instead of the Morton order directly, so the leaf order can later be
+// reordered by the visibility clustering (KMPP) while every sampler keeps working unchanged.
+[[vk::binding(VXPGStaticBindingPoints::eLeafVoxel)]]
+RWStructuredBuffer<uint> leafVoxel;            // N^3: leaf slot -> flat voxel index
+[[vk::binding(VXPGStaticBindingPoints::eVoxelLeaf)]]
+RWStructuredBuffer<uint> voxelLeaf;            // N^3: flat voxel index -> leaf slot
+[[vk::binding(VXPGStaticBindingPoints::eClusterRange)]]
+RWStructuredBuffer<uint2> clusterRange;        // VXPG_CLUSTER_COUNT: [lo, hi] leaf slot range
+[[vk::binding(VXPGStaticBindingPoints::eRepSP)]]
+RWStructuredBuffer<float4> repSP;              // VXPG_REP_SP_COUNT: xyz position, w valid flag
+[[vk::binding(VXPGStaticBindingPoints::eVoxelSignature)]]
+RWStructuredBuffer<uint4> voxelSignature;      // N^3: 128 bit visibility signature
+[[vk::binding(VXPGStaticBindingPoints::eLitVoxelList)]]
+RWStructuredBuffer<uint> litVoxelList;         // VXPG_KMPP_MAX_VOXELS: compact lit voxel list
+[[vk::binding(VXPGStaticBindingPoints::eLitVoxelCount)]]
+RWStructuredBuffer<uint> litVoxelCount;        // 1 entry
+[[vk::binding(VXPGStaticBindingPoints::eClusterCentroid)]]
+RWStructuredBuffer<uint4> clusterCentroid;     // VXPG_CLUSTER_COUNT: signature centroids
+[[vk::binding(VXPGStaticBindingPoints::eClusterCentroidE)]]
+RWStructuredBuffer<float> clusterCentroidE;   // VXPG_CLUSTER_COUNT: centroid irradiance (paper Eq. 4)
+[[vk::binding(VXPGStaticBindingPoints::eVoxelCluster)]]
+RWStructuredBuffer<uint> voxelCluster;         // N^3: cluster id per voxel
+[[vk::binding(VXPGStaticBindingPoints::eSpixelAccum)]]
+RWStructuredBuffer<VXPGSpixelAccum> spixelAccum;  // spixelCount: SLIC cluster sums (reset each update)
 [[vk::binding(VXPGStaticBindingPoints::eSpixelClusterTotal)]]
-RWStructuredBuffer<int> spixelClusterTotal;    // spixelCount entries, fixed point 1/1000
+RWStructuredBuffer<int> spixelClusterTotal; // spixelCount entries, fixed point 1/1000
+[[vk::binding(VXPGStaticBindingPoints::eGlobalInfo)]]
+RWStructuredBuffer<VXPGGlobalInfo> globalInfo;
 
 #define VXPG_INVALID_INDEX 0xffffffffu
 #define VXPG_PI 3.14159265358979323846
@@ -111,6 +138,10 @@ int3 VXPG_MortonDecode(uint code, int bits)
 int   VXPG_MortonBits()  { return pushConst.maxTreeLevel; }
 uint  VXPG_VoxelToSlot(int3 v) { return VXPG_MortonEncode(v, VXPG_MortonBits()); }
 int3  VXPG_SlotToVoxel(uint s) { return VXPG_MortonDecode(s, VXPG_MortonBits()); }
+
+// Leaf slot <-> voxel through the indirection buffers (see the declarations above).
+int3 VXPG_SlotVoxel(uint slot) { return VXPG_ReconstructIndex(leafVoxel[slot]); }
+uint VXPG_VoxelLeafSlot(int3 v) { return voxelLeaf[VXPG_FlatIndex(v)]; }
 
 // Number of leaves of the light tree (one per voxel slot).
 uint VXPG_LeafCount()          { return VXPG_VoxelCount(); }
@@ -450,12 +481,44 @@ void VXPG_VoxelSurfaceBounds(int3 v, out float3 bmin, out float3 bmax)
     float3 pmax = float3(voxelBoundMax[flat * 4 + 0], voxelBoundMax[flat * 4 + 1], voxelBoundMax[flat * 4 + 2]) / float(0xffffffffu);
     bmin = vmin + saturate(pmin) * ext;
     bmax = vmin + saturate(pmax) * ext;
-    // degenerate / unwritten bounds collapse to an empty box: use the full voxel.
-    if (any(bmax - bmin <= 1e-7 * ext))
+
+    // Only truly unwritten bounds (the geometry pass never merged anything here) fall back to the
+    // full voxel. A wall / floor patch is legitimately a *thin slab*: falling back to the whole
+    // voxel in that case made the guide aim into the empty volume of the cube (most samples were
+    // then rejected by the semi-NEE test) and inflated the solid angle used by the pdf, which
+    // over-estimated the guided contribution by several times.
+    const uint written = voxelBoundMax[flat * 4 + 0] | voxelBoundMax[flat * 4 + 1] | voxelBoundMax[flat * 4 + 2];
+    if (written == 0u && all(pmin >= 1.0))
     {
         bmin = vmin;
         bmax = vmax;
     }
+    else
+    {
+        // Never let an axis collapse completely, the spherical quad needs a positive extent.
+        const float3 minThickness = float3(1e-4) * ext;
+        bmax = max(bmax, bmin + minThickness);
+        bmin = min(bmin, bmax - minThickness);
+    }
+}
+
+// Face area of a full voxel. Only used to keep the fixed point accumulation in a stable numeric
+// range after the area factor of Eq. (7) was introduced: it is a constant of the frame, so it
+// cancels in the relative weights.
+float VXPG_VoxelReferenceArea()
+{
+    const float voxelSize = 2.0 * pushConst.VGBExtent / float(VXPG_VoxelResolution());
+    return max(voxelSize * voxelSize, 1e-12);
+}
+
+// Surface area of the scene geometry inside a voxel, approximated by the area of the largest of
+// the six faces of the voxel's compact bounding box (VXPG paper, Section 5.2, right below Eq. 7).
+float VXPG_VoxelSurfaceArea(int3 voxel)
+{
+    float3 bmin, bmax;
+    VXPG_VoxelSurfaceBounds(voxel, bmin, bmax);
+    const float3 e = max(bmax - bmin, float3(0.0));
+    return max(e.x * e.y, max(e.y * e.z, e.z * e.x));
 }
 
 // Average irradiance of a voxel (0 when nothing was injected there).
@@ -466,7 +529,16 @@ float VXPG_VoxelIrradiance(uint flat)
     return (float(voxelIrradiance[flat]) / VXPG_IRRADIANCE_SCALE) / float(count);
 }
 
-float VXPG_VoxelImportance(uint flat) { return VXPG_VoxelIrradiance(flat); }
+// Sampling weight of a voxel, VXPG paper Eq. (7): the irradiance stored in the voxel times the
+// surface area of the geometry inside it (i.e. the power of the "virtual voxel light"). The area is
+// baked into the weight because a voxel is shared by all shading points, so the factor is
+// independent of the shading point; the shading point dependent factors (visibility, geometry,
+// BSDF) belong to the supervoxel/cluster term and to the intra voxel sampling.
+float VXPG_VoxelImportance(uint flat)
+{
+    int3 voxel = VXPG_ReconstructIndex(flat);
+    return VXPG_VoxelIrradiance(flat) * VXPG_VoxelSurfaceArea(voxel);
+}
 
 //------------------------------------------------------------------------------------------
 // Ray tracing / payload helpers (RayQuery based, like the VRPG renderer of this project)
@@ -543,6 +615,25 @@ float3 VXPG_RayMiss(float3 rayDirection)
     return sceneInfo.backgroundColor;
 }
 
+void VXPG_MakePayload(inout CallablePayload payload, const in VXPGPixelData hit, float3 outgoing, uint seed, SceneInfo sceneInfo)
+{
+    payload.material = sceneInfo.materials[asuint(hit.normalMaterial.w)];
+    payload.hitPos = hit.position.xyz;
+    payload.hitNormal = hit.normalMaterial.xyz;
+    payload.outgoing = outgoing;
+    payload.isExt = hit.texCoordsIsExt.w == 1.0f;
+    payload.randomSeed = seed;
+    payload.bsdf = float3(0.0, 0.0, 0.0);
+    payload.pdf = 1.0;
+    payload.incidence = float3(0.0, 0.0, 0.0);
+    payload.directionLightDir = float3(0.0, 0.0, 0.0);
+    payload.directionLightRadiance = float3(0.0, 0.0, 0.0);
+    orthonormalBasis(payload.hitNormal, payload.TBN[0], payload.TBN[1]);
+    payload.TBN[2] = payload.hitNormal;
+    if (hit.texCoordsIsExt.z == 1.0f) getTextueData(payload, hit.texCoordsIsExt.xy);
+    if (payload.material.type != MaterialType::Dielectric && payload.material.type != MaterialType::RoughDielectric)
+        payload.material.emissive *= hit.texCoordsIsExt.w;
+}
 // Build a shader payload from an explicit shading point (used for the second vertices where
 // the tracer only returns the hit record).
 void VXPG_MakePayload(inout CallablePayload payload, VXPGHit hit, float3 outgoing, uint seed, SceneInfo sceneInfo)
@@ -588,8 +679,156 @@ int VXPG_SelectSpixel(int2 pixel)
     return int(pixelData[p.y * res.x + p.x].info.x);
 }
 
+// Cluster id of a leaf slot: the visibility clustering (KMPP) when enabled, the Morton chunk
+// otherwise. Every consumer (sampler and pdf) has to agree on this.
+int VXPG_ClusterOfLeafSlot(uint slot)
+{
+    if (slot == VXPG_INVALID_INDEX)
+        return -1;
+    uint flat = leafVoxel[slot];
+    if (flat == VXPG_INVALID_INDEX)
+        return -1;
+    uint cluster = ((pushConst.flags & 512) != 0) ? voxelCluster[flat] : VXPG_ClusterOfSlot(slot);
+    return int(min(cluster, uint(VXPG_CLUSTER_COUNT) - 1u));
+}
+
+// Deterministic per pixel jitter: the sampler and the pdf have to use exactly the same jittered
+// pixel / shading point, otherwise the mixture p(cluster|x) of the pdf is not the density that the
+// sampler used (that mismatch biased the guided contribution).
+float3 VXPG_ShadingPosJittered(int2 pixel, float3 shadingPos)
+{
+    uint h = xxhash32(uint3(uint(pixel.x), uint(pixel.y), 0x51ed270bu ^ uint(pushConst.randomFrameIndex)));
+    const float3 r = float3(rand(h), rand(h), rand(h));
+    return shadingPos + (r - 0.5) * pushConst.VGBVoxelSize * pushConst.jitterRadius;
+}
+
+int2 VXPG_SpixelPixelJittered(int2 pixel)
+{
+    const int range = max(int(pushConst.padding0), 0);
+    if (range == 0)
+        return pixel;
+    uint h = xxhash32(uint3(uint(pixel.x), uint(pixel.y), 0x9e3779b9u ^ uint(pushConst.randomFrameIndex)));
+    return pixel + int2(int(rand(h) * float(range)), int(rand(h) * float(range)));
+}
+
+// SLIC distance: D^2 = (d_lab/m)^2 + (d_xy/S)^2 . VXPG replaces the lab colour by the world
+// space hit position and adds the shading normal term (paper Eq. 2).
+float VXPG_SpixelDistance(float3 pixPos, float3 pixNormal, float2 pixXY, VXPGSpixelInfo info)
+{
+    // NOTE: this is the original (unnormalised) metric, restored because the SLIC style normalisation
+    // collapsed the segmentation in this scene (nearly every pixel ended up in one cluster). The
+    // screen term is normalised by S as in SLIC, the depth term uses the world position with the
+    // scale that the assignment always used, and surfaces facing away are rejected outright.
+    const int s = max(pushConst.spixelSize, 1);
+    const float invS = 1.0 / (1.4242 * float(s));
+    const float invM = 5.0 / 1.7321;
+    const float3 dPos = pixPos - info.pos.xyz;
+    const float2 dXY = pixXY - info.center;
+    // Paper Eq. (2): only merge shading points whose normals agree (n1 . n2 > 0.1).
+    if (dot(pixNormal, info.normal.xyz) <= 0.1)
+        return 1e6;
+    return dot(dPos, dPos) * invM * invM + dot(dXY, dXY) * invS * invS;
+}
+
+// Supplemental Eq. (5): the four nearest superpixels of a shading point, weighted by 1/distance.
+// Returns the number of valid candidates (the weights are normalised).
+int VXPG_SpixelMixture(int2 pixel, float3 shadingPos, float3 shadingNormal, out int ids[4], out float weights[4])
+{
+    for (int i = 0; i < 4; ++i)
+    {
+        ids[i] = -1;
+        weights[i] = 0.0;
+    }
+
+    const int2 res = int2(pushConst.screenSize);
+    const int size = max(pushConst.spixelSize, 1);
+    const int2 grid = int2((res.x + size - 1) / size, (res.y + size - 1) / size);
+    const int2 jitteredPixel = VXPG_SpixelPixelJittered(pixel);
+    const float3 jitteredShadingPos = VXPG_ShadingPosJittered(pixel, shadingPos);
+    const int2 cell = clamp(jitteredPixel, int2(0, 0), res - int2(1, 1)) / size;
+
+    float bestDist[4] = { 1e30, 1e30, 1e30, 1e30 };
+    for (int dy = -1; dy <= 1; ++dy)
+    {
+        for (int dx = -1; dx <= 1; ++dx)
+        {
+            const int2 c = cell + int2(dx, dy);
+            if (any(c < int2(0, 0)) || any(c >= grid))
+                continue;
+            const int2 centrePixel = clamp(c * size + size / 2, int2(0, 0), res - int2(1, 1));
+            const int id = int(pixelData[centrePixel.y * res.x + centrePixel.x].info.x);
+            if (id < 0 || id >= pushConst.spixelCount)
+                continue;
+            // Skip duplicates: neighbouring cells can share one superpixel, and a duplicated entry
+            // would make the mixture collapse back onto a single distribution.
+            bool duplicate = false;
+            for (int q = 0; q < 4; ++q)
+                if (ids[q] == id)
+                    duplicate = true;
+            if (duplicate)
+                continue;
+            const float d = max(VXPG_SpixelDistance(jitteredShadingPos, shadingNormal, float2(jitteredPixel), spixelInfo[id]), 1e-4);
+            for (int k = 0; k < 4; ++k)
+            {
+                if (d < bestDist[k])
+                {
+                    for (int m = 3; m > k; --m)
+                    {
+                        bestDist[m] = bestDist[m - 1];
+                        ids[m] = ids[m - 1];
+                    }
+                    bestDist[k] = d;
+                    ids[k] = id;
+                    break;
+                }
+            }
+        }
+    }
+
+    float sumF = 0.0;
+    for (int i = 0; i < 4; ++i)
+    {
+        if (ids[i] < 0)
+            continue;
+        weights[i] = 1.0 / bestDist[i];
+        sumF += weights[i];
+    }
+    if (!(sumF > 0.0))
+        return 0;
+    for (int i = 0; i < 4; ++i)
+        weights[i] /= sumF;
+    return 4;
+}
+
+// Sample one of the four superpixels with p = F_i / sum F (supplemental Eq. 5).
+int VXPG_SampleSpixelFuzzy(int2 pixel, float3 shadingPos, float3 shadingNormal, inout uint seed,
+                           out int ids[4], out float weights[4])
+{
+    if (VXPG_SpixelMixture(pixel, shadingPos, shadingNormal, ids, weights) == 0)
+        return -1;
+    const float r = rand(seed);
+    float acc = 0.0;
+    for (int i = 0; i < 4; ++i)
+    {
+        acc += weights[i];
+        if (r <= acc)
+            return ids[i];
+    }
+    return ids[0];
+}
+
+// Marginal superpixel -> cluster probability of the fuzzy mixture.
+float VXPG_TopLevelProbabilityMixture(int ids[4], float weights[4], int cluster)
+{
+    float p = 0.0;
+    for (int i = 0; i < 4; ++i)
+        if (ids[i] >= 0 && weights[i] > 0.0)
+            p += weights[i] * VXPG_TopLevelProbability(ids[i], cluster);
+    return p;
+}
+
 // Sample the VXPG distribution at a shading point.
-VXPGGuideSample VXPG_SampleVoxelGuiding(int2 pixel, float3 shadingPos, int3 currentVoxel, inout uint seed)
+VXPGGuideSample VXPG_SampleVoxelGuiding(int2 pixel, float3 shadingPos, float3 shadingNormal, int3 currentVoxel, inout uint seed)
 {
     VXPGGuideSample result;
     result.valid = false;
@@ -598,23 +837,40 @@ VXPGGuideSample VXPG_SampleVoxelGuiding(int2 pixel, float3 shadingPos, int3 curr
     result.aabbMax = float3(-1e30);
     result.pdf = 0.0;
 
-    // Jitter the shading point (SP) by up to half a voxel and the superpixel lookup by a few
-    // pixels. Every sample therefore evaluates the guiding distribution at a slightly different
-    // position, which dithers the per voxel / per superpixel weight steps instead of freezing them
-    // on the grid. Sampling and the returned pdf use the same jittered SP, so the density is exact.
-    const float3 spJitter = (float3(rand(seed), rand(seed), rand(seed)) - 0.5) * pushConst.VGBVoxelSize
-                          * pushConst.jitterRadius;
-    const float3 shadingPosJittered = shadingPos + spJitter;
-    const int spixelJitterRange = max(int(pushConst.padding0), 0);
-    const int2 pixelJittered = pixel + int2(int(rand(seed) * float(spixelJitterRange)),
-                                            int(rand(seed) * float(spixelJitterRange)));
+    // The superpixel lookup jitter is deterministic (see VXPG_SpixelMixture) so that the pdf below
+    // uses exactly the same jittered pixel / shading point as this sampler.
+    const int2 pixelJittered = pixel;
+    const float3 shadingPosJittered = shadingPos;
 
-    int spixel = VXPG_SelectSpixel(pixelJittered);
+    // Fuzzy superpixel selection (supplemental Eq. 5) unless it is disabled by the flags.
+    int ids[4];
+    float weights[4];
+    int spixel;
+    if ((pushConst.flags & 2048) != 0)
+    {
+        spixel = VXPG_SampleSpixelFuzzy(pixelJittered, shadingPosJittered, shadingNormal, seed, ids, weights);
+    }
+    else
+    {
+        spixel = VXPG_SelectSpixel(pixelJittered);
+        for (int i = 0; i < 4; ++i)
+        {
+            ids[i] = (i == 0) ? spixel : -1;
+            weights[i] = (i == 0) ? 1.0 : 0.0;
+        }
+    }
+    if (spixel < 0)
+        return result;
 
     // 1) pick a cluster with the per superpixel top level tree
     float topProb = 0.0f;
     int cluster = VXPG_SampleTopLevelTree(spixel, rand(seed), topProb);
-    if (cluster < 0 || topProb <= 0.0f)
+    if (cluster < 0)
+        return result;
+    // The sampled spixel is one draw of the fuzzy mixture, so the density of the cluster is the
+    // mixture probability (not the probability of the single drawn superpixel).
+    topProb = VXPG_TopLevelProbabilityMixture(ids, weights, cluster);
+    if (topProb <= 0.0f)
         return result;
 
     int clusterRoot = clusterRoots[cluster];
@@ -632,7 +888,11 @@ VXPGGuideSample VXPG_SampleVoxelGuiding(int2 pixel, float3 shadingPos, int3 curr
     if (leaf >= VXPG_NodeCount())
         return result;
     uint slot = treeNodes[leaf].voxelSlot;
-    int3 voxel = VXPG_SlotToVoxel(slot);
+    if (slot == VXPG_INVALID_INDEX)
+        return result;
+    if (leafVoxel[slot] == VXPG_INVALID_INDEX)
+        return result;
+    int3 voxel = VXPG_SlotVoxel(slot);
     if (all(voxel == currentVoxel))
         return result;
 
@@ -673,24 +933,28 @@ VXPGGuideSample VXPG_SampleVoxelGuiding(int2 pixel, float3 shadingPos, int3 curr
 
 // Probability of the guidance generating a direction that lands in "voxel" (i.e. the
 // probability the guided technique would have sampled this voxel and a direction inside it).
-float VXPG_PdfVoxelGuiding(int2 pixel, int3 voxel, int3 currentVoxel, float3 shadingPos)
+float VXPG_PdfVoxelGuiding(int2 pixel, int3 voxel, int3 currentVoxel, float3 shadingPos, float3 shadingNormal)
 {
     if (all(voxel == currentVoxel)) return 0.0f;
     if (voxel.x < 0 || voxel.y < 0 || voxel.z < 0) return 0.0f;
     int res = VXPG_VoxelResolution();
     if (voxel.x >= res || voxel.y >= res || voxel.z >= res) return 0.0f;
 
-    uint slot = VXPG_VoxelToSlot(voxel);
+    uint slot = VXPG_VoxelLeafSlot(voxel);
+    if (slot == VXPG_INVALID_INDEX) return 0.0f;
     uint leaf = VXPG_LeafNodeIndex(slot);
     if (leaf >= VXPG_NodeCount()) return 0.0f;
     if (treeNodes[leaf].intensity <= 0.0f) return 0.0f;
 
-    int spixel = VXPG_SelectSpixel(pixel);
-    int cluster = int(VXPG_ClusterOfSlot(slot));
+    int ids[4];
+    float weights[4];
+    if (VXPG_SpixelMixture(pixel, shadingPos, shadingNormal, ids, weights) == 0) return 0.0f;
+    int cluster = VXPG_ClusterOfLeafSlot(slot);
+    if (cluster < 0) return 0.0f;
     int clusterRoot = clusterRoots[cluster];
     if (clusterRoot < 0) return 0.0f;
 
-    float clusterProb = VXPG_TopLevelProbability(spixel, cluster);
+    float clusterProb = VXPG_TopLevelProbabilityMixture(ids, weights, cluster);
     if (clusterProb <= 0.0f) return 0.0f;
 
     float voxelProb = VXPG_TreePathProbability(uint(clusterRoot), leaf);
@@ -733,7 +997,43 @@ float3 VXPG_DirectLight(inout CallablePayload payload, SceneInfo sceneInfo)
         payload.directionLightRadiance = float3(0.0, 0.0, 0.0);
         return payload.material.emissive;
     }
-    getDirectionLight(payload, sceneInfo);
+    // Own directional light NEE. The shared helper (getDirectionLight) uses TMin = 1 mm, which
+    // skips occluders closer than ~1mm / sin(grazing angle) and therefore leaks light along the
+    // edges where two walls meet (the bright hairlines). The epsilon is exposed through
+    // pushConst.neeTMin (VXPG_NEE_EPS) so the trade off against acne can be tuned.
+    payload.directionLightRadiance = float3(0.0, 0.0, 0.0);
+    {
+        const bool isDielectric = payload.material.type == uint(MaterialType::Dielectric)
+                               || payload.material.type == uint(MaterialType::RoughDielectric);
+        const uint lightNum = min(sceneInfo.numLights, NEE_MAX_SAMPLE_NUM);
+        for (int lightIndex = 0; lightIndex < lightNum; ++lightIndex)
+        {
+            Light light = sceneInfo.lights[lightIndex];
+            if (light.type != uint(LightType::Direction))
+                continue;
+
+            const float3 sampleDir = normalize(-light.direction);
+            const float cosine = dot(sampleDir, payload.hitNormal);
+            if (!isDielectric && cosine <= 0.001f)
+                continue;
+
+            RayDesc shadowRay;
+            shadowRay.Origin = payload.hitPos + 1e-5f * sampleDir;
+            shadowRay.Direction = sampleDir;
+            shadowRay.TMin = max(pushConst.neeTMin, 1e-6);
+            shadowRay.TMax = INFINITE;
+
+            HitTestPayload shadowPayload;
+            shadowPayload.distance = MISS_DISTANCE;
+            hitTestTraceRay(shadowRay, shadowPayload);
+            if (shadowPayload.distance != MISS_DISTANCE)
+                continue;
+
+            payload.directionLightDir = light.direction;
+            payload.directionLightRadiance = light.color * light.intensity * abs(cosine);
+            break;
+        }
+    }
     float3 emissive = payload.material.emissive;
     BSDF_SAMPLE(payload);
     return emissive + payload.directionLightRadiance;
@@ -747,7 +1047,7 @@ float3 VXPG_DirectLight(inout CallablePayload payload, SceneInfo sceneInfo)
 // narrow range here. Both techniques use this same weight function while their contributions are
 // still divided by the exact densities, so the weights sum to one per direction and the combined
 // estimator stays consistent; only the split between the two techniques changes.
-float VXPG_PdfVoxelGuidingSmooth(int2 pixel, int3 voxel, int3 currentVoxel, float3 shadingPos)
+float VXPG_PdfVoxelGuidingSmooth(int2 pixel, int3 voxel, int3 currentVoxel, float3 shadingPos, float3 shadingNormal)
 {
     if (all(voxel == currentVoxel))
         return 0.0f;
@@ -755,18 +1055,24 @@ float VXPG_PdfVoxelGuidingSmooth(int2 pixel, int3 voxel, int3 currentVoxel, floa
     if (any(voxel < int3(0, 0, 0)) || any(voxel >= int3(res, res, res)))
         return 0.0f;
 
-    const uint slot = VXPG_VoxelToSlot(voxel);
+    const uint slot = VXPG_VoxelLeafSlot(voxel);
+    if (slot == VXPG_INVALID_INDEX) return 0.0f;
     const uint leaf = VXPG_LeafNodeIndex(slot);
     if (leaf >= VXPG_NodeCount())
         return 0.0f;
 
-    const int spixel = VXPG_SelectSpixel(pixel);
-    const int cluster = int(VXPG_ClusterOfSlot(slot));
+    int ids[4];
+    float weights[4];
+    if (VXPG_SpixelMixture(pixel, shadingPos, shadingNormal, ids, weights) == 0)
+        return 0.0f;
+    const int cluster = VXPG_ClusterOfLeafSlot(slot);
+    if (cluster < 0)
+        return 0.0f;
     const int clusterRoot = clusterRoots[cluster];
     if (clusterRoot < 0)
         return 0.0f;
 
-    const float clusterProb = VXPG_TopLevelProbability(spixel, cluster);
+    const float clusterProb = VXPG_TopLevelProbabilityMixture(ids, weights, cluster);
     if (clusterProb <= 0.0f)
         return 0.0f;
 

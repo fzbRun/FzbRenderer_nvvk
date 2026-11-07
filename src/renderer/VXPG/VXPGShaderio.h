@@ -27,7 +27,10 @@ NAMESPACE_SHADERIO_BEGIN()
 #define VXPG_CLUSTER_COUNT 32                 // clusters per superpixel (top level tree leaves)
 #define VXPG_TOP_LEVEL_STRIDE 64              // floats per superpixel in the top level tree
 #define VXPG_TOP_LEVEL_LEAF_OFFSET 32         // leaf i lives at [offset + 32 + i]
-#define VXPG_MAX_VOXEL_RESOLUTION 128         // upper bound of the (cubic) voxel grid
+#define VXPG_MAX_VOXEL_RESOLUTION 128
+#define VXPG_REP_SP_COUNT 128        // stratified jittered representative shading points (paper 5.2)
+#define VXPG_SIGNATURE_WORDS 4       // 128 bit visibility signature
+#define VXPG_KMPP_MAX_VOXELS 8192    // clustering works on the compact lit voxel list         // upper bound of the (cubic) voxel grid
 #define VXPG_THREADGROUP_SIZE_X 16
 #define VXPG_THREADGROUP_SIZE_Y 16
 #define VXPG_CLEAR_THREADGROUP_SIZE 512
@@ -61,11 +64,22 @@ struct VXPGPixelData
 	float4 normalMaterial; // xyz: shading normal,   w: asfloat(material index)
 	float4 vplPos;         // xyz: injected VPL position (1st indirect vertex), w: asfloat(octa normal)
 	uint4  info;           // x: superpixel id, y: primary voxel flat id, z: VPL voxel flat id, w: flags
+	float4 texCoordsIsExt; // xy: texture coordinates, z: hasTexture w: 1 if ext, 0 otherwise
 };
 
 // Light tree node. Internal nodes are [0, numVoxels-1), leaves [numVoxels-1, 2*numVoxels-1).
 // The reference stores the AABB in the node as well; only the traversal weight is used by the
 // intensity-only traversal, so the port keeps the node minimal.
+// SLIC cluster accumulators (kept apart from VXPGSpixelInfo, which holds the *means*: mixing the
+// two in one buffer made every iteration divide the running sums again and collapsed the centres).
+struct VXPGSpixelAccum
+{
+	float4 posSum;      // xyz sum of positions, w = sample count
+	float4 normalSum;   // xyz sum of normals
+	float2 xySum;       // sum of pixel coordinates
+	uint2  pad;
+};
+
 struct VXPGTreeNode
 {
 	float intensity;   // leaf: importance of the voxel, internal: sum of the children
@@ -84,6 +98,14 @@ struct VXPGSpixelInfo
 	float2 center;     // pixel coordinate of the centre
 	int    noPixels;   // unused by the port (kept for layout parity)
 	int    id;         // spixel flat id
+};
+
+struct VXPGGlobalInfo
+{
+	DispatchIndirectCommand cmd;     // 12 bytes: x/y/z group counts for vkCmdDispatchIndirect
+	uint32_t               padding0; // explicit: puts globalMean at offset 16 in both layouts
+	float3                 globalMean;   // xyz: sum of the lit voxel centres (divided by litCount)
+	uint32_t               padding1;     // keeps the size a multiple of 16
 };
 
 // Push constants shared by every VXPG pass. Kept 16 byte friendly: a float3 is always
@@ -127,6 +149,12 @@ struct VXPGPushConstant
 	uint2 threadGroupCount;
 	uint2 dispatchOffset;
 	uint2 padding2;
+
+	float kmppWeightE;  // Eq. (4) w_E: weight of the |E_p - E_q| irradiance term of the KMPP distance
+	float neeTMin;      // shadow ray TMin for the directional light NEE (1e-3 in the shared helper
+	                    // leaks light along wall corners: an occluder closer than 1 mm / sin(angle)
+	                    // is skipped, which produced the bright hairlines on the edges)
+	float3 padding3;
 };
 
 // Static descriptor set bindings. 0 and 1 are reserved by pathTracingCommon.slang
@@ -144,6 +172,18 @@ enum class VXPGStaticBindingPoints
 	eSpixelInfo,            // RWStructuredBuffer<VXPGSpixelInfo> spixelCount
 	eSpixelClusterWeight,   // RWStructuredBuffer<int>            spixelCount*32 (fixed point 1/1000)
 	eSpixelClusterTotal,    // RWStructuredBuffer<int>            spixelCount    (fixed point 1/1000)
+	eLeafVoxel,             // RWStructuredBuffer<uint>           N^3, leaf slot -> flat voxel index
+	eVoxelLeaf,             // RWStructuredBuffer<uint>           N^3, flat voxel index -> leaf slot
+	eClusterRange,          // RWStructuredBuffer<uint2>          VXPG_CLUSTER_COUNT, leaf range per cluster
+	eRepSP,                 // RWStructuredBuffer<float4>         128 stratified jittered representative SPs
+	eVoxelSignature,        // RWStructuredBuffer<uint4>          N^3, 128 bit visibility signature
+	eLitVoxelList,          // RWStructuredBuffer<uint>           KMPP_MAX_VOXELS, compact lit voxel list
+	eLitVoxelCount,         // RWStructuredBuffer<uint>           1, number of entries in the list
+	eClusterCentroid,       // RWStructuredBuffer<uint4>          VXPG_CLUSTER_COUNT, signature centroids
+	eVoxelCluster,          // RWStructuredBuffer<uint>           N^3, cluster id per voxel
+	eSpixelAccum,           // RWStructuredBuffer<VXPGSpixelAccum> spixelCount, SLIC cluster sums
+	eGlobalInfo,
+	eClusterCentroidE,   // RWStructuredBuffer<float>         VXPG_CLUSTER_COUNT, centroid irradiance
 };
 
 // Dynamic descriptor set bindings.

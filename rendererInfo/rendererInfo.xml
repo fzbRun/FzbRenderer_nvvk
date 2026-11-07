@@ -3,7 +3,7 @@
 	<resolution width = "1280" height = "720" />
 	<sceneXML path = "veach-ajar-2" />	<!--simpleTest bearBox veach-ajar-dynamic  veach-ajar-2  veach-mis staircase staircase-dynamic dining-room veach-bidir yanYun ReSTIR_Test_Scene-->
 
-	<renderer type = "VXPG">  <!--VRPG VXPG FzbPathGuiding NPMPathGuiding PathTracing PathTracing_KPCNNDenoising VolumetricFog StochasticLightcuts ReSTIR_GI Deferred  Mesh ZhiHuCode-->
+	<renderer type = "VXPG">  <!--VRPG VRPG2 VXPG FzbPathGuiding NPMPathGuiding PathTracing PathTracing_KPCNNDenoising VolumetricFog StochasticLightcuts ReSTIR_GI Deferred  Mesh  NeuralTextureCompression ZhiHuCode-->
 		<maxDepth value = "4" />
 		<useNEE value = "false" />
 		<spp value = "1" />
@@ -19,14 +19,16 @@
 		</LightVGB>
 		<VXPG>
 			<voxelResolution value = "64" />
-			<!-- 8..128£¬2 µÄÃÝ -->
+			<!-- 8..128ï¼Œ2 çš„å¹‚ -->
 			<spixelSize value = "32" />
-			<!-- 4..256£»»á×Ô¶¯·Å´óÒÔÃâÍø¸ñ¹ý´ó -->
+			<!-- 4..256ï¼›ä¼šè‡ªåŠ¨æ”¾å¤§ä»¥å…ç½‘æ ¼è¿‡å¤§ -->
 			<bounce value = "3" />
-			<!-- Ê×¸ö¼ä½Ó¶¥µãºóµÄ¶îÍâ BSDF+NEE µ¯Éä -->
+			<!-- é¦–ä¸ªé—´æŽ¥é¡¶ç‚¹åŽçš„é¢å¤– BSDF+NEE å¼¹å°„ -->
 			<misMode value = "0" />
 			<!-- 0 = balance, 1 = power -->
 		</VXPG>
+		<LightInject></LightInject>
+		<Octree></Octree>
 	</renderer>
 	
 </rendererInfo>

@@ -13,6 +13,7 @@
 #include "ReSTIRGI/ReSTIR_GI.h"
 #include "StochasticLightcuts/StochasticLightcuts.h"
 #include "VXPG/VXPG.h"
+#include "NeuralTextureCompression/NeuralTextureCompression.h"
 
 enum FzbRendererType {
 	FZB_RENDERER_FORWARD,
@@ -29,6 +30,7 @@ enum FzbRendererType {
 	FZB_RENDERER_RESTIR_GI,
 	FZB_RENDERER_STOCHASTIC_LIGHTCUTS,
 	FZB_RENDERER_VOLUMETRIC_FOG,
+	FZB_RENDERER_NEURALTEXTURECOMPRESSION_FOG,
 	FZB_RENDERER_MESH,
 	FZB_ZHIHU_CODE,
 };
@@ -45,6 +47,7 @@ std::map<std::string, FzbRendererType> RendererTypeMap{
 	{ "ReSTIR_GI", FZB_RENDERER_RESTIR_GI },
 	{ "StochasticLightcuts", FZB_RENDERER_STOCHASTIC_LIGHTCUTS },
 	{ "VolumetricFog", FZB_RENDERER_VOLUMETRIC_FOG },
+	{ "NeuralTextureCompression", FZB_RENDERER_NEURALTEXTURECOMPRESSION_FOG },
 	{ "Mesh", FZB_RENDERER_MESH },
 	{ "ZhiHuCode", FZB_ZHIHU_CODE },
 };
@@ -64,6 +67,7 @@ std::shared_ptr<FzbRenderer::Renderer> FzbRenderer::createRenderer(RendererCreat
 			case FZB_RENDERER_RESTIR_GI: return std::make_shared<ReSTIR_GI>(createInfo.rendererNode);
 			case FZB_RENDERER_STOCHASTIC_LIGHTCUTS: return std::make_shared<StochasticLightcutsRenderer>(createInfo.rendererNode);
 			case FZB_RENDERER_VOLUMETRIC_FOG: return std::make_shared<VolumetricFog>(createInfo.rendererNode);
+			case FZB_RENDERER_NEURALTEXTURECOMPRESSION_FOG: return std::make_shared<NeuralTextureCompression>(createInfo.rendererNode);
 			case FZB_RENDERER_MESH: return std::make_shared<MeshRenderer>(createInfo.rendererNode);
 			case FZB_ZHIHU_CODE: return std::make_shared<ZhiHuCode>(createInfo.rendererNode);
 		}

@@ -37,30 +37,10 @@ void FzbRenderer::Application::getAppInfoFromXML(nvapp::ApplicationCreateInfo& a
 	appInfo.name = rendererInfo.child("name").attribute("value").value();
 	//appInfo.windowSize.x = std::stoi(rendererInfo.child("resolution").attribute("width").value());
 	//appInfo.windowSize.y = std::stoi(rendererInfo.child("resolution").attribute("height").value());
-	{
-		const uint32_t renderW = uint32_t(std::stoi(rendererInfo.child("resolution").attribute("width").value()));
-		const uint32_t renderH = uint32_t(std::stoi(rendererInfo.child("resolution").attribute("height").value()));
+	const uint32_t renderW = uint32_t(std::stoi(rendererInfo.child("resolution").attribute("width").value()));
+	const uint32_t renderH = uint32_t(std::stoi(rendererInfo.child("resolution").attribute("height").value()));
 
-		renderResolution = { renderW, renderH };
-
-		// 左侧面板固定 320，splitter 默认 4
-		const uint32_t leftPanelWidth = 320;
-		const uint32_t splitterSize = 2;
-
-		appInfo.windowSize.x = renderW + leftPanelWidth + splitterSize;
-		appInfo.windowSize.y = renderH;   // 不要菜单栏，才能精确 720
-
-		appInfo.useMenu = true;          // 需要菜单栏就改成 renderH + 菜单高度
-		const uint32_t menuBarHeight = 25;
-		appInfo.windowSize.y = renderH + menuBarHeight;
-
-		appInfo.dockSetup = [leftPanelWidth, renderW](ImGuiID dockID) {
-			// nvapp 已经把 Viewport dock 到中央节点
-			float ratio = float(leftPanelWidth) / float(leftPanelWidth + renderW); // 320 / 1600 = 0.2
-			ImGuiID leftID = ImGui::DockBuilderSplitNode(dockID, ImGuiDir_Left, ratio, nullptr, &dockID);
-			ImGui::DockBuilderDockWindow("Settings", leftID);
-		};
-	}
+	renderResolution = { renderW, renderH };
 
 	sceneResource.scenePath = rendererInfo.child("sceneXML").attribute("path").value();
 	sceneResource.scenePath = std::filesystem::absolute(exePath / TARGET_EXE_TO_SOURCE_DIRECTORY / "resources") / sceneResource.scenePath;
@@ -74,6 +54,27 @@ void FzbRenderer::Application::getAppInfoFromXML(nvapp::ApplicationCreateInfo& a
 		renderer = FzbRenderer::createRenderer(rendererCreateInfo);
 	}
 	else throw std::runtime_error("sceneInfoXML必须指定一个renderer！");
+
+	{
+		// 左侧面板固定 320，splitter 默认 4
+		const uint32_t leftPanelWidth = 320;
+		const uint32_t splitterSize = 2;
+
+		appInfo.windowSize.x = renderResolution.width + leftPanelWidth + splitterSize;
+		appInfo.windowSize.y = renderResolution.height;   // 不要菜单栏，才能精确 720
+
+		appInfo.useMenu = true;          // 需要菜单栏就改成 renderH + 菜单高度
+		const uint32_t menuBarHeight = 25;
+		appInfo.windowSize.y = renderResolution.height + menuBarHeight;
+
+		const uint32_t width = renderResolution.width;
+		appInfo.dockSetup = [leftPanelWidth, width](ImGuiID dockID) {
+			// nvapp 已经把 Viewport dock 到中央节点
+			float ratio = float(leftPanelWidth) / float(leftPanelWidth + renderResolution.width); // 320 / 1600 = 0.2
+			ImGuiID leftID = ImGui::DockBuilderSplitNode(dockID, ImGuiDir_Left, ratio, nullptr, &dockID);
+			ImGui::DockBuilderDockWindow("Settings", leftID);
+			};
+	}
 
 	appInfo.cmdCount = cmdCount;
 
