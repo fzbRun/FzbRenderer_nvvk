@@ -33,7 +33,6 @@ void vxpgVBufferMain(uint2 threadIndex : SV_DispatchThreadID){
     // every frame, this is the only place the assignment survives.
     uint index = threadIndex.y * pushConst.screenSize.x + threadIndex.x;
     const VXPGPixelData previous = pixelData[index];
-    const uint previousSpixel = previous.info.x;
     // The VPL voxel and the throughput were produced by the injection pass that ran just before
     // this pass (from the previous frame's samples), so they have to survive this overwrite.
     const uint previousVplVoxel = previous.info.z;
@@ -43,7 +42,7 @@ void vxpgVBufferMain(uint2 threadIndex : SV_DispatchThreadID){
     pd.position = float4(0.0);
     pd.normalMaterial = float4(0.0);
     pd.vplPos = float4(0.0, 0.0, 0.0, previousVplThroughput);
-    pd.info = uint4(previousSpixel, VXPG_INVALID_INDEX, previousVplVoxel, 0u);
+    pd.info = uint4(VXPG_INVALID_INDEX, VXPG_INVALID_INDEX, previousVplVoxel, 0u);
     pd.texCoordsIsExt = float4(0.0f, 0.0f, 0.0f, 0.0f);
 
     if (hit.hit){
@@ -57,6 +56,10 @@ void vxpgVBufferMain(uint2 threadIndex : SV_DispatchThreadID){
     }
 
     pixelData[index] = pd;
+    VXPGPixelCompact compact;
+    compact.posValid = float4(pd.position.xyz, pd.info.w != 0u ? 1.0 : 0.0);
+    compact.normal = float4(pd.normalMaterial.xyz, 0.0);
+    pixelCompact[index] = compact;
 }
 
 //------------------------------------------------------------------------------------------
@@ -606,6 +609,10 @@ void vxpgSpixelCentersMain(uint2 threadIndex : SV_DispatchThreadID)
 // group in shared memory. That removes the 9 global loads of the 48 byte VXPGSpixelInfo per pixel
 // which dominated the Nsight capture (LSU global load 81% + LG throttle 40%).
 groupshared VXPGSpixelInfo sCandidates[9];
+// Screen space centres of the candidates: the early-out only needs these eight bytes, so the full
+// 48 byte struct is read from shared memory only for the (usually one or two) candidates that
+// survive the bound test.
+groupshared float2 sCenters[9];
 
 [numthreads(VXPG_THREADGROUP_SIZE_X, VXPG_THREADGROUP_SIZE_Y, 1)]
 [shader("compute")]
@@ -622,7 +629,9 @@ void vxpgSpixelAssignMain(uint2 threadIndex : SV_DispatchThreadID, uint2 groupIn
     {
         const int2 offset = int2(int(groupThreadIndex % 3u) - 1, int(groupThreadIndex / 3u) - 1);
         const int2 tile = clamp(groupCell + offset, int2(0, 0), grid - int2(1, 1));
-        sCandidates[groupThreadIndex] = spixelInfo[tile.y * grid.x + tile.x];
+        const VXPGSpixelInfo info = spixelInfo[tile.y * grid.x + tile.x];
+        sCandidates[groupThreadIndex] = info;
+        sCenters[groupThreadIndex] = info.center;
     }
     GroupMemoryBarrierWithGroupSync();
 
@@ -630,59 +639,120 @@ void vxpgSpixelAssignMain(uint2 threadIndex : SV_DispatchThreadID, uint2 groupIn
         return;
 
     const uint index = threadIndex.y * pushConst.screenSize.x + threadIndex.x;
-    VXPGPixelData pd = pixelData[index];
-    if (pd.info.w == 0u)
+    const VXPGPixelCompact pix = pixelCompact[index];
+    if (pix.posValid.w == 0.0)
         return;
 
     const int2 cell = clamp(int2(threadIndex) / s, int2(0, 0), grid - int2(1, 1));
-    const float3 pixPos = pd.position.xyz;
-    const float3 pixNormal = normalize(pd.normalMaterial.xyz);
+    const float3 pixPos = pix.posValid.xyz;
+    const float3 pixNormal = normalize(pix.normal.xyz);
     const float2 pixXY = float2(threadIndex);
 
-    // The staged candidates are only valid for pixels inside the group's cell; the (rare) pixels of
-    // a group that straddles a cell boundary fall back to the global buffer.
-    const bool useStage = all(cell == groupCell);
+    // The staged candidates are valid for the whole group when it does not cross a cell boundary
+    // (always true while the superpixel size is a multiple of the group size). The decision is taken
+    // per group so that every thread takes the same path and the warp reduction below can use the
+    // uniform group cell.
+    const bool stageValid = ((s % VXPG_THREADGROUP_SIZE_X) == 0)
+                         || (groupOrigin.x / s == (groupOrigin.x + VXPG_THREADGROUP_SIZE_X - 1) / s);
+    const bool useStage = stageValid
+                       && ((s % VXPG_THREADGROUP_SIZE_Y) == 0
+                           || (groupOrigin.y / s == (groupOrigin.y + VXPG_THREADGROUP_SIZE_Y - 1) / s));
+
+    // The full distance is screenTerm + worldTerm and both terms are non negative, so a candidate
+    // whose screen term alone already exceeds the best distance cannot win: it is rejected without
+    // touching its position/normal. The centre candidate is tested first (order table below) so the
+    // bound is tight for the remaining eight, which is where most of the savings come from.
+    static const uint kSearchOrder[9] = { 4u, 3u, 1u, 5u, 7u, 0u, 2u, 6u, 8u };
+    const float invS  = 1.0f / (1.4242f * float(s));
+    const float invS2 = invS * invS;
 
     float best = 1e30;
     int bestId = -1;
-    for (int j = -1; j <= 1; ++j)
+    uint bestSlot = 0u;
+    for (uint k = 0u; k < 9u; ++k)
     {
-        for (int i = -1; i <= 1; ++i)
+        const uint slot = kSearchOrder[k];
+        const int2 offset = int2(int(slot % 3u) - 1, int(slot / 3u) - 1);
+        const int2 tile = clamp(cell + offset, int2(0, 0), grid - int2(1, 1));
+        const int id = tile.y * grid.x + tile.x;
+
+        // Screen bound first: it only needs the compact centre, so the 48 byte candidate record is
+        // touched only when the candidate can still win.
+        const float2 center = useStage ? sCenters[slot] : spixelInfo[id].center;
+        const float2 dXY = pixXY - center;
+        if (dot(dXY, dXY) * invS2 >= best)
+            continue;   // the world term can only make it larger
+
+        const VXPGSpixelInfo info = useStage ? sCandidates[slot] : spixelInfo[id];
+        if (info.pos.w <= 0.0)
+            continue;
+
+        const float distance = VXPG_SpixelDistance(pixPos, pixNormal, pixXY, info);
+        if (distance < best)
         {
-            const int2 tile = clamp(cell + int2(i, j), int2(0, 0), grid - int2(1, 1));
-            const int id = tile.y * grid.x + tile.x;
-            const VXPGSpixelInfo info = useStage ? sCandidates[uint((j + 1) * 3 + (i + 1))] : spixelInfo[id];
-            if (info.pos.w <= 0.0)
-                continue;
-            const float distance = VXPG_SpixelDistance(pixPos, pixNormal, pixXY, info);
-            if (distance < best)
-            {
-                best = distance;
-                bestId = id;
-            }
+            best = distance;
+            bestId = id;
+            bestSlot = slot;
         }
     }
 
     if (bestId < 0)
     {
-        pd.info.x = VXPG_INVALID_INDEX;
-        pixelData[index] = pd;
+        pixelSpixelId[index] = VXPG_INVALID_INDEX;
         return;
     }
 
-    // accumulate into the dedicated SLIC sums (float atomics, feature is enabled)
-    InterlockedAdd(spixelAccum[bestId].posSum.x, pixPos.x);
-    InterlockedAdd(spixelAccum[bestId].posSum.y, pixPos.y);
-    InterlockedAdd(spixelAccum[bestId].posSum.z, pixPos.z);
-    InterlockedAdd(spixelAccum[bestId].posSum.w, 1.0);
-    InterlockedAdd(spixelAccum[bestId].normalSum.x, pixNormal.x);
-    InterlockedAdd(spixelAccum[bestId].normalSum.y, pixNormal.y);
-    InterlockedAdd(spixelAccum[bestId].normalSum.z, pixNormal.z);
-    InterlockedAdd(spixelAccum[bestId].xySum.x, pixXY.x);
-    InterlockedAdd(spixelAccum[bestId].xySum.y, pixXY.y);
+    // Accumulate the SLIC sums. Nine per pixel float atomics were the second hottest spot in the
+    // Nsight capture, so the contributions are reduced per warp and per candidate slot first: the
+    // atomics are then issued once per warp (usually for two or three slots) instead of nine times
+    // per pixel.
+    if (useStage)
+    {
+        for (uint slot = 0u; slot < 9u; ++slot)
+        {
+            const bool mine = (bestSlot == slot);
+            // The count is wave uniform, so the guarded reductions below are executed by the whole
+            // wave or by none of it. Reducing only the non empty slots cuts the warp level
+            // instructions from 4 per slot (36) down to about 4 per occupied slot (usually 1-2).
+            const uint count = WaveActiveSum(mine ? 1u : 0u);
+            if (count == 0u)
+                continue;
+            const float3 posSum = WaveActiveSum(mine ? pixPos : float3(0.0));
+            const float3 nrmSum = WaveActiveSum(mine ? pixNormal : float3(0.0));
+            const float2 xySum  = WaveActiveSum(mine ? pixXY : float2(0.0));
 
-    pd.info.x = uint(bestId);
-    pixelData[index] = pd;
+            if (WaveIsFirstLane())
+            {
+                const int2 offset = int2(int(slot % 3u) - 1, int(slot / 3u) - 1);
+                const int2 tile = clamp(groupCell + offset, int2(0, 0), grid - int2(1, 1));
+                const int id = tile.y * grid.x + tile.x;
+                InterlockedAdd(spixelAccum[id].posSum.x, posSum.x);
+                InterlockedAdd(spixelAccum[id].posSum.y, posSum.y);
+                InterlockedAdd(spixelAccum[id].posSum.z, posSum.z);
+                InterlockedAdd(spixelAccum[id].posSum.w, float(count));
+                InterlockedAdd(spixelAccum[id].normalSum.x, nrmSum.x);
+                InterlockedAdd(spixelAccum[id].normalSum.y, nrmSum.y);
+                InterlockedAdd(spixelAccum[id].normalSum.z, nrmSum.z);
+                InterlockedAdd(spixelAccum[id].xySum.x, xySum.x);
+                InterlockedAdd(spixelAccum[id].xySum.y, xySum.y);
+            }
+        }
+    }
+    else
+    {
+        // rare fallback (group crosses a cell boundary): per thread atomics
+        InterlockedAdd(spixelAccum[bestId].posSum.x, pixPos.x);
+        InterlockedAdd(spixelAccum[bestId].posSum.y, pixPos.y);
+        InterlockedAdd(spixelAccum[bestId].posSum.z, pixPos.z);
+        InterlockedAdd(spixelAccum[bestId].posSum.w, 1.0);
+        InterlockedAdd(spixelAccum[bestId].normalSum.x, pixNormal.x);
+        InterlockedAdd(spixelAccum[bestId].normalSum.y, pixNormal.y);
+        InterlockedAdd(spixelAccum[bestId].normalSum.z, pixNormal.z);
+        InterlockedAdd(spixelAccum[bestId].xySum.x, pixXY.x);
+        InterlockedAdd(spixelAccum[bestId].xySum.y, pixXY.y);
+    }
+
+    pixelSpixelId[index] = uint(bestId);
 }
 
 // Centre = mean of the assigned pixels; the sums are cleared for the next iteration.
@@ -736,10 +806,11 @@ void vxpgSpixelAccumMain(uint2 threadIndex : SV_DispatchThreadID)
 
     uint index = threadIndex.y * pushConst.screenSize.x + threadIndex.x;
     VXPGPixelData pd = pixelData[index];
-    if (pd.info.w == 0u || pd.info.x == VXPG_INVALID_INDEX || pd.info.z == VXPG_INVALID_INDEX)
+    const uint spixelId = pixelSpixelId[index];
+    if (pd.info.w == 0u || spixelId == VXPG_INVALID_INDEX || pd.info.z == VXPG_INVALID_INDEX)
         return;
 
-    int spixel = int(pd.info.x);
+    int spixel = int(spixelId);
     if (spixel < 0 || spixel >= pushConst.spixelCount)
         return;
 
@@ -1389,6 +1460,6 @@ void vxpgSuperPixelDebugMain(uint2 threadIndex: SV_DispatchThreadID) {
     if(any(threadIndex >= pushConst.screenSize)) return;
 
     const uint pixelIndex = threadIndex.y * pushConst.screenSize.x + threadIndex.x;
-    int superPixelIndex = pixelData[pixelIndex].info.x;
+    int superPixelIndex = int(pixelSpixelId[pixelIndex]);
     outImage[threadIndex] = float4(VXPG_ClusterDebugColor(superPixelIndex), 1.0f);
 }

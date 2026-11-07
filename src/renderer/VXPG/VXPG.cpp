@@ -102,7 +102,7 @@ VXPGRenderer::VXPGRenderer(pugi::xml_node& rendererNode){
 	// "Rebuild Guiding" switches it back to per frame.
 	rebuildPerFrame = true;
 	// 0 = one sample MIS (no per voxel pdf weight), 1 = balance, 2 = power.
-	pushConstant.misMode = 0;
+	pushConstant.misMode = 1;
 
 	// Read the settings defensively: a missing or malformed value must never throw inside the
 	// renderer constructor (std::stoi would terminate the process).
@@ -302,6 +302,8 @@ void VXPGRenderer::createResources()
 	create(clusterCentroidEBuffer, VkDeviceSize(VXPG_CLUSTER_COUNT) * sizeof(float), "clusterCentroidE");
 	create(voxelClusterBuffer, VkDeviceSize(voxelCount) * sizeof(uint32_t), "voxelCluster");
 	create(spixelAccumBuffer, VkDeviceSize(spixelCount) * sizeof(shaderio::VXPGSpixelAccum), "spixelAccum");
+	create(pixelSpixelIdBuffer, pixelCount * sizeof(uint32_t), "pixelSpixelId");
+	create(pixelCompactBuffer, pixelCount * sizeof(shaderio::VXPGPixelCompact), "pixelCompact");
 
 	// Indirect dispatch command + mean accumulator for the two stage supervoxel seeding. The
 	// INDIRECT_BUFFER usage flag is required for vkCmdDispatchIndirect.
@@ -315,6 +317,10 @@ void VXPGRenderer::createResources()
 	// dereferenced with uninitialized indices.
 	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
 	clearVoxelGrids(cmd);
+	// One shot: the assignment is carried across frames when the guiding is not rebuilt, so the id
+	// buffer must not be cleared per frame.
+	vkCmdFillBuffer(cmd, pixelSpixelIdBuffer.buffer, 0, VK_WHOLE_SIZE, 0xffffffffu);
+	vkCmdFillBuffer(cmd, pixelCompactBuffer.buffer, 0, VK_WHOLE_SIZE, 0u);
 	vkCmdFillBuffer(cmd, treeNodesBuffer.buffer, 0, VK_WHOLE_SIZE, 0u);
 	vkCmdFillBuffer(cmd, clusterRootsBuffer.buffer, 0, VK_WHOLE_SIZE, 0xffffffffu);
 	vkCmdFillBuffer(cmd, topLevelTreeBuffer.buffer, 0, VK_WHOLE_SIZE, 0u);
@@ -350,6 +356,7 @@ void VXPGRenderer::destroyResources()
 		{ &repSPBuffer },              { &voxelSignatureBuffer },    { &litVoxelListBuffer },
 		{ &litVoxelCountBuffer },      { &clusterCentroidBuffer },   { &voxelClusterBuffer },
 		{ &spixelAccumBuffer },        { &globalInfoBuffer },        { &clusterCentroidEBuffer },
+		{ &pixelSpixelIdBuffer },        { &pixelCompactBuffer },
 	};
 	for (const BufferRef& ref : buffers)
 	{
@@ -716,6 +723,8 @@ void VXPGRenderer::createDescriptorSetLayout()
 		(uint32_t)shaderio::VXPGStaticBindingPoints::eSpixelAccum,
 		(uint32_t)shaderio::VXPGStaticBindingPoints::eGlobalInfo,
 		(uint32_t)shaderio::VXPGStaticBindingPoints::eClusterCentroidE,
+		(uint32_t)shaderio::VXPGStaticBindingPoints::ePixelSpixelId,
+		(uint32_t)shaderio::VXPGStaticBindingPoints::ePixelCompact,
 	};
 	for (uint32_t binding : bufferBindings)
 	{
@@ -781,6 +790,8 @@ void VXPGRenderer::createDescriptorSet()
 	appendBuffer(shaderio::VXPGStaticBindingPoints::eSpixelAccum, spixelAccumBuffer);
 	appendBuffer(shaderio::VXPGStaticBindingPoints::eGlobalInfo, globalInfoBuffer);
 	appendBuffer(shaderio::VXPGStaticBindingPoints::eClusterCentroidE, clusterCentroidEBuffer);
+	appendBuffer(shaderio::VXPGStaticBindingPoints::ePixelSpixelId, pixelSpixelIdBuffer);
+	appendBuffer(shaderio::VXPGStaticBindingPoints::ePixelCompact, pixelCompactBuffer);
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }

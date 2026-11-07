@@ -100,6 +100,14 @@ struct VXPGSpixelInfo
 	int    id;         // spixel flat id
 };
 
+// Compact per pixel record for the SLIC passes: they only need the shading position, the normal
+// and the validity flag, so they read 32 bytes here instead of the 80 byte VXPGPixelData.
+struct VXPGPixelCompact
+{
+	float4 posValid;   // xyz: shading position, w: 1 when the pixel has a valid primary hit
+	float4 normal;     // xyz: shading normal (w unused)
+};
+
 struct VXPGGlobalInfo
 {
 	DispatchIndirectCommand cmd;     // 12 bytes: x/y/z group counts for vkCmdDispatchIndirect
@@ -184,6 +192,8 @@ enum class VXPGStaticBindingPoints
 	eSpixelAccum,           // RWStructuredBuffer<VXPGSpixelAccum> spixelCount, SLIC cluster sums
 	eGlobalInfo,
 	eClusterCentroidE,   // RWStructuredBuffer<float>         VXPG_CLUSTER_COUNT, centroid irradiance
+	ePixelSpixelId,      // RWStructuredBuffer<uint>          pixels, spixel id of each pixel
+	ePixelCompact,       // RWStructuredBuffer<VXPGPixelCompact> pixels, SLIC input
 };
 
 // Dynamic descriptor set bindings.

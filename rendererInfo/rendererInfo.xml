@@ -24,8 +24,8 @@
 			<!-- 4..256；会自动放大以免网格过大 -->
 			<bounce value = "3" />
 			<!-- 首个间接顶点后的额外 BSDF+NEE 弹射 -->
-			<misMode value = "0" />
-			<!-- 0 = balance, 1 = power -->
+			<misMode value = "1" />
+			<!-- 0 = one-sample, 1 = balance, 2 = power -->
 		</VXPG>
 		<LightInject></LightInject>
 		<Octree></Octree>

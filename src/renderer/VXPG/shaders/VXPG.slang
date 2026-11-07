@@ -38,8 +38,7 @@ void computeMain_VXPG(uint2 threadIndex : SV_DispatchThreadID)
         cameraRay.TMax = INFINITE;
 
         VXPGHit primary = VXPG_TraceRay(cameraRay);
-        if (!primary.hit)
-        {
+        if (!primary.hit){
             accumulated += VXPG_RayMiss(cameraRay.Direction);
             continue;
         }
@@ -50,19 +49,38 @@ void computeMain_VXPG(uint2 threadIndex : SV_DispatchThreadID)
         // Debug view of the guiding structure (VXPG_DEBUG=16):
         //   red   : VPL count of the primary hit voxel (0.25 -> 1)
         //   green : superpixel assigned for this pixel
-        //   blue  : cluster roots available (cluster 0)
-        if ((pushConst.flags & 32) != 0)
-        {
-            int3 voxel = VXPG_WorldToVoxelID(primary.position);
-            float r = saturate(float(voxelVplCount[VXPG_FlatIndex(voxel)]) * 0.25);
+        //   blue  : fraction of the superpixel's clusters that are usable (weight and a valid root)
+        if ((pushConst.flags & 32) != 0){
+            // "Is guiding data available at this pixel?" view:
+            //   red   : VPLs in the visible voxel (light injection reached this region)
+            //   green : accumulated weight sum(T * Phi) of the pixel's superpixel
+            //   blue  : the superpixel's dominant cluster has a valid light tree root
+            const int3 voxel = VXPG_WorldToVoxelID(primary.position);
+            const float r = saturate(float(voxelVplCount[VXPG_FlatIndex(voxel)]) * 0.25);
+            const int sp = VXPG_SelectSpixel(pixel);   // -1 for background pixels
+
             float g = 0.0;
             float b = 0.0;
-            int sp = VXPG_SelectSpixel(pixel);
-            g = (sp >= 0) ? 0.5 : 0.0;
-            if (sp >= 0)
-                g += saturate(topLevelTree[sp * VXPG_TOP_LEVEL_STRIDE + 1] * 1e-3) * 0.5;
-            b = saturate(treeNodes[0].intensity * 1e-4) * 0.5 + ((clusterRoots[0] >= 0) ? 0.5 : 0.0);
-            g = saturate(topLevelTree[sp * VXPG_TOP_LEVEL_STRIDE + 1] * 1e-3);
+            if (sp >= 0)   // never index the top level tree with the -1 sentinel
+            {
+                const int offset = sp * VXPG_TOP_LEVEL_STRIDE;
+                // Log scale: the accumulated weights are fixed point (x1000), so a linear 1e-3 scale
+                // saturates to white as soon as any guiding data exists.
+                const float total = max(topLevelTree[offset + 1], 0.0);
+                g = saturate(log2(1.0 + total) * 0.0625);   // 0 at 0, ~0.6 at 1e3, 1 at 6.4e4
+
+                // Blue: fraction of the superpixel's clusters that hold weight and own a valid light
+                // tree root, i.e. how much of the 32 cluster distribution is actually usable.
+                int usableClusters = 0;
+                for (int c = 0; c < VXPG_CLUSTER_COUNT; ++c)
+                {
+                    const float w = topLevelTree[offset + VXPG_TOP_LEVEL_LEAF_OFFSET + c];
+                    if (w > 0.0 && clusterRoots[c] >= 0)
+                        ++usableClusters;
+                }
+                b = float(usableClusters) / float(VXPG_CLUSTER_COUNT);
+            }
+
             outImage[pixel] = float4(r, g, b, 1.0);
             continue;
         }
@@ -160,8 +178,7 @@ void computeMain_VXPG(uint2 threadIndex : SV_DispatchThreadID)
         const bool oneSampleMis = (pushConst.misMode == 0);
         const float selectProb = 0.5;
         bool pickBsdf = true;
-        if (oneSampleMis)
-            pickBsdf = rand(seed) < selectProb;
+        if (oneSampleMis) pickBsdf = rand(seed) < selectProb;
         const float3 indirectBefore = accumulated;
 
         // Debug view of the guided branch (VXPG_DEBUG=128):
@@ -213,12 +230,8 @@ void computeMain_VXPG(uint2 threadIndex : SV_DispatchThreadID)
                 RayDesc rayA = VXPG_SpawnRay(primary.position, primary.normal, bsdfPayload.incidence);
                 VXPGHit hitA = VXPG_TraceRay(rayA);
 
-                if (!hitA.hit)
-                {
-                    accumulated += VXPG_RayMiss(rayA.Direction) * bsdfWeight / bsdfPdf;
-                }
-                else
-                {
+                if (!hitA.hit) accumulated += VXPG_RayMiss(rayA.Direction) * bsdfWeight / bsdfPdf;
+                else{
                     CallablePayload payloadA;
                     VXPG_MakePayload(payloadA, hitA, -bsdfPayload.incidence, seed, sceneInfo);
                     float3 radianceA = VXPG_DirectLight(payloadA, sceneInfo);
@@ -241,35 +254,22 @@ void computeMain_VXPG(uint2 threadIndex : SV_DispatchThreadID)
                         w1 *= w1;
                         w2 *= w2;
                     }
-                    // VXPG_DEBUG=64 disables the MIS weights (energy balance experiment).
-                    const float misA = (oneSampleMis || (pushConst.flags & 128) != 0) ? 1.0f : (w1 / max(w1 + w2, 1e-8));
+
+                    //if (pushConst.frameIndex == 0 && all(threadIndex >= uint2(635, 355)) && all(threadIndex <= uint2(645, 365))) {
+                    //    printf("guidePdfA: %f\n", guidePdfA);
+                    //}
+
+                    // One-sample MIS (Veach): every pixel evaluates a single technique, so the
+                    // balance weight has to be divided by the selection probability:
+                    //     F = f(X_i) / (c_i * (p1(X_i) + p2(X_i)))
+                    // Without the c_i division (and with the weight pinned to 1) the estimator was
+                    // only valid when both techniques cover the whole hemisphere; the guided
+                    // technique only covers directions towards injected voxels, so it converged too
+                    // dark. VXPG_DEBUG=64 keeps the unweighted variant for energy experiments.
+                    const float balanceA = w1 / max(w1 + w2, 1e-8);
+                    const float misA = (pushConst.flags & 128) != 0 ? 1.0f
+                                     : (oneSampleMis ? balanceA / selectProb : balanceA);
                     accumulated += contributionA * misA;
-
-                    if (extraBounces > 0)
-                    {
-                        float3 throughput = bsdfWeight / bsdfPdf;
-                        CallablePayload bouncePayload = payloadA;
-                        for (int b = 0; b < extraBounces; ++b)
-                        {
-                            float stepPdf = bouncePayload.pdf;
-                            float3 stepWeight = bouncePayload.bsdf * abs(dot(bouncePayload.incidence, bouncePayload.hitNormal));
-                            if (!(stepPdf > 0.0) || all(stepWeight <= 0.0))
-                                break;
-
-                            throughput *= stepWeight / stepPdf;
-                            RayDesc bounceRay = VXPG_SpawnRay(bouncePayload.hitPos, bouncePayload.hitNormal, bouncePayload.incidence);
-                            VXPGHit bounceHit = VXPG_TraceRay(bounceRay);
-                            if (!bounceHit.hit)
-                            {
-                                accumulated += VXPG_RayMiss(bounceRay.Direction) * throughput;
-                                break;
-                            }
-                            VXPG_MakePayload(bouncePayload, bounceHit, -bouncePayload.incidence, seed, sceneInfo);
-                            getDirectionLight(bouncePayload, sceneInfo);
-                            BSDF_SAMPLE(bouncePayload);
-                            accumulated += (bouncePayload.material.emissive + bouncePayload.directionLightRadiance) * throughput;
-                        }
-                    }
                 }
             }
         }
@@ -287,11 +287,16 @@ void computeMain_VXPG(uint2 threadIndex : SV_DispatchThreadID)
                 VXPGHit hitB = VXPG_TraceRay(rayB);
 
                 // The hit has to land in the *sampled voxel itself*, not merely inside its AABB: at wall
-    // corners the wall surface lies exactly on the voxel boundary, so an AABB test accepts the
-    // occluder as if it were the VPL and light leaks along every edge (the bright hairlines).
-    const bool hitInVoxel = hitB.hit && all(hitB.position >= guide.aabbMin) && all(hitB.position <= guide.aabbMax)
-                         && all(VXPG_WorldToVoxelID(hitB.position) == guide.voxel);
-    if (hitInVoxel)
+                // corners the wall surface lies exactly on the voxel boundary, so an AABB test accepts the
+                // occluder as if it were the VPL and light leaks along every edge (the bright hairlines).
+                const bool hitInVoxel = hitB.hit && all(hitB.position >= guide.aabbMin) && all(hitB.position <= guide.aabbMax)
+                                     && all(VXPG_WorldToVoxelID(hitB.position) == guide.voxel);
+
+                //if (pushConst.frameIndex == 0 && all(threadIndex >= uint2(635, 355)) && all(threadIndex <= uint2(645, 365))) {
+                //    printf("hitInVoxel: %d, sampleDir: %f %f %f\n", hitInVoxel, guide.direction.x, guide.direction.y, guide.direction.z);
+                //}
+
+                if (hitInVoxel)
                 {
                     float3 bsdfB = getBSDF(primaryPayload.material, guide.direction, primaryPayload.hitNormal,
                                            primaryPayload.outgoing, primaryPayload.TBN, primaryPayload.isExt);
@@ -311,16 +316,59 @@ void computeMain_VXPG(uint2 threadIndex : SV_DispatchThreadID)
 
                         float w1 = getPdf(primaryPayload.material, guide.direction, primaryPayload.hitNormal,
                                           primaryPayload.outgoing, primaryPayload.TBN, primaryPayload.isExt);
-                        float w2 = VXPG_PdfVoxelGuidingSmooth(pixel, guide.voxel, primaryVoxel, primary.position, primaryPayload.hitNormal);
+                        // Use the density the sample was actually drawn from (the sampler's own pdf),
+                        // not the smoothed approximation: the MIS weight has to see the same density
+                        // that divides the contribution, otherwise the one-sample form
+                        // f / (c_i (p1 + p2)) is no longer the density ratio it assumes.
+                        float w2 = guide.pdf;
                         if (pushConst.misMode == int(VXPG_MisMode::ePower))
                         {
                             w1 *= w1;
                             w2 *= w2;
                         }
-                        const float misB = (oneSampleMis || (pushConst.flags & 128) != 0) ? 1.0f : (w2 / max(w1 + w2, 1e-8));
+                        const float balanceB = w2 / max(w1 + w2, 1e-8);
+                        const float misB = (pushConst.flags & 128) != 0 ? 1.0f
+                                         : (oneSampleMis ? balanceB / selectProb : balanceB);
                         accumulated += contributionB * misB;
                     }
                 }
+            }
+        }
+
+        // Contribution of paths other than those with length 3 in path space
+        if (extraBounces > 0)
+        {
+            CallablePayload bouncePayload = primaryPayload;
+            BSDF_SAMPLE(bouncePayload);
+            float bsdfPdf = bouncePayload.pdf;
+            float3 bsdfWeight = bouncePayload.bsdf * abs(dot(bouncePayload.incidence, bouncePayload.hitNormal));
+            float3 throughput = bsdfWeight / bsdfPdf;
+
+            RayDesc bounceRay = VXPG_SpawnRay(bouncePayload.hitPos, bouncePayload.hitNormal, bouncePayload.incidence);
+            VXPGHit bounceHit = VXPG_TraceRay(bounceRay);
+            if (!bounceHit.hit){
+                accumulated += VXPG_RayMiss(bounceRay.Direction) * throughput;
+                break;
+            }
+            VXPG_MakePayload(bouncePayload, bounceHit, -bouncePayload.incidence, seed, sceneInfo);
+            BSDF_SAMPLE(bouncePayload);
+
+            for (int b = 0; b < extraBounces; ++b){
+                float stepPdf = bouncePayload.pdf;
+                float3 stepWeight = bouncePayload.bsdf * abs(dot(bouncePayload.incidence, bouncePayload.hitNormal));
+                if (!(stepPdf > 0.0) || all(stepWeight <= 0.0)) break;
+
+                throughput *= stepWeight / stepPdf;
+                bounceRay = VXPG_SpawnRay(bouncePayload.hitPos, bouncePayload.hitNormal, bouncePayload.incidence);
+                bounceHit = VXPG_TraceRay(bounceRay);
+                if (!bounceHit.hit){
+                    accumulated += VXPG_RayMiss(bounceRay.Direction) * throughput;
+                    break;
+                }
+                VXPG_MakePayload(bouncePayload, bounceHit, -bouncePayload.incidence, seed, sceneInfo);
+                getDirectionLight(bouncePayload, sceneInfo);
+                BSDF_SAMPLE(bouncePayload);
+                accumulated += (bouncePayload.material.emissive + bouncePayload.directionLightRadiance) * throughput;
             }
         }
 
@@ -361,8 +409,7 @@ void computeMain_VXPG(uint2 threadIndex : SV_DispatchThreadID)
         return;
     }
 
-    if (any(isnan(accumulated)) || any(isinf(accumulated)))
-        accumulated = float3(0.0);
+    if (any(isnan(accumulated)) || any(isinf(accumulated))) accumulated = float3(0.0);
 
     // Temporal accumulation, identical to the VRPG renderer:
     //   maxFrames == 1 : current frame only (no accumulation)

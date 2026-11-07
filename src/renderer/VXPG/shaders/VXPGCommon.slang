@@ -29,7 +29,14 @@ RWStructuredBuffer<int> clusterRoots;          // VXPG_CLUSTER_COUNT entries
 [[vk::binding(VXPGStaticBindingPoints::eTopLevelTree)]]
 RWStructuredBuffer<float> topLevelTree;        // spixelCount * VXPG_TOP_LEVEL_STRIDE
 [[vk::binding(VXPGStaticBindingPoints::eSpixelInfo)]]
-RWStructuredBuffer<VXPGSpixelInfo> spixelInfo; // spixelCount entries
+RWStructuredBuffer<VXPGSpixelInfo> spixelInfo;
+// Superpixel id of every pixel. Kept separate from VXPGPixelData so that the assign pass writes
+// four bytes per pixel instead of rewriting the whole 80 byte record (that store was a large part
+// of the remaining global traffic).
+[[vk::binding(VXPGStaticBindingPoints::ePixelSpixelId)]]
+RWStructuredBuffer<uint> pixelSpixelId;
+[[vk::binding(VXPGStaticBindingPoints::ePixelCompact)]]
+RWStructuredBuffer<VXPGPixelCompact> pixelCompact; // spixelCount entries
 [[vk::binding(VXPGStaticBindingPoints::eSpixelClusterWeight)]]
 RWStructuredBuffer<int> spixelClusterWeight;   // spixelCount * VXPG_CLUSTER_COUNT, fixed point 1/1000
 // Leaf order indirection. The light tree leaves are indexed by "slot"; a slot maps to a voxel
@@ -676,7 +683,7 @@ int VXPG_SelectSpixel(int2 pixel)
 {
     int2 res = int2(pushConst.screenSize);
     int2 p = clamp(pixel, int2(0, 0), res - int2(1, 1));
-    return int(pixelData[p.y * res.x + p.x].info.x);
+    return int(pixelSpixelId[p.y * res.x + p.x]);
 }
 
 // Cluster id of a leaf slot: the visibility clustering (KMPP) when enabled, the Morton chunk
@@ -700,6 +707,17 @@ float3 VXPG_ShadingPosJittered(int2 pixel, float3 shadingPos)
     uint h = xxhash32(uint3(uint(pixel.x), uint(pixel.y), 0x51ed270bu ^ uint(pushConst.randomFrameIndex)));
     const float3 r = float3(rand(h), rand(h), rand(h));
     return shadingPos + (r - 0.5) * pushConst.VGBVoxelSize * pushConst.jitterRadius;
+}
+
+// Deterministic jitter of the aimed surface box inside the voxel (same convention as the helpers
+// above): the sampler and both pdf functions must use the *same* shift, otherwise the guide pdf
+// weight is not the density that the sampler actually used.
+float3 VXPG_VoxelBoxShift(int2 pixel, float3 boxExtent)
+{
+    uint h = xxhash32(uint3(uint(pixel.x), uint(pixel.y), 0x68bc21ebu ^ uint(pushConst.randomFrameIndex)));
+    const float3 freeSpace = max(pushConst.VGBVoxelSize - boxExtent, float3(0.0));
+    const float3 r = float3(rand(h), rand(h), rand(h));
+    return (r - 0.5) * freeSpace * pushConst.jitterRadius;
 }
 
 int2 VXPG_SpixelPixelJittered(int2 pixel)
@@ -756,7 +774,7 @@ int VXPG_SpixelMixture(int2 pixel, float3 shadingPos, float3 shadingNormal, out 
             if (any(c < int2(0, 0)) || any(c >= grid))
                 continue;
             const int2 centrePixel = clamp(c * size + size / 2, int2(0, 0), res - int2(1, 1));
-            const int id = int(pixelData[centrePixel.y * res.x + centrePixel.x].info.x);
+            const int id = int(pixelSpixelId[centrePixel.y * res.x + centrePixel.x]);
             if (id < 0 || id >= pushConst.spixelCount)
                 continue;
             // Skip duplicates: neighbouring cells can share one superpixel, and a duplicated entry
@@ -909,8 +927,7 @@ VXPGGuideSample VXPG_SampleVoxelGuiding(int2 pixel, float3 shadingPos, float3 sh
     // moves between samples (dithering the voxel grid) while the direction stays inside the voxel
     // that the semi-NEE acceptance test uses. This keeps the brightness unchanged.
     const float3 boxExtent = 2.0 * extend;
-    const float3 freeSpace = max(pushConst.VGBVoxelSize - boxExtent, float3(0.0));
-    const float3 boxShift = (float3(rand(seed), rand(seed), rand(seed)) - 0.5) * freeSpace * pushConst.jitterRadius;
+    const float3 boxShift = VXPG_VoxelBoxShift(pixel, boxExtent);
     float sphPdf = 0.0f;
     float rnd0 = rand(seed);
     float rnd1 = rand(seed);
@@ -964,6 +981,8 @@ float VXPG_PdfVoxelGuiding(int2 pixel, int3 voxel, int3 currentVoxel, float3 sha
     VXPG_VoxelSurfaceBounds(voxel, bmin, bmax);
     float3 center = 0.5 * (bmin + bmax);
     float3 extend = max(0.5 * (bmax - bmin), float3(1e-6));
+    // The sampler aims at the same deterministic shifted box, so the density is evaluated there.
+    center += VXPG_VoxelBoxShift(pixel, 2.0 * extend);
     float sphPdf = VXPG_PdfSampleSphericalVoxel(center, extend, shadingPos);
 
     return clusterProb * voxelProb * sphPdf;
@@ -1049,41 +1068,35 @@ float3 VXPG_DirectLight(inout CallablePayload payload, SceneInfo sceneInfo)
 // estimator stays consistent; only the split between the two techniques changes.
 float VXPG_PdfVoxelGuidingSmooth(int2 pixel, int3 voxel, int3 currentVoxel, float3 shadingPos, float3 shadingNormal)
 {
-    if (all(voxel == currentVoxel))
-        return 0.0f;
+    if (all(voxel == currentVoxel)) return 0.0f;
     const int res = VXPG_VoxelResolution();
-    if (any(voxel < int3(0, 0, 0)) || any(voxel >= int3(res, res, res)))
-        return 0.0f;
+    if (any(voxel < int3(0, 0, 0)) || any(voxel >= int3(res, res, res))) return 0.0f;
 
     const uint slot = VXPG_VoxelLeafSlot(voxel);
     if (slot == VXPG_INVALID_INDEX) return 0.0f;
     const uint leaf = VXPG_LeafNodeIndex(slot);
-    if (leaf >= VXPG_NodeCount())
-        return 0.0f;
+    if (leaf >= VXPG_NodeCount()) return 0.0f;
 
     int ids[4];
     float weights[4];
-    if (VXPG_SpixelMixture(pixel, shadingPos, shadingNormal, ids, weights) == 0)
-        return 0.0f;
+    if (VXPG_SpixelMixture(pixel, shadingPos, shadingNormal, ids, weights) == 0) return 0.0f;
     const int cluster = VXPG_ClusterOfLeafSlot(slot);
-    if (cluster < 0)
-        return 0.0f;
+    if (cluster < 0) return 0.0f;
     const int clusterRoot = clusterRoots[cluster];
-    if (clusterRoot < 0)
-        return 0.0f;
+    if (clusterRoot < 0) return 0.0f;
 
     const float clusterProb = VXPG_TopLevelProbabilityMixture(ids, weights, cluster);
-    if (clusterProb <= 0.0f)
-        return 0.0f;
+    if (clusterProb <= 0.0f) return 0.0f;
 
     float ratio = 0.0f;
     const float rootIntensity = treeNodes[uint(clusterRoot)].intensity;
-    if (rootIntensity > 0.0f)
-        ratio = clamp(treeNodes[leaf].intensity / rootIntensity, 0.05, 1.0);
+    if (rootIntensity > 0.0f) ratio = clamp(treeNodes[leaf].intensity / rootIntensity, 0.05, 1.0);
 
     float3 bmin, bmax;
     VXPG_VoxelSurfaceBounds(voxel, bmin, bmax);
-    const float3 center = 0.5 * (bmin + bmax);
     const float3 extend = max(0.5 * (bmax - bmin), float3(1e-6));
+    // Same deterministic box shift as the sampler: the MIS weight then sees the density of the box
+    // that was actually aimed at (this only improves the balance between the two techniques).
+    const float3 center = 0.5 * (bmin + bmax) + VXPG_VoxelBoxShift(pixel, 2.0 * extend);
     return clusterProb * ratio * VXPG_PdfSampleSphericalVoxel(center, extend, shadingPos);
 }

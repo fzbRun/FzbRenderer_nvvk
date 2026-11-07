@@ -32,7 +32,14 @@
 - **KPCN 卷积神经网络降噪器**
   <img src="./result/KPCN.png" alt="FzbRenderer_nvvk" style="width:80%; border-radius:6px; display:block;" />
 - **体积雾以及流体模拟(实习项目，无法公开)**
-- **Octree ReSTIR Path Guiding**
+- **VXPG**
+  实时pathGuiding算法, 2-bounce, 1spp
+  <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+  <img src="./result/VXPG-result.png"     alt="result" style="width:30%; border-radius:6px;" />
+  <img src="./result/VXPG-SuperPixel.png" alt="SuperPixel" style="width:30%; border-radius:6px;" />
+  <img src="./result/VXPG-SuperVoxel.png" alt="SuperVoxel" style="width:30%; border-radius:6px;" />
+</div>
+- **ReSTIR PG**
 
 
 ## 快速开始

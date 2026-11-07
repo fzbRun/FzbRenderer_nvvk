@@ -95,6 +95,8 @@ namespace FzbRenderer {
 	nvvk::Buffer clusterCentroidEBuffer{};   // centroid irradiance (paper Eq. 4)  // VXPG_CLUSTER_COUNT x uint4
 		nvvk::Buffer voxelClusterBuffer{};     // N^3 uint
 		nvvk::Buffer spixelAccumBuffer{};
+	nvvk::Buffer pixelSpixelIdBuffer{};
+	nvvk::Buffer pixelCompactBuffer{};   // 32 byte SLIC input per pixel   // 4 byte spixel id per pixel (assign output)
 	nvvk::Buffer globalInfoBuffer{};        // spixelCount x VXPGSpixelAccum (SLIC sums)
 
 		// sizes
