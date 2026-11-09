@@ -77,19 +77,12 @@ void VRPGRenderer::init() {
 	IF_DEBUG(Feature::createGBuffer(true, true,(uint32_t)ImageType_VRPG::eImgTonemapped,Application::renderResolution),
 		Feature::createGBuffer(false, true, 1, Application::renderResolution));
 
-	// Keep a tiny placeholder alive so the static descriptor write is always valid.
-	// The full W*H path-state buffer is only allocated when wavefront mode is enabled.
-	ensureWavefrontPathStateBuffer({ 1u, 1u });
-
 	createDescriptorSetLayout();
 	createDescriptorSet();
 	createPipelineLayout();
 	compileAndCreateShaders();
 
 #ifndef NDEBUG
-	showDebugImages.clear();
-	showDebugImages.insert({ (uint32_t)ImageType_VRPG::eImgPGVariance, false });
-
 	{
 		std::filesystem::path refImagePath = "C:/Users/fangzanbo/Desktop/FzbRenderer_nvvk/result/bearBox.png";
 		refImage.init(refImagePath, nullptr, false);
@@ -115,13 +108,6 @@ void VRPGRenderer::clean() {
 
 	VkDevice device = Application::app->getDevice();
 	vkDestroyShaderEXT(device, computeShader_VRPG, nullptr);
-
-	// Experimental wavefront prototype resources.
-	vkDestroyShaderEXT(device, computeShader_WavefrontInit, nullptr);
-	vkDestroyShaderEXT(device, computeShader_WavefrontBounce, nullptr);
-	vkDestroyShaderEXT(device, computeShader_WavefrontResolve, nullptr);
-	if (wavefrontPathStateBuffer.buffer != VK_NULL_HANDLE)
-		Application::allocator.destroyBuffer(wavefrontPathStateBuffer);
 
 #ifndef NDEBUG
 	Flip->clean();
@@ -173,51 +159,6 @@ void VRPGRenderer::uiRender() {
 				"Sample Per Pixel");
 			PE::end();
 		}
-
-		/*
-		ImGui::SeparatorText("Wavefront (Experimental)");
-		ImGui::TextDisabled("Compile-time: VRPG_USE_WAVEFRONT = %d", VRPG_USE_WAVEFRONT);
-		ImGui::TextDisabled("Bounced guide + BSDF double MIS path state prototype");
-
-		if (ptContext.rtPosFetchFeature.rayTracingPositionFetch == VK_FALSE){
-			ImGui::TextColored({ 1, 0, 0, 1 }, "ERROR: Position Fetch not supported!");
-			ImGui::Text("This hardware does not support");
-			ImGui::Text("VK_KHR_ray_tracing_position_fetch");
-			ImGui::Text("Please use RTX 20 series or newer GPU.");
-		}else{
-			ImGui::TextColored({ 0, 1, 0, 1 }, "Position Fetch: SUPPORTED");
-			ImGui::Separator();
-		}
-		*/
-
-#ifndef NDEBUG
-		if (PE::begin()) {
-			uint32_t debugImageIndex = (uint32_t)ImageType_VRPG::eImgPGVariance;
-			if (PE::entry("PathGuiding Variance", [&] {
-				static const ImVec4 highlightColor = ImVec4(118.f / 255.f, 185.f / 255.f, 0.f, 1.f);
-				ImVec4 selectedColor = showDebugImages[debugImageIndex] ? highlightColor : ImGui::GetStyleColorVec4(ImGuiCol_Button);
-				ImVec4 hoveredColor = ImVec4(selectedColor.x * 1.2f, selectedColor.y * 1.2f, selectedColor.z * 1.2f, 1.f);
-				ImGui::PushStyleColor(ImGuiCol_Button, selectedColor);
-				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, hoveredColor);
-				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(5, 5));
-
-				bool result = ImGui::ImageButton("##but", (ImTextureID)gBuffers.getDescriptorSet((uint32_t)ImageType_VRPG::eImgPGVariance),
-					ImVec2(100 * gBuffers.getAspectRatio(), 100));
-
-				ImGui::PopStyleColor(2);
-				ImGui::PopStyleVar();
-				return result;
-				}))
-			{
-				showDebugImages[debugImageIndex] = !showDebugImages[debugImageIndex];
-				for (auto& pair : showDebugImages) {
-					if (pair.first == debugImageIndex) continue;
-					showDebugImages[pair.first] = false;
-				}
-			}
-		}
-		PE::end();
-#endif
 	}
 	ImGui::End();
 
@@ -237,20 +178,9 @@ void VRPGRenderer::uiRender() {
 #endif
 
 	if (UIModified) resetFrame();
-
-#ifndef NDEBUG
-	for (auto& pair : showDebugImages) {
-		if (showDebugImages[pair.first]) 
-			Application::viewportImage = gBuffers.getDescriptorSet(pair.first);
-	}
-#endif
 };
 void VRPGRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 	NVVK_CHECK(gBuffers.update(cmd, size));
-
-	// Resize the wavefront path-state buffer with the render target. When the prototype
-	// is disabled only the 1-element placeholder is kept.
-	ensureWavefrontPathStateBuffer(wavefront ? size : VkExtent2D{ 1u, 1u });
 
 	nvvk::WriteSetContainer write{};
 	VkWriteDescriptorSet    OutImageWrite =
@@ -293,26 +223,7 @@ void VRPGRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 	VkWriteDescriptorSet    depthImageWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VRPG::eDepthImage, 0, 0, 1);
 	write.append(depthImageWrite, gBuffers.getDepthImageView(), VK_IMAGE_LAYOUT_GENERAL);
-
-	VkWriteDescriptorSet    pgVarianceImageWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VRPG::ePGValueImage, 0, 0, 1);
-	write.append(pgVarianceImageWrite, gBuffers.getColorImageView((uint32_t)ImageType_VRPG::eImgPGValue), VK_IMAGE_LAYOUT_GENERAL);
-
-	pgVarianceImageWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VRPG::ePGValue2Image, 0, 0, 1);
-	write.append(pgVarianceImageWrite, gBuffers.getColorImageView((uint32_t)ImageType_VRPG::eImgPGValue2), VK_IMAGE_LAYOUT_GENERAL);
-
-	pgVarianceImageWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VRPG::ePGVarianceImage, 0, 0, 1);
-	write.append(pgVarianceImageWrite, gBuffers.getColorImageView((uint32_t)ImageType_VRPG::eImgPGVariance), VK_IMAGE_LAYOUT_GENERAL);
 #endif
-
-	// The wavefront prototype keeps its per-pixel path state in the same static set.
-	{
-		VkWriteDescriptorSet wavefrontPathStateWrite =
-			staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VRPGWavefront::ePathState, 0, 0, 1);
-		write.append(wavefrontPathStateWrite, wavefrontPathStateBuffer, 0, wavefrontPathStateBuffer.bufferSize);
-	}
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 
@@ -432,8 +343,7 @@ void VRPGRenderer::render(VkCommandBuffer* cmdPtr) {
 	octree->renderCandidates(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	
-	if (wavefront) wavefrontPathTracing(cmd);
-	else pathGuiding(cmd);
+	pathGuiding(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	
 	Application::tonemapper.runCompute(cmd, gBuffers.getSize(), Application::tonemapperData, gBuffers.getDescriptorImageInfo((uint32_t)ImageType_VRPG::eImgRendered), gBuffers.getDescriptorImageInfo((uint32_t)ImageType_VRPG::eImgTonemapped));
@@ -550,22 +460,6 @@ void VRPGRenderer::createDescriptorSetLayout() {
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
-
-	bindings.addBinding({
-		.binding = (uint32_t)shaderio::StaticBindingPoints_VRPG::ePGValueImage,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-		.descriptorCount = 1,
-		.stageFlags = VK_SHADER_STAGE_ALL });
-	bindings.addBinding({
-		.binding = (uint32_t)shaderio::StaticBindingPoints_VRPG::ePGValue2Image,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-		.descriptorCount = 1,
-		.stageFlags = VK_SHADER_STAGE_ALL });
-	bindings.addBinding({
-		.binding = (uint32_t)shaderio::StaticBindingPoints_VRPG::ePGVarianceImage,
-		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-		.descriptorCount = 1,
-		.stageFlags = VK_SHADER_STAGE_ALL });
 #endif
 
 	staticDescPack.init(bindings, Application::app->getDevice(), 1, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
@@ -645,16 +539,9 @@ void VRPGRenderer::createDescriptorSet() {
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VRPG::eReservoir, 0, 0, 1);
 	write.append(reservoirWrite, octree->reservoirCurrentBuffer, 0, octree->reservoirCurrentBuffer.bufferSize);
 
-	
-
 	VkWriteDescriptorSet    GlobalInfoWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VRPG::eGlobalInfo, 0, 0, 1);
 	write.append(GlobalInfoWrite, octree->globalInfoBuffer, 0, octree->globalInfoBuffer.bufferSize);
-
-	// Placeholder (1x1) until the experimental wavefront mode is enabled.
-	VkWriteDescriptorSet wavefrontPathStateWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VRPGWavefront::ePathState, 0, 0, 1);
-	write.append(wavefrontPathStateWrite, wavefrontPathStateBuffer, 0, wavefrontPathStateBuffer.bufferSize);
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }
@@ -713,17 +600,6 @@ void VRPGRenderer::compileAndCreateShaders() {
 		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_VRPG);
 		NVVK_DBG_NAME(computeShader_VRPG);
 	}
-	//--------------------------------------------------------------------------------------
-	// Experimental wavefront path tracer: one module, three compute entry points.
-	// Failure here must not affect the stable path, so it is reported and skipped.
-	{
-		std::filesystem::path wavefrontSource = shaderPath / "VRPGWavefront.slang";
-		VkShaderModuleCreateInfo wavefrontCode = FzbRenderer::compileSlangShader(wavefrontSource, {});
-		if (wavefrontCode.codeSize > 0 && wavefrontCode.pCode != nullptr)
-			createWavefrontShaders(wavefrontCode);
-		else
-			LOGE("Wavefront prototype shader failed to compile; the toggle will fall back to the stable VRPG path.\n");
-	}
 };
 void VRPGRenderer::updateDataPerFrame(VkCommandBuffer cmd) {}
 
@@ -773,160 +649,6 @@ void VRPGRenderer::pathGuiding(VkCommandBuffer cmd) {
 		vkCmdPushConstants2(cmd, &pushInfo);
 		vkCmdDispatch(cmd, groupSize.width, dispatchGroupHeight, 1);
 	}
-}
-
-//------------------------------------------------------------------------------------------
-// Experimental wavefront path tracer
-//------------------------------------------------------------------------------------------
-bool VRPGRenderer::wavefrontShadersValid() const {
-	return computeShader_WavefrontInit != VK_NULL_HANDLE &&
-		computeShader_WavefrontBounce != VK_NULL_HANDLE &&
-		computeShader_WavefrontResolve != VK_NULL_HANDLE;
-}
-
-void VRPGRenderer::ensureWavefrontPathStateBuffer(const VkExtent2D& extent) {
-	const uint32_t width = std::max(extent.width, 1u);
-	const uint32_t height = std::max(extent.height, 1u);
-	const VkDeviceSize requiredSize =
-		VkDeviceSize(width) * VkDeviceSize(height) * sizeof(shaderio::WavefrontPathState);
-
-	if (wavefrontPathStateBuffer.buffer != VK_NULL_HANDLE && wavefrontPathStateBufferSize == requiredSize)
-		return;
-
-	if (wavefrontPathStateBuffer.buffer != VK_NULL_HANDLE)
-		Application::allocator.destroyBuffer(wavefrontPathStateBuffer);
-
-	NVVK_CHECK(Application::allocator.createBuffer(
-		wavefrontPathStateBuffer, requiredSize,
-		VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT));
-	NVVK_DBG_NAME(wavefrontPathStateBuffer.buffer);
-
-	wavefrontPathStateBufferSize = requiredSize;
-	wavefrontPathStateExtent = { width, height };
-	LOGI("Wavefront path state buffer: %ux%u (%.2f MB)\n", width, height,
-		double(requiredSize) / (1024.0 * 1024.0));
-}
-
-void VRPGRenderer::writeWavefrontPathStateDescriptor() {
-	if (wavefrontPathStateBuffer.buffer == VK_NULL_HANDLE) return;
-
-	nvvk::WriteSetContainer write{};
-	VkWriteDescriptorSet pathStateWrite =
-		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_VRPGWavefront::ePathState, 0, 0, 1);
-	write.append(pathStateWrite, wavefrontPathStateBuffer, 0, wavefrontPathStateBuffer.bufferSize);
-	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
-}
-
-void VRPGRenderer::createWavefrontShaders(const VkShaderModuleCreateInfo& shaderCode) {
-	VkDevice device = Application::app->getDevice();
-
-	vkDestroyShaderEXT(device, computeShader_WavefrontInit, nullptr);
-	vkDestroyShaderEXT(device, computeShader_WavefrontBounce, nullptr);
-	vkDestroyShaderEXT(device, computeShader_WavefrontResolve, nullptr);
-
-	const VkPushConstantRange pushConstantRange{
-		.stageFlags = VK_SHADER_STAGE_ALL,
-		.offset = 0,
-		.size = sizeof(shaderio::VRPGPushConstant),
-	};
-	std::array<VkDescriptorSetLayout, 2> layouts = { {staticDescPack.getLayout(), dynamicDescPack.getLayout()} };
-
-	// Same layouts/push constants as the stable VRPG shader object, but the module
-	// exposes three compute entry points and we select them by name.
-	VkShaderCreateInfoEXT shaderInfo{
-		.sType = VK_STRUCTURE_TYPE_SHADER_CREATE_INFO_EXT,
-		.codeType = VK_SHADER_CODE_TYPE_SPIRV_EXT,
-		.pName = "wavefrontInitMain",
-		.setLayoutCount = layouts.size(),
-		.pSetLayouts = layouts.data(),
-		.pushConstantRangeCount = 1,
-		.pPushConstantRanges = &pushConstantRange,
-	};
-	shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-	shaderInfo.nextStage = 0;
-	shaderInfo.codeSize = shaderCode.codeSize;
-	shaderInfo.pCode = shaderCode.pCode;
-
-	VkResult result = vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_WavefrontInit);
-	if (result != VK_SUCCESS) {
-		LOGE("Failed to create wavefront init shader (VkResult %d).\n", int(result));
-		return;
-	}
-
-	shaderInfo.pName = "wavefrontBounceMain";
-	result = vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_WavefrontBounce);
-	if (result != VK_SUCCESS) {
-		LOGE("Failed to create wavefront bounce shader (VkResult %d).\n", int(result));
-		return;
-	}
-
-	shaderInfo.pName = "wavefrontResolveMain";
-	result = vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_WavefrontResolve);
-	if (result != VK_SUCCESS)
-		LOGE("Failed to create wavefront resolve shader (VkResult %d).\n", int(result));
-
-	NVVK_DBG_NAME(computeShader_WavefrontInit);
-	NVVK_DBG_NAME(computeShader_WavefrontBounce);
-	NVVK_DBG_NAME(computeShader_WavefrontResolve);
-}
-
-void VRPGRenderer::wavefrontPathTracing(VkCommandBuffer cmd) {
-	NVVK_DBG_SCOPE(cmd);
-
-	const VkExtent2D sceneSize = Application::renderResolution;
-	const VkDeviceSize requiredSize =
-		VkDeviceSize(sceneSize.width) * VkDeviceSize(sceneSize.height) * sizeof(shaderio::WavefrontPathState);
-
-	// Never dispatch the prototype against an undersized buffer or missing shaders;
-	// fall back to the stable path so the renderer stays usable.
-	if (sceneSize.width == 0 || sceneSize.height == 0 || !wavefrontShadersValid() ||
-		wavefrontPathStateBuffer.buffer == VK_NULL_HANDLE || wavefrontPathStateBufferSize < requiredSize) {
-		LOGW("Wavefront prototype not ready (state buffer %llu/%llu bytes, shaders %d); falling back to stable VRPG.\n",
-			(unsigned long long)wavefrontPathStateBufferSize, (unsigned long long)requiredSize,
-			wavefrontShadersValid() ? 1 : 0);
-		pathGuiding(cmd);
-		return;
-	}
-
-	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1,
-		staticDescPack.getSetPtr(), 0, nullptr);
-
-	nvvk::WriteSetContainer write{};
-	write.append(dynamicDescPack.makeWrite(shaderio::DynamicSetBindingPoints_PT::eTlas_PT), asManager.asBuilder.tlas);
-	vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 1, write.size(), write.data());
-
-	const VkExtent2D groupSize = nvvk::getGroupCounts(
-		sceneSize, VkExtent2D{ FZB_WAVEFRONT_THREADGROUP_SIZE_X, FZB_WAVEFRONT_THREADGROUP_SIZE_Y });
-
-	pushConstant.sceneSize = shaderio::uint2(sceneSize.width, sceneSize.height);
-	pushConstant.threadGroupCount = shaderio::uint2(groupSize.width, groupSize.height);
-	pushConstant.dispatchOffset = shaderio::uint2(0, 0);
-
-	VkPushConstantsInfo pushInfo = {
-		.sType = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
-		.layout = pipelineLayout,
-		.stageFlags = VK_SHADER_STAGE_ALL,
-		.offset = 0,
-		.size = sizeof(shaderio::VRPGPushConstant),
-		.pValues = &pushConstant,
-	};
-	vkCmdPushConstants2(cmd, &pushInfo);
-
-	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
-	auto dispatchPass = [&](VkShaderEXT shader) {
-		vkCmdBindShadersEXT(cmd, 1, &stage, &shader);
-		vkCmdDispatch(cmd, groupSize.width, groupSize.height, 1);
-		// Path states are read by the next pass, so order the passes with a barrier.
-		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-	};
-
-	dispatchPass(computeShader_WavefrontInit);
-
-	const int bounceCount = std::max(pushConstant.maxDepth, 1);
-	for (int bounce = 0; bounce < bounceCount; ++bounce)
-		dispatchPass(computeShader_WavefrontBounce);
-
-	dispatchPass(computeShader_WavefrontResolve);
 }
 
 void VRPGRenderer::createFlipReadbackBuffer() {

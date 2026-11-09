@@ -1360,7 +1360,7 @@ void VXPGRenderer::uiRender()
 
 	if (ImGui::Begin("VXPGSettings"))
 	{
-		ImGui::SeparatorText("VXPG (mode 4: Guide + BSDF)");
+		ImGui::SeparatorText("VXPG");
 		ImGui::TextDisabled("Frame: %d / %d", pushConstant.frameIndex, maxFrames);
 		ImGui::TextDisabled("Voxel grid: %d^3 = %d voxels, %d tree nodes", pushConstant.voxelResolution, voxelCount, nodeCount);
 		ImGui::TextDisabled("Superpixels: %d x %d = %d, %d clusters", spixelGridWidth, spixelGridHeight, spixelCount,

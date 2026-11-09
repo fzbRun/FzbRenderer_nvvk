@@ -523,6 +523,41 @@ void getDirectionLight(inout CallablePayload payload, SceneInfo sceneInfo) {
     }
 }
 
+void getDirectionLight2(inout CallablePayload payload, SceneInfo sceneInfo) {
+    payload.directionLightRadiance = 0.0f;
+
+    bool isDielectric = payload.material.type == uint(MaterialType::Dielectric) ||
+                        payload.material.type == uint(MaterialType::RoughDielectric);
+    uint lightNum = min(sceneInfo.numLights, NEE_MAX_SAMPLE_NUM);
+    for (int lightIndex = 0; lightIndex < lightNum; ++lightIndex) {
+        Light light = sceneInfo.lights[lightIndex];
+        if (light.type == uint(LightType::Direction)) {
+            float3 sampleDir = -light.direction;
+            float cosine = dot(sampleDir, payload.hitNormal);
+            if (!isDielectric && cosine <= 0.001f) continue;
+
+            const uint rayFlags = 0;
+            RayDesc tempRay;
+            tempRay.Direction = normalize(sampleDir);
+            tempRay.Origin = payload.hitPos + 0.00001f * tempRay.Direction;
+            tempRay.TMin = 0.001f;
+            tempRay.TMax = INFINITE;
+            HitTestPayload tempPayload;
+            tempPayload.distance = MISS_DISTANCE;
+
+            hitTestTraceRay(tempRay, tempPayload);
+
+            if (tempPayload.distance != MISS_DISTANCE) continue;
+            payload.directionLightDir = light.direction;
+
+            float3 bsdf = getBSDF(payload.material, sampleDir, payload.hitNormal, payload.outgoing, payload.TBN, payload.isExt);
+            payload.directionLightRadiance = light.color * light.intensity * abs(cosine) * bsdf;
+
+            break;
+        }
+    }
+}
+
 //------------------------------------------Material BSDF---------------------------------------------------
 #define NVPRO_CORE_MATERIAL_FUNTION
 

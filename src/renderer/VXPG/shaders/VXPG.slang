@@ -37,6 +37,10 @@ void computeMain_VXPG(uint2 threadIndex : SV_DispatchThreadID)
         cameraRay.TMin = 0.001;
         cameraRay.TMax = INFINITE;
 
+        //if (pushConst.frameIndex == 0 && all(threadIndex >= uint2(635, 355)) && all(threadIndex <= uint2(645, 365))) {
+        //    printf("pixel: %d %d\n", pixel.x, pixel.y);
+        //}
+
         VXPGHit primary = VXPG_TraceRay(cameraRay);
         if (!primary.hit){
             accumulated += VXPG_RayMiss(cameraRay.Direction);
@@ -255,10 +259,6 @@ void computeMain_VXPG(uint2 threadIndex : SV_DispatchThreadID)
                         w2 *= w2;
                     }
 
-                    //if (pushConst.frameIndex == 0 && all(threadIndex >= uint2(635, 355)) && all(threadIndex <= uint2(645, 365))) {
-                    //    printf("guidePdfA: %f\n", guidePdfA);
-                    //}
-
                     // One-sample MIS (Veach): every pixel evaluates a single technique, so the
                     // balance weight has to be divided by the selection probability:
                     //     F = f(X_i) / (c_i * (p1(X_i) + p2(X_i)))
@@ -291,10 +291,6 @@ void computeMain_VXPG(uint2 threadIndex : SV_DispatchThreadID)
                 // occluder as if it were the VPL and light leaks along every edge (the bright hairlines).
                 const bool hitInVoxel = hitB.hit && all(hitB.position >= guide.aabbMin) && all(hitB.position <= guide.aabbMax)
                                      && all(VXPG_WorldToVoxelID(hitB.position) == guide.voxel);
-
-                //if (pushConst.frameIndex == 0 && all(threadIndex >= uint2(635, 355)) && all(threadIndex <= uint2(645, 365))) {
-                //    printf("hitInVoxel: %d, sampleDir: %f %f %f\n", hitInVoxel, guide.direction.x, guide.direction.y, guide.direction.z);
-                //}
 
                 if (hitInVoxel)
                 {
@@ -408,6 +404,8 @@ void computeMain_VXPG(uint2 threadIndex : SV_DispatchThreadID)
         outImage[pixel] = float4(mapped, 1.0f);
         return;
     }
+
+    if (pushConst.frameIndex == 0 && all(threadIndex >= uint2(635, 355)) && all(threadIndex <= uint2(645, 365))) accumulated = float3(10.0f, 0.0f, 0.0f);
 
     if (any(isnan(accumulated)) || any(isinf(accumulated))) accumulated = float3(0.0);
 

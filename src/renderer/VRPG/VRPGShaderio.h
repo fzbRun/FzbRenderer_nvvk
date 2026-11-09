@@ -9,10 +9,14 @@ NAMESPACE_SHADERIO_BEGIN()
 #define Candidate_Samples_Count 64
 
 // Compile-time VRPG switches (change requires rebuilding the app).
-#define VRPG_USE_WAVEFRONT 0      // 0 stable single dispatch, 1 experimental wavefront
 #define VRPG_RANDOM_FRAME_SOURCE 1
-#define VRPG_CAMERA_REPROJECTION 0 // 0 off, 1 reproject static camera reset
-#define VRPG_PATH_SAMPLE_MODE 0   // 0 double MIS, 1 one-sample MIS, 2 guide only
+#ifndef VRPG_PATH_SAMPLE_MODE
+// How the BSDF and the guide techniques are combined (see computeMain_VRPG):
+    //   0 (default) two sample balance MIS: both rays traced, one sample chosen for the
+    //     continuation, every weighted term divided by the selection probability
+    //   1 one sample 50/50: only the chosen technique traced, its terms divided by q
+#define VRPG_PATH_SAMPLE_MODE 1
+#endif
 #define VRPG_JITTER_SAMPLING 1
 #define VRPG_NEARBY_NODE_COUNT 4
 #define VRPG_SPATIAL_REUSE 0
@@ -22,7 +26,6 @@ NAMESPACE_SHADERIO_BEGIN()
 #define Pairwise_MIS
 
 #define OCTREE_E_CLUSTER
-
 
 #define HITTEST_COUNT_PER_CHILDNODE_VRPG 4		//must <= 4
 
@@ -89,9 +92,6 @@ enum class StaticBindingPoints_VRPG
 
 #ifndef NDEBUG
 	eDepthImage,
-	ePGValueImage,
-	ePGValue2Image,
-	ePGVarianceImage,
 #endif
 };
 enum class DynamicBindingPoints_VRPG {
