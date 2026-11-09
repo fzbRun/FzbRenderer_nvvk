@@ -131,6 +131,32 @@ int getGlobalGLabelFromInfo(int2 info) {
 
 // Uniform disk sample in the tangent plane of the current G cluster, then
 // choose the candidate G cluster containing the jittered point.
+// Score of a candidate G cluster for the cosine based jitter. meanNormal is the averaged normal
+// whose length is the coherence (1 = perfectly aligned normals, 0 = mixed/crease). The score is the
+// direction cosine weighted by both coherences and by a smooth spatial falloff of the jittered
+// point to the candidate AABB. A negative result means "do not use this candidate".
+float vrpgClusterJitterScore(OctreeNodeData_G_VRPG reference, OctreeNodeData_G_VRPG candidate,
+                             float3 p, float radius)
+{
+    const float coherenceRef = length(reference.meanNormal.xyz);
+    const float coherenceCandidate = length(candidate.meanNormal.xyz);
+    if (coherenceRef <= 1e-6f || coherenceCandidate <= 1e-6f)
+        return -1.0f;
+
+    const float cosine = dot(reference.meanNormal.xyz, candidate.meanNormal.xyz)
+                       / (coherenceRef * coherenceCandidate);
+    const float similarity = max(0.0f, cosine);
+    if (similarity < VRPG_COSINE_MIN_DOT)
+        return -1.0f;
+
+    const float3 center = (candidate.aabb.minimum + candidate.aabb.maximum) * 0.5f;
+    const float d2 = dot(p - center, p - center);
+    const float falloff = 1.0f / (1.0f + d2 / max(radius * radius, 1e-12f));
+
+    return pow(similarity, VRPG_COSINE_POWER)
+         * clamp(coherenceRef, 0.0f, 1.0f) * clamp(coherenceCandidate, 0.0f, 1.0f) * falloff;
+}
+
 int sampleJitteredClusterG(int currentNodeLabel, int currentLayer, int currentNodeIndex, float3 hitPos, float materialRoughness, inout uint randomSeed) {
     OctreeNodeData_G_VRPG currentNode = OctreeNodeDataBuffer_G[currentLayer][currentNodeIndex];
     float3 normal = normalize(currentNode.meanNormal.xyz + float3(1e-8f));
@@ -148,6 +174,28 @@ int sampleJitteredClusterG(int currentNodeLabel, int currentLayer, int currentNo
     float theta = 2.0f * M_PI * rand(randomSeed);
     float3 jitteredPos = hitPos + (cos(theta) * tangent + sin(theta) * bitangent) * r;
 
+    #if VRPG_COSINE_NEIGHBOR
+    // Cosine + coherence weighting: choose the candidate (the current node or one of the stored
+    // neighbours) whose direction matches the current one and whose AABB is close to the jittered
+    // point. There is no hard "inside the AABB" test any more: that gate produced the same kind of
+    // visible seam as the normal partition test did.
+    int2 nearbyNodeInfos[NEARBY_NODE_COUNT_VRPG] = NearbyNodeInfoBuffer[currentNodeLabel].nearbyNodeInfos;
+    int nearbyNodeLimit = clamp(VRPG_NEARBY_NODE_COUNT, 0, NEARBY_NODE_COUNT_VRPG);
+
+    int selectedLabel = currentNodeLabel;
+    float bestScore = vrpgClusterJitterScore(currentNode, currentNode, jitteredPos, radius);
+    for (int i = 0; i < nearbyNodeLimit; ++i) {
+        int2 nearbyInfo = nearbyNodeInfos[i];
+        if (nearbyInfo.x < 0) continue;
+        OctreeNodeData_G_VRPG nearbyNode = OctreeNodeDataBuffer_G[nearbyInfo.x][nearbyInfo.y];
+        float score = vrpgClusterJitterScore(currentNode, nearbyNode, jitteredPos, radius);
+        if (score > bestScore) {
+            bestScore = score;
+            selectedLabel = getGlobalGLabelFromInfo(nearbyInfo);
+        }
+    }
+    return selectedLabel >= 0 ? selectedLabel : currentNodeLabel;
+    #else
     int selectedLabel = currentNodeLabel;
     float bestCenterDistance = 1e30f;
     bool foundInside = false;
@@ -207,6 +255,7 @@ int sampleJitteredClusterG(int currentNodeLabel, int currentLayer, int currentNo
     }
 
     return selectedLabel >= 0 ? selectedLabel : currentNodeLabel;
+    #endif
 }
 
 bool getNodeAABB_E_VRPG(inout VRSampleData sampleData, inout HitPayload_VRPG payload, uint2 threadIndex) {

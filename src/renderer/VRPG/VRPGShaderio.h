@@ -19,6 +19,17 @@ NAMESPACE_SHADERIO_BEGIN()
 #endif
 #define VRPG_JITTER_SAMPLING 1
 #define VRPG_NEARBY_NODE_COUNT 4
+
+// Neighbour jitter across G clusters (see GetAdjClusterG.slang / VRPGGuide.slang):
+//   0 (default) : the original hard requirement that a neighbour lives in the same normal partition
+//   1           : cosine + coherence weighting, so the jitter can cross normal partition boundaries
+//                 on curved (circle/sphere) and flat surfaces while creases are still refused
+//                 (the length of meanNormal is the consistency of the averaged normal)
+#ifndef VRPG_COSINE_NEIGHBOR
+#define VRPG_COSINE_NEIGHBOR 1
+#endif
+#define VRPG_COSINE_MIN_DOT 0.70f    // cos(45 deg): reject candidates facing away more than that
+#define VRPG_COSINE_POWER   2.0f     // sharpness of the cosine weight
 #define VRPG_SPATIAL_REUSE 0
 #define VRPG_TEMPORAL_REUSE 0
 

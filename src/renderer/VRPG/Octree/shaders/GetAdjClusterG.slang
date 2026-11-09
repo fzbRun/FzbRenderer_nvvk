@@ -139,8 +139,26 @@ void computeMain_getNearbyNodes1(uint threadIndex: SV_DispatchThreadID, uint thr
     float tieBreak = (1.0f - clamp(extentAlong / max(indivisibleNodeData.extent, 1e-6f), 0.0f, 1.0f)) * 1e-9f;
     distance += tieBreak;
 
+    #if VRPG_COSINE_NEIGHBOR
+    // Cosine + coherence candidate gating instead of the hard "same normal partition" test: curved
+    // (circle / sphere) and flat surfaces keep jittering across partition boundaries, while creases
+    // are still refused because the average normal length drops there.
+    // indivisibleNodeData.normal is the normalised mean normal of the current cluster; its own
+    // coherence is a per node constant and therefore does not change the ranking of the candidates.
+    const float cosineCoherenceOther = length(nearbyNodeData.meanNormal.xyz);
+    float cosineSim = -1.0f;
+    if (cosineCoherenceOther > 1e-6f)
+        cosineSim = dot(indivisibleNodeData.normal, nearbyNodeData.meanNormal.xyz) / cosineCoherenceOther;
+    const float cosineInRange = max(0.0f, cosineSim);
+    const float cosineScore = pow(cosineInRange, VRPG_COSINE_POWER) * clamp(cosineCoherenceOther, 0.0f, 1.0f);
+    if (cosineInRange < VRPG_COSINE_MIN_DOT || cosineScore <= 1e-6f)
+        distance = 1e30f;
+    else
+        distance /= cosineScore;    // the selector below minimises distance, so better score = smaller
+    #else
     if (nearbyNormalIndex != indivisibleNodeData.normalIndex)
         distance = 1e30f;
+    #endif
     if (indivisibleNodeLabel == nearbyNodeLabel) distance = 1e30f;
 
     for (int i = 0; i < 4; i++) {
