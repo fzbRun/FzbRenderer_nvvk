@@ -1485,7 +1485,8 @@ void Octree_VRPG::getOctreeLabel(VkCommandBuffer cmd) {
 	vkCmdDispatch(cmd, 1, 1, 1);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 
-	for (int layerIndex = OCTREE_CLUSTER_LAYER_VRPG; layerIndex <= pushConstant.octreeMaxLayer; ++layerIndex) {
+	int startLayer = 2;
+	for (int layerIndex = startLayer; layerIndex <= pushConstant.octreeMaxLayer; ++layerIndex) {
 		pushConstant.currentLayer = layerIndex;
 		vkCmdPushConstants2(cmd, &pushInfo);
 

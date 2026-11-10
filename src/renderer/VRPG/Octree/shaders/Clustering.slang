@@ -302,8 +302,10 @@ void computeMain_createOctreeArray(uint threadIndex: SV_DispatchThreadID, uint g
                 mergeNormal.y += WaveReadLaneAt(mergeNormal.y, targetLane);
                 mergeNormal.z += WaveReadLaneAt(mergeNormal.z, targetLane);
             }
-            mergeNormal = normalize(mergeNormal / max(float(blockHasDataNodeCount), 1.0f) +
-                                    float3(1e-8f));
+            mergeNormal = normalize(mergeNormal / max(float(blockHasDataNodeCount), 1.0f) + float3(1e-8f));
+            mergeNormal.x = WaveReadLaneAt(mergeNormal.x, blockFirstWarpLane);
+            mergeNormal.y = WaveReadLaneAt(mergeNormal.y, blockFirstWarpLane);
+            mergeNormal.z = WaveReadLaneAt(mergeNormal.z, blockFirstWarpLane);
 
             float3 nodeNormal = normalize(nodeData_G.meanNormal.xyz + float3(1e-8f));
             float minNormalCos = hasData ? dot(nodeNormal, mergeNormal) : 1.0f;

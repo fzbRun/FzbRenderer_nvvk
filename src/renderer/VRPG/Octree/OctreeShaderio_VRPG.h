@@ -153,7 +153,7 @@ struct AdjClusterTempInfo_VRPG {
 	float nearbyNodeDistances[NEARBY_NODE_COUNT_VRPG];
 };
 //------------------------------------------------------------------------------------------
-#define OCTREE_CLUSTER_LAYER_VRPG 2
+#define OCTREE_CLUSTER_LAYER_VRPG 3
 static const uint OctreeLayerNodeCount_VRPG[MAX_OCTREE_LAYER_VRPG] = { 6, 48, 384, 3072, 24576, 196608, 1572864 };
 static const uint OctreeLayerStartIndex_VRPG[4] = { 0, 8, 56, 384 };
 

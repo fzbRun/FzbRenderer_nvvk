@@ -365,5 +365,19 @@ void computeMain_getOctreeLabel4(uint threadIndex: SV_DispatchThreadID, uint thr
             }
         }
         #endif
-    }
+
+    //if (threadIndex == 0) {
+    //    OctreeNodeInfo_G_VRPG info = OctreeNodeInfoBuffer_G[3][1537];
+    //    printf("layer: 3, index: 1537\n label: %d, indivisible: %d\n", info.label_indivisible >> 1, info.label_indivisible & 1);
+    //
+    //    int2 info2 = IndivisibleNodeInfoBuffer_G[219];
+    //    printf("layer: %d, index: %d\n label: %d, indivisible: %d\n", info2.x, info2.y, info.label_indivisible >> 1, info.label_indivisible & 1);
+    //
+    //    info = OctreeNodeInfoBuffer_G[4][12301];
+    //    printf("layer: 4, index: 12301\n label: %d, indivisible: %d\n", info.label_indivisible >> 1, info.label_indivisible & 1);
+    //
+    //    info2 = IndivisibleNodeInfoBuffer_G[672];
+    //    printf("layer: %d, index: %d\n label: %d, indivisible: %d\n", info2.x, info2.y, info.label_indivisible >> 1, info.label_indivisible & 1);
+    //}
+}
 }

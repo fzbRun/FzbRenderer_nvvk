@@ -152,11 +152,13 @@ void computeMain_GetDebugClusterG(uint threadIndex: SV_DispatchThreadID) {
     if (nodeLabel_G >= 0 && nodeLabel_G < int(GlobalInfoBuffer[0].indivisibleNodeCount_G)) {
         uint2 debugClusterInfo = IndivisibleNodeInfoBuffer_G[nodeLabel_G];
         OctreeNodeData_G_VRPG debugClusterData = OctreeNodeDataBuffer_G[debugClusterInfo.x][debugClusterInfo.y];
-        printf("cluster debug: layer=%d node=%d\nnormal: %f %f %f\naabb=(%f %f %f)-(%f %f %f)\n",
+        printf("cluster debug: layer=%d node=%d\nnormal: %f %f %f\naabb=(%f %f %f)-(%f %f %f)\npos: %f %f %f\n",
                debugClusterInfo.x, debugClusterInfo.y,
                debugClusterData.meanNormal.x, debugClusterData.meanNormal.y, debugClusterData.meanNormal.z,
                debugClusterData.aabb.minimum.x, debugClusterData.aabb.minimum.y, debugClusterData.aabb.minimum.z,
-               debugClusterData.aabb.maximum.x, debugClusterData.aabb.maximum.y, debugClusterData.aabb.maximum.z);
+               debugClusterData.aabb.maximum.x, debugClusterData.aabb.maximum.y, debugClusterData.aabb.maximum.z,
+               hitPos.x, hitPos.y, hitPos.z,
+        );
     }
 }
 
