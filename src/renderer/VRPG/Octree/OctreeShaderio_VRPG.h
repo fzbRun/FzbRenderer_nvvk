@@ -7,7 +7,7 @@
 #define FZBRENDERER_OCTREE_2_VRPG_SHADERIO_H
 
 #define MAX_OCTREE_LAYER_VRPG 8
-#define IndivisibleNodeCount_G_VRPG 3000
+#define IndivisibleNodeCount_G_VRPG 4000
 
 NAMESPACE_SHADERIO_BEGIN()
 
@@ -143,6 +143,22 @@ enum class BindingPoints_Octree_VRPG : uint32_t {
 	eSpatialReservoir,
 	eReservoirCurrent,
 	eReservoirHistory,
+
+#if VRPG_Candidate_Samples_SampleMode == 1
+	eCandidatePoolInfo_VRPG,
+	eCandidatePoolNodeInfo_VRPG,
+#endif
+};
+//------------------------------------------------------------------------------------------
+struct OctreeLayerInfo_VRPG {
+	uint32_t divisibleNodeCount;
+	uint32_t indivisibleNodeCount;
+};
+
+struct OctreeGlobalInfo_VRPG {
+	DispatchIndirectCommand cmd;
+	uint indivisibleNodeCount_G;
+	OctreeLayerInfo_VRPG layerInfos_G[MAX_OCTREE_LAYER_VRPG];
 };
 //------------------------------------------------------------------------------------------
 #define MAX_ADJACENT_CLUSTER_COUNT 4
@@ -187,6 +203,15 @@ struct CandidateLeafNodeData_VRPG {
 	float3 normal;
 #endif
 };
+
+struct CandidatePoolInfo_VRPG {
+	int candidateNodeCount;
+};
+struct CandidatePoolNodeInfo_VRPG {
+	int valid;
+	int layer_E;
+	int nodeIndex_E;
+};
 //------------------------------------------------------------------------------------------
 struct CandidateSampleData_VRPG {
 	float w;
@@ -206,17 +231,6 @@ struct ReservoirSample_VRPG {
 struct HasDataOctreeBlockCount_VRPG {
 	uint32_t count_G;
 	uint32_t count_E;
-};
-
-struct OctreeLayerInfo_VRPG {
-	uint32_t divisibleNodeCount;
-	uint32_t indivisibleNodeCount;
-};
-
-struct OctreeGlobalInfo_VRPG {
-	DispatchIndirectCommand cmd;
-	uint indivisibleNodeCount_G;
-	OctreeLayerInfo_VRPG layerInfos_G[MAX_OCTREE_LAYER_VRPG];
 };
 
 struct OctreeThreadGroupInfo_VRPG {

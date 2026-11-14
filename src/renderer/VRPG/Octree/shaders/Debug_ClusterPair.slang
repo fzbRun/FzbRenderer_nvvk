@@ -95,17 +95,28 @@ void computeMain_GetDebugClusterG(uint threadIndex: SV_DispatchThreadID) {
     CallablePayload payload;
     if (!traceRay(ray, payload)) {
         pushConst.globalInfoAddress.clusterIndex_G = -1;
+        printf("not hit geometry!\n");
         return;
     }
+    float3 hitPos = payload.hitPos;
+    float3 hitNormal = payload.hitNormal;
+    printf("hitPos: %f %f %f, hitNormal: %f %f %f\n", hitPos.x, hitPos.y, hitPos.z, hitNormal.x, hitNormal.y, hitNormal.z);
 
     uint normalIndex = getNormalIndex(payload.hitNormal);
-    float3 hitPos = payload.hitPos;
+    int voxelIndex = getVoxelIndex(hitPos, pushConst.VGBStartPos_Size.xyz, pushConst.VGBVoxelSize.xyz, (int)pushConst.VGBStartPos_Size.w);
+    voxelIndex += normalIndex * pushConst.VGBVoxelTotalCount;
+    OctreeNodeData_G_VRPG nodeData = OctreeNodeDataBuffer_G[pushConst.octreeMaxLayer][voxelIndex];
+    if (nodeData.meanNormal.w == 0.0f) {
+        printf("voxel not has geometry!\n");
+        return;
+    }
 
     OctreeNodeInfo_G_VRPG nodeInfo_G = OctreeNodeInfoBuffer_G[0][normalIndex];
     int nodeLabel_G = int(nodeInfo_G.label_indivisible >> 1) - 1;
     bool hasData = nodeLabel_G >= 0;
     if (!hasData) {
         pushConst.globalInfoAddress.clusterIndex_G = -1;
+        printf("normal tree not has geometry!\n");
         return;
     }
 
@@ -143,6 +154,7 @@ void computeMain_GetDebugClusterG(uint threadIndex: SV_DispatchThreadID) {
     }
     if (!hitIndivisible) {
         pushConst.globalInfoAddress.clusterIndex_G = -1;
+        printf("not Indivisible!\n");
         return;
     }
 
@@ -152,12 +164,11 @@ void computeMain_GetDebugClusterG(uint threadIndex: SV_DispatchThreadID) {
     if (nodeLabel_G >= 0 && nodeLabel_G < int(GlobalInfoBuffer[0].indivisibleNodeCount_G)) {
         uint2 debugClusterInfo = IndivisibleNodeInfoBuffer_G[nodeLabel_G];
         OctreeNodeData_G_VRPG debugClusterData = OctreeNodeDataBuffer_G[debugClusterInfo.x][debugClusterInfo.y];
-        printf("cluster debug: layer=%d node=%d\nnormal: %f %f %f\naabb=(%f %f %f)-(%f %f %f)\npos: %f %f %f\n",
+        printf("cluster debug: layer=%d node=%d\nnormal: %f %f %f\naabb=(%f %f %f)-(%f %f %f)\n\n",
                debugClusterInfo.x, debugClusterInfo.y,
                debugClusterData.meanNormal.x, debugClusterData.meanNormal.y, debugClusterData.meanNormal.z,
                debugClusterData.aabb.minimum.x, debugClusterData.aabb.minimum.y, debugClusterData.aabb.minimum.z,
                debugClusterData.aabb.maximum.x, debugClusterData.aabb.maximum.y, debugClusterData.aabb.maximum.z,
-               hitPos.x, hitPos.y, hitPos.z,
         );
     }
 }

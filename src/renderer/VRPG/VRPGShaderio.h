@@ -7,6 +7,16 @@
 NAMESPACE_SHADERIO_BEGIN()
 
 #define Candidate_Samples_Count 64
+#ifndef VRPG_Candidate_Samples_SampleMode
+#define VRPG_Candidate_Samples_SampleMode 1
+
+#if VRPG_Candidate_Samples_SampleMode == 1
+#undef Candidate_Samples_Count
+//don't change
+#define Candidate_Samples_Count 32
+#endif
+
+#endif
 
 // Compile-time VRPG switches (change requires rebuilding the app).
 #define VRPG_RANDOM_FRAME_SOURCE 1

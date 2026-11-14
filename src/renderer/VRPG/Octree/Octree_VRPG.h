@@ -72,6 +72,11 @@ public:
 	nvvk::Buffer clusterPairGlobalInfoBuffer;
 	nvvk::Buffer clusterPairHitInfoBuffer;
 
+#if VRPG_Candidate_Samples_SampleMode == 1
+	nvvk::Buffer candidatePoolInfoBuffer;
+	nvvk::Buffer candidatePoolNodeInfoBuffer;
+#endif
+
 	nvvk::Buffer candidateSubTreeInfoBuffer;
 	nvvk::Buffer candidateLeafNodeDataBuffer;
 
@@ -122,6 +127,14 @@ private:
 	VkShaderEXT computeShader_getOctreeLabel4{};
 
 	VkShaderEXT computeShader_initWeights{};
+#if VRPG_Candidate_Samples_SampleMode == 1
+	VkShaderEXT computeShader_getCandidateNodes_init{};
+	VkShaderEXT computeShader_getCandidateNodes_1{};
+	VkShaderEXT computeShader_getCandidateNodes_2{};
+	VkShaderEXT computeShader_getCandidateNodes_3{};
+	VkShaderEXT computeShader_getCandidateNodes_4{};
+	VkShaderEXT computeShader_getCandidateNodes_5{};
+#endif 
 	VkShaderEXT computeShader_getCandidateNodes{};
 	VkShaderEXT computeShader_dispatchGetCandidateLeafNodes{};
 	VkShaderEXT computeShader_getCandidateLeafNodes{};

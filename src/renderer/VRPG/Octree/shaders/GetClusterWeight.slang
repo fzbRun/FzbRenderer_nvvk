@@ -72,7 +72,11 @@ void computeMain_initCandidateNodes(uint threadIndex: SV_DispatchThreadID, uint 
     if (threadIndex == 0) {
         clusterPairGlobalInfoBuffer[0].clusterPairCount = 0;
         DispatchIndirectCommand cmd;
+        #if VRPG_Candidate_Samples_SampleMode == 1
+        cmd.x = indivisibleNodeCount_G;
+        #else
         cmd.x = (indivisibleNodeCount_G + GET_CANDIDATE_NODES_CS_THREADGROUP_SIZE - 1) / GET_CANDIDATE_NODES_CS_THREADGROUP_SIZE;
+        #endif
         cmd.y = 1; cmd.z = 1;
         GlobalInfoBuffer[0].cmd = cmd;
         bool hasLightNode = false;
@@ -516,10 +520,10 @@ void computeMain_clusterPairHitTest(uint threadIndex: SV_DispatchThreadID, uint 
         ray.TMax = INFINITE;
         traceRay(ray, hitPayload);
         if (hitPayload.hit > 0.0f) {
-            bool check = checkOcclusion(samplePoint_E, hitPayload.hitPos, nodeData_G.aabb);
+            bool check = true;  //checkOcclusion(samplePoint_E, hitPayload.hitPos, nodeData_G.aabb);
             check &= checkPointInAABB2(hitPayload.hitPos, nodeData_G.aabb);
             check &= dot(hitPayload.normal, -sampleDir) > 0.0f;
-            check &= dot(hitPayload.normal, normal_G) > 0.707f;
+            check &= all(GetPrincipalAxis(hitPayload.normal) == GetPrincipalAxis(normal_G)); // dot(hitPayload.normal, normal_G) > 0.707f;
             if (!check) hitPayload.hit = -2.0f;
         }
     }

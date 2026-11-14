@@ -168,6 +168,12 @@ float3x3 RandomRotationY(float r) {
     r *= 6.2831853;
     return float3x3(float3(cos(r), 0, sin(r)), float3(0, 1, 0), float3(-sin(r), 0, cos(r)));
 }
+//---------------------------------------------------normal---------------------------------------------------
+float3 GetPrincipalAxis(float3 n)
+{
+    float3 a = abs(n);
+    return step(max(a.x, max(a.y, a.z)), a) * sign(n);
+}
 //---------------------------------------------------AABB---------------------------------------------------
 inline bool checkPointInAABB(float3 pos, AABB aabb) {
     return all((pos - aabb.minimum >= 0.0f) && (aabb.maximum - pos >= 0.0f));

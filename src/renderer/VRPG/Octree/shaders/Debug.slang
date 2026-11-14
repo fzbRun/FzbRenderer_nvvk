@@ -37,6 +37,8 @@ VSout vertexMain(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID
         show = any(node.radiance > 0.0f);
         nodeAABB = node.aabb;
         color = node.radiance * 50.0f;
+
+        //if (pushConst.curLayer_E == 2 && nodeIndex == 0) color = float3(10.0f, 10.0f, 0.0f);
     } else {
         int nodeIndex = pushConst.normalIndex_G_2 * pushConst.curLayerNodeCount_G_2 + instanceIndex;
         OctreeNodeInfo_G_VRPG nodeInfo = OctreeNodeInfoBuffer_G[pushConst.curLayer_G_2][nodeIndex];

@@ -41,7 +41,7 @@ void computeMain_clearVGB(uint threadIndex: SV_DispatchThreadID) {
 struct VSout
 {
     float3 worldPos : POSITION;
-    float3 worldNormal : NORMAL;
+    //float3 worldNormal : NORMAL;
     float3 emissive;
 };
 
@@ -72,7 +72,7 @@ VSout vertexMain(uint vertexIndex: SV_VertexID)
 
     // Retrieve the data
     float3 posMesh = getAttribute<float3>(mesh.dataBuffer, mesh.triMesh.positions, vertexIndex);
-    float3 normalMesh = getAttribute<float3>(mesh.dataBuffer, mesh.triMesh.normals, vertexIndex);
+    //float3 normalMesh = getAttribute<float3>(mesh.dataBuffer, mesh.triMesh.normals, vertexIndex);
 
     //BSDFMaterial material = sceneInfo.materials[instance.materialIndex];
     //int normalMapIndex = material.materialMapIndex.x;
@@ -86,12 +86,12 @@ VSout vertexMain(uint vertexIndex: SV_VertexID)
     //    normalMesh = mul(localNormal, TBN);
     //}
 
-    float3 normal = mul(normalMesh, transpose(Inverse3x3(float3x3(instance.transform))));
+    //float3 normal = mul(normalMesh, transpose(Inverse3x3(float3x3(instance.transform))));
     float4 pos = mul(float4(posMesh, 1.0), instance.transform);
 
     VSout output;
     output.worldPos = pos.xyz;
-    output.worldNormal = normal;
+    //output.worldNormal = normal;
     output.emissive = sceneInfo.materials[instance.materialIndex].emissive;
 
     return output;
@@ -103,10 +103,13 @@ void geometryMain(
     triangle VSout input[3],
     inout TriangleStream<GSout> outputStream
 ) {
-    float3 normal0 = input[0].worldNormal;
-    float3 normal1 = input[1].worldNormal;
-    float3 normal2 = input[2].worldNormal;
-    float3 normal = normalize(normal0 + normal1 + normal2);
+    // float3 normal0 = input[0].worldNormal;
+    // float3 normal1 = input[1].worldNormal;
+    // float3 normal2 = input[2].worldNormal;
+    float3 e0 = input[1].worldPos - input[0].worldPos;
+    float3 e1 = input[2].worldPos - input[0].worldPos;
+
+    float3 normal = normalize(cross(e0, e1));
     float3 absNormal = abs(normal);
     int viewIndex = absNormal.x > absNormal.y ? (absNormal.x > absNormal.z ? 1 : 0) : (absNormal.y > absNormal.z ? 2 : 0);
 
@@ -114,7 +117,7 @@ void geometryMain(
     for (int i = 0; i < 3; i++) {
         output.sv_position = mul(float4(input[i].worldPos, 1.0f), pushConst.VP[viewIndex]);
         output.worldPos = input[i].worldPos;
-        output.worldNormal = input[i].worldNormal;
+        output.worldNormal = normal;    //input[i].worldNormal;
         outputStream.Append(output);
     }
 
@@ -216,19 +219,15 @@ void geometryMain_ThreeView(
     triangle VSout input[3],
     inout TriangleStream<GSout_ThreeView> outputStream
 ) {
-    float3 normal0 = input[0].worldNormal;
-    float3 normal1 = input[1].worldNormal;
-    float3 normal2 = input[2].worldNormal;
-    float3 normal = normalize(normal0 + normal1 + normal2);
+    // float3 normal0 = input[0].worldNormal;
+    // float3 normal1 = input[1].worldNormal;
+    // float3 normal2 = input[2].worldNormal;
+    // float3 normal = normalize(normal0 + normal1 + normal2);
+    float3 e0 = input[1].worldPos - input[0].worldPos;
+    float3 e1 = input[2].worldPos - input[0].worldPos;
 
-    //float3 pos0 = input[0].worldPos;
-    //float3 pos1 = input[1].worldPos;
-    //float3 pos2 = input[2].worldPos;
-    //float3 e0 = pos1 - pos0;
-    //float3 e1 = pos2 - pos0;
-    //float3 normal = normalize(cross(e0, e1));
+    float3 normal = normalize(cross(e0, e1));
     float3 absNormal = abs(normal);
-
     int viewIndex = absNormal.x > absNormal.y ? (absNormal.x > absNormal.z ? 1 : 0) : (absNormal.y > absNormal.z ? 2 : 0);
 
     GSout_ThreeView output;
@@ -236,7 +235,7 @@ void geometryMain_ThreeView(
     for (int i = 0; i < 3; i++) {
         output.worldPos = input[i].worldPos;
         output.sv_position = mul(float4(output.worldPos, 1.0f), pushConst.VP[viewIndex]);
-        output.worldNormal = input[i].worldNormal;
+        output.worldNormal = normal;    //input[i].worldNormal;
         output.emissive = input[i].emissive;
         outputStream.Append(output);
     }

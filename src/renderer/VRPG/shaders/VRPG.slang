@@ -189,6 +189,74 @@ bool traceRay(RayDesc ray, inout HitPayload_VRPG payload)
     }
     return false;
 }
+
+bool traceRay_test(RayDesc ray, inout HitPayload_VRPG payload)
+{
+    #ifndef NDEBUG
+    if (any(isnan(ray.Origin)) || any(isinf(ray.Origin)) ||
+        any(isnan(ray.Direction)) || any(isinf(ray.Direction)))
+        return false;
+    #endif
+    RayQuery<RAY_FLAG_NONE> q;
+    q.TraceRayInline(topLevelAS, RAY_FLAG_NONE, 0xFF, ray);
+    while (q.Proceed())
+    {
+        if (q.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE)
+            q.CommitNonOpaqueTriangleHit();
+    }
+    if (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
+    {
+        float2 barycentricCoords = q.CommittedTriangleBarycentrics();
+        float4x3 worldToObject = q.CommittedWorldToObject4x3();
+        float4x3 objectToWorld = q.CommittedObjectToWorld4x3();
+        int instanceIndex = q.CommittedInstanceIndex();
+        uint primitiveIndex = q.CommittedPrimitiveIndex();
+        SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+        Instance instance = sceneInfo.instances[instanceIndex];
+        Mesh mesh = sceneInfo.meshes[instance.meshIndex];
+        payload.material = sceneInfo.materials[instance.materialIndex];
+        const float3 barycentrics = float3(1.0f - barycentricCoords.x - barycentricCoords.y, barycentricCoords.x, barycentricCoords.y);
+
+        const int3 idx = getTriangleIndices(mesh.dataBuffer, mesh.triMesh, primitiveIndex);
+
+        if (any(idx < 0) ||
+    idx.x >= int(mesh.triMesh.positions.count) ||
+    idx.y >= int(mesh.triMesh.positions.count) ||
+            idx.z >= int(mesh.triMesh.positions.count))
+        {
+            return false;
+        }
+
+        BufferView posf = mesh.triMesh.positions;
+        posf.byteStride = 4;
+
+        const uint i0 = uint(idx.x) * 3u;
+        const uint i1 = uint(idx.y) * 3u;
+        const uint i2 = uint(idx.z) * 3u;
+
+        const float3 v0 = float3(getAttribute<float>(mesh.dataBuffer, posf, i0 + 0u),
+                                 getAttribute<float>(mesh.dataBuffer, posf, i0 + 1u),
+                                 getAttribute<float>(mesh.dataBuffer, posf, i0 + 2u));
+        const float3 v1 = float3(getAttribute<float>(mesh.dataBuffer, posf, i1 + 0u),
+                                 getAttribute<float>(mesh.dataBuffer, posf, i1 + 1u),
+                                 getAttribute<float>(mesh.dataBuffer, posf, i1 + 2u));
+        const float3 v2 = float3(getAttribute<float>(mesh.dataBuffer, posf, i2 + 0u),
+                                 getAttribute<float>(mesh.dataBuffer, posf, i2 + 1u),
+                                 getAttribute<float>(mesh.dataBuffer, posf, i2 + 2u));
+
+        const float3 localPosition = v0 * barycentrics.x + v1 * barycentrics.y + v2 * barycentrics.z;
+        payload.hitPos = float3(mul(float4(localPosition, 1.0), objectToWorld));
+
+        const float3 geoNormal = normalize(cross(v1 - v0, v2 - v0));
+        float3x3 W = float3x3(worldToObject[0].xyz, worldToObject[1].xyz, worldToObject[2].xyz);
+        payload.hitNormal = normalize(mul(geoNormal, W));
+
+        if (any(isnan(payload.hitNormal))) return false;
+        return true;
+    }
+    return false;
+}
+
 float3 RayMiss(float3 rayDirection) {
     SceneInfo* sceneInfo = pushConst.sceneInfoAddress;
     if (sceneInfo.useSky == 1) return evalSimpleSky(sceneInfo.skySimpleParam, rayDirection);
