@@ -5,6 +5,7 @@
 #include <nvvk/formats.hpp>
 #include "FzbPathGuidingRenderer/FzbPathGuiding.h"
 #include "VRPG/VRPG.h"
+#include "VRPG2/VRPG2.h"
 #include "NPMPathGuiding/NPMPathGuiding.h"
 #include "PathTracing_KPCNNDenoising/PathTracing_KPCNNDenoising.h"
 #include "ZhiHuCode/ZhiHuCode.h"
@@ -13,6 +14,7 @@
 #include "ReSTIRGI/ReSTIR_GI.h"
 #include "StochasticLightcuts/StochasticLightcuts.h"
 #include "VXPG/VXPG.h"
+#include "LPV/LPV.h"
 #include "NeuralTextureCompression/NeuralTextureCompression.h"
 
 enum FzbRendererType {
@@ -25,7 +27,9 @@ enum FzbRendererType {
 	FZB_FEATURE_COMPONENT_SVO_PG_DEBUG,
 	FZB_RENDERER_FZB_PATH_GUIDING,
 	FZB_RENDERER_VXPG,
+	FZB_RENDERER_LPV,
 	FZB_RENDERER_VRPG,
+	FZB_RENDERER_VRPG2,
 	FZB_RENDERER_PATH_TRACING_KPCNN_DENOISING,
 	FZB_RENDERER_RESTIR_GI,
 	FZB_RENDERER_STOCHASTIC_LIGHTCUTS,
@@ -42,7 +46,9 @@ std::map<std::string, FzbRendererType> RendererTypeMap{
 	{ "NPMPathGuiding", FZB_RENDERER_NPM_PATH_GUIDING },
 	{ "FzbPathGuiding", FZB_RENDERER_FZB_PATH_GUIDING },
 	{ "VXPG", FZB_RENDERER_VXPG },
+	{ "LPV", FZB_RENDERER_LPV },
 	{ "VRPG", FZB_RENDERER_VRPG },
+	{ "VRPG2", FZB_RENDERER_VRPG2 },
 	{ "PathTracing_KPCNNDenoising", FZB_RENDERER_PATH_TRACING_KPCNN_DENOISING },
 	{ "ReSTIR_GI", FZB_RENDERER_RESTIR_GI },
 	{ "StochasticLightcuts", FZB_RENDERER_STOCHASTIC_LIGHTCUTS },
@@ -61,8 +67,10 @@ std::shared_ptr<FzbRenderer::Renderer> FzbRenderer::createRenderer(RendererCreat
 			case FZB_RENDERER_PATH_TRACING: return std::make_shared<PathTracingRenderer>(createInfo.rendererNode);
 			case FZB_RENDERER_FZB_PATH_GUIDING: return std::make_shared<FzbPathGuidingRenderer>(createInfo.rendererNode);
 			case FZB_RENDERER_VXPG: return std::make_shared<VXPGRenderer>(createInfo.rendererNode);
+			case FZB_RENDERER_LPV: return std::make_shared<LPVRenderer>(createInfo.rendererNode);
 			case FZB_RENDERER_VRPG: return std::make_shared<VRPGRenderer>(createInfo.rendererNode);
-			//case FZB_RENDERER_NPM_PATH_GUIDING: return std::make_shared<NPMPathGuiding>(createInfo.rendererNode);
+	case FZB_RENDERER_VRPG2: return std::make_shared<VRPG2Renderer>(createInfo.rendererNode);
+					//case FZB_RENDERER_NPM_PATH_GUIDING: return std::make_shared<NPMPathGuiding>(createInfo.rendererNode);
 			case FZB_RENDERER_PATH_TRACING_KPCNN_DENOISING: return std::make_shared<PathTracing_KPCNNDenoising>(createInfo.rendererNode);
 			case FZB_RENDERER_RESTIR_GI: return std::make_shared<ReSTIR_GI>(createInfo.rendererNode);
 			case FZB_RENDERER_STOCHASTIC_LIGHTCUTS: return std::make_shared<StochasticLightcutsRenderer>(createInfo.rendererNode);

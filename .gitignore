@@ -1,10 +1,32 @@
-# Build directories (common CMake convention)
+# ============================================================
+# FzbRenderer_nvvk —— .gitignore
+# 原则：源码 / 资源 / 脚本 / 构建配置进仓库；
+#       构建产物、调试快照、运行时缓存不进。
+# 注意：本文件只影响「尚未被跟踪」的文件。
+#       已经被跟踪的文件要 git rm --cached 才会真正失效。
+# ============================================================
+
+# ---------- 构建目录 ----------
 build/
 _build/
 out/
 cmake-build-*/
 
-# Visual Studio files
+# 运行产物：exe / dll / 截图 / 日志都在这里
+_bin/
+
+# 构建日志（含 build/logs/ 之类）
+logs/
+/*.log
+
+# ---------- CMake 生成物 ----------
+CMakeCache.txt
+CMakeFiles/
+CTestTestfile.cmake
+cmake_install.cmake
+install_manifest.txt
+
+# ---------- Visual Studio ----------
 *.sln
 *.vcxproj
 *.vcxproj.filters
@@ -13,11 +35,10 @@ cmake-build-*/
 *.user
 *.userosscache
 *.sln.docstates
-
-# Visual Studio IntelliSense
 .vs/
+#.vscode/settings.json      # 目前故意提交（记录了本机依赖路径），需要时可取消注释
 
-# Compile results
+# ---------- 编译产物 ----------
 *.exe
 *.dll
 *.lib
@@ -27,39 +48,48 @@ cmake-build-*/
 *.obj
 *.o
 *.manifest
-
-# Debug and Release folders (if built in source tree)
-Debug/
-Release/
-#x64/
-#x86/
-
-# CMake cache and generated files (if not using out-of-source build exclusively)
-CMakeCache.txt
-CMakeFiles/
-CTestTestfile.cmake
-cmake_install.cmake
-install_manifest.txt
-
-# Precompiled headers (optional, if you don't commit them)
 *.pch
 
-# Environment files (e.g., from vcpkg or conan)
-vcpkg_installed/
-conan.lock
-conanbuildinfo.cmake
+# 直接在源码树里构建时（历史习惯）
+Debug/
+Release/
 
-# Editors
+# ---------- Slang / SPIR-V 运行时缓存 ----------
+# 这些缓存按 mtime 判断是否重编译，提交后反而会掩盖 shader 源码的改动
+*.spv
+*.slang.dep
+
+# ---------- 调试 / 临时文件 ----------
+# 不要用 .bak / .zip 做回退快照，回退用 git
+*.bak
+*.seambak
+*.tmp
 *.swp
 *~
 .DS_Store
 
-_downloaded_resources/
-#third_party/
+# ---------- Python ----------
+__pycache__/
+*.pyc
 
+# ---------- _tools：脚本要跟踪，调试产物不要 ----------
+_tools/*.zip
+_tools/*.err
+_tools/*.out
+_tools/lpv_validation/
+_tools/gi_stripped.cpp
+
+# ---------- 依赖下载 / 包管理缓存 ----------
+_downloaded_resources/
+vcpkg_installed/
+conan.lock
+conanbuildinfo.cmake
+
+# ---------- 大体积/实验产物 ----------
 *.exr
 *.bin
-#.vscode/settings.json
-
 result/nsight*
 论文/
+
+# third_party/ 目前是 vendored 依赖且已入库，保持提交
+#third_party/
