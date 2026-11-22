@@ -49,7 +49,7 @@ struct VRPGSetting {
 	int lightOctreeDepth;
 
 	//PathGuiding
-	float jitterRadiusScale = 0.5f;
+	float jitterRadiusScale = 3.0f;
 };
 struct VRPGSource {
 	AccelerationStructureManager* asManager;

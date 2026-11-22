@@ -15,21 +15,6 @@ NAMESPACE_SHADERIO_BEGIN()
 #define FZB_PATHGUIDING_THREADGROUP_SIZE_X 16
 #define FZB_PATHGUIDING_THREADGROUP_SIZE_Y 16
 
-#ifndef VRPG_PATH_SAMPLE_MODE
-// 1 = one sample technique choice with balance heuristic MIS (see pathGuiding.slang)
-#define VRPG_PATH_SAMPLE_MODE 1
-#endif
-#ifndef VRPG_RANDOM_FRAME_SOURCE
-#define VRPG_RANDOM_FRAME_SOURCE 1
-#endif
-// no spatiotemporal reuse and no neighbour jitter in this renderer
-#define VRPG_SPATIAL_REUSE 0
-#define VRPG_TEMPORAL_REUSE 0
-#define VRPG_JITTER_SAMPLING 0
-#ifndef NEARBY_NODE_COUNT_VRPG
-#define NEARBY_NODE_COUNT_VRPG 4
-#endif
-
 struct PathGuidingPushConstant_VRPG2
 {
 	int maxFrameCount;
@@ -78,6 +63,7 @@ enum class PathGuidingBindingPoints_VRPG2 : uint32_t
 	eGlobalInfo,
 
 	eClusterData_Octree,
+	eNearbyClusterInfos,
 
 	eOutImage = 0,
 	eTextures = 1,

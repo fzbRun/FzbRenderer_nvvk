@@ -3,23 +3,9 @@
 #include "renderer/VRPG2/PathGuiding/PathGuidingShaderio.h"
 #include "renderer/VRPG2/RIS/RISShaderio.h"
 #include "renderer/VRPG2/shaders/VRPGCommon.slang"
+#include "renderer/VRPG2/PathGuiding/shaders/common.slang"
 
-[[vk::push_constant]] ConstantBuffer<PathGuidingPushConstant_VRPG2, ScalarDataLayout> pushConst;
-[[vk::binding(PathGuidingBindingPoints_VRPG2::eClusterInfo_Octree)]] RWStructuredBuffer<ClusterInfo_Octree_VRPG, ScalarDataLayout> ClusterInfo_Octree[];
-[[vk::binding(PathGuidingBindingPoints_VRPG2::eLightNodeData_Octree)]] RWStructuredBuffer<LightNodeData_Octree_VRPG, ScalarDataLayout> LightNodeData_Octree[];
-[[vk::binding(PathGuidingBindingPoints_VRPG2::eCandidateSubTreeInfo)]] RWStructuredBuffer<CandidateSubTreeInfo_VRPG2, ScalarDataLayout> candidateSubTreeDataBuffer;
-[[vk::binding(PathGuidingBindingPoints_VRPG2::eCandidateLeafNodeData)]] RWStructuredBuffer<CandidateLeafNodeData_VRPG2, ScalarDataLayout> candidateLeafNodeDataBuffer;
-[[vk::binding(PathGuidingBindingPoints_VRPG2::eCandidateSampleData)]] RWStructuredBuffer<CandidateSampleData_VRPG2, ScalarDataLayout> candidateSampleDataBuffer;
-[[vk::binding(PathGuidingBindingPoints_VRPG2::eCandidateSamplePrefixWSum)]] RWStructuredBuffer<float> candidateSamplePrefixWSumBuffer;
-[[vk::binding(PathGuidingBindingPoints_VRPG2::eGlobalInfo)]] RWStructuredBuffer<GlobalInfo_VRPG2, ScalarDataLayout> GlobalInfoBuffer;
-#ifdef SpatialReuse_VRPG
-[[vk::binding(PathGuidingBindingPoints_VRPG2::eCandidateSampleAABB)]] RWStructuredBuffer<AABB, ScalarDataLayout> candidateSampleAABBBuffer;
-[[vk::binding(PathGuidingBindingPoints_VRPG2::eCandidateSampleData2)]] RWStructuredBuffer<CandidateSampleData_VRPG2, ScalarDataLayout> candidateSampleData2Buffer;
-#endif
-[[vk::binding(PathGuidingBindingPoints_VRPG2::eClusterData_Octree)]] RWStructuredBuffer<ClusterData_Octree_VRPG, ScalarDataLayout> ClusterData_Octree[];
-
-typedef CallablePayload HitPayload_VRPG;
-
+//---------------------------------------------------------------------------------------------------
 struct VRSampleData {
     float pdf;
     float wSum;
@@ -29,7 +15,6 @@ struct VRSampleData {
     AABB aabb;
     int normalIndex;
 };
-
 //----------------------------------------------Sample Function----------------------------------------------
 bool SphericalRectangleSample(AABB aabb, float3 hitPos, inout uint randomSeed, inout float3 sampleDir, inout float pdf, uint2 threadIndex) {
     float3 distance = aabb.maximum - aabb.minimum;
@@ -93,6 +78,7 @@ bool SphericalRectangleSample(AABB aabb, float3 hitPos, inout uint randomSeed, i
 int getNodeIndex_E(float3 hitPos, float3 hitNormal) {
     int3 voxelIndex = int3((hitPos - pushConst.lightVGBStartPos_Size.xyz) / pushConst.lightVGBVoxelSize.xyz);
     int voxelCount = 1 << pushConst.lightMaxOctreeLayer;
+    voxelIndex = clamp(voxelIndex, 0, voxelCount - 1);
     int voxelTotalCount = voxelCount * voxelCount * voxelCount;
 
     uint normalIndex = getNormalIndex(hitNormal);
@@ -116,7 +102,6 @@ int getNodeIndex_E(float3 hitPos, float3 hitNormal) {
 
     return nodeIndex_E;
 }
-
 int getGlobalGLabelFromInfo(int2 info) {
     if (info.x < 0) return -1;
     int label = 0;
@@ -172,7 +157,29 @@ int sampleJitteredClusterG(int currentNodeLabel, int currentLayer, int currentNo
     float theta = 2.0f * M_PI * rand(randomSeed);
     float3 jitteredPos = hitPos + (cos(theta) * tangent + sin(theta) * bitangent) * r;
 
-    return currentNodeLabel;
+    // Choose the current cluster or one of its stored neighbour clusters for the jittered point.
+    // The score is cosine + coherence weighted, so the jitter can cross normal partition boundaries
+    // while creases (low coherence) are still rejected.
+    const int clusterCount = int(GlobalInfoBuffer[0].ClusterCount);
+    if (currentNodeLabel < 0 || currentNodeLabel >= clusterCount || clusterCount <= 0)
+        return currentNodeLabel;
+
+    int selectedLabel = currentNodeLabel;
+    float bestScore = vrpgClusterJitterScore(currentNode, currentNode, jitteredPos, radius);
+    for (int i = 0; i < VRPG_NEARBY_CLUSTER_COUNT; ++i) {
+        OctreeNodeInfo_VRPG2 nearbyInfo = NearbyClusterInfoBuffer[currentNodeLabel].nearbyClusterInfos[i];
+        if (nearbyInfo.layerIndex < 0 || nearbyInfo.layerIndex > pushConst.maxOctreeLayer) continue;
+        int layerNodeCount = 6 * (1 << (3 * nearbyInfo.layerIndex));
+        if (nearbyInfo.nodeIndex < 0 || nearbyInfo.nodeIndex >= layerNodeCount) continue;
+        ClusterData_Octree_VRPG nearbyNode = ClusterData_Octree[nearbyInfo.layerIndex][nearbyInfo.nodeIndex];
+        float score = vrpgClusterJitterScore(currentNode, nearbyNode, jitteredPos, radius);
+        if (score > bestScore) {
+            bestScore = score;
+            int label = getGlobalGLabelFromInfo(int2(nearbyInfo.layerIndex, nearbyInfo.nodeIndex));
+            if (label >= 0 && label < clusterCount) selectedLabel = label;
+        }
+    }
+    return selectedLabel;
 }
 
 bool getNodeAABB_E_VRPG(inout VRSampleData sampleData, inout HitPayload_VRPG payload, uint2 threadIndex) {
@@ -229,10 +236,8 @@ bool getNodeAABB_E_VRPG(inout VRSampleData sampleData, inout HitPayload_VRPG pay
     #if VRPG_JITTER_SAMPLING == 1
     {
         float materialRoughness = payload.material.roughness;
-        if (payload.material.type == uint(MaterialType::Diffuse))
-            materialRoughness = 1.0f;
-        nodeLabel_G = sampleJitteredClusterG(nodeLabel_G, layerIndex_G, nodeIndex_G,
-                                             hitPos, materialRoughness, payload.randomSeed);
+        if (payload.material.type == uint(MaterialType::Diffuse)) materialRoughness = 1.0f;
+        nodeLabel_G = sampleJitteredClusterG(nodeLabel_G, layerIndex_G, nodeIndex_G, hitPos, materialRoughness, payload.randomSeed);
     }
     #endif
 
@@ -293,9 +298,12 @@ bool getNodeAABB_E_VRPG(inout VRSampleData sampleData, inout HitPayload_VRPG pay
 
     int subTreeNodeIndex_layer = candidateSubTreeDataBuffer[nodeLabel_G * Candidate_Samples_Count + candidateIndex].subTreeNodeIndex_layer;
     int subTreeLayer = subTreeNodeIndex_layer & 15;
+    if (subTreeLayer == -1) return false;
+
     int subTreeIndex = subTreeNodeIndex_layer >> 4;
     int subTreeLayerNodeCount = (1 << (3 * subTreeLayer));
     sampleData.normalIndex = subTreeIndex / subTreeLayerNodeCount;
+
 
     return SphericalRectangleSample(sampleData.aabb, payload.hitPos, payload.randomSeed, sampleData.sampleDir, sampleData.pdf);
 }
@@ -341,11 +349,9 @@ float getPgPdf_SPReuse(float wSum, float3 bsdfSamplePos, float3 bsdfSampleNormal
     return pdf;
 }
 
-float getPgPdf2(float wSum, int label_G, int outgoingIndex, float3 bsdfSamplePos, float3 bsdfSampleNormal, float3 hitPos, float3 sampleDir, float3 bsdf_cosine) {
+float getPgPdf(float wSum, int label_G, int outgoingIndex, float3 bsdfSamplePos, float3 bsdfSampleNormal, float3 hitPos, float3 sampleDir, float3 bsdf_cosine) {
     int gCount = int(GlobalInfoBuffer[0].ClusterCount);
-    if (label_G < 0 || label_G >= gCount ||
-        outgoingIndex < 0 || outgoingIndex >= OUTGOING_COUNT_VRPG2)
-        return 0.0f;
+    if (label_G < 0 || label_G >= gCount || outgoingIndex < 0 || outgoingIndex >= OUTGOING_COUNT_VRPG2) return 0.0f;
 
     uint nodeIndex_E = getNodeIndex_E(hitPos, bsdfSampleNormal);
 
@@ -363,7 +369,7 @@ float getPgPdf2(float wSum, int label_G, int outgoingIndex, float3 bsdfSamplePos
         int subTreeLeafNodeEndIndex = subTreeLeafNodeStartIndex + subTreeLeafNodeCount;
         if (nodeIndex_E >= subTreeLeafNodeStartIndex && nodeIndex_E < subTreeLeafNodeEndIndex) {
             ESum = subTreeInfo.ESum;
-            int candidateIndex = outgoingIndex * GlobalInfoBuffer[0].ClusterCount * Candidate_Samples_Count + label_G * Candidate_Samples_Count + i;
+            int candidateIndex = outgoingIndex * gCount * Candidate_Samples_Count + label_G * Candidate_Samples_Count + i;
             wi_ori = candidateSampleDataBuffer[candidateIndex].w;
             break;
         }
@@ -412,5 +418,78 @@ float getPgPdf2(float wSum, int label_G, int outgoingIndex, float3 bsdfSamplePos
         else pdf /= solidAngleSum;
     }
 
+    return pdf;
+}
+//-------------------------------------------------------------------------------------------------------------
+struct VRPGTechniqueSample
+{
+    bool valid;
+    float3 dir;
+    float3 bsdfCosine;
+    float bsdfPdf;
+    float guidePdf;
+};
+
+// Samples the BSDF technique. Returns the direct lighting term of the current vertex (it has to be
+// captured before BSDF_SAMPLE, which folds the BRDF into directionLightRadiance).
+VRPGTechniqueSample vrpgSampleBsdf(inout HitPayload_VRPG payload, SceneInfo sceneInfo) {
+    VRPGTechniqueSample s;
+    s.valid = false;
+    s.dir = float3(0.0f, 0.0f, 1.0f);
+    s.bsdfCosine = float3(0.0f);
+    s.bsdfPdf = 0.0f;
+    s.guidePdf = 0.0f;
+
+    BSDF_SAMPLE(payload);
+
+    s.dir = payload.incidence;
+    s.bsdfCosine = payload.bsdf * abs(dot(s.dir, payload.hitNormal));
+    s.bsdfPdf = payload.pdf;
+    if (!(s.bsdfPdf >= 0.0f) || isinf(s.bsdfPdf)) s.bsdfPdf = 0.0f;
+    if (any(isnan(s.bsdfCosine)) || any(isinf(s.bsdfCosine))) s.bsdfCosine = float3(0.0f);
+    s.valid = (s.bsdfPdf > 0.0f) && any(s.bsdfCosine > 0.0f);
+    return s;
+}
+
+// Shading point counterpart of the same data for the guide direction.
+VRPGTechniqueSample vrpgSampleGuide(HitPayload_VRPG payload, VRSampleData vrSampleData, bool getVrSample) {
+    VRPGTechniqueSample s;
+    s.valid = false;
+    s.dir = float3(0.0f, 0.0f, 1.0f);
+    s.bsdfCosine = float3(0.0f);
+    s.bsdfPdf = 0.0f;
+    s.guidePdf = 0.0f;
+
+    if (!getVrSample) return s;
+    s.guidePdf = vrSampleData.pdf;
+    if (!(s.guidePdf > 0.0f) || isinf(s.guidePdf)) {
+        s.guidePdf = 0.0f;
+        return s;
+    }
+
+    s.dir = vrSampleData.sampleDir;
+    const float cosine = abs(dot(payload.hitNormal, s.dir));
+    s.bsdfCosine = cosine * getBSDF(payload.material, s.dir, payload.hitNormal, payload.outgoing, payload.TBN, payload.isExt);
+    if (any(isnan(s.bsdfCosine)) || any(isinf(s.bsdfCosine))) s.bsdfCosine = float3(0.0f);
+
+    s.bsdfPdf = getPdf(payload.material, s.dir, payload.hitNormal, payload.outgoing, payload.TBN, payload.isExt);
+    if (!(s.bsdfPdf >= 0.0f) || isinf(s.bsdfPdf)) s.bsdfPdf = 0.0f;
+    s.valid = any(s.bsdfCosine > 0.0f);
+    return s;
+}
+
+// Guide density along an arbitrary direction (needs the payload of the vertex that direction hits).
+float vrpgGuidePdfAt(HitPayload_VRPG nextPayload, float3 previousHitPos, VRSampleData vrSampleData,
+                     float3 dir, float3 bsdfCosine, uint2 threadIndex)
+{
+    float pdf;
+    #if (VRPG_SPATIAL_REUSE || VRPG_TEMPORAL_REUSE)
+    pdf = getPgPdf_SPReuse(vrSampleData.wSum, nextPayload.hitPos, nextPayload.hitNormal,
+                           previousHitPos, dir, bsdfCosine, threadIndex);
+    #else
+    pdf = getPgPdf(vrSampleData.wSum, vrSampleData.nodeLabel_G, vrSampleData.outgoingIndex,
+                    nextPayload.hitPos, nextPayload.hitNormal, previousHitPos, dir, bsdfCosine);
+    #endif
+    if (!(pdf >= 0.0f) || isinf(pdf)) pdf = 0.0f;
     return pdf;
 }

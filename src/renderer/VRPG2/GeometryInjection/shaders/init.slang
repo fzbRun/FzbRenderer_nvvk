@@ -17,7 +17,6 @@ void computeMain_clearVGB(uint threadIndex: SV_DispatchThreadID) {
     VoxelData_VRPG voxelData;
     voxelData.aabbI.minimum = int4(FloatToOrderedInt(3.402823466e+38f));
     voxelData.aabbI.maximum = int4(FloatToOrderedInt(-3.402823466e+38f));
-    voxelData.irradiance = float4(0.0f);
     voxelData.sumNormal_G = float4(0.0f);
 
     uint normalIndex = threadIndex / voxelCount;

@@ -1,17 +1,16 @@
 #include "renderer/VRPG2/VRPG2Shaderio.h"
-#include "renderer/VRPG2/GeometryInjection/GeometryInjectionShaderio.h"
 #include "renderer/VRPG2/LightInjection/LightInjectionShaderio.h"
+#include "renderer/VRPG2/LightClustering/LightClusteringShaderio.h"
 #include "common/Shader/Slang/commonFunction.slang"
 
-// Debug view of the light injection result, ported from VRPG's LightInject::debug_Cube
-// (shaders/lightInject2.slang: vertexMain_Cube / fragmentMain_Cube).
+// Debug view of the light injection result, ported from VRPG's LightInject::debug_Cube.
 //
-// One solid cube per geometry VGB voxel, colored by the average irradiance of the voxel.
-// Voxels that were never injected (irradiance.w == 0) are collapsed to a degenerate clip
-// position, so they cost no fragments.
+// The injection now writes the leaf layer of the light tree (16^3 light cells), so this pass
+// draws one solid cube per non-empty light cell, colored by the radiance accumulated there
+// (VRPG shows the same quantity as voxelData.irradiance.xyz / irradiance.w).
 
 [[vk::push_constant]] ConstantBuffer<LightInjectPushConstant_VRPG> pushConst;
-[[vk::binding(StaticBindingPoints_LightInject_VRPG::eVGB)]] RWStructuredBuffer<VoxelData_VRPG, ScalarDataLayout> VGBs[];
+[[vk::binding(StaticBindingPoints_LightInject_VRPG::eLightNodeData)]] RWStructuredBuffer<LightNodeData_Octree_VRPG, ScalarDataLayout> LightNodeData;
 
 struct VSout {
     float4 sv_position : SV_Position;
@@ -23,24 +22,20 @@ struct PSout {
 
 [shader("vertex")]
 VSout vertexMain(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID) {
-    uint voxelTotalCount = uint(max(pushConst.voxelCount, 1));
-    uint VGBIndex = uint(instanceIndex) / voxelTotalCount;
-    uint voxelIndex = uint(instanceIndex) % voxelTotalCount;
-
-    VoxelData_VRPG voxelData = VGBs[VGBIndex][voxelIndex];
+    LightNodeData_Octree_VRPG node = LightNodeData[instanceIndex];
 
     VSout output;
     output.color = float3(0.0f);
-    if (voxelData.irradiance.w == 0.0f) {
-        output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
-    } else {
+    if (any(node.radiance > 0.0f)) {
         float3 worldPos;
-        worldPos.x = ((vertexIndex & 3) * 2) % 6 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.x) : OrderedIntToFloat(voxelData.aabbI.maximum.x);
-        worldPos.y = (vertexIndex & 3) <= 1 ? OrderedIntToFloat(voxelData.aabbI.minimum.y) : OrderedIntToFloat(voxelData.aabbI.maximum.y);
-        worldPos.z = vertexIndex / 4 == 0 ? OrderedIntToFloat(voxelData.aabbI.minimum.z) : OrderedIntToFloat(voxelData.aabbI.maximum.z);
+        worldPos.x = ((vertexIndex & 3) * 2) % 6 == 0 ? node.aabb.minimum.x : node.aabb.maximum.x;
+        worldPos.y = (vertexIndex & 3) <= 1 ? node.aabb.minimum.y : node.aabb.maximum.y;
+        worldPos.z = vertexIndex / 4 == 0 ? node.aabb.minimum.z : node.aabb.maximum.z;
 
         output.sv_position = mul(float4(worldPos, 1.0f), pushConst.sceneInfoAddress[0].viewProjMatrix);
-        output.color = voxelData.irradiance.xyz / voxelData.irradiance.w;
+        output.color = node.radiance;
+    } else {
+        output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
     }
 
     return output;

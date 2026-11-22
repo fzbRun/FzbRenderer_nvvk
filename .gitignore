@@ -93,3 +93,5 @@ result/nsight*
 
 # third_party/ 目前是 vendored 依赖且已入库，保持提交
 #third_party/
+
+Aftermath/

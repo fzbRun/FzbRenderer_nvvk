@@ -26,8 +26,16 @@ void LightInjection_VRPG::init() {
 #ifndef NDEBUG
 	VkExtent2D resolution = { VRPG2Renderer::setting.rasterVoxelizatioResolution.x, VRPG2Renderer::setting.rasterVoxelizatioResolution.y };
 	Feature::createGBuffer(true, false, 1, resolution);
+
+	{
+		nvutils::PrimitiveMesh primitive = FzbRenderer::MeshSet::createCube(false, false);
+		FzbRenderer::MeshSet mesh = FzbRenderer::MeshSet("Cube", primitive);
+		scene.addMeshSet(mesh);
+		scene.createSceneInfoBuffer();
+	}
 #endif
 	//---------------------------------------------------------------------------------------------
+	VRPG2Renderer::setting.spv_lightInjection = Application::sceneResource.isStaticScene ? LIGHTINJECT_SAMPLE_COUNT_STATIC_SCENE : LIGHTINJECT_SAMPLE_COUNT;
 	createSource();
 	createDescriptorSetLayout();
 	createDescriptorSet();
@@ -47,14 +55,6 @@ void LightInjection_VRPG::init() {
 	}
 	compileAndCreateShaders();
 
-#ifndef NDEBUG
-	{
-		nvutils::PrimitiveMesh primitive = FzbRenderer::MeshSet::createCube(false, false);
-		FzbRenderer::MeshSet mesh = FzbRenderer::MeshSet("Cube", primitive);
-		scene.addMeshSet(mesh);
-		scene.createSceneInfoBuffer();
-	}
-#endif
 }
 void LightInjection_VRPG::clean() {
 	// Debug builds create a GBuffer here; Feature::clean also destroys the descriptor packs and
@@ -129,8 +129,8 @@ void LightInjection_VRPG::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 };
 void LightInjection_VRPG::preRender() {}
 void LightInjection_VRPG::updateDataPerFrame(VkCommandBuffer cmd) {
-	VRPG2Renderer::setting.spv_lightInjection = (Application::sceneResource.isStaticScene && !VRPG2Renderer::setting.rebuildPerFrame)
-		? LIGHTINJECT_SAMPLE_COUNT_STATIC_SCENE : LIGHTINJECT_SAMPLE_COUNT;
+	// the light tree and the candidate tables have to follow the geometry VGB
+	VRPG2Renderer::setting.lightChange |= VRPG2Renderer::setting.geometryChange;
 
 	pushConstant.frameIndex = VRPG2Renderer::setting.frameIndex;
 	pushConstant.randomFrameIndex = VRPG2Renderer::setting.randomFrameIndex;
@@ -139,14 +139,11 @@ void LightInjection_VRPG::updateDataPerFrame(VkCommandBuffer cmd) {
 	pushConstant.bounces = VRPG2Renderer::setting.bounces_lightInjection;
 
 	int layerDiff = VRPG2Renderer::setting.geometryOctreeDepth - VRPG2Renderer::setting.lightOctreeDepth;
-	pushConstant.nodeSize = shaderio::float4(VRPG2Renderer::setting.voxelSize * float(1 << (3 * layerDiff)), 1.0f);
+	pushConstant.nodeSize = shaderio::float4(VRPG2Renderer::setting.voxelSize * float(1 << layerDiff), 1.0f);
 	pushConstant.nodeGridStartPos = shaderio::float4(VRPG2Renderer::setting.voxelGridStartPos, 1.0f);
 	pushConstant.nodeCount = (int)std::pow(VRPG2Renderer::setting.voxelGridResolution, 3) / (1 << (3 * layerDiff));
 
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
-
-	// the light tree and the candidate tables have to follow the geometry VGB
-	VRPG2Renderer::setting.lightChange |= VRPG2Renderer::setting.geometryChange;
 
 	float angle = FzbRenderer::rand(pushConstant.randomFrameIndex) * glm::two_pi<float>();
 	pushConstant.randomRotateMatrix = glm::mat3(glm::rotate(glm::mat4(1.0f), angle, glm::vec3(0, 0, 1)));
@@ -166,6 +163,13 @@ void LightInjection_VRPG::render(VkCommandBuffer cmd) {
 	};
 
 	injection(cmd);
+}
+void LightInjection_VRPG::postProcess(VkCommandBuffer cmd) {
+#ifndef NDEBUG
+	if (!showInjectionResult) return;
+
+	injectionCube(cmd);
+#endif
 }
 
 void LightInjection_VRPG::createSource() {
@@ -211,6 +215,12 @@ void LightInjection_VRPG::createDescriptorSetLayout() {
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = 1,
 		.stageFlags = VK_SHADER_STAGE_ALL });
+	// write target of the injection: the leaf layer of the light tree
+	bindings.addBinding({
+		.binding = (uint32_t)shaderio::StaticBindingPoints_LightInject_VRPG::eLightNodeData,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_ALL });
 
 	staticDescPack.init(bindings, Application::app->getDevice(), 1, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
 		VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT);
@@ -253,6 +263,8 @@ void LightInjection_VRPG::createDescriptorSet() {
 	VkWriteDescriptorSet    lightInjectionGlobalInfoWrite =
 		staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_LightInject_VRPG::eLightInjectionGlobalInfo, 0, 0, 1);
 	write.append(lightInjectionGlobalInfoWrite, globalInfoBuffer, 0, globalInfoBuffer.bufferSize);
+
+
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }
@@ -343,6 +355,57 @@ void LightInjection_VRPG::compileAndCreateShaders() {
 #endif
 }
 
+void LightInjection_VRPG::injection(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
+
+	// The leaf layer of the light tree is owned by LightClustering, which is initialised after this
+	// module, so the write target is bound on the first injection instead of in createDescriptorSet.
+	if (!lightNodeDescriptorBound) {
+		nvvk::Buffer& lightNodeLeafDataBuffer = VRPG2Renderer::source.lightNodeDataBuffer_Octree[VRPG2Renderer::setting.lightOctreeDepth];
+		nvvk::WriteSetContainer write{};
+		write.append(staticDescPack.makeWrite((uint32_t)shaderio::StaticBindingPoints_LightInject_VRPG::eLightNodeData, 0, 0, 1),
+			lightNodeLeafDataBuffer, 0, lightNodeLeafDataBuffer.bufferSize);
+		vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
+		lightNodeDescriptorBound = true;
+	}
+
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, staticDescPack.getSetPtr(), 0, nullptr);
+	{
+		nvvk::WriteSetContainer write{};
+		write.append(dynamicDescPack.makeWrite(shaderio::DynamicSetBindingPoints_PT::eTlas_PT), VRPG2Renderer::source.asManager->asBuilder.tlas);
+		vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 1, write.size(), write.data());
+	}
+	vkCmdPushConstants2(cmd, &pushInfo);
+
+	vkCmdFillBuffer(cmd, globalInfoBuffer.buffer, 0, sizeof(shaderio::LightInjectGlobalInfo_VRPG), 0);
+	nvvk::Buffer& lightNodeLeafDataBuffer = VRPG2Renderer::source.lightNodeDataBuffer_Octree[VRPG2Renderer::setting.lightOctreeDepth];
+	vkCmdFillBuffer(cmd, lightNodeLeafDataBuffer.buffer, 0, lightNodeLeafDataBuffer.bufferSize, 0);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+
+	int layerDiff = VRPG2Renderer::setting.geometryOctreeDepth - VRPG2Renderer::setting.lightOctreeDepth;
+	uint32_t nodeCount = (uint32_t)pow(VRPG2Renderer::setting.voxelGridResolution, 3) / (1 << (3 * layerDiff));
+
+	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
+
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_init);
+	VkExtent2D groupSize = nvvk::getGroupCounts({ nodeCount * 6 , 1 }, VkExtent2D{ 1024, 1 });
+	vkCmdDispatch(cmd, groupSize.width, 1, 1);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+
+	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_dispatchLightInjection);
+	vkCmdDispatch(cmd, 1, 1, 1);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+
+	for (int i = 0; i < VRPG2Renderer::setting.spv_lightInjection; ++i) {
+		pushConstant.sampleIndex = i;
+		vkCmdPushConstants2(cmd, &pushInfo);
+
+		vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_lightInjection);
+		vkCmdDispatchIndirect(cmd, VRPG2Renderer::source.globalInfoBuffer.buffer, 0);
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	}
+}
+
 #ifndef NDEBUG
 // Draws one solid cube per injected voxel, colored by the average irradiance of the voxel.
 // Ported from VRPG's LightInject::debug_Cube (shaders/lightInject2.slang vertexMain_Cube).
@@ -415,45 +478,3 @@ void LightInjection_VRPG::injectionCube(VkCommandBuffer cmd) {
 	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getDepthImage(), VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
 }
 #endif
-
-void LightInjection_VRPG::postProcess(VkCommandBuffer cmd) {
-#ifndef NDEBUG
-	if (!showInjectionResult) return;
-
-	injectionCube(cmd);
-#endif
-}
-
-void LightInjection_VRPG::injection(VkCommandBuffer cmd) {
-	NVVK_DBG_SCOPE(cmd);
-
-	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, staticDescPack.getSetPtr(), 0, nullptr);
-	{
-		nvvk::WriteSetContainer write{};
-		write.append(dynamicDescPack.makeWrite(shaderio::DynamicSetBindingPoints_PT::eTlas_PT), VRPG2Renderer::source.asManager->asBuilder.tlas);
-		vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 1, write.size(), write.data());
-	}
-	vkCmdPushConstants2(cmd, &pushInfo);
-
-	vkCmdFillBuffer(cmd, globalInfoBuffer.buffer, 0, sizeof(shaderio::LightInjectGlobalInfo_VRPG), 0);
-	nvvk::Buffer& lightNodeLeafDataBuffer = VRPG2Renderer::source.lightNodeDataBuffer_Octree[VRPG2Renderer::setting.lightOctreeDepth];
-	vkCmdFillBuffer(cmd, lightNodeLeafDataBuffer.buffer, 0, lightNodeLeafDataBuffer.bufferSize, 0);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-
-	int layerDiff = VRPG2Renderer::setting.geometryOctreeDepth - VRPG2Renderer::setting.lightOctreeDepth;
-	uint32_t nodeCount = (uint32_t)pow(VRPG2Renderer::setting.voxelGridResolution, 3) * 6 / (1 << (3 * layerDiff));
-
-	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
-
-	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_init);
-	VkExtent2D groupSize = nvvk::getGroupCounts({ nodeCount , 1 }, VkExtent2D{ 1024, 1 });
-	vkCmdDispatch(cmd, groupSize.width, 1, 1);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-
-	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_dispatchLightInjection);
-	vkCmdDispatch(cmd, 1, 1, 1);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
-
-	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_lightInjection);
-	vkCmdDispatchIndirect(cmd, VRPG2Renderer::source.globalInfoBuffer.buffer, 0);
-}

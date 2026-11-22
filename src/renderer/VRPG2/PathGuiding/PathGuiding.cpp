@@ -8,7 +8,10 @@
 
 using namespace FzbRenderer;
 
-PathGuiding_VRPG::PathGuiding_VRPG(pugi::xml_node& featureNode) {}
+PathGuiding_VRPG::PathGuiding_VRPG(pugi::xml_node& featureNode) {
+	if (pugi::xml_node jitterNode = featureNode.child("jitterRadiusScale"))
+		VRPG2Renderer::setting.jitterRadiusScale = std::stoi(jitterNode.attribute("value").value());
+}
 
 void PathGuiding_VRPG::init(PathGuidingCreateInfo_VRPG2 createInfo) {
 	gBuffers = createInfo.gBuffers;
@@ -134,6 +137,8 @@ void PathGuiding_VRPG::createDescriptorSetLayout() {
 	bindings.addBinding({ .binding = (uint32_t)shaderio::PathGuidingBindingPoints_VRPG2::eClusterData_Octree,
 		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		.descriptorCount = (uint32_t)VRPG2Renderer::source.clusterDataBuffer_Octree.size(), .stageFlags = VK_SHADER_STAGE_ALL });
+	bindings.addBinding({ .binding = (uint32_t)shaderio::PathGuidingBindingPoints_VRPG2::eNearbyClusterInfos,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_ALL });
 
 	staticDescPack.init(bindings, Application::app->getDevice(), 1, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
 		VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT);
@@ -175,6 +180,7 @@ void PathGuiding_VRPG::createDescriptorSet() {
 	writeOne(shaderio::PathGuidingBindingPoints_VRPG2::eCandidateLeafNodeData, VRPG2Renderer::source.candidateLeafNodeDataBuffer);
 	writeOne(shaderio::PathGuidingBindingPoints_VRPG2::eCandidateSampleData, VRPG2Renderer::source.candidateSampleDataBuffer);
 	writeOne(shaderio::PathGuidingBindingPoints_VRPG2::eCandidateSamplePrefixWSum, VRPG2Renderer::source.candidateSamplePrefixWSumBuffer);
+	writeOne(shaderio::PathGuidingBindingPoints_VRPG2::eNearbyClusterInfos, VRPG2Renderer::source.nearbyClusterInfoBuffer);
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }

@@ -41,16 +41,15 @@ void computeMain_init(uint threadIndex: SV_DispatchThreadID, uint groupThreadInd
         VoxelData_VRPG voxelData = VGBs[VGBIndex][voxelIndex];
 
         bool hasData = voxelData.sumNormal_G.w > 0.0f;
-        AABB nodeAabb;
         if (hasData) {
-            nodeAabb.minimum.x = OrderedIntToFloat(voxelData.aabbI.minimum.x);
-            nodeAabb.minimum.y = OrderedIntToFloat(voxelData.aabbI.minimum.y);
-            nodeAabb.minimum.z = OrderedIntToFloat(voxelData.aabbI.minimum.z);
-            nodeAabb.maximum.x = OrderedIntToFloat(voxelData.aabbI.maximum.x);
-            nodeAabb.maximum.y = OrderedIntToFloat(voxelData.aabbI.maximum.y);
-            nodeAabb.maximum.z = OrderedIntToFloat(voxelData.aabbI.maximum.z);
+            aabb.minimum.x = OrderedIntToFloat(voxelData.aabbI.minimum.x);
+            aabb.minimum.y = OrderedIntToFloat(voxelData.aabbI.minimum.y);
+            aabb.minimum.z = OrderedIntToFloat(voxelData.aabbI.minimum.z);
+            aabb.maximum.x = OrderedIntToFloat(voxelData.aabbI.maximum.x);
+            aabb.maximum.y = OrderedIntToFloat(voxelData.aabbI.maximum.y);
+            aabb.maximum.z = OrderedIntToFloat(voxelData.aabbI.maximum.z);
 
-            clusterData.aabb = nodeAabb;
+            clusterData.aabb = aabb;
             clusterData.meanNormal = voxelData.sumNormal_G / voxelData.sumNormal_G.w;
         }
         //------------------------------------------getHasDataInfo------------------------------------

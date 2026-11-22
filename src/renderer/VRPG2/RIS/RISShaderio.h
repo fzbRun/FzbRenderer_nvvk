@@ -9,26 +9,6 @@
 #define FZBRENDERER_VRPG2_RIS_SHADER_IO_H
 NAMESPACE_SHADERIO_BEGIN()
 
-//------------------------------------------------------------
-// Resampled importance sampling over the light tree.
-//
-// Two candidate-selection strategies are available, selected at compile time:
-//   VRPG_Candidate_Samples_SampleMode == 1 : pool based light cut (bounded cut of M nodes)
-//   VRPG_Candidate_Samples_SampleMode == 0 : greedy light cut driven by a relative error threshold
-// Both feed the same downstream chain (leaf descent, hit tests, weights, prefix sum).
-//------------------------------------------------------------
-#ifndef VRPG_Candidate_Samples_SampleMode
-#define VRPG_Candidate_Samples_SampleMode 1
-#endif
-
-#if VRPG_Candidate_Samples_SampleMode == 1
-// bounded cut: the pool never holds more than M nodes
-#define Candidate_Samples_Count_VRPG2 32
-#else
-// the greedy cut appends up to 7 children per expansion step
-#define Candidate_Samples_Count_VRPG2 64
-#endif
-
 #define OUTGOING_COUNT_VRPG2 32		// number of outgoing direction bins per cluster
 #define HITTEST_COUNT_VRPG2 8		// visibility samples per candidate
 #define LIGHTCUT_RELATIVE_ERROR_VRPG2 0.01f
@@ -47,19 +27,24 @@ NAMESPACE_SHADERIO_BEGIN()
 #define inverseOutgoing_VRPG2 inverseSF
 #endif
 
+struct ClusterPairDebugGlobalInfo_VRPG2 {
+	int clusterIndex_G;
+	int candidateNodeCounts[MAX_OCTREE_LAYER_VRPG2];
+	OctreeNodeInfo_VRPG2 itertionResult[MAX_OCTREE_LAYER_VRPG2][Candidate_Samples_Count];
+};
 //------------------------------------------------------------
 struct RISPushConstant_VRPG2 {
 	int frameIndex;
 	int randomFrameIndex = 0;
 
 	int candidateSampleBufferIndex = 0;
+	int iterationIndex = 0;
 
 	uint32_t lightOctreeMaxLayer;
 	float3x3 randomRotateMatrix;
 
 	SceneInfo* sceneInfoAddress;
-
-	float4x4 padding1;
+	ClusterPairDebugGlobalInfo_VRPG2* globalInfoAddress;
 };
 
 enum class RISBindingPoints_VRPG2 : uint32_t {
@@ -69,11 +54,12 @@ enum class RISBindingPoints_VRPG2 : uint32_t {
 	eClusterInfo_Octree,
 	eLightNodeData_Octree,
 
-	eGlobalInfo,
 	eClusterInfo_SVO,
 
+	eGlobalInfo,
+	eRISGlobalInfo,
+
 	eClusterPairInfo,
-	eClusterPairGlobalInfo,
 	eClusterPairHitInfo,
 
 	eCandidateSubTreeInfo,
@@ -87,6 +73,8 @@ enum class RISBindingPoints_VRPG2 : uint32_t {
 #if VRPG_Candidate_Samples_SampleMode == 1
 	eCandidatePoolNodeInfo,	// pool contents (mode 1 only)
 #endif
+
+	eNearbyClusterInfos,	// debug pass only (VRPG: BindingPoints_Octree_VRPG::eNearbyNodeInfos)
 };
 
 //------------------------------------------------------------
@@ -94,7 +82,7 @@ enum class RISBindingPoints_VRPG2 : uint32_t {
 struct ClusterPairInfo_VRPG2 {
 	int layerIndex_G;
 	int nodeIndex_G;
-	int indivisibleNodeLabel;
+	int clusterIndex;
 	int layerIndex_E;
 	int nodeIndex_E;
 	int candidateNodeIndex;
@@ -103,7 +91,7 @@ struct ClusterPairInfo_VRPG2 {
 	float leafNodePdf;
 };
 
-struct ClusterPairGlobalInfo_VRPG2 {
+struct RISGlobalInfo_VRPG2 {
 	uint32_t clusterPairCount;
 };
 
@@ -143,9 +131,11 @@ struct CandidatePoolInfo_VRPG2 {
 	int candidateNodeCount;
 };
 
+// Same layout as VRPG's CandidatePoolNodeInfo_VRPG: a candidate that fails the visibility test is
+// only marked invalid and stays in the pool until the compaction pass drops it.
 struct CandidatePoolNodeInfo_VRPG2 {
-	int noExpand;		// 1 = this node stays in the cut
-	int layerIndex_E;	// -1 for the root
+	int valid;
+	int layer_E;		// -1 for the root
 	int nodeIndex_E;
 };
 
@@ -157,6 +147,38 @@ struct LightCutNode_VRPG2 {
 	float error;
 	float I;
 };
+
+//------------------------------------------------------------
+// Cluster pair debug pass, ported from VRPG (OctreeShaderio_VRPG.h /
+// Octree_VRPG::clusterPairDebug). The global info holds the geometric cluster that was picked by
+// the debug compute shader from the pixel under the cursor.
+
+struct ClusterPairDebugPushConstant_VRPG2 {
+	int frameIndex;
+	int mode = 0;
+	int mode2 = 0;
+	int spatialReuse = 0;
+
+	uint32_t octreeMaxLayer;
+	uint32_t VGBVoxelTotalCount;
+	float4 VGBStartPos_Size;
+	float4 VGBVoxelSize;
+
+	uint2 pixelIndex;
+	uint2 screenSize;
+
+	int outgoingIndex = 0;
+
+	int iteration;
+	int normalIndex;
+	int padding;
+
+	SceneInfo* sceneInfoAddress;
+	ClusterPairDebugGlobalInfo_VRPG2* globalInfoAddress;
+};
+
+// Debug GBuffer of the cluster pair pass (VRPG: GBuffers_Octree_VRPG::eClusterPairResult).
+
 
 NAMESPACE_SHADERIO_END()
 #endif

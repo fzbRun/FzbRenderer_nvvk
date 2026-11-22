@@ -19,6 +19,7 @@ FzbRenderer 1.0 —— 基于 nvpro_core2 的 Vulkan 渲染器集合（光栅化
 | `rendererInfo/rendererInfo.xml` | **唯一入口配置**：选渲染器、分辨率、场景、各渲染器参数 |
 | `resources/<scene>/sceneInfo.xml` | 场景描述：相机、材质、灯光、mesh、实例 |
 | `third_party/` | vendored：`nvpro_core2`、Slang。**只读** |
+| `.dsh/skills/` | AI 工作流流程：`code-review` `code-change` `renderer-debug`，用法见 `docs/ai-workflow.md` |
 
 ## 构建
 
@@ -89,13 +90,12 @@ exe 通过编译期宏 `TARGET_EXE_TO_SOURCE_DIRECTORY` 回到**源码目录**�
 - **绝不要整文件重写这些文件**——中文注释会被写成乱码。只做最小范围的替换，或先确认编码再操作。
 - 新增文件用 UTF-8。
 
-## 版本控制现状（先看这条再动手）
+## 版本控制现状
 
-- 当前分支 `RT_05`，工作区有未提交改动。
-- **`src/renderer/VRPG2/` 和 `src/renderer/LPV/` 整个目录还没进 git（untracked）**，`_tools/` 下还有 30 多个手工 zip 快照。
-  → 这意味着这些代码**没有 diff 基线、无法回退、无法 review**。在动 VRPG2 / LPV 之前，先让用户提交一次基线。
-- `build/`、`_bin/`、`*.exe`、`*.dll` 已被 `.gitignore` 覆盖；`_tools/` 下的手工 zip 快照与 `.err/.out` 也已排除。
-- `.gitignore` 只对**未跟踪**文件生效；已跟踪的 `*.bak`、`__pycache__/*.pyc`、`*.spv` 需要 `git rm --cached` 才会撤出索引。
+- 当前分支 `RT_02`（上游 `origin/RT_02`）。`src/renderer/VRPG2/` 与 `src/renderer/LPV/` **已作为基线提交进 git**，有 diff 可查。
+- 调试期间**不需要频繁提交**：基线已有，改坏了 `git checkout -- <file>` 或 `git diff` 就能回退。收尾时再压成一次干净提交。
+- `.gitignore` 已覆盖 `build/`、`_bin/`、`_tools/` 的调试产物。
+- 已跟踪的 `*.bak`、`__pycache__/*.pyc`、`*.spv` 需要 `git rm --cached` 才会撤出索引 —— 留到收尾统一处理，不要顺手删。
 
 ## 工作协议（给 AI 代理）
 
@@ -105,6 +105,16 @@ exe 通过编译期宏 `TARGET_EXE_TO_SOURCE_DIRECTORY` 回到**源码目录**�
 4. **不要新建 `.bak` / `.zip` 快照**。回退用 git；如果没基线，先提醒用户提交。
 5. **输出审查结论的格式**：`文件:行` + 触发条件 + 为什么现有代码会失败 + 建议改法 + 置信度。先说结论，不要复述代码。
 6. 不确定的结论标成"待确认"，不要当事实上报。
+
+## 工作流（三个 skill）
+
+遇到对应用户请求时**先加载 skill，再动手**：
+
+- `code-review` —— 只读审查。用户说"检查/审查/有没有 bug"时走这个，**不要直接通读全仓库**。产出：带证据的问题清单。
+- `code-change` —— 实现/修复。先定契约（改什么、怎么算改完、不碰什么），再最小改动 + 构建 + 验证。
+- `renderer-debug` —— 症状驱动定位。先排除假因（`.spv` 缓存、shader 静默失败、xml 未生效），再二分。
+
+三者如何串联、一次会话该给哪些信息，见 `docs/ai-workflow.md`。
 
 ## 禁区
 

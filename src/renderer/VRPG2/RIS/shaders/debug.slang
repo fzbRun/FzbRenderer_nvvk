@@ -1,0 +1,300 @@
+#include "feature/PathTracing/shaders/pathTracingCommon.slang"
+#include "renderer/VRPG2/shaders/VRPGCommon.slang"
+#include "renderer/VRPG2/RIS/RISShaderio.h"
+
+// Ported from VRPG/Octree/shaders/Debug_ClusterPair.slang: the RIS candidate chain of one
+// geometric cluster (picked by the compute shader from the pixel under the cursor) is drawn on
+// top of the scene, so it can be compared with the guide lookup.
+//
+//   mode 0 : cluster AABB and (mode 1) one line per outgoing direction
+//   mode 2 : candidate light AABBs of the selected outgoing direction
+//   mode 3 : the nearby clusters of the selected cluster
+//
+//   debugPushConstant2.mode2 selects the candidate set drawn in mode 2.
+
+[[vk::push_constant]] ConstantBuffer<ClusterPairDebugPushConstant_VRPG2> pushConst;
+
+[[vk::binding(RISBindingPoints_VRPG2::eClusterData_Octree)]] RWStructuredBuffer<ClusterData_Octree_VRPG, ScalarDataLayout> ClusterData_Octree[];
+[[vk::binding(RISBindingPoints_VRPG2::eClusterInfo_Octree)]] RWStructuredBuffer<ClusterInfo_Octree_VRPG, ScalarDataLayout> ClusterInfo_Octree[];
+[[vk::binding(RISBindingPoints_VRPG2::eLightNodeData_Octree)]] RWStructuredBuffer<LightNodeData_Octree_VRPG, ScalarDataLayout> LightNodeData_Octree[];
+
+[[vk::binding(RISBindingPoints_VRPG2::eClusterInfo_SVO)]] RWStructuredBuffer<OctreeNodeInfo_VRPG2> ClusterInfo_SVO;
+
+[[vk::binding(RISBindingPoints_VRPG2::eGlobalInfo)]] RWStructuredBuffer<GlobalInfo_VRPG2, ScalarDataLayout> GlobalInfoBuffer;
+[[vk::binding(RISBindingPoints_VRPG2::eNearbyClusterInfos)]] RWStructuredBuffer<NearbyClusterInfo_VRPG> NearbyClusterInfoBuffer;
+
+[[vk::binding(RISBindingPoints_VRPG2::eCandidateSubTreeInfo)]] RWStructuredBuffer<CandidateSubTreeInfo_VRPG2, ScalarDataLayout> candidateSubTreeInfoBuffer;
+[[vk::binding(RISBindingPoints_VRPG2::eCandidateLeafNodeData)]] RWStructuredBuffer<CandidateLeafNodeData_VRPG2, ScalarDataLayout> candidateLeafNodeDataBuffer;
+[[vk::binding(RISBindingPoints_VRPG2::eCandidateSampleData)]] RWStructuredBuffer<CandidateSampleData_VRPG2, ScalarDataLayout> candidateSampleDataBuffer;
+
+//------------------------------------------------------------------------------------------
+bool traceRay(RayDesc ray, inout CallablePayload payload)
+{
+    // Initialize inline ray query with no special flags
+    RayQuery<RAY_FLAG_NONE> q;
+    q.TraceRayInline(topLevelAS, RAY_FLAG_NONE, 0xFF, ray);
+
+    // Process all potential intersections along the ray
+    while (q.Proceed())
+    {
+        // For non-opaque triangles, force them to be opaque (simplified alpha handling)
+        if (q.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE)
+            q.CommitNonOpaqueTriangleHit(); // Accept all intersections as solid
+    }
+
+    // Check if ray hit any geometry
+    if (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
+    {
+        // Extract intersection data from the committed hit
+        float2 barycentricCoords = q.CommittedTriangleBarycentrics(); // (u,v) coordinates on triangle
+        float4x3 worldToObject = q.CommittedWorldToObject4x3();       // Transform matrix
+        float4x3 objectToWorld = q.CommittedObjectToWorld4x3();       // Inverse transform matrix
+        int instanceIndex = q.CommittedInstanceIndex();               // Instance index in scene
+        uint primitiveIndex = q.CommittedPrimitiveIndex();
+
+        SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+        Instance instance = sceneInfo.instances[instanceIndex]; // Instance data
+        Mesh mesh = sceneInfo.meshes[instance.meshIndex];
+        payload.material = sceneInfo.materials[instance.materialIndex]; // Material properties
+
+        // Convert built-in barycentric coordinates to full barycentric coordinates
+        const float3 barycentrics =
+            float3(1.0 - barycentricCoords.x - barycentricCoords.y, barycentricCoords.x, barycentricCoords.y);
+
+        // Process intersection data into world-space shading information
+        // HitState hitState = getHitStateWithPositionFetch(barycentrics);
+        float3 triPos[3];
+        triPos = q.CommittedGetIntersectionTriangleVertexPositions();
+        const float3 localPosition = triPos[0] * barycentrics.x + triPos[1] * barycentrics.y + triPos[2] * barycentrics.z;
+        payload.hitPos = float3(mul(float4(localPosition, 1.0), objectToWorld));
+
+        const float3 edge1 = triPos[1] - triPos[0];
+        const float3 edge2 = triPos[2] - triPos[0];
+        const float3 geoNormal = normalize(cross(edge1, edge2));
+
+        // payload.hitNormal = normalize(mul(worldToObject, geoNormal).xyz);
+        payload.hitNormal = normalize(mul(geoNormal, transpose(worldToObject)).xyz);
+
+        return true;
+    }
+    return false;
+}
+
+[numthreads(1, 1, 1)]
+[shader("compute")]
+void computeMain_GetDebugClusterG(uint threadIndex: SV_DispatchThreadID) {
+    SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
+
+    const uint rayFlags = 0; // RAY_FLAG_CULL_BACK_FACING_TRIANGLES;
+    RayDesc ray;
+    ray.TMin = 0.001;
+    ray.TMax = INFINITE;
+
+    const float2 pixelCenter = (float2)pushConst.pixelIndex + float2(0.5f, 0.5f);
+    const float2 clipCoords = pixelCenter / pushConst.screenSize * 2.0 - 1.0;
+    float4 viewCoords = mul(float4(clipCoords, 1.0, 1.0), sceneInfo.projInvMatrix);
+    viewCoords /= viewCoords.w;
+
+    ray.Origin = sceneInfo.cameraPosition;
+    ray.Direction = normalize(mul(float4(normalize(viewCoords.xyz), 0.0), sceneInfo.viewInvMatrix).xyz);
+
+    CallablePayload payload;
+    if (!traceRay(ray, payload)) {
+        pushConst.globalInfoAddress.clusterIndex_G = -1;
+        printf("not hit geometry!\n");
+        return;
+    }
+    float3 hitPos = payload.hitPos;
+    float3 hitNormal = payload.hitNormal;
+    printf("hitPos: %f %f %f, hitNormal: %f %f %f\n", hitPos.x, hitPos.y, hitPos.z, hitNormal.x, hitNormal.y, hitNormal.z);
+
+    uint normalIndex = getNormalIndex(payload.hitNormal);
+    int voxelIndex = getVoxelIndex(hitPos, pushConst.VGBStartPos_Size.xyz, pushConst.VGBVoxelSize.xyz, (int)pushConst.VGBStartPos_Size.w);
+    voxelIndex += normalIndex * pushConst.VGBVoxelTotalCount;
+    ClusterData_Octree_VRPG nodeData = ClusterData_Octree[pushConst.octreeMaxLayer][voxelIndex];
+    if (nodeData.meanNormal.w == 0.0f) {
+        printf("voxel not has geometry!\n");
+        return;
+    }
+
+    ClusterInfo_Octree_VRPG nodeInfo_G = ClusterInfo_Octree[0][normalIndex];
+    int nodeLabel_G = int(nodeInfo_G.label_indivisible >> 1) - 1;
+    bool hasData = nodeLabel_G >= 0;
+    if (!hasData) {
+        pushConst.globalInfoAddress.clusterIndex_G = -1;
+        printf("normal tree not has geometry!\n");
+        return;
+    }
+
+    bool indivisible = (nodeInfo_G.label_indivisible & 1u) == 1;
+    bool hitIndivisible = false;
+    int layerIndex_G = 0; int nodeIndex_G = normalIndex;
+    if (indivisible) hitIndivisible = true;
+    else {
+        nodeLabel_G = GlobalInfoBuffer[0].layerInfos_G[0].indivisibleNodeCount;
+
+        float3 nodeSize = pushConst.VGBVoxelSize.xyz * (1 << (pushConst.octreeMaxLayer - 1));
+        float3 nodeStartPos = pushConst.VGBStartPos_Size.xyz;
+
+        for (layerIndex_G = 1; layerIndex_G <= pushConst.octreeMaxLayer; ++layerIndex_G) {
+            int3 nodeIndex3 = min(int3((hitPos - nodeStartPos) / nodeSize), 1);
+            int subNodeIndex = nodeIndex3.z * 4 + nodeIndex3.y * 2 + nodeIndex3.x;
+            nodeIndex_G = nodeIndex_G * 8 + subNodeIndex;
+
+            nodeInfo_G = ClusterInfo_Octree[layerIndex_G][nodeIndex_G];
+
+            int  nodeLayerLabel = int(nodeInfo_G.label_indivisible >> 1) - 1;
+            hasData = nodeLayerLabel >= 0;
+            indivisible = (nodeInfo_G.label_indivisible & 1u) == 1;
+
+            if (!hasData) break;
+            if (indivisible) {
+                nodeLabel_G += nodeLayerLabel;
+                hitIndivisible = true;
+                break;
+            }
+            nodeLabel_G += GlobalInfoBuffer[0].layerInfos_G[layerIndex_G].indivisibleNodeCount;
+            nodeStartPos += nodeIndex3 * nodeSize;
+            nodeSize /= 2.0f;
+        }
+    }
+    if (!hitIndivisible) {
+        pushConst.globalInfoAddress.clusterIndex_G = -1;
+        printf("not Indivisible!\n");
+        return;
+    }
+
+    pushConst.globalInfoAddress.clusterIndex_G = nodeLabel_G;
+    printf("frameIndex: %d, clusterGIndex: %d  totalIndivisible: %d\n", 
+        pushConst.frameIndex, nodeLabel_G, GlobalInfoBuffer[0].ClusterCount);
+
+    if (nodeLabel_G >= 0 && nodeLabel_G < int(GlobalInfoBuffer[0].ClusterCount)) {
+        OctreeNodeInfo_VRPG2 debugClusterInfo = ClusterInfo_SVO[nodeLabel_G];
+        ClusterData_Octree_VRPG debugClusterData = ClusterData_Octree[debugClusterInfo.layerIndex][debugClusterInfo.nodeIndex];
+        printf("cluster debug: layer=%d node=%d\nnormal: %f %f %f\naabb=(%f %f %f)-(%f %f %f)\n\n",
+               debugClusterInfo.layerIndex, debugClusterInfo.nodeIndex,
+               debugClusterData.meanNormal.x, debugClusterData.meanNormal.y, debugClusterData.meanNormal.z,
+               debugClusterData.aabb.minimum.x, debugClusterData.aabb.minimum.y, debugClusterData.aabb.minimum.z,
+               debugClusterData.aabb.maximum.x, debugClusterData.aabb.maximum.y, debugClusterData.aabb.maximum.z,
+        );
+    }
+}
+
+//------------------------------------------------------------------------------------------
+struct VSout {
+    float4 sv_position : SV_Position;
+    bool debug_color;
+    nointerpolation float4 color;
+};
+struct PSout
+{
+    float4 color0 : SV_Target0;
+};
+[shader("vertex")]
+VSout vertexMain(uint vertexIndex: SV_VertexID, int instanceIndex: SV_InstanceID) {
+    VSout output;
+
+    bool show = pushConst.globalInfoAddress.clusterIndex_G >= 0;
+    if (!show) {
+        output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
+        return output;
+    }
+
+    OctreeNodeInfo_VRPG2 nodeInfo;
+    AABB nodeAABB;
+    if (pushConst.mode == 3) {
+        int idx = instanceIndex;
+        if (idx == 0) {
+            nodeInfo = ClusterInfo_SVO[pushConst.globalInfoAddress.clusterIndex_G];
+            output.color = float4(1.0f, 0.0f, 0.0f, 1.0f);
+        }
+        else {
+            OctreeNodeInfo_VRPG2 nearby = NearbyClusterInfoBuffer[pushConst.globalInfoAddress.clusterIndex_G].nearbyClusterInfos[idx - 1];
+            if (nearby.layerIndex < 0) {
+                output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
+                return output;
+            }
+            nodeInfo = nearby;
+            output.color = float4(0.1f, 1.0f, 0.1f, 1.0f);
+        }
+        nodeAABB = ClusterData_Octree[nodeInfo.layerIndex][nodeInfo.nodeIndex].aabb;
+    }
+    else {
+        nodeInfo = ClusterInfo_SVO[pushConst.globalInfoAddress.clusterIndex_G];
+        nodeAABB = ClusterData_Octree[nodeInfo.layerIndex][nodeInfo.nodeIndex].aabb;
+        output.color = float4(1.0f, 0.0f, 0.0f, 1.0f);
+    }
+
+    if (pushConst.mode == 3) {}
+    else if (pushConst.mode == 0) {}
+    else if (pushConst.mode == 1) {
+        float3 outgoing = getOutgoing_VRPG2(pushConst.outgoingIndex, OUTGOING_COUNT_VRPG2);
+        float3 nodeCenter = (nodeAABB.maximum + nodeAABB.minimum) * 0.5f;
+        output.sv_position.xyz = vertexIndex == 0 ? nodeCenter : nodeCenter + outgoing;
+        output.sv_position = mul(float4(output.sv_position.xyz, 1.0f), pushConst.sceneInfoAddress[0].viewProjMatrix);
+        output.color.xyz = float3(0.0f, 0.0f, 1.0f);
+        return output;
+    } else {
+        int candidateIndex = pushConst.outgoingIndex * GlobalInfoBuffer[0].ClusterCount * Candidate_Samples_Count + pushConst.globalInfoAddress.clusterIndex_G * Candidate_Samples_Count + instanceIndex;
+
+        if (pushConst.mode2 == 2) {
+            if (instanceIndex < pushConst.globalInfoAddress.candidateNodeCounts[pushConst.iteration]) {
+                int layerIndex = pushConst.globalInfoAddress.itertionResult[pushConst.iteration][instanceIndex].layerIndex;
+                if (layerIndex < 0) {
+                    output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
+                    return output;
+                }
+                else {
+                    int nodeIndex = pushConst.globalInfoAddress.itertionResult[pushConst.iteration][instanceIndex].nodeIndex;
+                    int normalIndex = nodeIndex / (1 << (3 * layerIndex));
+                    if (normalIndex != pushConst.normalIndex) {
+                        output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
+                        return output;
+                    }
+
+                    LightNodeData_Octree_VRPG nodeData = LightNodeData_Octree[layerIndex][nodeIndex];
+
+                    nodeAABB = nodeData.aabb;
+                    output.color.xyz = nodeData.radiance;
+                }
+            } else {
+                output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
+                return output;
+            }
+        } else {
+            CandidateSampleData_VRPG2 candidateNodeData = candidateSampleDataBuffer[candidateIndex];
+            CandidateSubTreeInfo_VRPG2 candidateSubTree = candidateSubTreeInfoBuffer[pushConst.globalInfoAddress.clusterIndex_G * Candidate_Samples_Count + instanceIndex];
+
+            show = candidateSubTree.subTreeNodeIndex_layer >= 0;
+            if (pushConst.mode2 == 1) show &= candidateNodeData.w > 0.0f;
+            if (!show) {
+                output.sv_position = float4(2.0, 2.0, 2.0, 1.0);
+                return output;
+            }
+
+            //int layerIndex = candidateSubTree.subTreeNodeIndex_layer & 15;
+            //int nodeIndex = candidateSubTree.subTreeNodeIndex_layer >> 4;
+            //LightNodeData_Octree_VRPG nodeData = LightNodeData_Octree[layerIndex][nodeIndex];
+
+            CandidateLeafNodeData_VRPG2 leafNodeData = candidateLeafNodeDataBuffer[pushConst.globalInfoAddress.clusterIndex_G * Candidate_Samples_Count + instanceIndex];
+            nodeAABB = leafNodeData.aabb;
+            output.color.xyz = leafNodeData.radiance;
+        }
+    }
+
+    float3 aabbSize = nodeAABB.maximum - nodeAABB.minimum;
+
+    output.sv_position.x = ((vertexIndex & 3) * 2) % 6 == 0 ? 0.0f : aabbSize.x;
+    output.sv_position.y = (vertexIndex & 3) <= 1 ? 0.0f : aabbSize.y;
+    output.sv_position.z = vertexIndex / 4 == 0 ? 0.0f : aabbSize.z;
+    output.sv_position.xyz += nodeAABB.minimum;
+
+    output.sv_position = mul(float4(output.sv_position.xyz, 1.0f), pushConst.sceneInfoAddress[0].viewProjMatrix);
+
+    return output;
+}
+
+[shader("pixel")]
+PSout fragmentMain(VSout input) {
+    return { input.color };
+}

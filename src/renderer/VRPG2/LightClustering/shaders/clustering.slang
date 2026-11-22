@@ -1,4 +1,4 @@
-﻿#include "common/Shader/Slang/commonFunction.slang"
+#include "common/Shader/Slang/commonFunction.slang"
 #include "renderer/VRPG2/VRPG2Shaderio.h"
 #include "renderer/VRPG2/LightClustering/LightClusteringShaderio.h"
 #include "renderer/VRPG2/shaders/VRPGCommon.slang"
@@ -6,7 +6,7 @@
 [[vk::push_constant]] ConstantBuffer<LightClusteringPushConstant_VRPG> pushConst;
 
 [[vk::binding(LightClusteringBindingPoints_VRPG::eGlobalInfo)]] RWStructuredBuffer<GlobalInfo_VRPG2> GlobalInfoBuffer;
-[[vk::binding(LightClusteringBindingPoints_VRPG::eClusteringGlobalInfo)]] RWStructuredBuffer<ClusteringGlobalInfo_VRPG> ClusteringGlobalInfoBuffer;
+[[vk::binding(LightClusteringBindingPoints_VRPG::eClusteringGlobalInfo)]] RWStructuredBuffer<LightClusteringGlobalInfo_VRPG> ClusteringGlobalInfoBuffer;
 
 [[vk::binding(LightClusteringBindingPoints_VRPG::eLightNodeData_Octree)]] RWStructuredBuffer<LightNodeData_Octree_VRPG, ScalarDataLayout> LightNodeData_Octree[];
 
@@ -38,7 +38,7 @@ void computeMain_GetHasDataLightNodeBlockInfo(uint threadIndex: SV_DispatchThrea
 
     if (warpIndex == threadGroupWarpCount - 1 && warpLane == 0) {
         uint groupHasDataNodeCount = hasDataGroupLabel + warpHasDataBlockCount;
-        InterlockedAdd<uint>(ClusteringGlobalInfoBuffer[0].hasDataClusterBlockCount, groupHasDataNodeCount, groupHasDataGlobalLabel);
+        InterlockedAdd<uint>(ClusteringGlobalInfoBuffer[0].hasDataLightNodeBlockCount, groupHasDataNodeCount, groupHasDataGlobalLabel);
     }
     GroupMemoryBarrierWithGroupSync();
 
@@ -51,7 +51,7 @@ void computeMain_GetHasDataLightNodeBlockInfo(uint threadIndex: SV_DispatchThrea
 [shader("compute")]
 void computeMain_DispatchClustering(uint threadIndex: SV_DispatchThreadID) {
     if (threadIndex == 0) {
-        int hasDataNodeCounts = ClusteringGlobalInfoBuffer[0].hasDataClusterBlockCount;
+        int hasDataNodeCounts = ClusteringGlobalInfoBuffer[0].hasDataLightNodeBlockCount;
         DispatchIndirectCommand cmd;
         uint hasDataNodeCount = hasDataNodeCounts * 8;
         cmd.x = (hasDataNodeCount + LightClustering_CS_THREADGROUP_SIZE - 1) / LightClustering_CS_THREADGROUP_SIZE;
@@ -109,22 +109,20 @@ void computeMain_Clustering1(uint threadIndex: SV_DispatchThreadID, uint groupTh
     uint blockLane = threadIndex & 7;
     uint blockFirstWarpLane = (warpLane / 8) * 8;
     uint blockNodeMask = 0xff << blockFirstWarpLane;
-    if (threadIndex >= ClusteringGlobalInfoBuffer[0].hasDataClusterBlockCount * 8) return;
+    if (threadIndex >= ClusteringGlobalInfoBuffer[0].hasDataLightNodeBlockCount * 8) return;
     //-----------------------------------------------------------------------------------
     uint currentBlockLabel = threadIndex / 8;
     uint nodeIndex = HasDataLightNodeBlockIndexBuffer[currentBlockLabel].blockIndex * 8 + blockLane;
     uint fatherNodeIndex = nodeIndex / 8;
     LightNodeData_Octree_VRPG nodeData = LightNodeData_Octree[pushConst.currentLayer][nodeIndex];
 
-    bool hasData = nodeData.meanNormal.w > 0.0f;
+    bool hasData = any(nodeData.radiance > 0.0f);
     uint32_t warpHasDataMask = WaveActiveBallot(hasData).x;
     uint32_t blockHasDataNodeCount = countbits(warpHasDataMask & blockNodeMask);
 
     if (blockHasDataNodeCount == 1) {
         if (hasData) LightNodeData_Octree[pushConst.currentLayer - 1][fatherNodeIndex] = nodeData;
-    }
-    //-----------------------------------------------------------------------------------
-    else {
+    } else {
         float3 mergeR = nodeData.radiance;
         for (int offset = 4; offset > 0; offset /= 2) {
             uint targetLane = warpLane + offset;
@@ -192,10 +190,11 @@ void computeMain_Clustering2(uint threadIndex: SV_DispatchThreadID, uint groupTh
     uint fatherNodeIndex = threadIndex / 8;
     LightNodeData_Octree_VRPG nodeData = LightNodeData_Octree[pushConst.currentLayer][threadIndex];
 
-    bool hasData = nodeData.meanNormal.w > 0.0f || any(nodeData.radiance > 0.0f);
+    bool hasData = any(nodeData.radiance > 0.0f);
     uint32_t warpHasDataMask = WaveActiveBallot(hasData).x;
     uint32_t blockHasDataNodeCount = countbits(warpHasDataMask & blockNodeMask);
 
+    if (blockHasDataNodeCount == 0) return;
     if (blockHasDataNodeCount == 1) {
         if (hasData) LightNodeData_Octree[pushConst.currentLayer - 1][fatherNodeIndex] = nodeData;
         return;

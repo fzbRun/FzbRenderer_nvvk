@@ -158,6 +158,7 @@ void VRPG2Renderer::resize(VkCommandBuffer cmd, const VkExtent2D& size) {
 	geometryClustering->resize(cmd, size);
 	lightInjection->resize(cmd, size);
 	lightClustering->resize(cmd, size);
+	ris->resize(cmd, size);
 }
 void VRPG2Renderer::preRender() {
 	geometryInjection->preRender();
@@ -202,44 +203,27 @@ void VRPG2Renderer::render(VkCommandBuffer* cmdPtr) {
 	if (lightDirty) {
 		lightInjection->render(cmd);
 		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-		//lightClustering->render(cmd);
-		//nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-	}
-	return;
-	{
-		setting.geometryChange = false;
-		setting.clusteringChange = false;
-		setting.lightChange = false;
-		++setting.randomFrameIndex;
-
-		// debug views of the geometry octree / SVO / light tree / light injection: drawn right
-		// after the clustering data is valid, before any early-out of this frame. uiRender points
-		// the viewport at the corresponding debug GBuffer.
-		geometryClustering->postProcess(cmd);
-		lightInjection->postProcess(cmd);
-		lightClustering->postProcess(cmd);
-		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
-			VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-
-		Application::tonemapper.runCompute(cmd, gBuffers.getSize(), Application::tonemapperData,
-			gBuffers.getDescriptorImageInfo((uint32_t)eImgRendered),
-			gBuffers.getDescriptorImageInfo((uint32_t)eImgTonemapped));
-		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-			VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-
-		return;
+		lightClustering->render(cmd);
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	}
 
 	ris->render(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
-	// the dirty flags are one-shot: they are recomputed by the modules on the next frame
+	{
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+		geometryInjection->postProcess(cmd);
+		geometryClustering->postProcess(cmd);
+		lightInjection->postProcess(cmd);
+		lightClustering->postProcess(cmd);
+		ris->postProcess(cmd);
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+	}
+
 	setting.geometryChange = false;
 	setting.clusteringChange = false;
 	setting.lightChange = false;
-	++setting.randomFrameIndex;
 
-	// guided path tracing into gBuffers, then tone map for the viewport
 	if (setting.frameIndex < maxFrames || maxFrames <= 2) {
 		pathGuiding->render(cmd);
 		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
@@ -250,5 +234,7 @@ void VRPG2Renderer::render(VkCommandBuffer* cmdPtr) {
 		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
 			VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	}
+
+	++setting.randomFrameIndex;
 }
 

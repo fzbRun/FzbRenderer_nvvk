@@ -12,6 +12,7 @@ NAMESPACE_SHADERIO_BEGIN()
 static const uint OctreeLayerNodeCount_VRPG2[MAX_OCTREE_LAYER_VRPG2] = { 6, 48, 384, 3072, 24576, 196608, 1572864 };
 static const uint OctreeLayerStartIndex_VRPG2[4] = { 0, 8, 56, 384 };
 
+#define VRPG_JITTER_SAMPLING 1
 #define VRPG_NEARBY_CLUSTER_COUNT 4
 #ifndef NEARBY_NODE_COUNT_VRPG
 #define NEARBY_NODE_COUNT_VRPG 4
@@ -54,7 +55,7 @@ static const uint OctreeLayerStartIndex_VRPG2[4] = { 0, 8, 56, 384 };
 	//   0 (default) two sample balance MIS: both rays traced, one sample chosen for the
 	//     continuation, every weighted term divided by the selection probability
 	//   1 one sample 50/50: only the chosen technique traced, its terms divided by q
-#define VRPG_PATH_SAMPLE_MODE 1
+#define VRPG_PATH_SAMPLE_MODE 0
 #endif
 //------------------------------------------------------------------------------------------
 struct OctreeNodeInfo_VRPG2 {

@@ -33,6 +33,7 @@ private:
 
 	nvvk::Buffer lightNodeBlockInfoBuffer;
 	nvvk::Buffer hasDataLightNodeBlockIndexBuffer;
+	VkShaderEXT computeShader_init{};
 	VkShaderEXT computeShader_GetHasDataLightNodeBlockInfo{};
 	VkShaderEXT computeShader_DispatchClustering{};
 	VkShaderEXT computeShader_Clustering1{};

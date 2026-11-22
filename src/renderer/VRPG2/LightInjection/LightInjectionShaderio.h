@@ -15,12 +15,12 @@ struct LightInjectPushConstant_VRPG {
 	int randomFrameIndex = 0;
 
 	uint spv;
+	int sampleIndex;
 	uint bounces;
 
+	int nodeCount;
 	float4 nodeSize;
 	float4 nodeGridStartPos;
-	int nodeCount;
-	int padding;
 
 	SceneInfo* sceneInfoAddress;
 	float3x3 randomRotateMatrix;

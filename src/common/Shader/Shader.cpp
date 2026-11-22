@@ -1,6 +1,7 @@
 #include "common/Application/Application.h"
 #include <nvutils/timers.hpp>
 #include "common/Shader/Shader.h"
+#include "common/Aftermath/aftermath_report.h"
 #include <iostream>
 #include <filesystem>
 
@@ -21,6 +22,12 @@ VkShaderModuleCreateInfo FzbRenderer::compileSlangShader(const std::filesystem::
 				Application::slangCompiler.getLastDiagnosticMessage().c_str());
 		}
 	}
+	// Register the exact SPIR-V that the renderers pass to Vulkan. Doing this here (instead of
+	// in the Slang compile callback) guarantees that the hash Aftermath computes for the crash
+	// dump matches the hash of the dumped binary.
+	if (shaderCode.pCode != nullptr && shaderCode.codeSize > 0)
+		FzbRenderer::aftermathRegisterShaderBinary(shaderCode.pCode, shaderCode.codeSize, shaderSource);
+
 	return shaderCode;
 };
 VkShaderModuleCreateInfo FzbRenderer::compileSlangShader(std::filesystem::path& shaderPath, std::vector<uint32_t>& shaderBuffer) {

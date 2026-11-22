@@ -104,7 +104,7 @@ void GeometryInjection_VRPG::updateDataPerFrame(VkCommandBuffer cmd) {
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 
 	// frameIndex is reset by resetFrame(), so a camera / UI reset also rebuilds the VGB
-	VRPG2Renderer::setting.geometryChange = !Application::sceneResource.isStaticScene || VRPG2Renderer::setting.rebuildPerFrame || VRPG2Renderer::setting.frameIndex == 0 || showThreeView;
+	VRPG2Renderer::setting.geometryChange = !Application::sceneResource.isStaticScene || VRPG2Renderer::setting.rebuildPerFrame || VRPG2Renderer::setting.randomFrameIndex == 0 || showThreeView;
 }
 void GeometryInjection_VRPG::render(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd, "GeometryInjection_render");

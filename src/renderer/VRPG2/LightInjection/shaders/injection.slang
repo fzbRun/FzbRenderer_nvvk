@@ -21,14 +21,17 @@ groupshared uint groupHasGeometryNodeLabel_inArray;
 [numthreads(1024, 1, 1)]
 [shader("compute")]
 void computeMain_init(uint threadIndex: SV_DispatchThreadID, uint groupThreadIndex: SV_GroupThreadID) {
+    if (groupThreadIndex == 0) groupHasGeometryNodeCount = 0;
+    GroupMemoryBarrierWithGroupSync();
     if (threadIndex >= pushConst.nodeCount * 6) return;
 
     ClusterData_Octree_VRPG geoClusterData = GeoClusterData[threadIndex];
     bool hasData = geoClusterData.meanNormal.w > 0.0f;
-    if (!hasData) return;
 
     LightNodeData_Octree_VRPG lightNodeData;
-    lightNodeData.meanNormal = float4(normalize(geoClusterData.meanNormal.xyz / geoClusterData.meanNormal.w), 1.0f);
+    lightNodeData.radiance = float3(0.0f);
+    lightNodeData.halfAngle = M_PI;
+    lightNodeData.meanNormal = geoClusterData.meanNormal;
     lightNodeData.aabb = geoClusterData.aabb;
     LightNodeData[threadIndex] = lightNodeData;
 
@@ -125,9 +128,9 @@ bool traceRay(RayDesc ray, inout LightInjectHitPayload payload)
         // payload.hitNormal = normalize(mul(worldToObject, geoNormal).xyz);
         payload.hitNormal = normalize(mul(geoNormal, transpose(worldToObject)).xyz);
         payload.cosineON = dot(payload.hitNormal, -ray.Direction);
-        // if (cosineON <= 0.0f) payload.hitNormal = -payload.hitNormal;
-        // if (payload.material.type != MaterialType::Dielectric && payload.material.type != MaterialType::RoughDielectric)
-        //     payload.material.emissive *= cosineON > 0.0f ? 1.0f : 0.0f;
+        if (payload.cosineON <= 0.0f) payload.hitNormal = -payload.hitNormal;
+        if (material.type != MaterialType::Dielectric && material.type != MaterialType::RoughDielectric)
+            material.emissive *= payload.cosineON > 0.0f ? 1.0f : 0.0f;
 
         float3 tangent, bitangent;
         orthonormalBasis(payload.hitNormal, tangent, bitangent);
@@ -270,7 +273,7 @@ void computeMain_LightInject(uint threadIndex: SV_DispatchThreadID, uint groupTh
     orthonormalBasis(nodeData.meanNormal.xyz, tangent, bitangent);
     float3x3 voxelTBN = float3x3(tangent, bitangent, nodeData.meanNormal.xyz);
 
-    int normalIndex = getNormalIndex(nodeData.meanNormal.xyz);
+    int normalIndex = int(nodeInfo.nodeIndex) / pushConst.nodeCount;
     float3 Normal;
     float plusMinusSign = float(normalIndex & 1u) * 2.0f - 1.0f;
     Normal.x = (1.0f - sign(normalIndex & 6u)) * plusMinusSign;
@@ -280,11 +283,11 @@ void computeMain_LightInject(uint threadIndex: SV_DispatchThreadID, uint groupTh
     float3 voxelAabbCenter = (nodeData.aabb.maximum + nodeData.aabb.minimum) * 0.5f;
     float3 voxelAabbHalfSize = (nodeData.aabb.maximum - nodeData.aabb.minimum) * 0.5f;
 
-    LightInjectHitPayload payload;
-    for (int sampleIndex = 0; sampleIndex < pushConst.spv; ++sampleIndex) {
-        payload.randomSeed = xxhash32(uint3(nodeInfo.nodeIndex, pushConst.randomFrameIndex, sampleIndex));
+    {
+        LightInjectHitPayload payload;
+        payload.randomSeed = xxhash32(uint3(nodeInfo.nodeIndex, pushConst.randomFrameIndex, pushConst.sampleIndex));
 
-        float3 sampleDir = fibSpherePoint(sampleIndex, pushConst.spv);
+        float3 sampleDir = fibSpherePoint(pushConst.sampleIndex, pushConst.spv);
         sampleDir = mul(sampleDir, pushConst.randomRotateMatrix);
         sampleDir = mul(sampleDir, voxelTBN);
         float3 samplePos = getAABBPoint(sampleDir, voxelAabbCenter, voxelAabbHalfSize) + 0.01f * sampleDir;
@@ -311,17 +314,16 @@ void computeMain_LightInject(uint threadIndex: SV_DispatchThreadID, uint groupTh
                 float3 radiance_nee = float3(0.0f);
                 if (isPosInDirectionLight(payload.hitPos, sceneInfo.lights[0])) {
                     if (bounceDepth > 0) payload.emissive = float3(0.0f);
-                }
-                else {
+                } else {
                     initNEE(payload);
-                    if (any(payload.lightRadiance > 0.0f)) radiance_nee = payload.lightRadiance * bsdf;
+                    radiance_nee = payload.lightRadiance * bsdf;
                 }
                 accumulatedRadiance += (payload.emissive + radiance_nee) * bsdf_cosine_pdf;
-                if (bounceDepth == 0 && any(payload.emissive > 0.0f)) accumulatedRadiance += payload.emissive * 10000.0f;
+                //if (bounceDepth == 0 && any(payload.emissive > 0.0f)) accumulatedRadiance += payload.emissive * 10000.0f;
 
                 float3 incidence = sample_hemisphere_mean(payload.randomSeed);
                 payload.incidence = mul(incidence, payload.TBN);
-                bsdf_cosine_pdf *= payload.albedo * M_1_PI; // * dot(incidence, payload.hitNormal);
+                bsdf_cosine_pdf *= bsdf; // * dot(incidence, payload.hitNormal);
 
                 ray.Origin = offsetRay(payload.hitPos, payload.hitNormal);
                 ray.Direction = payload.incidence;
@@ -334,8 +336,13 @@ void computeMain_LightInject(uint threadIndex: SV_DispatchThreadID, uint groupTh
         }
     }
     accumulatedRadiance /= pushConst.spv;
+    float3 lengthAxis = nodeData.aabb.maximum - nodeData.aabb.minimum;
+    int3 axisSign = sign(lengthAxis);
+    lengthAxis += float3(int3(1) - axisSign) * 0.0001f;
+    if (all(axisSign == 0)) lengthAxis = float3(0.0f);
+    accumulatedRadiance *= (lengthAxis.x * lengthAxis.y + lengthAxis.x * lengthAxis.z + lengthAxis.y * lengthAxis.z) * 2.0f;
 
     if (any(accumulatedRadiance > 0.0f) && !any(isnan(accumulatedRadiance) || isinf(accumulatedRadiance))) {
-        LightNodeData[nodeInfo.nodeIndex].radiance = accumulatedRadiance;
+        LightNodeData[nodeInfo.nodeIndex].radiance += accumulatedRadiance;
     }
 }

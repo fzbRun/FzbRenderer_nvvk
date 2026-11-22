@@ -9,11 +9,16 @@
     printf("\n");                                                                                                      \
   }
 //#define USE_NSIGHT_AFTERMATH  (not always on, as it slows down the application)
+#define FZB_NO_AFTERMATH      (define to build without GPU crash dumps)
+#if !defined(NDEBUG) && !defined(FZB_NO_AFTERMATH)
+#define USE_NSIGHT_AFTERMATH
+#endif
 
 #include "./Application.h"
 #include "pugixml.hpp"
 #include <nvvk/validation_settings.hpp>
 #include <common/utils.hpp>
+#include "common/Aftermath/aftermath_report.h"
 #include <nvgui/camera.hpp>
 #include <nvgui/sky.hpp>
 #include <nvgui/camera.hpp>
@@ -23,6 +28,8 @@
 #include "common/Shader/nvvk/spv/tonemapper.slang.h"
 #include "common/Shader/Shader.h"
 #include <imgui_internal.h>
+#include <cstdlib>
+#include <string>
 
 void FzbRenderer::Application::getAppInfoFromXML(nvapp::ApplicationCreateInfo& appInfo) {
 	std::filesystem::path exePath = nvutils::getExecutablePath().parent_path();
@@ -112,11 +119,28 @@ FzbRenderer::Application::Application(nvapp::ApplicationCreateInfo& appInfo, nvv
 	vkContextInitInfo.instanceCreateInfoExt = validationSettings.buildPNextChain();
 #endif
 
+{
+	bool enableAftermath = false;
+#if defined(USE_NSIGHT_AFTERMATH)
+	enableAftermath = true;
+#endif
+	if (std::getenv("FZB_AFTERMATH_REPORT") != nullptr) enableAftermath = true;
+	FzbRenderer::setAftermathCaptureEnabled(enableAftermath);
+}
+
 #if defined(USE_NSIGHT_AFTERMATH)   //GPU崩溃之后的调试工具
 	auto& aftermath = AftermathCrashTracker::getInstance();
 	aftermath.initialize();
 	aftermath.addExtensions(vkContextInitInfo.deviceExtensions);
-	nvvk::CheckError::getInstance().setCallbackFunction([&](VkResult result) { aftermath.errorCallback(result); });
+	nvvk::CheckError::getInstance().setCallbackFunction([&](VkResult result) {
+		// Our own decoder needs the dump file, so run it first; the tracker callback below
+		// waits for the dump as well and then calls exit(1).
+		if (result == VK_ERROR_DEVICE_LOST)
+		{
+			FzbRenderer::printAftermathReport();
+		}
+		aftermath.errorCallback(result);
+		});
 #endif
 
 	//vkContext.m_deviceFeatures12.scalarBlockLayout = VK_TRUE;
@@ -154,10 +178,25 @@ void FzbRenderer::Application::onAttach(nvapp::Application* app) {
 	initSlangCompiler();
 	samplerPool.init(app->getDevice());
 
+	// Re-analyze an existing GPU crash dump without having to reproduce the crash again:
+	//   set FZB_AFTERMATH_REPORT=<dump path> (or 1 for the newest dump in the exe dir) and launch the exe.
+	if (const char* aftermathReportRequest = std::getenv("FZB_AFTERMATH_REPORT"))
+	{
+		if (aftermathReportRequest[0] != '\0' && std::string(aftermathReportRequest) != "1")
+			FzbRenderer::printAftermathReport(aftermathReportRequest);
+		else
+			FzbRenderer::printAftermathReport();
+	}
+
 	sceneResource.createSceneFromXML();
 
 	skySimple.init(&allocator, std::span(sky_simple_slang));
 	tonemapper.init(&allocator, std::span(tonemapper_slang));
+
+	// The built-in nvpro shaders do not go through the Slang compiler, register them explicitly
+	// so a GPU crash inside them can be resolved by the crash report as well.
+	FzbRenderer::aftermathRegisterShaderBinary(tonemapper_slang, sizeof(tonemapper_slang), "<built-in>/nvshaders/tonemapper.slang");
+	FzbRenderer::aftermathRegisterShaderBinary(sky_simple_slang, sizeof(sky_simple_slang), "<built-in>/nvshaders/sky_simple.slang");
 
 	renderer->init();
 }
@@ -199,10 +238,17 @@ void FzbRenderer::Application::initSlangCompiler() {
 		});
 #endif
 
+//#if defined(AFTERMATH_AVAILABLE)
+//	slangCompiler.setCompileCallback([&](const std::filesystem::path& sourceFile, const uint32_t* spirvCode, size_t spirvSize) {
+//		std::span<const uint32_t> data(spirvCode, spirvSize / sizeof(uint32_t));
+//		AftermathCrashTracker::getInstance().addShaderBinary(data);
+//		});
+//#endif
 #if defined(AFTERMATH_AVAILABLE)
+	// Registers the shader with Nsight Aftermath and dumps <hash>.spv + manifest.txt to
+	// <exeDir>/aftermath_shaders so a GPU crash can be resolved back to this .slang file.
 	slangCompiler.setCompileCallback([&](const std::filesystem::path& sourceFile, const uint32_t* spirvCode, size_t spirvSize) {
-		std::span<const uint32_t> data(spirvCode, spirvSize / sizeof(uint32_t));
-		AftermathCrashTracker::getInstance().addShaderBinary(data);
+		FzbRenderer::aftermathRegisterShaderBinary(spirvCode, spirvSize, sourceFile);
 		});
 #endif
 }
@@ -309,6 +355,23 @@ void FzbRenderer::Application::onPreRender() {
 	renderer->preRender();
 }
 void FzbRenderer::Application::onRender(VkCommandBuffer* cmd) {
+	// The renderer reuses single-copy per-frame resources (G-buffers, RIS candidate buffers,
+	// tonemapper images, ...). nvapp only synchronizes the ring slot reuse, so consecutive
+	// frames in flight would read/write those resources concurrently and the driver faulted
+	// intermittently (device lost). Wait until the previous frame completed on the GPU so at
+	// most one frame is in flight.
+	const uint32_t            frameCycleSize = app->getFrameCycleSize();
+	const nvvk::SemaphoreInfo frameSignal    = app->getFrameSignalSemaphore();
+	if (frameSignal.value > frameCycleSize)
+	{
+		const uint64_t            waitValue = frameSignal.value - 1;  // the previous frame's value
+		const VkSemaphoreWaitInfo waitInfo{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+		                                   .semaphoreCount = 1,
+		                                   .pSemaphores = &frameSignal.semaphore,
+		                                   .pValues = &waitValue};
+		NVVK_CHECK(vkWaitSemaphores(app->getDevice(), &waitInfo, std::numeric_limits<uint64_t>::max()));
+	}
+
 	sceneResource.updateDataPerFrame(cmd[0]);
 	renderer->render(cmd);
 }

@@ -734,7 +734,7 @@ void GeometryClustering_VRPG::createClusterOctree(VkCommandBuffer cmd) {
 
 		vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_DispatchClustering);
 		vkCmdDispatch(cmd, 1, 1, 1);
-		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 
 		vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_Clustering1);
 		vkCmdDispatchIndirect(cmd, VRPG2Renderer::source.globalInfoBuffer.buffer, 0);
@@ -764,7 +764,7 @@ void GeometryClustering_VRPG::createClusterSVO(VkCommandBuffer cmd) {
 	VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_CreateSVO1);
 	vkCmdDispatch(cmd, 1, 1, 1);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 
 	int startLayer = 2;
 	for (int layerIndex = startLayer; layerIndex <= pushConstant.octreeMaxLayer; ++layerIndex) {
@@ -773,13 +773,11 @@ void GeometryClustering_VRPG::createClusterSVO(VkCommandBuffer cmd) {
 
 		vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_CreateSVO2);
 		vkCmdDispatchIndirect(cmd, VRPG2Renderer::source.globalInfoBuffer.buffer, 0);
-		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 
 		vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_CreateSVO3);
 		vkCmdDispatchIndirect(cmd, VRPG2Renderer::source.globalInfoBuffer.buffer, 0);
-		if (layerIndex < pushConstant.octreeMaxLayer)
-			nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
-		else nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 	}
 
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_CreateSVO4);
@@ -793,7 +791,7 @@ void GeometryClustering_VRPG::getNearbyClusterInfo(VkCommandBuffer cmd) {
 
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_dispatchGetNearbyCluster);
 	vkCmdDispatch(cmd, 1, 1, 1);
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
 
 	vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_getNearbyCluster1);
 	vkCmdDispatchIndirect(cmd, VRPG2Renderer::source.globalInfoBuffer.buffer, 0);

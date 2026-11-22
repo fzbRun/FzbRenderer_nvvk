@@ -49,6 +49,7 @@ void LightClustering_VRPG::clean() {
 
 	VkDevice device = Application::app->getDevice();
 
+	vkDestroyShaderEXT(device, computeShader_init, nullptr);
 	vkDestroyShaderEXT(device, computeShader_GetHasDataLightNodeBlockInfo, nullptr);
 	vkDestroyShaderEXT(device, computeShader_DispatchClustering, nullptr);
 	vkDestroyShaderEXT(device, computeShader_Clustering1, nullptr);
@@ -126,12 +127,9 @@ void LightClustering_VRPG::updateDataPerFrame(VkCommandBuffer cmd) {
 	pushConstant.frameIndex = VRPG2Renderer::setting.frameIndex;
 	pushConstant.randomFrameIndex = (VRPG_RANDOM_FRAME_SOURCE != 0) ? int(VRPG2Renderer::setting.randomFrameIndex) : VRPG2Renderer::setting.frameIndex;
 
-	// the light tree leaves are coarse light voxels (VRPG: 16^3) aggregating the geometry voxels
-	uint32_t lightNoeCount = 1u << VRPG2Renderer::setting.lightOctreeDepth;
-	pushConstant.nodeTotalCount = lightNoeCount;
-	pushConstant.nodeGridStartPos_Size = glm::vec4(VRPG2Renderer::setting.voxelGridStartPos, float(lightNoeCount));
-	int layerDiff = VRPG2Renderer::setting.geometryOctreeDepth - VRPG2Renderer::setting.lightOctreeDepth;
-	pushConstant.nodeSize = shaderio::float4(VRPG2Renderer::setting.voxelSize * float(1 << (3 * layerDiff)), 1.0f);
+	pushConstant.lightOctreeMaxLayer = VRPG2Renderer::setting.lightOctreeDepth;
+	pushConstant.lightOctreeNodeTotalCount = ((1u << (3 * (VRPG2Renderer::setting.lightOctreeDepth + 1))) - 1) / 7 * 6;
+	pushConstant.lightLeafNodeTotalCount = (1 << (3 * VRPG2Renderer::setting.lightOctreeDepth)) * 6;
 
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)Application::sceneResource.bSceneInfo.address;
 }
@@ -156,78 +154,6 @@ void LightClustering_VRPG::render(VkCommandBuffer cmd) {
 
 	createLightNodeOctree(cmd);
 }
-#ifndef NDEBUG
-// Draws the wireframe boxes of the light tree nodes that carry radiance, ported from
-// VRPG's Octree_VRPG::lightTreeDebug.
-void LightClustering_VRPG::lightTreeDebug(VkCommandBuffer cmd) {
-	NVVK_DBG_SCOPE(cmd);
-
-	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage((uint32_t)shaderio::GBuffers_LightClustering_VRPG::eLightTree), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
-	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getDepthImage(), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
-
-	VkRenderingAttachmentInfo colorAttachment = DEFAULT_VkRenderingAttachmentInfo;
-	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-	colorAttachment.imageView = gBuffers.getColorImageView((uint32_t)shaderio::GBuffers_LightClustering_VRPG::eLightTree);
-	colorAttachment.clearValue = { .color = {Application::sceneResource.sceneInfo.backgroundColor.x,
-											Application::sceneResource.sceneInfo.backgroundColor.y,
-											Application::sceneResource.sceneInfo.backgroundColor.z, 1.0f} };
-
-	VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
-	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-	depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
-	depthAttachment.imageView = gBuffers.getDepthImageView();
-
-	VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
-	renderingInfo.renderArea = { {0, 0}, gBuffers.getSize() };
-	renderingInfo.colorAttachmentCount = 1;
-	renderingInfo.pColorAttachments = &colorAttachment;
-	renderingInfo.pDepthAttachment = &depthAttachment;
-
-	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, staticDescPack.getSetPtr(), 0, nullptr);
-
-	vkCmdBeginRendering(cmd, &renderingInfo);
-
-	graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
-	graphicsDynamicPipeline.inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
-	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;
-	graphicsDynamicPipeline.rasterizationState.polygonMode = VK_POLYGON_MODE_LINE;
-	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_FALSE;
-	graphicsDynamicPipeline.depthStencilState.depthWriteEnable = VK_FALSE;
-	graphicsDynamicPipeline.depthStencilState.depthBoundsTestEnable = VK_FALSE;
-	graphicsDynamicPipeline.cmdApplyAllStates(cmd);
-	vkCmdSetDepthBoundsTestEnable(cmd, VK_FALSE);
-	graphicsDynamicPipeline.cmdSetViewportAndScissor(cmd, gBuffers.getSize());
-	graphicsDynamicPipeline.cmdBindShaders(cmd, { .vertex = vertexShader_TreeDebug, .fragment = fragmentShader_TreeDebug });
-
-	vkCmdSetVertexInputEXT(cmd, 0, nullptr, 0, nullptr);
-
-	const shaderio::Mesh& mesh = scene.meshes[0];
-	const shaderio::TriangleMesh& triMesh = mesh.triMesh;
-
-	uint32_t bufferIndex = scene.getMeshBufferIndex(0);
-	const nvvk::Buffer& v = scene.bDatas[bufferIndex];
-	vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(mesh.indexType));
-
-	// normalIndex == 6 means "all six normal partitions"
-	const int selectedNormal = debugPushConstant.normalIndex_E;
-	const int firstNormal = selectedNormal == 6 ? 0 : selectedNormal;
-	const int lastNormal = selectedNormal == 6 ? 6 : selectedNormal + 1;
-
-	for (int normalIndex = firstNormal; normalIndex < lastNormal; ++normalIndex) {
-		debugPushConstant.normalIndex_E = normalIndex;
-		debugPushConstant.mode = 1;
-		vkCmdPushConstants2(cmd, &debugPushInfo);
-		vkCmdDrawIndexed(cmd, triMesh.indices.count, (uint32_t)debugPushConstant.curLayerNodeCount_E, 0, 0, 0);
-	}
-	debugPushConstant.normalIndex_E = selectedNormal;
-
-	vkCmdEndRendering(cmd);
-
-	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage((uint32_t)shaderio::GBuffers_LightClustering_VRPG::eLightTree), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
-	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getDepthImage(), VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
-}
-#endif
-
 void LightClustering_VRPG::postProcess(VkCommandBuffer cmd) {
 #ifndef NDEBUG
 	if (!showLightTree) return;
@@ -409,6 +335,20 @@ void LightClustering_VRPG::compileAndCreateShaders() {
 	VkDevice device = Application::app->getDevice();
 	//--------------------------------------------------------------------------------------
 	{
+		shaderSource = shaderPath / "init.slang";
+		shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
+
+		vkDestroyShaderEXT(device, computeShader_init, nullptr);
+		shaderInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		shaderInfo.nextStage = 0;
+		shaderInfo.pName = "computeMain_init";
+		shaderInfo.codeSize = shaderCode.codeSize;
+		shaderInfo.pCode = shaderCode.pCode;
+		vkCreateShadersEXT(device, 1U, &shaderInfo, nullptr, &computeShader_init);
+		NVVK_DBG_NAME(computeShader_init);
+	}
+	//--------------------------------------------------------------------------------------
+	{
 		shaderSource = shaderPath / "clustering.slang";
 		shaderCode = FzbRenderer::compileSlangShader(shaderSource, {});
 
@@ -482,12 +422,25 @@ void LightClustering_VRPG::createLightNodeOctree(VkCommandBuffer cmd) {
 
 	int iterationCount = std::min(VRPG2Renderer::setting.lightOctreeDepth, 3);
 	uint32_t layerBlockCount = uint32_t(pow(8, VRPG2Renderer::setting.lightOctreeDepth)) * 6 / 8;
-	for (int layerIndex = VRPG2Renderer::setting.lightOctreeDepth; layerIndex >= iterationCount; --layerIndex) {
+
+	{
+		vkCmdPushConstants2(cmd, &pushInfo);
+
+		vkCmdFillBuffer(cmd, lightNodeBlockInfoBuffer.buffer, 0, lightNodeBlockInfoBuffer.bufferSize, 0);
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+
+		vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_init);
+		VkExtent2D leafGroupSize = nvvk::getGroupCounts({ (uint32_t)pushConstant.lightOctreeNodeTotalCount, 1 }, VkExtent2D{ 1024, 1 });
+		vkCmdDispatch(cmd, leafGroupSize.width, 1, 1);
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT);
+	}
+
+	for (int layerIndex = VRPG2Renderer::setting.lightOctreeDepth; layerIndex > iterationCount; --layerIndex) {
 		pushConstant.currentLayer = layerIndex;
 		pushConstant.currentLayerBlockCount = layerBlockCount;
 		vkCmdPushConstants2(cmd, &pushInfo);
 
-		vkCmdFillBuffer(cmd, clusteringGlobalInfoBuffer.buffer, 0, sizeof(shaderio::uint), 0);
+		vkCmdFillBuffer(cmd, clusteringGlobalInfoBuffer.buffer, 0, sizeof(shaderio::LightClusteringGlobalInfo_VRPG), 0);
 		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
 		vkCmdBindShadersEXT(cmd, 1, &stage, &computeShader_GetHasDataLightNodeBlockInfo);
@@ -519,3 +472,72 @@ void LightClustering_VRPG::createLightNodeOctree(VkCommandBuffer cmd) {
 		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 	}
 }
+
+void LightClustering_VRPG::lightTreeDebug(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
+
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage((uint32_t)shaderio::GBuffers_LightClustering_VRPG::eLightTree), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getDepthImage(), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
+
+	VkRenderingAttachmentInfo colorAttachment = DEFAULT_VkRenderingAttachmentInfo;
+	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	colorAttachment.imageView = gBuffers.getColorImageView((uint32_t)shaderio::GBuffers_LightClustering_VRPG::eLightTree);
+	colorAttachment.clearValue = { .color = {Application::sceneResource.sceneInfo.backgroundColor.x,
+											Application::sceneResource.sceneInfo.backgroundColor.y,
+											Application::sceneResource.sceneInfo.backgroundColor.z, 1.0f} };
+
+	VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
+	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
+	depthAttachment.imageView = gBuffers.getDepthImageView();
+
+	VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
+	renderingInfo.renderArea = { {0, 0}, gBuffers.getSize() };
+	renderingInfo.colorAttachmentCount = 1;
+	renderingInfo.pColorAttachments = &colorAttachment;
+	renderingInfo.pDepthAttachment = &depthAttachment;
+
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, staticDescPack.getSetPtr(), 0, nullptr);
+
+	vkCmdBeginRendering(cmd, &renderingInfo);
+
+	graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
+	graphicsDynamicPipeline.inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+	graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;
+	graphicsDynamicPipeline.rasterizationState.polygonMode = VK_POLYGON_MODE_LINE;
+	graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_FALSE;
+	graphicsDynamicPipeline.depthStencilState.depthWriteEnable = VK_FALSE;
+	graphicsDynamicPipeline.depthStencilState.depthBoundsTestEnable = VK_FALSE;
+	graphicsDynamicPipeline.cmdApplyAllStates(cmd);
+	vkCmdSetDepthBoundsTestEnable(cmd, VK_FALSE);
+	graphicsDynamicPipeline.cmdSetViewportAndScissor(cmd, gBuffers.getSize());
+	graphicsDynamicPipeline.cmdBindShaders(cmd, { .vertex = vertexShader_TreeDebug, .fragment = fragmentShader_TreeDebug });
+
+	vkCmdSetVertexInputEXT(cmd, 0, nullptr, 0, nullptr);
+
+	const shaderio::Mesh& mesh = scene.meshes[0];
+	const shaderio::TriangleMesh& triMesh = mesh.triMesh;
+
+	uint32_t bufferIndex = scene.getMeshBufferIndex(0);
+	const nvvk::Buffer& v = scene.bDatas[bufferIndex];
+	vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(mesh.indexType));
+
+	// normalIndex == 6 means "all six normal partitions"
+	const int selectedNormal = debugPushConstant.normalIndex_E;
+	const int firstNormal = selectedNormal == 6 ? 0 : selectedNormal;
+	const int lastNormal = selectedNormal == 6 ? 6 : selectedNormal + 1;
+
+	for (int normalIndex = firstNormal; normalIndex < lastNormal; ++normalIndex) {
+		debugPushConstant.normalIndex_E = normalIndex;
+		debugPushConstant.mode = 1;
+		vkCmdPushConstants2(cmd, &debugPushInfo);
+		vkCmdDrawIndexed(cmd, triMesh.indices.count, (uint32_t)debugPushConstant.curLayerNodeCount_E, 0, 0, 0);
+	}
+	debugPushConstant.normalIndex_E = selectedNormal;
+
+	vkCmdEndRendering(cmd);
+
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage((uint32_t)shaderio::GBuffers_LightClustering_VRPG::eLightTree), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getDepthImage(), VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
+}
+

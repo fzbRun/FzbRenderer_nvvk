@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "feature/Feature.h"
 #include "renderer/VRPG2/RIS/RISShaderio.h"
@@ -7,9 +7,11 @@
 #ifndef FZBRENDERER_VRPG2_RIS_H
 #define FZBRENDERER_VRPG2_RIS_H
 namespace FzbRenderer {
-// Resampled importance sampling over the light tree. Fills the candidate tables that the path
-// guiding pass consumes. Two candidate-selection strategies are compiled in, selected by
-// VRPG_Candidate_Samples_SampleMode in RISShaderio.h (no spatiotemporal reuse).
+enum class GBuffers_RIS_VRPG2 : uint32_t {
+	eClusterPairResult = 0,
+	eBufferCount,
+};
+
 class RIS_VRPG : public Feature {
 public:
 	RIS_VRPG() = default;
@@ -24,6 +26,8 @@ public:
 	void updateDataPerFrame(VkCommandBuffer cmd);
 	void render(VkCommandBuffer cmd);
 	void uiRender();
+	void resize(VkCommandBuffer cmd, const VkExtent2D& size) override;
+	void postProcess(VkCommandBuffer cmd) override;
 
 private:
 	void createSource();
@@ -39,23 +43,45 @@ private:
 	void getCandidateNodeWeight(VkCommandBuffer cmd);
 	void createCandidatePrefixWSum(VkCommandBuffer cmd);
 
-#ifndef NDEBUG
-	// label -> (layer, node) -> candidate chain can be compared with the guide lookup.
-#endif
+	// Ported from VRPG Octree_VRPG::clusterPairDebug: draws the candidate chain of the geometric
+	// cluster picked from the pixel under the cursor (right click / VRPG2_AUTO_PICK).
+	
 
 	shaderio::RISPushConstant_VRPG2 pushConstant{};
 	VkPushConstantsInfo pushInfo{};
 
+	shaderio::ClusterPairDebugPushConstant_VRPG2 debugPushConstant2{};
+	VkPushConstantsInfo debugPushInfo{};
 
-	VkShaderEXT computeShader_initCandidateNodes{};
-	VkShaderEXT computeShader_selectCandidates{};
-	VkShaderEXT computeShader_emitClusterPairs{};
+	nvvk::Buffer RISGlobalInfoBuffer;
+
+
+
+	VkShaderEXT computeShader_init{};
+
+	VkShaderEXT computeShader_getCandidateNodes_1{};
+	VkShaderEXT computeShader_getCandidateNodes_2{};
+	VkShaderEXT computeShader_getCandidateNodes_3{};
+	VkShaderEXT computeShader_getCandidateNodes_4{};
+	VkShaderEXT computeShader_getCandidateNodes_5{};
+
+	VkShaderEXT computeShader_getCandidateNodes{};
+	
+	VkShaderEXT computeShader_dispatchGetCandidateLeafNodes{};
 	VkShaderEXT computeShader_getCandidateLeafNodes{};
 	VkShaderEXT computeShader_clusterPairHitTest{};
 	VkShaderEXT computeShader_getCandidateNodeWeight{};
 	VkShaderEXT computeShader_createCandidatePrefixWSum{};
 
-	bool dirty = true;
+	nvvk::Buffer clusterPairDebugGlobalInfoBuffer;
+	VkShaderEXT computeShader_GetDebugClusterG{};
+	VkShaderEXT vertexShader_ClusterPairDebug{};
+	VkShaderEXT fragmentShader_ClusterPairDebug{};
+	bool showClusterPairDebugMap = false;
+	bool showNearbyClusters = false;
+	int  debugClusterIndex = -1;
+	bool changeClusterG = true;
+	void clusterPairDebug(VkCommandBuffer cmd);
 };
 }
 #endif

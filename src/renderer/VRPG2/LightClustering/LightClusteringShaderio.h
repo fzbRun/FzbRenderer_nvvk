@@ -13,9 +13,9 @@ struct LightClusteringPushConstant_VRPG {
 	int frameIndex;
 	int randomFrameIndex = 0;
 
-	uint32_t nodeTotalCount;		//per normal
-	float4 nodeGridStartPos_Size;
-	float4 nodeSize;
+	int lightOctreeMaxLayer;
+	int lightOctreeNodeTotalCount;
+	int lightLeafNodeTotalCount;
 
 	uint32_t currentLayer;
 	uint32_t currentLayerBlockCount;

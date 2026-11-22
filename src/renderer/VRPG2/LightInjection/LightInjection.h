@@ -49,6 +49,7 @@ private:
 	VkShaderEXT vertexShader_Cube{};
 	VkShaderEXT fragmentShader_Cube{};
 	VkPushConstantsInfo debugPushInfo{};
+	bool lightNodeDescriptorBound = false;	// the light tree leaf buffer is bound on the first injection
 };
 }
 

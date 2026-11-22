@@ -58,7 +58,7 @@
 				                                     = 0 (greedy relative error cut, M = 64) -->
 			</RIS>
 			<PathGuiding>
-				<!-- 引导采样与 BSDF 采样的 MIS 由 VRPG_PATH_SAMPLE_MODE 控制（默认 1） -->
+				<jitterRadiusScale value="3.0f"/>
 			</PathGuiding>
 		</VRPG>
 
