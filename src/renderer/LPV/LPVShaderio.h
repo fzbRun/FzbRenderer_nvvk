@@ -80,8 +80,6 @@ struct LPVFrameInfo
 
 	// per cascade: xyz = world space minimum corner, w = cell size
 	float4 cascadeOriginSize[LPV_MAX_CASCADES];
-	// per cascade: x = extent, y = view distance at which the cascade starts, z = 1/extent, w = unused
-	float4 cascadeMisc[LPV_MAX_CASCADES];
 
 	// per light: x = world area of one orthographic RSM texel,
 	//           y = solid angle of one perspective RSM texel, z/w = unused
@@ -153,6 +151,31 @@ enum class LPVStaticBindingPoints
 	eGvRsm,          // RWStructuredBuffer<float>          C * N^3 * 4
 	eFrameInfo,      // RWStructuredBuffer<LPVFrameInfo>   1
 	eInstanceSize,   // RWStructuredBuffer<float>          instance count, world size of each instance
+};
+
+struct CascadeDebugInfo {
+	float3 startPos;
+	float voxelSize;
+	int resolution;
+};
+struct LPVDebugPushConstant {
+	int frameIndex;
+	int padding;
+	uint2 screenSize;
+	SceneInfo* sceneInfoAddress;
+
+	int GBufferIndex;
+
+	int cascadeCount;
+	int gridIndex;
+	CascadeDebugInfo gridInfo[LPV_MAX_CASCADES];
+	int debugVoxelCount;
+
+	int lightIndex;
+
+	int showGvSH;
+	int cascadeIndex_showSH;
+	int3 voxelIndex_showSH;
 };
 
 NAMESPACE_SHADERIO_END()

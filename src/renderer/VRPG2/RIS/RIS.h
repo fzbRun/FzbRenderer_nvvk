@@ -55,8 +55,6 @@ private:
 
 	nvvk::Buffer RISGlobalInfoBuffer;
 
-
-
 	VkShaderEXT computeShader_init{};
 
 	VkShaderEXT computeShader_getCandidateNodes_1{};

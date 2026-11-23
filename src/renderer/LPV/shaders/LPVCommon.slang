@@ -18,7 +18,11 @@
 #include "feature/PathTracing/shaders/pathTracingCommon.slang"
 #include "renderer/LPV/LPVShaderio.h"
 
+#ifndef LPV_DEBUG
 [[vk::push_constant]] ConstantBuffer<LPVPushConstant, ScalarDataLayout> pushConst;
+#else
+[[vk::push_constant]] ConstantBuffer<LPVDebugPushConstant, ScalarDataLayout> pushConst;
+#endif
 
 [[vk::binding(LPVStaticBindingPoints::ePixelData)]] RWStructuredBuffer<LPVPixelData> pixelData;
 [[vk::binding(LPVStaticBindingPoints::eLPVVolumes)]] RWStructuredBuffer<float>      lpvVolumes;
@@ -135,11 +139,6 @@ float3 LPV_CascadeOrigin(int cascade)
 float LPV_CascadeCellSize(int cascade)
 {
     return frameInfo[0].cascadeOriginSize[cascade].w;
-}
-
-float LPV_CascadeExtent(int cascade)
-{
-    return frameInfo[0].cascadeMisc[cascade].x;
 }
 
 float3 LPV_CellCenter(int cascade, int3 cell)

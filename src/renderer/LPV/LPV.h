@@ -49,10 +49,8 @@ private:
 	// One nested grid, moved with the camera and snapped to whole cells.
 	struct CascadeLayout
 	{
-		shaderio::float3 origin{ 0.0f, 0.0f, 0.0f };
+		shaderio::float3  startPos{ 0.0f, 0.0f, 0.0f };
 		float             cellSize = 0.25f;
-		float             extent = 8.0f;
-		float             startDistance = 0.0f;
 	};
 
 	// placement / bookkeeping
@@ -67,8 +65,6 @@ private:
 	VkDeviceSize volumeFloatCount() const;
 
 	// passes
-	void bindStaticState(VkCommandBuffer cmd);
-	void dispatchCompute(VkCommandBuffer cmd, VkShaderEXT shader, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ);
 	void runGBufferPass(VkCommandBuffer cmd);
 	void runRsmInjectionPass(VkCommandBuffer cmd);
 	void runGvMergePass(VkCommandBuffer cmd);
@@ -91,7 +87,9 @@ private:
 	bool  skipDirectShadow = false;  // debug: LPV_NO_SHADOW=1 disables the direct shadow ray
 	int   saveFrame = -1;            // frame index at which the tonemapped image is written
 
+	VkPushConstantsInfo pushInfo{};
 	shaderio::LPVPushConstant pushConstant{};
+
 	shaderio::LPVFrameInfo    frameInfo{};
 
 	// GPU resources
@@ -126,6 +124,38 @@ private:
 	shaderio::float3                            cameraForward{ 0.0f, 0.0f, -1.0f };
 	float                                       sceneRadius = 1.0f;
 	uint32_t                                    activeLightCount = 0;
+
+	//-------------------------------------------------------------------
+	shaderio::LPVDebugPushConstant debugPushConstant{};
+
+	bool showGBuffer = false;
+	VkShaderEXT shaderShowGBuffer{};
+	void showGBufferResult(VkCommandBuffer cmd);
+
+	VkShaderEXT shaderShowGrid_vertex{};
+	VkShaderEXT shaderShowGrid_fragment{};
+	void showGridResult(VkCommandBuffer cmd);
+
+	bool showRSM = false;
+	VkShaderEXT shaderShowRSM{};
+	void showRSMResult(VkCommandBuffer cmd);
+
+	bool showSH_Gv = false;
+	int cascadeIndex_showSH_Gv;
+	shaderio::int3 voxelIndex_showSH_Gv;
+
+	bool showSH_RSM = false;
+	int cascadeIndex_showSH_RSM;
+	shaderio::int3 voxelIndex_showSH_RSM;
+
+	bool showSH_Propagate = false;
+	int cascadeIndex_showSH_Propagate;
+	shaderio::int3 voxelIndex_showSH_Propagate;
+
+	VkShaderEXT shaderShowSH_vertex{};
+	VkShaderEXT shaderShowSH_fragment{};
+	void showSHResult(VkCommandBuffer cmd);
+
 };
 
 }  // namespace FzbRenderer
