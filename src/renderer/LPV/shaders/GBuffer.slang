@@ -92,7 +92,7 @@ void lpvGBufferMain(uint2 threadIndex: SV_DispatchThreadID){
         specular = material.albedo;
 
     data.positionValid = float4(hit.position, 1.0);
-    data.normal = float4(normal, 0.0);
+    data.normal = float4(normal, 1.0);
     data.albedo = float4(diffuseAlbedo, 0.0);
     data.directColor = float4(direct, 0.0);
     data.specular = float4(specular, 0.0);
@@ -106,7 +106,7 @@ void lpvGBufferMain(uint2 threadIndex: SV_DispatchThreadID){
     float distance = max(hit.distance, 1e-4);
     float3 viewDir = normalize(hit.position - sceneInfo.cameraPosition);
     float cosView = max(abs(dot(normal, viewDir)), 0.05);
-    float pixelFootprint = distance * distance * LPV_PixelSolidAngle();
+    float pixelFootprint = distance * distance * LPV_PixelSolidAngle(threadIndex);
     float surfelArea = pixelFootprint / cosView;
 
     int cascadeCount = LPV_CascadeCount();

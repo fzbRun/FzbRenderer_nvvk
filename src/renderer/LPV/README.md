@@ -163,31 +163,26 @@ count) are parameters; everything else is fixed by the paper.
         <cellSize value = "0" />        <!-- finest cell in metres, 0 = scene diameter / N -->
         <useOcclusion value = "true" /> <!-- geometry volume on/off (debug) -->
         <useDampening value = "true" /> <!-- section 3.4 dampening on/off (debug) -->
-        <debugView value = "0" />       <!-- 0 off, 1 cascades, 2 direct only, 3 indirect only, 4 reference GI, 5 RSM -->
         <saveFrame value = "-1" />      <!-- write <exe dir>/lpv_snapshot.png at this frame index -->
     </LPV>
 </renderer>
 ```
 
-Debug environment variables: `LPV_DEBUG` (same as `debugView`), `LPV_ITERATIONS`, `LPV_SAVE_FRAME`,
+Debug environment variables: `LPV_ITERATIONS`, `LPV_SAVE_FRAME`,
 `LPV_NO_SHADOW=1` (disables the direct shadow ray, bit 6 of the push constant flags),
 `LPV_NO_DIRECT=1` (same as the *Remove direct light* button).
 
 The *Remove direct light* button in the UI (flag `eLPVFlagNoDirect`, bit 2 of the push constant flags)
 drops the direct term from the image, so what remains is the LPV contribution plus the glossy lookup —
-handy to judge the indirect term on its own without the *Indirect only* debug view (that one also
-disables the glossy term).
+handy to judge the indirect term on its own.
 
-`debugView = 5` (the *Show RSM* checkbox) draws the virtual RSM of the first light: one screen pixel
-per RSM texel, evaluated through the same `LPV_RsmTexel()` as the injection pass, so it shows exactly
-the reflected flux that gets injected. It is a normal gather-pass view, so the tonemapper runs and the
-image is never stale; the rest of the frame (propagation, gather) still executes.
+The *Show RSM* checkbox draws the virtual RSM of the first light: one screen pixel per RSM texel,
+evaluated through the same `LPV_RsmTexel()` as the injection pass, so it shows exactly the reflected
+flux that gets injected.
 
 ## Self checks
 
-The `Reference GI` debug view is an unbiased Monte Carlo single bounce estimator of the same frame and
-camera (8 cosine weighted rays per pixel); it is a validation tool, not part of the method. Checks that
-run without a reference image:
+Checks that run without a reference image:
 
 | Check | Expected |
 | --- | --- |

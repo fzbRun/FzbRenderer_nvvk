@@ -25,13 +25,15 @@
 #endif
 
 [[vk::binding(LPVStaticBindingPoints::ePixelData)]] RWStructuredBuffer<LPVPixelData> pixelData;
-[[vk::binding(LPVStaticBindingPoints::eLPVVolumes)]] RWStructuredBuffer<float>      lpvVolumes;
-[[vk::binding(LPVStaticBindingPoints::eLPVAccum)]] RWStructuredBuffer<float>        lpvAccum;
-[[vk::binding(LPVStaticBindingPoints::eGvMerged)]] RWStructuredBuffer<float>        gvMerged;
-[[vk::binding(LPVStaticBindingPoints::eGvCamera)]] RWStructuredBuffer<float>        gvCamera;
-[[vk::binding(LPVStaticBindingPoints::eGvRsm)]] RWStructuredBuffer<float>           gvRsm;
+[[vk::binding(LPVStaticBindingPoints::eLPVVolumes)]] RWStructuredBuffer<float>      lpvVolumes[LPV_MAX_CASCADES];
+[[vk::binding(LPVStaticBindingPoints::eLPVAccum)]] RWStructuredBuffer<float>        lpvAccum[LPV_MAX_CASCADES];
+[[vk::binding(LPVStaticBindingPoints::eGvMerged)]] RWStructuredBuffer<float>        gvMerged[LPV_MAX_CASCADES];
+[[vk::binding(LPVStaticBindingPoints::eGvCamera)]] RWStructuredBuffer<float>        gvCamera[LPV_MAX_CASCADES];
+[[vk::binding(LPVStaticBindingPoints::eGvRsm)]] RWStructuredBuffer<float>           gvRsm[LPV_MAX_CASCADES];
 [[vk::binding(LPVStaticBindingPoints::eFrameInfo)]] RWStructuredBuffer<LPVFrameInfo> frameInfo;
-[[vk::binding(LPVStaticBindingPoints::eInstanceSize)]] RWStructuredBuffer<float>     instanceSize;
+[[vk::binding(LPVStaticBindingPoints::eInstanceSize)]] RWStructuredBuffer<float> instanceSize;
+[[vk::binding(LPVStaticBindingPoints::eDepthImage)]] RWTexture2D<float>     depthImage;
+[[vk::binding(LPVStaticBindingPoints::eGridDebugData)]] RWStructuredBuffer<GridDebugInfo, ScalarDataLayout>     gridDebugData;
 
 /* Paper 4.1: "if the size of an object (determined using its bounding box) is smaller than the cell
    size of a grid, we do not create VPLs from this object by not rendering it to the RSM. This is to
@@ -120,15 +122,21 @@ int LPV_CascadeCount()
     return frameInfo[0].info.x;
 }
 
-int LPV_GridResolution()
+int LPV_CascadeResolution(int cascade)
 {
-    return frameInfo[0].info.y;
+    return frameInfo[0].cascadeResolution[cascade];
 }
 
-uint LPV_VoxelCount()
+
+uint LPV_VoxelCount(int cascade)
 {
-    uint n = uint(LPV_GridResolution());
+    uint n = uint(LPV_CascadeResolution(cascade));
     return n * n * n;
+}
+
+float LPV_CascadeReach(int cascade)
+{
+    return frameInfo[0].cascadeReach[cascade];
 }
 
 float3 LPV_CascadeOrigin(int cascade)
@@ -141,32 +149,145 @@ float LPV_CascadeCellSize(int cascade)
     return frameInfo[0].cascadeOriginSize[cascade].w;
 }
 
+float3 LPV_GvOrigin(int cascade)
+{
+    return LPV_CascadeOrigin(cascade) - 0.5 * LPV_CascadeCellSize(cascade);
+}
+
 float3 LPV_CellCenter(int cascade, int3 cell)
 {
     return LPV_CascadeOrigin(cascade) + (float3(cell.x, cell.y, cell.z) + 0.5) * LPV_CascadeCellSize(cascade);
 }
 
-// Flat float index of coefficient `channel` of a voxel inside one of the ping pong volumes.
 uint LPV_VolumeFloatIndex(int volume, int cascade, int3 cell, int channel)
 {
-    int  n       = LPV_GridResolution();
-    uint voxels  = LPV_VoxelCount();
-    uint voxel   = uint(cascade) * voxels + uint((cell.z * n + cell.y) * n + cell.x);
-    return (uint(volume) * uint(LPV_CascadeCount()) * voxels + voxel) * LPV_VOXEL_FLOATS + uint(channel) * LPV_SH_COEFF_COUNT;
+    int  n       = LPV_CascadeResolution(cascade);
+    uint voxels  = LPV_VoxelCount(cascade);
+    uint voxel   = uint((cell.z * n + cell.y) * n + cell.x);
+    return (uint(volume) * voxels + voxel) * LPV_VOXEL_FLOATS + uint(channel) * LPV_SH_COEFF_COUNT;
 }
 
 uint LPV_AccumFloatIndex(int cascade, int3 cell, int channel)
 {
-    int  n      = LPV_GridResolution();
-    uint voxels = LPV_VoxelCount();
-    return (uint(cascade) * voxels + uint((cell.z * n + cell.y) * n + cell.x)) * LPV_VOXEL_FLOATS + uint(channel) * LPV_SH_COEFF_COUNT;
+    int  n      = LPV_CascadeResolution(cascade);
+    uint voxel  = uint((cell.z * n + cell.y) * n + cell.x);
+    return voxel * LPV_VOXEL_FLOATS + uint(channel) * LPV_SH_COEFF_COUNT;
 }
+
+int LPV_GvResolution(int cascade) { return LPV_CascadeResolution(cascade) + 1; }
+uint LPV_GvVoxelCount(int cascade) { int n = LPV_GvResolution(cascade); return uint(n * n * n); }
 
 uint LPV_GvFloatIndex(int cascade, int3 cell, int channel)
 {
-    int  n      = LPV_GridResolution();
-    uint voxels = LPV_VoxelCount();
-    return (uint(cascade) * voxels + uint((cell.z * n + cell.y) * n + cell.x)) * LPV_GV_FLOATS + uint(channel);
+    int n = LPV_GvResolution(cascade);
+    return uint((cell.z * n + cell.y) * n + cell.x) * LPV_GV_FLOATS + uint(channel);
+}
+
+float4 LPV_ReadFloat4(RWStructuredBuffer<float> buffer, uint base)
+{
+    return float4(buffer[base], buffer[base + 1], buffer[base + 2], buffer[base + 3]);
+}
+
+void LPV_WriteFloat4(RWStructuredBuffer<float> buffer, uint base, float4 value)
+{
+    buffer[base + 0] = value.x;
+    buffer[base + 1] = value.y;
+    buffer[base + 2] = value.z;
+    buffer[base + 3] = value.w;
+}
+
+void LPV_AtomicAddFloat4(RWStructuredBuffer<float> buffer, uint base, float4 value)
+{
+    InterlockedAdd(buffer[base + 0], value.x);
+    InterlockedAdd(buffer[base + 1], value.y);
+    InterlockedAdd(buffer[base + 2], value.z);
+    InterlockedAdd(buffer[base + 3], value.w);
+}
+
+float4 LPV_ReadVolumes(int volume, int cascade, uint base)
+{
+    if (cascade == 0) return LPV_ReadFloat4(lpvVolumes[0], base);
+    if (cascade == 1) return LPV_ReadFloat4(lpvVolumes[1], base);
+    if (cascade == 2) return LPV_ReadFloat4(lpvVolumes[2], base);
+    return LPV_ReadFloat4(lpvVolumes[3], base);
+}
+
+void LPV_WriteVolumes(int volume, int cascade, uint base, float4 value)
+{
+    if (cascade == 0) { LPV_WriteFloat4(lpvVolumes[0], base, value); return; }
+    if (cascade == 1) { LPV_WriteFloat4(lpvVolumes[1], base, value); return; }
+    if (cascade == 2) { LPV_WriteFloat4(lpvVolumes[2], base, value); return; }
+    LPV_WriteFloat4(lpvVolumes[3], base, value);
+}
+
+void LPV_AtomicAddVolumes(int volume, int cascade, uint base, float4 value)
+{
+    if (cascade == 0) { LPV_AtomicAddFloat4(lpvVolumes[0], base, value); return; }
+    if (cascade == 1) { LPV_AtomicAddFloat4(lpvVolumes[1], base, value); return; }
+    if (cascade == 2) { LPV_AtomicAddFloat4(lpvVolumes[2], base, value); return; }
+    LPV_AtomicAddFloat4(lpvVolumes[3], base, value);
+}
+
+float4 LPV_ReadAccum(int cascade, uint base)
+{
+    if (cascade == 0) return LPV_ReadFloat4(lpvAccum[0], base);
+    if (cascade == 1) return LPV_ReadFloat4(lpvAccum[1], base);
+    if (cascade == 2) return LPV_ReadFloat4(lpvAccum[2], base);
+    return LPV_ReadFloat4(lpvAccum[3], base);
+}
+
+void LPV_AddAccum(int cascade, uint base, float4 value)
+{
+    if (cascade == 0) { lpvAccum[0][base] += value.x; lpvAccum[0][base + 1] += value.y; lpvAccum[0][base + 2] += value.z; lpvAccum[0][base + 3] += value.w; return; }
+    if (cascade == 1) { lpvAccum[1][base] += value.x; lpvAccum[1][base + 1] += value.y; lpvAccum[1][base + 2] += value.z; lpvAccum[1][base + 3] += value.w; return; }
+    if (cascade == 2) { lpvAccum[2][base] += value.x; lpvAccum[2][base + 1] += value.y; lpvAccum[2][base + 2] += value.z; lpvAccum[2][base + 3] += value.w; return; }
+    lpvAccum[3][base] += value.x; lpvAccum[3][base + 1] += value.y; lpvAccum[3][base + 2] += value.z; lpvAccum[3][base + 3] += value.w;
+}
+
+float4 LPV_ReadGv(int gvSource, int cascade, uint base)
+{
+    if (gvSource == LPVGeometrySource::eLPVGeometryFromCamera)
+    {
+        if (cascade == 0) return LPV_ReadFloat4(gvCamera[0], base);
+        if (cascade == 1) return LPV_ReadFloat4(gvCamera[1], base);
+        if (cascade == 2) return LPV_ReadFloat4(gvCamera[2], base);
+        return LPV_ReadFloat4(gvCamera[3], base);
+    }
+    if (gvSource == LPVGeometrySource::eLPVGeometryFromRsm)
+    {
+        if (cascade == 0) return LPV_ReadFloat4(gvRsm[0], base);
+        if (cascade == 1) return LPV_ReadFloat4(gvRsm[1], base);
+        if (cascade == 2) return LPV_ReadFloat4(gvRsm[2], base);
+        return LPV_ReadFloat4(gvRsm[3], base);
+    }
+    if (cascade == 0) return LPV_ReadFloat4(gvMerged[0], base);
+    if (cascade == 1) return LPV_ReadFloat4(gvMerged[1], base);
+    if (cascade == 2) return LPV_ReadFloat4(gvMerged[2], base);
+    return LPV_ReadFloat4(gvMerged[3], base);
+}
+
+void LPV_AtomicAddGvBase(int gvSource, int cascade, uint base, float4 value)
+{
+    if (gvSource == LPVGeometrySource::eLPVGeometryFromCamera)
+    {
+        if (cascade == 0) { LPV_AtomicAddFloat4(gvCamera[0], base, value); return; }
+        if (cascade == 1) { LPV_AtomicAddFloat4(gvCamera[1], base, value); return; }
+        if (cascade == 2) { LPV_AtomicAddFloat4(gvCamera[2], base, value); return; }
+        LPV_AtomicAddFloat4(gvCamera[3], base, value);
+        return;
+    }
+    if (cascade == 0) { LPV_AtomicAddFloat4(gvRsm[0], base, value); return; }
+    if (cascade == 1) { LPV_AtomicAddFloat4(gvRsm[1], base, value); return; }
+    if (cascade == 2) { LPV_AtomicAddFloat4(gvRsm[2], base, value); return; }
+    LPV_AtomicAddFloat4(gvRsm[3], base, value);
+}
+
+void LPV_StoreGvMerged(int cascade, uint base, float4 value)
+{
+    if (cascade == 0) { LPV_WriteFloat4(gvMerged[0], base, value); return; }
+    if (cascade == 1) { LPV_WriteFloat4(gvMerged[1], base, value); return; }
+    if (cascade == 2) { LPV_WriteFloat4(gvMerged[2], base, value); return; }
+    LPV_WriteFloat4(gvMerged[3], base, value);
 }
 
 bool LPV_CellInside(int3 cell, int n)
@@ -179,80 +300,71 @@ bool LPV_CellInside(int3 cell, int n)
 //------------------------------------------------------------------------------------------
 float4 LPV_LoadVolumeSH(int volume, int cascade, int3 cell, int channel)
 {
-    uint base = LPV_VolumeFloatIndex(volume, cascade, cell, channel);
-    return float4(lpvVolumes[base], lpvVolumes[base + 1], lpvVolumes[base + 2], lpvVolumes[base + 3]);
+    return LPV_ReadVolumes(volume, cascade, LPV_VolumeFloatIndex(volume, cascade, cell, channel));
 }
 
 void LPV_StoreVolumeSH(int volume, int cascade, int3 cell, LPVSH sh)
 {
-    uint base = LPV_VolumeFloatIndex(volume, cascade, cell, 0);
-    lpvVolumes[base + 0] = sh.r.x;
-    lpvVolumes[base + 1] = sh.r.y;
-    lpvVolumes[base + 2] = sh.r.z;
-    lpvVolumes[base + 3] = sh.r.w;
-    base = LPV_VolumeFloatIndex(volume, cascade, cell, 1);
-    lpvVolumes[base + 0] = sh.g.x;
-    lpvVolumes[base + 1] = sh.g.y;
-    lpvVolumes[base + 2] = sh.g.z;
-    lpvVolumes[base + 3] = sh.g.w;
-    base = LPV_VolumeFloatIndex(volume, cascade, cell, 2);
-    lpvVolumes[base + 0] = sh.b.x;
-    lpvVolumes[base + 1] = sh.b.y;
-    lpvVolumes[base + 2] = sh.b.z;
-    lpvVolumes[base + 3] = sh.b.w;
+    LPV_WriteVolumes(volume, cascade, LPV_VolumeFloatIndex(volume, cascade, cell, 0), sh.r);
+    LPV_WriteVolumes(volume, cascade, LPV_VolumeFloatIndex(volume, cascade, cell, 1), sh.g);
+    LPV_WriteVolumes(volume, cascade, LPV_VolumeFloatIndex(volume, cascade, cell, 2), sh.b);
 }
 
-// VPL injection is a scatter over many RSM texels, so the SH coefficients are accumulated with
-// float atomics (VK_EXT_shader_atomic_float, enabled by the renderer).
 void LPV_AtomicAddVolumeSH(int volume, int cascade, int3 cell, LPVSH sh)
 {
-    uint base = LPV_VolumeFloatIndex(volume, cascade, cell, 0);
-    InterlockedAdd(lpvVolumes[base + 0], sh.r.x);
-    InterlockedAdd(lpvVolumes[base + 1], sh.r.y);
-    InterlockedAdd(lpvVolumes[base + 2], sh.r.z);
-    InterlockedAdd(lpvVolumes[base + 3], sh.r.w);
-    base = LPV_VolumeFloatIndex(volume, cascade, cell, 1);
-    InterlockedAdd(lpvVolumes[base + 0], sh.g.x);
-    InterlockedAdd(lpvVolumes[base + 1], sh.g.y);
-    InterlockedAdd(lpvVolumes[base + 2], sh.g.z);
-    InterlockedAdd(lpvVolumes[base + 3], sh.g.w);
-    base = LPV_VolumeFloatIndex(volume, cascade, cell, 2);
-    InterlockedAdd(lpvVolumes[base + 0], sh.b.x);
-    InterlockedAdd(lpvVolumes[base + 1], sh.b.y);
-    InterlockedAdd(lpvVolumes[base + 2], sh.b.z);
-    InterlockedAdd(lpvVolumes[base + 3], sh.b.w);
+    LPV_AtomicAddVolumes(volume, cascade, LPV_VolumeFloatIndex(volume, cascade, cell, 0), sh.r);
+    LPV_AtomicAddVolumes(volume, cascade, LPV_VolumeFloatIndex(volume, cascade, cell, 1), sh.g);
+    LPV_AtomicAddVolumes(volume, cascade, LPV_VolumeFloatIndex(volume, cascade, cell, 2), sh.b);
+}
+
+void LPV_AtomicSplatVolumeSH(int volume, int cascade, float3 position, LPVSH sh)
+{
+    float  s  = LPV_CascadeCellSize(cascade);
+    int    n  = LPV_CascadeResolution(cascade);
+    float3 g  = (position - LPV_CascadeOrigin(cascade)) / s - 0.5;
+    int3   i0 = int3(floor(g));
+    float3 t  = g - float3(i0);
+
+    for (int dz = 0; dz < 2; ++dz)
+    {
+        float wz = dz == 1 ? t.z : 1.0 - t.z;
+        for (int dy = 0; dy < 2; ++dy)
+        {
+            float wy = dy == 1 ? t.y : 1.0 - t.y;
+            for (int dx = 0; dx < 2; ++dx)
+            {
+                float wx = dx == 1 ? t.x : 1.0 - t.x;
+                float w  = wx * wy * wz;
+                if (w <= 0.0)
+                    continue;
+
+                int3 cell = i0 + int3(dx, dy, dz);
+                if (!LPV_CellInside(cell, n))
+                    continue;
+
+                LPV_AtomicAddVolumeSH(volume, cascade, cell, LPV_MakeSH(sh.r * w, sh.g * w, sh.b * w));
+            }
+        }
+    }
 }
 
 void LPV_AddAccumSH(int cascade, int3 cell, LPVSH sh)
 {
-    uint base = LPV_AccumFloatIndex(cascade, cell, 0);
-    lpvAccum[base + 0] += sh.r.x;
-    lpvAccum[base + 1] += sh.r.y;
-    lpvAccum[base + 2] += sh.r.z;
-    lpvAccum[base + 3] += sh.r.w;
-    base = LPV_AccumFloatIndex(cascade, cell, 1);
-    lpvAccum[base + 0] += sh.g.x;
-    lpvAccum[base + 1] += sh.g.y;
-    lpvAccum[base + 2] += sh.g.z;
-    lpvAccum[base + 3] += sh.g.w;
-    base = LPV_AccumFloatIndex(cascade, cell, 2);
-    lpvAccum[base + 0] += sh.b.x;
-    lpvAccum[base + 1] += sh.b.y;
-    lpvAccum[base + 2] += sh.b.z;
-    lpvAccum[base + 3] += sh.b.w;
+    LPV_AddAccum(cascade, LPV_AccumFloatIndex(cascade, cell, 0), sh.r);
+    LPV_AddAccum(cascade, LPV_AccumFloatIndex(cascade, cell, 1), sh.g);
+    LPV_AddAccum(cascade, LPV_AccumFloatIndex(cascade, cell, 2), sh.b);
 }
 
 float4 LPV_LoadAccumSH(int cascade, int3 cell, int channel)
 {
-    uint base = LPV_AccumFloatIndex(cascade, cell, channel);
-    return float4(lpvAccum[base], lpvAccum[base + 1], lpvAccum[base + 2], lpvAccum[base + 3]);
+    return LPV_ReadAccum(cascade, LPV_AccumFloatIndex(cascade, cell, channel));
 }
 
 // Trilinear lookup of one channel of the accumulated volume. Cell centers live at
 // origin + (i + 0.5) * cellSize, therefore the texel coordinate is (p - origin) / cellSize - 0.5.
 float4 LPV_SampleAccumChannel(int cascade, float3 position, int channel)
 {
-    int    n = LPV_GridResolution();
+    int    n = LPV_CascadeResolution(cascade);
     float  s = LPV_CascadeCellSize(cascade);
     float3 o = LPV_CascadeOrigin(cascade);
 
@@ -289,7 +401,7 @@ LPVSH LPV_SampleAccum(int cascade, float3 position)
 // Nearest lookup, used for the directional derivative of the dampening term (paper section 3.4).
 LPVSH LPV_LoadAccumNearest(int cascade, float3 position)
 {
-    int    n = LPV_GridResolution();
+    int    n = LPV_CascadeResolution(cascade);
     float  s = LPV_CascadeCellSize(cascade);
     float3 o = LPV_CascadeOrigin(cascade);
     int3   c = int3(clamp(floor((position - o) / s), float3(0.0, 0.0, 0.0), float3(n - 1, n - 1, n - 1)));
@@ -303,63 +415,59 @@ LPVSH LPV_LoadAccumNearest(int cascade, float3 position)
 //------------------------------------------------------------------------------------------
 float4 LPV_LoadGv(int gvSource, int cascade, int3 cell)
 {
-    uint base = LPV_GvFloatIndex(cascade, cell, 0);
-    if (gvSource == LPVGeometrySource::eLPVGeometryFromCamera)
-        return float4(gvCamera[base], gvCamera[base + 1], gvCamera[base + 2], gvCamera[base + 3]);
-    return float4(gvRsm[base], gvRsm[base + 1], gvRsm[base + 2], gvRsm[base + 3]);
+    return LPV_ReadGv(gvSource, cascade, LPV_GvFloatIndex(cascade, cell, 0));
 }
 
 void LPV_AtomicAddGv(int gvSource, int cascade, int3 cell, float4 value)
 {
-    uint base = LPV_GvFloatIndex(cascade, cell, 0);
-    if (gvSource == LPVGeometrySource::eLPVGeometryFromCamera)
-    {
-        InterlockedAdd(gvCamera[base + 0], value.x);
-        InterlockedAdd(gvCamera[base + 1], value.y);
-        InterlockedAdd(gvCamera[base + 2], value.z);
-        InterlockedAdd(gvCamera[base + 3], value.w);
-    }
-    else
-    {
-        InterlockedAdd(gvRsm[base + 0], value.x);
-        InterlockedAdd(gvRsm[base + 1], value.y);
-        InterlockedAdd(gvRsm[base + 2], value.z);
-        InterlockedAdd(gvRsm[base + 3], value.w);
-    }
+    LPV_AtomicAddGvBase(gvSource, cascade, LPV_GvFloatIndex(cascade, cell, 0), value);
 }
 
 float4 LPV_LoadGvMerged(int cascade, int3 cell)
 {
-    uint base = LPV_GvFloatIndex(cascade, cell, 0);
-    return float4(gvMerged[base], gvMerged[base + 1], gvMerged[base + 2], gvMerged[base + 3]);
+    return LPV_ReadGv(LPVGeometrySource::eLPVGeometryMerged, cascade, LPV_GvFloatIndex(cascade, cell, 0));
 }
 
-// Trilinear lookup of the merged geometry volume at a world position.
-float4 LPV_SampleGvMerged(int cascade, float3 position)
+// Load from any of the geometry volumes: 0 = camera, 1 = RSM, 2 = merged (see LPVGeometrySource).
+float4 LPV_LoadGvAny(int gvSource, int cascade, int3 cell)
 {
-    int    n = LPV_GridResolution();
-    float  s = LPV_CascadeCellSize(cascade);
-    float3 o = LPV_CascadeOrigin(cascade);
+    if (gvSource == LPVGeometrySource::eLPVGeometryFromCamera || gvSource == LPVGeometrySource::eLPVGeometryFromRsm)
+        return LPV_LoadGv(gvSource, cascade, cell);
+    return LPV_LoadGvMerged(cascade, cell);
+}
 
-    float3 c = clamp((position - o) / s, float3(0.0, 0.0, 0.0), float3(n - 1, n - 1, n - 1));
+// Trilinear lookup of one of the geometry volumes at a world position.
+float4 LPV_SampleGv(int gvSource, int cascade, float3 position)
+{
+    int    n = LPV_GvResolution(cascade);
+    float  s = LPV_CascadeCellSize(cascade);
+    float3 o = LPV_GvOrigin(cascade);
+
+    float3 c = clamp((position - o) / s - 0.5, float3(0.0, 0.0, 0.0), float3(n - 1, n - 1, n - 1));
     int3   i0 = int3(floor(c));
     int3   i1 = min(i0 + int3(1, 1, 1), int3(n - 1, n - 1, n - 1));
     float3 t  = c - float3(i0.x, i0.y, i0.z);
 
-    float4 gv000 = LPV_LoadGvMerged(cascade, int3(i0.x, i0.y, i0.z));
-    float4 gv100 = LPV_LoadGvMerged(cascade, int3(i1.x, i0.y, i0.z));
-    float4 gv010 = LPV_LoadGvMerged(cascade, int3(i0.x, i1.y, i0.z));
-    float4 gv110 = LPV_LoadGvMerged(cascade, int3(i1.x, i1.y, i0.z));
-    float4 gv001 = LPV_LoadGvMerged(cascade, int3(i0.x, i0.y, i1.z));
-    float4 gv101 = LPV_LoadGvMerged(cascade, int3(i1.x, i0.y, i1.z));
-    float4 gv011 = LPV_LoadGvMerged(cascade, int3(i0.x, i1.y, i1.z));
-    float4 gv111 = LPV_LoadGvMerged(cascade, int3(i1.x, i1.y, i1.z));
+    float4 gv000 = LPV_LoadGvAny(gvSource, cascade, int3(i0.x, i0.y, i0.z));
+    float4 gv100 = LPV_LoadGvAny(gvSource, cascade, int3(i1.x, i0.y, i0.z));
+    float4 gv010 = LPV_LoadGvAny(gvSource, cascade, int3(i0.x, i1.y, i0.z));
+    float4 gv110 = LPV_LoadGvAny(gvSource, cascade, int3(i1.x, i1.y, i0.z));
+    float4 gv001 = LPV_LoadGvAny(gvSource, cascade, int3(i0.x, i0.y, i1.z));
+    float4 gv101 = LPV_LoadGvAny(gvSource, cascade, int3(i1.x, i0.y, i1.z));
+    float4 gv011 = LPV_LoadGvAny(gvSource, cascade, int3(i0.x, i1.y, i1.z));
+    float4 gv111 = LPV_LoadGvAny(gvSource, cascade, int3(i1.x, i1.y, i1.z));
 
     float4 x00 = lerp(gv000, gv100, t.x);
     float4 x10 = lerp(gv010, gv110, t.x);
     float4 x01 = lerp(gv001, gv101, t.x);
     float4 x11 = lerp(gv011, gv111, t.x);
     return lerp(lerp(x00, x10, t.y), lerp(x01, x11, t.y), t.z);
+}
+
+// Trilinear lookup of the merged geometry volume at a world position.
+float4 LPV_SampleGvMerged(int cascade, float3 position)
+{
+    return LPV_SampleGv(LPVGeometrySource::eLPVGeometryMerged, cascade, position);
 }
 
 /* Inject one surfel into the geometry volume of one cascade.
@@ -382,21 +490,18 @@ float4 LPV_SampleGvMerged(int cascade, float3 position)
 
    So only the peak amplitude A_s / s^2 is stored as the SH coefficients of a clamped cosine around
    n; the probability clamp belongs to the evaluation (B(w) is saturated where it is queried), the
-   paper's storage step itself has no clamp. Cell centres of the geometry volume sit on the *corners*
-   of the LPV cells (paper 3.2, the GV is "shifted by half a cell" with respect to the LPV), which is
-   why the index below rounds instead of flooring. That half cell shift of the *grid* is the paper's
-   only displacement; the surfel itself is not moved along its normal. */
+   paper's storage step itself has no clamp. The geometry volume is the LPV grid shifted by half a
+   cell (LPV_GvOrigin), so its cell centres sit on the corners of the LPV cells (paper 3.2). The
+   surfel itself is not moved along its normal. */
 void LPV_InjectBlocking(int gvSource, int cascade, float3 position, float3 normal, float surfelArea)
 {
     float s = LPV_CascadeCellSize(cascade);
-    int   resolution = LPV_GridResolution();
-    int3  cell = int3(floor((position - LPV_CascadeOrigin(cascade)) / s + 0.5));
-    if (!LPV_CellInside(cell, resolution))
-        return;
+    int   resolution = LPV_GvResolution(cascade);
+    int3  cell = int3(floor((position - LPV_GvOrigin(cascade)) / s));
+    if (!LPV_CellInside(cell, resolution)) return;
 
     float scale = surfelArea / (s * s);
-    if (scale <= 0.0)
-        return;
+    if (scale <= 0.0) return;
     LPV_AtomicAddGv(gvSource, cascade, cell, scale * LPV_SH_Lobe(normal));
 }
 
@@ -517,15 +622,21 @@ RayDesc LPV_CameraRay(uint2 pixel, float2 jitter)
     return ray;
 }
 
-// Solid angle of one pixel, derived from the projection matrix (1/P[1][1] = tan(fovY / 2)).
-float LPV_PixelSolidAngle()
+float LPV_PixelSolidAngle(uint2 pixel)
 {
     SceneInfo sceneInfo = pushConst.sceneInfoAddress[0];
     float     tanY = 1.0 / max(abs(sceneInfo.projMatrix[1][1]), 1e-6);
     float     tanX = 1.0 / max(abs(sceneInfo.projMatrix[0][0]), 1e-6);
-    float     width  = float(pushConst.screenSize.x);
-    float     height = float(pushConst.screenSize.y);
-    return (2.0 * tanX / width) * (2.0 * tanY / height);
+
+    const float2 screenSize = max(float2(pushConst.screenSize), float2(1.0, 1.0));
+    // glm's orthoRH_ZO has P[3][3] = 1, perspectiveRH_ZO has 0; orthographic rays are parallel.
+    const bool orthographic = sceneInfo.projMatrix[3][3] > 0.5;
+
+    float2 ndc  = (float2(pixel) + 0.5) / screenSize * 2.0 - 1.0;
+    float  tan2 = (ndc.x * tanX) * (ndc.x * tanX) + (ndc.y * tanY) * (ndc.y * tanY);
+    float  cosAxis = orthographic ? 1.0 : rsqrt(1.0 + tan2);
+
+    return (2.0 * tanX / screenSize.x) * (2.0 * tanY / screenSize.y) * cosAxis * cosAxis * cosAxis;
 }
 
 // Direction towards a punctual light; returns false when the light cannot reach the surface.

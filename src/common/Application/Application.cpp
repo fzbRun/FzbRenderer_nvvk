@@ -110,13 +110,16 @@ FzbRenderer::Application::Application(nvapp::ApplicationCreateInfo& appInfo, nvv
 		nvvk::addSurfaceExtensions(vkContextInitInfo.instanceExtensions, &vkContextInitInfo.deviceExtensions);
 	}
 
-#ifdef NDEBUG
+#if defined(NDEBUG)
 #else
 	nvvk::ValidationSettings validationSettings;
-	validationSettings.setPreset(nvvk::ValidationSettings::LayerPresets::eStandard);
-	validationSettings.printf_enable = VK_TRUE;
-	validationSettings.printf_buffer_size = 1048576;
-	vkContextInitInfo.instanceCreateInfoExt = validationSettings.buildPNextChain();
+	if (std::getenv("FZB_NO_VALIDATION") == nullptr)
+	{
+		validationSettings.setPreset(nvvk::ValidationSettings::LayerPresets::eStandard);
+		validationSettings.printf_enable = VK_TRUE;
+		validationSettings.printf_buffer_size = 1048576;
+		vkContextInitInfo.instanceCreateInfoExt = validationSettings.buildPNextChain();
+	}
 #endif
 
 {

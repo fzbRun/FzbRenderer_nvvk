@@ -11,14 +11,11 @@ int3 LPV_FaceAxis(int face) {
 
 [numthreads(LPV_VOXEL_THREADGROUP, LPV_VOXEL_THREADGROUP, LPV_VOXEL_THREADGROUP)]
 [shader("compute")] void lpvPropagateMain(uint3 threadIndex: SV_DispatchThreadID){
-    int resolution = LPV_GridResolution();
-    int cascadeCount = LPV_CascadeCount();
-    if (threadIndex.z >= uint(cascadeCount * resolution)) return;
-
-    int cascade = int(threadIndex.z) / resolution;
-    int3 cell = int3(int(threadIndex.x), int(threadIndex.y), int(threadIndex.z) - cascade * resolution);
+    int resolution = LPV_CascadeResolution(pushConst.cascadeIndex);
+    int3 cell = int3(threadIndex);
     if (!LPV_CellInside(cell, resolution)) return;
 
+    int cascade = pushConst.cascadeIndex;
     int iteration = pushConst.iteration;
     int readVolume = iteration & 1;
     int writeVolume = 1 - readVolume;
@@ -42,7 +39,9 @@ int3 LPV_FaceAxis(int face) {
         float4 blocking = 0.0f;
         if (useOcclusion && iteration > 0) {
             float3 faceCenter = cellCenter - 0.5 * cellSize * offset3;
-            blocking = LPV_SampleGvMerged(cascade, faceCenter);
+            int3 voxelIndex = int3((faceCenter - LPV_GvOrigin(cascade)) / cellSize);
+            if (LPV_CellInside(voxelIndex, LPV_GvResolution(cascade)))
+                blocking = LPV_LoadGvMerged(cascade, voxelIndex);
         }
 
         for (int face = 0; face < 6; ++face) {
@@ -56,8 +55,9 @@ int3 LPV_FaceAxis(int face) {
 
             float attenuation = 1.0;
             if (useOcclusion && iteration > 0) {
-                float blockProb = saturate(dot(blocking, LPV_SH_Basis(-propagateDir)));
-                attenuation = 1.0 - blockProb;
+                float blockProb1 = saturate(dot(blocking, LPV_SH_Basis(-propagateDir)));
+                float blockProb2 = pushConst.occTwoFace == 1 ? saturate(dot(blocking, LPV_SH_Basis(propagateDir))) : 0.0f;
+                attenuation = 1.0 - blockProb1 - blockProb2;
             }
 
             float4 basisValue = LPV_SH_Basis(propagateDir);

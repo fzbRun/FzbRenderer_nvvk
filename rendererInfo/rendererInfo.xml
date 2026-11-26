@@ -3,23 +3,23 @@
 	<resolution width = "1280" height = "720" />
 	<sceneXML path = "veach-ajar-2" />	<!--simpleTest bearBox veach-ajar-dynamic  veach-ajar-2  veach-mis staircase_change staircase-dynamic dining-room veach-bidir yanYun ReSTIR_Test_Scene-->
 
-	<renderer type = "VRPG2">  <!--LPV VRPG VXPG FzbPathGuiding NPMPathGuiding PathTracing PathTracing_KPCNNDenoising VolumetricFog StochasticLightcuts ReSTIR_GI Deferred  Mesh  NeuralTextureCompression ZhiHuCode-->
+	<renderer type = "LPV">  <!--LPV VRPG VXPG FzbPathGuiding NPMPathGuiding PathTracing PathTracing_KPCNNDenoising VolumetricFog StochasticLightcuts ReSTIR_GI Deferred  Mesh  NeuralTextureCompression ZhiHuCode-->
 		<maxDepth value = "4" />
 		<useNEE value = "false" />
 		<spp value = "1" />
 		<LPV>
 			<cascades value = "3" />
 			<!-- 1..4 层嵌套网格，随相机移动并按格对齐 -->
-			<resolution value = "32" />
+			<resolution value = "16" />
 			<!-- 每层网格分辨率 N（N^3 个格子），必须是 8 的倍数 -->
 			<rsmResolution value = "256" />
 			<!-- 每盏灯虚拟 RSM 的分辨率，等于注入的 VPL 数量上限 -->
-			<iterations value = "8" />
+			<iterations value = "16" />
 			<!-- 光传播迭代次数（论文 3.3：级联下 8 次）；0 = 只注入不传播，用来看注入本身 -->
 			<cellSize value = "0" />
 			<!-- 最细层的格子边长（米）；填 0 则按场景包围盒自动取值（约 场景直径 / N） -->
 			<useOcclusion value = "true" />
-			<useDampening value = "true" />
+			<useDampening value = "false" />
 			<saveFrame value = "-1" />
 			<!-- 在第 n 帧把 tonemap 后的结果存成 exe 目录下的 lpv_snapshot.png（-1 关闭） -->
 			<!-- 其余量（半格偏移、5 个出口面、2/s 距离假设、级联两级插值）都由论文固定，不再暴露为参数 -->

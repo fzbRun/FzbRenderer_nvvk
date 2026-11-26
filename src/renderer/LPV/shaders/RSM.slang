@@ -71,11 +71,9 @@ void lpvRsmInjectMain(uint2 threadIndex: SV_DispatchThreadID){
         float cellSize = LPV_CascadeCellSize(cascade);
         if (LPV_ObjectSize(hit.instanceIndex) < cellSize) continue;
 
-        float3 injectionPosition = hit.position + hit.normal * (0.5 * cellSize);
-        int3 cell = int3(floor((injectionPosition - LPV_CascadeOrigin(cascade)) / cellSize));
-        if (!LPV_CellInside(cell, LPV_GridResolution())) continue;
-
-        LPV_AtomicAddVolumeSH(0, cascade, cell, LPV_MakeSH(flux.x * lobe, flux.y * lobe, flux.z * lobe));
+        float3 injectionPosition = hit.position + hit.normal * 0.5f * cellSize;
+        int3 voxelIndex = int3((injectionPosition - LPV_CascadeOrigin(cascade)) / cellSize);
+        LPV_AtomicAddVolumeSH(0, cascade, voxelIndex, LPV_MakeSH(flux.x * lobe, flux.y * lobe, flux.z * lobe));
         LPV_InjectBlocking(LPVGeometrySource::eLPVGeometryFromRsm, cascade, hit.position, hit.normal, surfelArea);
     }
 }

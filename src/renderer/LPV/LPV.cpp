@@ -13,6 +13,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <string>
 #include <vector>
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -22,6 +25,15 @@ using namespace FzbRenderer;
 namespace {
 glm::vec3 lpvUpVector(const glm::vec3& direction){
 	return std::abs(direction.y) > 0.99f ? glm::vec3(0.0f, 0.0f, 1.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
+}
+// Whitespace trimming for the "key = value" parameter file.
+std::string lpvTrim(const std::string& text)
+{
+	const size_t first = text.find_first_not_of(" \t\r\n");
+	if (first == std::string::npos)
+		return {};
+	const size_t last = text.find_last_not_of(" \t\r\n");
+	return text.substr(first, last - first + 1);
 }
 } 
 //------------------------Construction / settings------------------------
@@ -95,14 +107,14 @@ LPVRenderer::LPVRenderer(pugi::xml_node& rendererNode)
 	if (pugi::xml_node node = rendererNode.child("LPV"))
 	{
 		cascadeCount      = readInt(node, "cascades", cascadeCount, 1, LPV_MAX_CASCADES);
-		gridResolution    = readInt(node, "resolution", gridResolution, 8, LPV_MAX_GRID_RESOLUTION);
+		baseResolution    = readInt(node, "resolution", baseResolution, 8, 64);
+		baseResolution    = std::max(LPV_VOXEL_THREADGROUP, (baseResolution / LPV_VOXEL_THREADGROUP) * LPV_VOXEL_THREADGROUP);
 		rsmResolution     = readInt(node, "rsmResolution", rsmResolution, 16, LPV_MAX_RSM_RESOLUTION);
 		iterationCount    = readInt(node, "iterations", iterationCount, 0, LPV_MAX_ITERATIONS);
 		baseCellSize      = readFloat(node, "cellSize", baseCellSize, 0.0f, 1024.0f);
 		useOcclusion      = readBool(node, "useOcclusion", useOcclusion);
 		useDampening      = readBool(node, "useDampening", useDampening);
 		saveFrame         = readInt(node, "saveFrame", saveFrame, -1, MAX_FRAME);
-		debugMode         = readInt(node, "debugView", debugMode, 0, 5);
 	}
 	// Debug / automation hooks. Empty values are ignored so that exporting a variable as "" from a
 	// script cannot silently change a setting.
@@ -113,8 +125,14 @@ LPVRenderer::LPVRenderer(pugi::xml_node& rendererNode)
 		value = std::clamp(std::atoi(text), minimum, maximum);
 	};
 	readEnvInt("LPV_SAVE_FRAME", saveFrame, -1, MAX_FRAME);
-	readEnvInt("LPV_DEBUG", debugMode, 0, 5);
 	readEnvInt("LPV_ITERATIONS", iterationCount, 0, LPV_MAX_ITERATIONS);
+	readEnvInt("LPV_CASCADES", cascadeCount, 1, LPV_MAX_CASCADES);
+	if (const char* debugCascade = std::getenv("LPV_DEBUG_CASCADE"))
+		debugCascadeId = (debugCascade[0] != '\0') && std::atoi(debugCascade) != 0;
+	if (const char* debugTransmit = std::getenv("LPV_DEBUG_TRANSMIT"))
+		debugTransmittance = (debugTransmit[0] != '\0') && std::atoi(debugTransmit) != 0;
+	if (const char* debugShEnv = std::getenv("LPV_DEBUG_SH"))
+		debugSH = (debugShEnv[0] != '\0') && std::atoi(debugShEnv) != 0;
 	if (const char* noShadow = std::getenv("LPV_NO_SHADOW"))
 		skipDirectShadow = (noShadow != nullptr && noShadow[0] != '\0') && std::atoi(noShadow) != 0;
 	// Same as the "Remove direct light" button, for scripted comparisons.
@@ -154,8 +172,8 @@ void LPVRenderer::clean()
 	VkDevice device = Application::app->getDevice();
 
 	for (VkShaderEXT* shader : { &shaderGBuffer, &shaderRsmInject, &shaderGvMerge, &shaderPropagate, &shaderGather,
-		&shaderShowGBuffer, &shaderShowGrid_vertex, &shaderShowGrid_fragment, &shaderShowRSM,
-		&shaderShowSH_vertex, &shaderShowSH_fragment })
+		&shaderCreateDepthImage, &shaderShowGBuffer, &shaderShowGrid_vertex, &shaderShowGrid_fragment, &shaderShowRSM,
+		&shaderShowSH_vertex, &shaderShowSH_fragment, &shaderInjectGrid, &shaderPrintSH })
 	{
 		if (*shader != VK_NULL_HANDLE)
 		{
@@ -167,9 +185,38 @@ void LPVRenderer::clean()
 	destroyResources();
 	PathTracingRenderer::clean();
 }
-void LPVRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size)
-{
+void LPVRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size){
 	NVVK_CHECK(gBuffers.update(cmd, size));
+	{
+		VkSamplerCreateInfo samplerInfo = DEFAULT_VkSamplerCreateInfo;
+		samplerInfo.magFilter = VK_FILTER_NEAREST;
+		samplerInfo.minFilter = VK_FILTER_NEAREST;
+		samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+		Application::samplerPool.acquireSampler(gBuffers.m_res.gBufferDepth.descriptor.sampler, samplerInfo);
+
+		const VkImageLayout layout{ VK_IMAGE_LAYOUT_GENERAL };
+		VkImageMemoryBarrier2 barrier = nvvk::makeImageMemoryBarrier({ .image = gBuffers.m_res.gBufferDepth.image,
+														.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+														.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+														.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
+		const VkDependencyInfo depInfo{ .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+									   .imageMemoryBarrierCount = 1,
+									   .pImageMemoryBarriers = &barrier };
+
+		vkCmdPipelineBarrier2(cmd, &depInfo);
+
+		VkClearDepthStencilValue clearDepth = { 1.0f, 0 };
+		VkImageSubresourceRange range = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 };
+		vkCmdClearDepthStencilImage(cmd, gBuffers.m_res.gBufferDepth.image,
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearDepth, 1, &range);
+
+		// Setting the layout to the final one
+		barrier = nvvk::makeImageMemoryBarrier(
+			{ .image = gBuffers.m_res.gBufferDepth.image, .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			.newLayout = layout, .subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
+		gBuffers.m_res.gBufferDepth.descriptor.imageLayout = layout;
+		vkCmdPipelineBarrier2(cmd, &depInfo);
+	}
 
 	const bool resolutionChanged = (size.width != currentResolution.width) || (size.height != currentResolution.height);
 	if (resolutionChanged)
@@ -184,6 +231,9 @@ void LPVRenderer::resize(VkCommandBuffer cmd, const VkExtent2D& size)
 	nvvk::WriteSetContainer write{};
 	VkWriteDescriptorSet    outImageWrite = staticDescPack.makeWrite(shaderio::StaticSetBindingPoints_PT::eOutImage_PT, 0, 0, 1);
 	write.append(outImageWrite, gBuffers.getColorImageView((uint32_t)ImageType_LPV::eImgRendered), VK_IMAGE_LAYOUT_GENERAL);
+
+	VkWriteDescriptorSet    depthImageWrite = staticDescPack.makeWrite((uint32_t)shaderio::LPVStaticBindingPoints::eDepthImage, 0, 0, 1);
+	write.append(depthImageWrite, gBuffers.getDepthImageView(), VK_IMAGE_LAYOUT_GENERAL);
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }
 void LPVRenderer::preRender()
@@ -195,7 +245,13 @@ void LPVRenderer::preRender()
 	if (scene.periodInstanceCount + scene.randomInstanceCount > 0 || scene.hasDynamicLight)
 		maxFrames = 1;
 
-	updateSceneBounds();
+	const bool dynamicScene = scene.periodInstanceCount + scene.randomInstanceCount > 0 || scene.hasDynamicLight;
+	if (!sceneBoundsValid || dynamicScene || scene.instances.size() != sceneBoundsInstanceCount)
+	{
+		updateSceneBounds();
+		sceneBoundsValid         = true;
+		sceneBoundsInstanceCount = scene.instances.size();
+	}
 	updateCascadeLayout();
 
 	pushConstant.frameIndex       = Application::frameIndex;
@@ -204,12 +260,27 @@ void LPVRenderer::preRender()
 	pushConstant.rsmResolution    = rsmResolution;
 	pushConstant.screenSize       = shaderio::uint2(currentResolution.width, currentResolution.height);
 	pushConstant.sceneInfoAddress = (shaderio::SceneInfo*)scene.bSceneInfo.address;
+
+	// The debug passes (showGBufferMain / showRSMMain) read their own push constant struct: without
+	// this they dispatch with screenSize == 0 and every thread returns immediately (black image).
+	debugPushConstant.screenSize = pushConstant.screenSize;
+	debugPushConstant.sceneInfoAddress = pushConstant.sceneInfoAddress;
+	debugPushConstant.cascadeCount     = cascadeCount;
+	debugPushConstant.frameIndex       = Application::frameIndex;
 	pushConstant.lightIndex       = 0;
 	pushConstant.time             = scene.time;
+	pushConstant.gatherOcclusion  = gatherOcclusionEnabled ? gatherOcclusion : 0.0f;
+	pushConstant.cascadeBlendCells = cascadeBlendCells;
+	pushConstant.iterationCount    = iterationCount;
 
-	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
-	asManager.updateToplevelAS(cmd);
-	Application::app->submitAndWaitTempCmdBuffer(cmd);
+	if (!tlasBuilt || dynamicScene || scene.instances.size() != tlasInstanceCount)
+	{
+		VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
+		asManager.updateToplevelAS(cmd);
+		Application::app->submitAndWaitTempCmdBuffer(cmd);
+		tlasBuilt         = true;
+		tlasInstanceCount = scene.instances.size();
+	}
 
 	// Debug / automation hook: write the tonemapped image of the previous frame at a given index.
 	if (saveFrame >= 0 && Application::frameIndex == saveFrame)
@@ -228,35 +299,29 @@ void LPVRenderer::updateDataPerFrame(VkCommandBuffer cmd) {
 	pushConstant.flags = int((useOcclusion ? uint32_t(shaderio::LPVFlags::eLPVFlagOcclusion) : 0u) |
 		(useDampening ? uint32_t(shaderio::LPVFlags::eLPVFlagDampening) : 0u) |
 		(showDirectLight ? 0u : uint32_t(shaderio::LPVFlags::eLPVFlagNoDirect)) |
-		(uint32_t(debugMode) << 3) |
+		(useTrilinearSample ? 0u : uint32_t(shaderio::LPVFlags::eLPVFlagNearestGather)) |
+		(debugCascadeId ? uint32_t(shaderio::LPVFlags::eLPVFlagDebugCascadeId) : 0u) |
+		(debugTransmittance ? uint32_t(shaderio::LPVFlags::eLPVFlagDebugTransmittance) : 0u) |
+		(debugSH ? uint32_t(shaderio::LPVFlags::eLPVFlagDebugSH) : 0u) |
 		(skipDirectShadow ? uint32_t(shaderio::LPVFlags::eLPVFlagNoShadow) : 0u));
 
-	// Paper 4.1 small object test: world space bounding box size of every instance. vkCmdUpdateBuffer
-	// is limited to maxUpdateBufferSize (64 KiB), so only the first entries are uploaded.
 	const size_t uploadCount = std::min<size_t>(instanceSizes.size(), 12288);
 	if (uploadCount > 0)
 		vkCmdUpdateBuffer(cmd, instanceSizeBuffer.buffer, 0, VkDeviceSize(uploadCount) * sizeof(float), instanceSizes.data());
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
 	{
+		debugPushConstant.frameIndex = pushConstant.frameIndex;
+		debugPushConstant.rsmResolution = pushConstant.rsmResolution;
+
 		for (int cascade = 0; cascade < cascadeCount; ++cascade) {
 			debugPushConstant.gridInfo[cascade].startPos = cascades[cascade].startPos;
 			debugPushConstant.gridInfo[cascade].voxelSize = cascades[cascade].cellSize;
-			debugPushConstant.gridInfo[cascade].resolution = gridResolution;
+			debugPushConstant.gridInfo[cascade].resolution = cascadeResolution[cascade];
 		}
-		debugPushConstant.debugVoxelCount = std::pow(gridResolution, 3);
-		if (debugPushConstant.gridIndex == cascadeCount) debugPushConstant.debugVoxelCount *= cascadeCount;
 
-		if (showSH_Gv) {
-			debugPushConstant.cascadeIndex_showSH = cascadeIndex_showSH_Gv;
-			debugPushConstant.voxelIndex_showSH = voxelIndex_showSH_Gv;
-		} else if (showSH_RSM) {
-			debugPushConstant.cascadeIndex_showSH = cascadeIndex_showSH_RSM;
-			debugPushConstant.voxelIndex_showSH = voxelIndex_showSH_RSM;
-		} else if (showSH_Propagate) {
-			debugPushConstant.cascadeIndex_showSH = cascadeIndex_showSH_Propagate;
-			debugPushConstant.voxelIndex_showSH = voxelIndex_showSH_Propagate;
-		}
+		debugPushConstant.gvSource = debugPushConstant.showSHType == 0 ? 0 : 1;
+		debugPushConstant.iterationCount = iterationCount;
 	}
 }
 void LPVRenderer::render(VkCommandBuffer* cmdPtr){
@@ -287,91 +352,48 @@ void LPVRenderer::render(VkCommandBuffer* cmdPtr){
 	clearVolumes(cmd);
 	updateDataPerFrame(cmd);  // uploads the frame info and barriers transfer -> compute
 
-	{
-		runGBufferPass(cmd);
-		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	runGBufferPass(cmd);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
-		if (showGBuffer || showSH_Gv) {
-			if (showGBuffer) showGBufferResult(cmd);
-			else showSHResult(cmd);
-			nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-
-			Application::tonemapper.runCompute(cmd, gBuffers.getSize(), Application::tonemapperData,
-				gBuffers.getDescriptorImageInfo((uint32_t)ImageType_LPV::eImgRendered),
-				gBuffers.getDescriptorImageInfo((uint32_t)ImageType_LPV::eImgTonemapped));
-			nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
-
-			return;
-		}
-	}
-	{
-		runRsmInjectionPass(cmd);
-		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-
-		if (showRSM || showSH_RSM) {
-			if (showRSM) showRSMResult(cmd);
-			else showSHResult(cmd);
-			nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-
-			Application::tonemapper.runCompute(cmd, gBuffers.getSize(), Application::tonemapperData,
-				gBuffers.getDescriptorImageInfo((uint32_t)ImageType_LPV::eImgRendered),
-				gBuffers.getDescriptorImageInfo((uint32_t)ImageType_LPV::eImgTonemapped));
-			nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
-
-			return;
-		}
-	}
+	runRsmInjectionPass(cmd);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
 	runGvMergePass(cmd);
-	{
-		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT);
-		VkBufferCopy2 copyRegion{
-			.sType = VK_STRUCTURE_TYPE_BUFFER_COPY_2,
-			.srcOffset = 0,
-			.dstOffset = 0,
-			.size = volumeFloatCount() * sizeof(float),
-		};
-		VkCopyBufferInfo2 copyInfo{
-			.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_INFO_2,
-			.srcBuffer = lpvVolumesBuffer.buffer,
-			.dstBuffer = lpvAccumBuffer.buffer,
-			.regionCount = 1,
-			.pRegions = &copyRegion,
-		};
-		vkCmdCopyBuffer2(cmd, &copyInfo);
-		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-	}
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT);
 
-	{
-		runPropagationPasses(cmd);
-		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-
-		if (showSH_Propagate) {
-			showSHResult(cmd);
-			nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-
-			Application::tonemapper.runCompute(cmd, gBuffers.getSize(), Application::tonemapperData,
-				gBuffers.getDescriptorImageInfo((uint32_t)ImageType_LPV::eImgRendered),
-				gBuffers.getDescriptorImageInfo((uint32_t)ImageType_LPV::eImgTonemapped));
-			nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
-
-			return;
-		}
-	}
+	runPropagationPasses(cmd);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
 	runGatherPass(cmd);
 	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
-	Application::tonemapper.runCompute(cmd, gBuffers.getSize(), Application::tonemapperData,
-	                                   gBuffers.getDescriptorImageInfo((uint32_t)ImageType_LPV::eImgRendered),
-	                                   gBuffers.getDescriptorImageInfo((uint32_t)ImageType_LPV::eImgTonemapped));
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-	                       VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT |
-	                           VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-	nvvk::cmdMemoryBarrier(cmd,
-	                       VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
-	                           VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-	                       VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
+	const bool debugViews = showGBuffer || showRSM || showSH || showGrid || printSH;
+	if (debugViews)
+	{
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+		createDeptImage(cmd);
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+
+		if (showGBuffer) showGBufferResult(cmd);
+		else if (showRSM) {
+			showRSMResult(cmd);
+			nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+			tonemapping(cmd);
+			return;
+		}
+
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+		if (showSH) showSHResult(cmd);
+
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+		if (showGrid) showGridResult(cmd);
+
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+		if (printSH) printSHResult(cmd);
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+	}
+
+	tonemapping(cmd);
 }
 //----------------------------Scene bounds / cascade placement----------------------------
 void LPVRenderer::updateSceneBounds(){
@@ -380,10 +402,9 @@ void LPVRenderer::updateSceneBounds(){
 	shaderio::float3 boundsMin(FLT_MAX, FLT_MAX, FLT_MAX);
 	shaderio::float3 boundsMax(-FLT_MAX, -FLT_MAX, -FLT_MAX);
 	instanceSizes.assign(scene.instances.size(), 1e30f);
-	for (size_t instanceIndex = 0; instanceIndex < scene.instances.size(); ++instanceIndex)
-	{
+	for (size_t instanceIndex = 0; instanceIndex < scene.instances.size(); ++instanceIndex){
 		const uint32_t meshIndex = scene.instances[instanceIndex].meshIndex;
-		MeshInfo       meshInfo  = scene.getMeshInfo(meshIndex);
+		MeshInfo& meshInfo = scene.getMeshInfo(meshIndex);
 		shaderio::AABB meshAABB  = meshInfo.getAABB(scene.instances[instanceIndex].transform);
 
 		boundsMin = glm::min(boundsMin, meshAABB.minimum);
@@ -395,42 +416,64 @@ void LPVRenderer::updateSceneBounds(){
 		instanceSizes[instanceIndex]  = glm::max(extent.x, glm::max(extent.y, extent.z));
 	}
 
-	if (scene.instances.empty() || boundsMin.x > boundsMax.x)
-	{
+	if (scene.instances.empty() || boundsMin.x > boundsMax.x){
 		boundsMin = shaderio::float3(-5.0f, -5.0f, -5.0f);
 		boundsMax = shaderio::float3(5.0f, 5.0f, 5.0f);
 	}
 
-	sceneBoundsMin = boundsMin;
-	sceneBoundsMax = boundsMax;
-	sceneCenter    = (boundsMin + boundsMax) * 0.5f;
-	sceneRadius    = std::max(glm::length(boundsMax - boundsMin) * 0.5f, 0.1f);
+	shaderio::float3 len3 = boundsMax - boundsMin;
+	boundsMin -= 0.1f * len3;
+	boundsMax += 0.1f * len3;
+	len3 = boundsMax - boundsMin;
+	
+	sceneRadius = std::max(len3.x, std::max(len3.y, len3.z)) * 0.5f;	// std::max(glm::length(boundsMax - boundsMin) * 0.5f, 0.1f);
+	sceneHalfDiagonal = length(len3) * 0.5;
+
+	sceneCenter = (boundsMin + boundsMax) * 0.5f;
+	sceneBoundsMin = sceneCenter - sceneRadius;
 }
 void LPVRenderer::updateCascadeLayout(){
-	const auto      cameraManip = Application::sceneResource.cameraManip;
-	const glm::vec3 eye         = cameraManip->getEye();
+	const float extent = std::max(sceneRadius * 2.0f, 0.2f);
 
-	float cellSize = baseCellSize;
-	if (cellSize <= 0.0f) cellSize = std::max(sceneRadius * 2.0f, 0.2f) / float(std::max(gridResolution, 8));
-	
-	for (int cascade = cascadeCount - 1; cascade >= 0; --cascade) {
-		CascadeLayout& layout = cascades[cascade];
+	for (int cascade = 0; cascade < cascadeCount; ++cascade) {
+		int resolution = std::clamp(baseResolution << cascade, 8, LPV_MAX_GRID_RESOLUTION);
+		resolution     = std::max(LPV_VOXEL_THREADGROUP, (resolution / LPV_VOXEL_THREADGROUP) * LPV_VOXEL_THREADGROUP);
 
-		int scale = 3 * (cascadeCount - cascade - 1);
-		layout.cellSize = cellSize * float(1 >> scale);
-		int gridResolution_cascade = gridResolution << scale;
-
-		shaderio::float3 relPos = eye - sceneBoundsMin;
-		shaderio::int3 centerVoxelIndex = relPos / cellSize;
-		shaderio::int3 startVoxelIndex = shaderio::clamp(centerVoxelIndex - gridResolution_cascade / 2, 0, gridResolution_cascade - 1);
-		layout.startPos = shaderio::float3(startVoxelIndex) * cellSize;
+		cascadeResolution[cascade]  = resolution;
+		cascades[cascade].cellSize  = extent / float(resolution);
+		cascades[cascade].startPos  = sceneBoundsMin;
 	}
+	gridResolution = cascadeResolution[std::max(cascadeCount - 1, 0)];
 }
 //-------------------------------------GPU resources-------------------------------------
+int LPVRenderer::debugGridResolution() const
+{
+	const int cascade = std::clamp(debugPushConstant.cascadeIndex, 0, std::max(cascadeCount - 1, 0));
+	return cascadeResolution[cascade];
+}
+
+uint32_t LPVRenderer::debugVoxelCount() const
+{
+	const uint32_t n = uint32_t(std::max(debugGridResolution(), 0));
+	return n * n * n;
+}
+void LPVRenderer::logDebugViewCounts() const
+{
+	static int sLastCascade = -1;
+	static int sLastCount   = -1;
+	const int  cascade      = std::clamp(debugPushConstant.cascadeIndex, 0, std::max(cascadeCount - 1, 0));
+	const int  count        = int(debugVoxelCount());
+	if (cascade == sLastCascade && count == sLastCount)
+		return;
+	sLastCascade = cascade;
+	sLastCount   = count;
+	LOGI("LPV debug: cascade %d, grid %d^3, voxels %d, cascadeCount %d, resolutions %d/%d\n", cascade, debugGridResolution(),
+	     count, cascadeCount, cascadeResolution[0], cascadeResolution[std::max(cascadeCount - 1, 0)]);
+}
 VkDeviceSize LPVRenderer::volumeFloatCount() const
 {
 	const VkDeviceSize voxels = VkDeviceSize(gridResolution) * VkDeviceSize(gridResolution) * VkDeviceSize(gridResolution);
-	return VkDeviceSize(cascadeCount) * voxels * LPV_VOXEL_FLOATS;
+	return voxels * LPV_VOXEL_FLOATS;
 }
 void LPVRenderer::createResources(){
 	nvvk::ResourceAllocator* allocator = Application::stagingUploader.getResourceAllocator();
@@ -444,18 +487,27 @@ void LPVRenderer::createResources(){
 	};
 
 	const VkDeviceSize pixelCount  = VkDeviceSize(currentResolution.width) * VkDeviceSize(currentResolution.height);
-	const VkDeviceSize voxelCount  = VkDeviceSize(gridResolution) * VkDeviceSize(gridResolution) * VkDeviceSize(gridResolution);
-	const VkDeviceSize volumeBytes = volumeFloatCount() * sizeof(float);
-	const VkDeviceSize gvBytes     = VkDeviceSize(cascadeCount) * voxelCount * LPV_GV_FLOATS * sizeof(float);
 
 	create(pixelDataBuffer, pixelCount * sizeof(shaderio::LPVPixelData), "pixelData");
-	create(lpvVolumesBuffer, 2 * volumeBytes, "lpvVolumes");
-	create(lpvAccumBuffer, volumeBytes, "lpvAccum");
-	create(gvMergedBuffer, gvBytes, "gvMerged");
-	create(gvCameraBuffer, gvBytes, "gvCamera");
-	create(gvRsmBuffer, gvBytes, "gvRsm");
+	for (int cascade = 0; cascade < LPV_MAX_CASCADES; ++cascade)
+	{
+		const int          resolution  = std::max(cascadeResolution[std::min(cascade, std::max(cascadeCount - 1, 0))], 8);
+		const VkDeviceSize voxelCount  = VkDeviceSize(resolution) * resolution * resolution;
+		const VkDeviceSize volumeBytes = voxelCount * LPV_VOXEL_FLOATS * sizeof(float);
+		const VkDeviceSize gvVoxels    = VkDeviceSize(resolution + 1) * (resolution + 1) * (resolution + 1);
+		const VkDeviceSize gvBytes     = gvVoxels * LPV_GV_FLOATS * sizeof(float);
+		create(lpvVolumesBuffer[cascade], 2 * volumeBytes, "lpvVolumes");
+		create(lpvAccumBuffer[cascade], volumeBytes, "lpvAccum");
+		create(gvMergedBuffer[cascade], gvBytes, "gvMerged");
+		create(gvCameraBuffer[cascade], gvBytes, "gvCamera");
+		create(gvRsmBuffer[cascade], gvBytes, "gvRsm");
+	}
 	create(frameInfoBuffer, sizeof(shaderio::LPVFrameInfo), "frameInfo");
 	create(instanceSizeBuffer, VkDeviceSize(std::max<size_t>(instanceSizes.size(), 1)) * sizeof(float), "instanceSize");
+
+	const VkDeviceSize gridVoxels = VkDeviceSize(gridResolution) * gridResolution * gridResolution;
+	const VkDeviceSize gridDataBytes = gridVoxels * sizeof(shaderio::GridDebugInfo);
+	create(gridDataBuffer, gridDataBytes, "gridDebugData");
 
 	VkCommandBuffer cmd = Application::app->createTempCmdBuffer();
 	clearVolumes(cmd);
@@ -480,24 +532,36 @@ void LPVRenderer::createResources(){
 }
 void LPVRenderer::destroyResources()
 {
-	for (nvvk::Buffer* buffer : { &pixelDataBuffer, &lpvVolumesBuffer, &lpvAccumBuffer, &gvMergedBuffer, &gvCameraBuffer, &gvRsmBuffer,
-	                              &frameInfoBuffer, &instanceSizeBuffer })
+	for (nvvk::Buffer* buffer : { &pixelDataBuffer, &frameInfoBuffer, &instanceSizeBuffer, &gridDataBuffer })
 	{
 		if (buffer->buffer != VK_NULL_HANDLE)
 			Application::allocator.destroyBuffer(*buffer);
 		*buffer = {};
 	}
+	for (int cascade = 0; cascade < LPV_MAX_CASCADES; ++cascade)
+	{
+		for (nvvk::Buffer* buffer : { &lpvVolumesBuffer[cascade], &lpvAccumBuffer[cascade], &gvMergedBuffer[cascade],
+		                              &gvCameraBuffer[cascade], &gvRsmBuffer[cascade] })
+		{
+			if (buffer->buffer != VK_NULL_HANDLE)
+				Application::allocator.destroyBuffer(*buffer);
+			*buffer = {};
+		}
+	}
 }
 void LPVRenderer::clearVolumes(VkCommandBuffer cmd){
 	NVVK_DBG_SCOPE(cmd);
 	// lpvAccum is fully overwritten by the copy of the injected volume, so it is not cleared here.
-	vkCmdFillBuffer(cmd, lpvVolumesBuffer.buffer, 0, VK_WHOLE_SIZE, 0u);
-	vkCmdFillBuffer(cmd, gvCameraBuffer.buffer, 0, VK_WHOLE_SIZE, 0u);
-	vkCmdFillBuffer(cmd, gvRsmBuffer.buffer, 0, VK_WHOLE_SIZE, 0u);
+	for (int cascade = 0; cascade < LPV_MAX_CASCADES; ++cascade)
+	{
+		vkCmdFillBuffer(cmd, lpvVolumesBuffer[cascade].buffer, 0, VK_WHOLE_SIZE, 0u);
+		vkCmdFillBuffer(cmd, gvCameraBuffer[cascade].buffer, 0, VK_WHOLE_SIZE, 0u);
+		vkCmdFillBuffer(cmd, gvRsmBuffer[cascade].buffer, 0, VK_WHOLE_SIZE, 0u);
+	}
+	vkCmdFillBuffer(cmd, gridDataBuffer.buffer, 0, VK_WHOLE_SIZE, 0u);
 }
 //-----------------------Descriptors / pipeline layout / shaders-----------------------
-void LPVRenderer::createDescriptorSetLayout()
-{
+void LPVRenderer::createDescriptorSetLayout(){
 	SCOPED_TIMER(__FUNCTION__);
 
 	nvvk::DescriptorBindings bindings;
@@ -511,10 +575,8 @@ void LPVRenderer::createDescriptorSetLayout()
 	                      .stageFlags = VK_SHADER_STAGE_ALL });
 
 	const uint32_t bufferBindings[] = {
-		(uint32_t)shaderio::LPVStaticBindingPoints::ePixelData,  (uint32_t)shaderio::LPVStaticBindingPoints::eLPVVolumes,
-		(uint32_t)shaderio::LPVStaticBindingPoints::eLPVAccum,   (uint32_t)shaderio::LPVStaticBindingPoints::eGvMerged,
-		(uint32_t)shaderio::LPVStaticBindingPoints::eGvCamera,   (uint32_t)shaderio::LPVStaticBindingPoints::eGvRsm,
-		(uint32_t)shaderio::LPVStaticBindingPoints::eFrameInfo,  (uint32_t)shaderio::LPVStaticBindingPoints::eInstanceSize,
+		(uint32_t)shaderio::LPVStaticBindingPoints::ePixelData,  (uint32_t)shaderio::LPVStaticBindingPoints::eFrameInfo,
+		(uint32_t)shaderio::LPVStaticBindingPoints::eInstanceSize, (uint32_t)shaderio::LPVStaticBindingPoints::eGridDebugData,
 	};
 	for (uint32_t binding : bufferBindings)
 	{
@@ -523,6 +585,23 @@ void LPVRenderer::createDescriptorSetLayout()
 		                      .descriptorCount = 1,
 		                      .stageFlags = VK_SHADER_STAGE_ALL });
 	}
+	const uint32_t cascadeBufferBindings[] = {
+		(uint32_t)shaderio::LPVStaticBindingPoints::eLPVVolumes, (uint32_t)shaderio::LPVStaticBindingPoints::eLPVAccum,
+		(uint32_t)shaderio::LPVStaticBindingPoints::eGvMerged,   (uint32_t)shaderio::LPVStaticBindingPoints::eGvCamera,
+		(uint32_t)shaderio::LPVStaticBindingPoints::eGvRsm,
+	};
+	for (uint32_t binding : cascadeBufferBindings)
+	{
+		bindings.addBinding({ .binding = binding,
+		                      .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		                      .descriptorCount = LPV_MAX_CASCADES,
+		                      .stageFlags = VK_SHADER_STAGE_ALL });
+	}
+
+	bindings.addBinding({ .binding = (uint32_t)shaderio::LPVStaticBindingPoints::eDepthImage,
+							  .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+							  .descriptorCount = 1,
+							  .stageFlags = VK_SHADER_STAGE_ALL });
 
 	staticDescPack.init(bindings, Application::app->getDevice(), 1, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
 	                    VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT);
@@ -535,8 +614,7 @@ void LPVRenderer::createDescriptorSetLayout()
 	                      .stageFlags = VK_SHADER_STAGE_ALL });
 	dynamicDescPack.init(bindings, Application::app->getDevice(), 0, VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT);
 }
-void LPVRenderer::createDescriptorSet()
-{
+void LPVRenderer::createDescriptorSet(){
 	nvvk::WriteSetContainer write{};
 
 	if (!Application::sceneResource.textures.empty())
@@ -555,13 +633,22 @@ void LPVRenderer::createDescriptorSet()
 	};
 
 	appendBuffer(shaderio::LPVStaticBindingPoints::ePixelData, pixelDataBuffer);
-	appendBuffer(shaderio::LPVStaticBindingPoints::eLPVVolumes, lpvVolumesBuffer);
-	appendBuffer(shaderio::LPVStaticBindingPoints::eLPVAccum, lpvAccumBuffer);
-	appendBuffer(shaderio::LPVStaticBindingPoints::eGvMerged, gvMergedBuffer);
-	appendBuffer(shaderio::LPVStaticBindingPoints::eGvCamera, gvCameraBuffer);
-	appendBuffer(shaderio::LPVStaticBindingPoints::eGvRsm, gvRsmBuffer);
+
+	auto appendBufferArray = [&](shaderio::LPVStaticBindingPoints binding, const std::array<nvvk::Buffer, LPV_MAX_CASCADES>& buffers) {
+		VkWriteDescriptorSet writeSet = staticDescPack.makeWrite((uint32_t)binding, 0, 0, LPV_MAX_CASCADES);
+		write.append(writeSet, buffers.data());
+	};
+	appendBufferArray(shaderio::LPVStaticBindingPoints::eLPVVolumes, lpvVolumesBuffer);
+	appendBufferArray(shaderio::LPVStaticBindingPoints::eLPVAccum, lpvAccumBuffer);
+	appendBufferArray(shaderio::LPVStaticBindingPoints::eGvMerged, gvMergedBuffer);
+	appendBufferArray(shaderio::LPVStaticBindingPoints::eGvCamera, gvCameraBuffer);
+	appendBufferArray(shaderio::LPVStaticBindingPoints::eGvRsm, gvRsmBuffer);
 	appendBuffer(shaderio::LPVStaticBindingPoints::eFrameInfo, frameInfoBuffer);
 	appendBuffer(shaderio::LPVStaticBindingPoints::eInstanceSize, instanceSizeBuffer);
+	appendBuffer(shaderio::LPVStaticBindingPoints::eGridDebugData, gridDataBuffer);
+
+	VkWriteDescriptorSet    depthImageWrite = staticDescPack.makeWrite((uint32_t)shaderio::LPVStaticBindingPoints::eDepthImage, 0, 0, 1);
+	write.append(depthImageWrite, gBuffers.getDepthImageView(), VK_IMAGE_LAYOUT_GENERAL);
 
 	vkUpdateDescriptorSets(Application::app->getDevice(), write.size(), write.data(), 0, nullptr);
 }
@@ -592,7 +679,7 @@ void LPVRenderer::compileAndCreateShaders(){
 	const VkPushConstantRange pushConstantRange{
 		.stageFlags = VK_SHADER_STAGE_ALL,
 		.offset = 0,
-		.size = sizeof(shaderio::LPVPushConstant),
+		.size = 256,
 	};
 	std::array<VkDescriptorSetLayout, 2> layouts = { { staticDescPack.getLayout(), dynamicDescPack.getLayout() } };
 	VkShaderCreateInfoEXT shaderInfo{
@@ -648,24 +735,40 @@ void LPVRenderer::compileAndCreateShaders(){
 		else NVVK_DBG_NAME(shader);
 		};
 
-	Application::slangCompiler.addOption({
-		.name = slang::CompilerOptionName::MacroDefine,
-		.value = slang::CompilerOptionValue{.kind = slang::CompilerOptionValueKind::String, .stringValue0 = "LPV_DEBUG"}
-	});
+	// The debug entry points (showGBufferMain / showRSMMain / ShowGrid / ShowSH) only exist under
+	// LPV_DEBUG. The compiler scopes its macro list per compile: every compileFile() rebuilds the
+	// session from m_macros / m_options (vslang/slang.cpp:141 -> createSession), so pushing the macro
+	// here and popping it after this batch is a real scope switch. The main passes above are already
+	// compiled, and neither F5 ("Reload shaders") nor any other renderer ever observes the macro.
+	// The empty value matches ShowSH.slang's own `#define LPV_DEBUG`, so the two do not conflict.
+	auto&      slangMacros = Application::slangCompiler.macros();
+	const auto savedMacros = slangMacros;
+	slangMacros.push_back({ "LPV_DEBUG", "" });
 
-	VkShaderModuleCreateInfo passesCode = FzbRenderer::compileSlangShader(shaderPath / "GBuffer.slang", {});
-	createShader(shaderGBuffer, passesCode, "showGBufferMain");
+	passesCode = FzbRenderer::compileSlangShader(shaderPath / "CreateDepthImage.slang", {});
+	createShader(shaderCreateDepthImage, passesCode, "createDepthImageMain");
 
-	VkShaderModuleCreateInfo passesCode = FzbRenderer::compileSlangShader(shaderPath / "ShowGrid.slang", {});
+	passesCode = FzbRenderer::compileSlangShader(shaderPath / "ShowGrid.slang", {});
 	createShaderVF(shaderShowGrid_vertex, passesCode, "vertexMain");
 	createShaderVF(shaderShowGrid_fragment, passesCode, "fragmentMain", false);
 
-	VkShaderModuleCreateInfo passesCode = FzbRenderer::compileSlangShader(shaderPath / "RSM.slang", {});
+	passesCode = FzbRenderer::compileSlangShader(shaderPath / "GBuffer.slang", {});
+	createShader(shaderShowGBuffer, passesCode, "showGBufferMain");
+
+	passesCode = FzbRenderer::compileSlangShader(shaderPath / "RSM.slang", {});
 	createShader(shaderShowRSM, passesCode, "showRSMMain");
 
-	VkShaderModuleCreateInfo passesCode = FzbRenderer::compileSlangShader(shaderPath / "ShowSH.slang", {});
+	passesCode = FzbRenderer::compileSlangShader(shaderPath / "ShowSH.slang", {});
 	createShaderVF(shaderShowSH_vertex, passesCode, "vertexMain");
 	createShaderVF(shaderShowSH_fragment, passesCode, "fragmentMain", false);
+
+	passesCode = FzbRenderer::compileSlangShader(shaderPath / "ShowGrid.slang", {});
+	createShader(shaderInjectGrid, passesCode, "injectGridMain");
+
+	passesCode = FzbRenderer::compileSlangShader(shaderPath / "PrintSH.slang", {});
+	createShader(shaderPrintSH, passesCode, "printfSHMain");
+
+	slangMacros = savedMacros;
 }
 //-----------------------------Per frame state-----------------------------
 void LPVRenderer::updateFrameInfo(){
@@ -705,6 +808,13 @@ void LPVRenderer::updateFrameInfo(){
 	// w = number of entries in the instance size buffer (paper 4.1 small object test)
 	frameInfo.info = shaderio::int4(cascadeCount, gridResolution, rsmResolution, int(instanceSizes.size()));
 
+	for (int cascade = 0; cascade < LPV_MAX_CASCADES; ++cascade)
+	{
+		const int index = std::min(cascade, std::max(cascadeCount - 1, 0));
+		frameInfo.cascadeResolution[cascade] = cascadeResolution[index];
+		frameInfo.cascadeReach[cascade] = float(iterationCount) * cascades[index].cellSize;
+	}
+
 	const float rsm = float(rsmResolution);
 	for (uint32_t lightIndex = 0; lightIndex < LIGHT_COUNT; ++lightIndex)
 	{
@@ -723,8 +833,8 @@ void LPVRenderer::updateFrameInfo(){
 				lightDirection = glm::vec3(0.0f, -1.0f, 0.0f);
 			lightDirection = glm::normalize(lightDirection);
 
-			const float halfExtent = sceneRadius * 1.05f;
-			const float distance = sceneRadius * 2.0f + 1.0f;
+			const float halfExtent = sceneHalfDiagonal * 1.05f;
+			const float distance = sceneHalfDiagonal * 2.0f + 1.0f;
 			const glm::vec3 lightEye = sceneCenter - lightDirection * distance;
 
 			const glm::mat4 view = glm::lookAt(lightEye, sceneCenter, lpvUpVector(lightDirection));
@@ -743,12 +853,12 @@ void LPVRenderer::updateFrameInfo(){
 				distance = 1e-4f;
 			const glm::vec3 direction = toCenter / distance;
 
-			float fovY = 2.0f * std::atan(sceneRadius * 1.15f / std::max(distance, sceneRadius * 0.2f));
+			float fovY = 2.0f * std::atan(sceneHalfDiagonal * 1.15f / std::max(distance, sceneHalfDiagonal * 0.2f));
 			fovY = std::clamp(fovY, 0.1f, 2.9f);
 
 			const glm::mat4 view = glm::lookAt(light.pos, sceneCenter, lpvUpVector(direction));
-			const glm::mat4 projection = glm::perspectiveRH_ZO(fovY, 1.0f, std::max(distance - sceneRadius * 1.2f, 0.02f),
-				distance + sceneRadius * 2.5f + 1.0f);
+			const glm::mat4 projection = glm::perspectiveRH_ZO(fovY, 1.0f, std::max(distance - sceneHalfDiagonal * 1.2f, 0.02f),
+				distance + sceneHalfDiagonal * 2.5f + 1.0f);
 
 			frameInfo.lightViewProjInverse[lightIndex] = glm::inverse(projection * view);
 
@@ -786,25 +896,52 @@ void LPVRenderer::runRsmInjectionPass(VkCommandBuffer cmd)
 void LPVRenderer::runGvMergePass(VkCommandBuffer cmd)
 {
 	NVVK_DBG_SCOPE(cmd);
-	vkCmdPushConstants2(cmd, &pushInfo);
-	const uint32_t resolution    = uint32_t(gridResolution);
-	const uint32_t groupCountXZ  = resolution / LPV_VOXEL_THREADGROUP;
-	const uint32_t groupCountY   = (resolution * uint32_t(cascadeCount)) / LPV_VOXEL_THREADGROUP;
-	dispatchCompute(cmd, shaderGvMerge, groupCountXZ, groupCountXZ, groupCountY);
-}
-void LPVRenderer::runPropagationPasses(VkCommandBuffer cmd)
-{
-	NVVK_DBG_SCOPE(cmd);
-	const uint32_t resolution   = uint32_t(gridResolution);
-	const uint32_t groupCountXY = resolution / LPV_VOXEL_THREADGROUP;
-	const uint32_t groupCountZ  = (resolution * uint32_t(cascadeCount)) / LPV_VOXEL_THREADGROUP;
-
-	for (int iteration = 0; iteration < iterationCount; ++iteration)
+	for (int cascade = 0; cascade < cascadeCount; ++cascade)
 	{
-		pushConstant.iteration = iteration;
+		const uint32_t resolution = uint32_t(cascadeResolution[cascade]) + 1u;
+		const uint32_t groupCount = (resolution + LPV_VOXEL_THREADGROUP - 1) / LPV_VOXEL_THREADGROUP;
+		pushConstant.cascadeIndex = cascade;
 		vkCmdPushConstants2(cmd, &pushInfo);
-		dispatchCompute(cmd, shaderPropagate, groupCountXY, groupCountXY, groupCountZ);
-		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+		dispatchCompute(cmd, shaderGvMerge, groupCount, groupCount, groupCount);
+	}
+}
+void LPVRenderer::runPropagationPasses(VkCommandBuffer cmd){
+	NVVK_DBG_SCOPE(cmd);
+
+	{
+		for (int cascade = 0; cascade < cascadeCount; ++cascade){
+			const VkDeviceSize cascadeVoxels =
+			    VkDeviceSize(cascadeResolution[cascade]) * cascadeResolution[cascade] * cascadeResolution[cascade];
+			VkBufferCopy2 copyRegion{
+				.sType = VK_STRUCTURE_TYPE_BUFFER_COPY_2,
+				.srcOffset = 0,
+				.dstOffset = 0,
+				.size = cascadeVoxels * LPV_VOXEL_FLOATS * sizeof(float),
+			};
+			VkCopyBufferInfo2 copyInfo{
+				.sType = VK_STRUCTURE_TYPE_COPY_BUFFER_INFO_2,
+				.srcBuffer = lpvVolumesBuffer[cascade].buffer,
+				.dstBuffer = lpvAccumBuffer[cascade].buffer,
+				.regionCount = 1,
+				.pRegions = &copyRegion,
+			};
+			vkCmdCopyBuffer2(cmd, &copyInfo);
+		}
+		nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+	}
+
+	if (iterationCount <= 0) return;
+	for (int cascade = 0; cascade < cascadeCount; ++cascade){
+		const uint32_t groupCount = uint32_t(cascadeResolution[cascade]) / LPV_VOXEL_THREADGROUP;
+
+		pushConstant.cascadeIndex      = cascade;
+		pushConstant.cascadeIterations = iterationCount;
+		for (int iteration = 0; iteration < iterationCount; ++iteration){
+			pushConstant.iteration = iteration;
+			vkCmdPushConstants2(cmd, &pushInfo);
+			dispatchCompute(cmd, shaderPropagate, groupCount, groupCount, groupCount);
+			nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+		}
 	}
 }
 void LPVRenderer::runGatherPass(VkCommandBuffer cmd)
@@ -817,6 +954,189 @@ void LPVRenderer::runGatherPass(VkCommandBuffer cmd)
 	const uint32_t groupCountY = (currentResolution.height + LPV_PIXEL_THREADGROUP_Y - 1) / LPV_PIXEL_THREADGROUP_Y;
 	dispatchCompute(cmd, shaderGather, groupCountX, groupCountY, 1);
 }
+void LPVRenderer::tonemapping(VkCommandBuffer cmd) {
+	Application::tonemapper.runCompute(cmd, gBuffers.getSize(), Application::tonemapperData,
+		gBuffers.getDescriptorImageInfo((uint32_t)ImageType_LPV::eImgRendered),
+		gBuffers.getDescriptorImageInfo((uint32_t)ImageType_LPV::eImgTonemapped));
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+}
+//----------------------------------Parameter presets----------------------------------
+void LPVRenderer::rebuildVolumes()
+{
+	vkDeviceWaitIdle(Application::app->getDevice());
+	updateCascadeLayout();
+	destroyResources();
+	createResources();
+	createDescriptorSet();
+	pushConstant.cascadeCount      = cascadeCount;
+	pushConstant.gridResolution    = gridResolution;
+	pushConstant.rsmResolution     = rsmResolution;
+	debugPushConstant.cascadeCount = cascadeCount;
+	resetFrame();
+}
+void LPVRenderer::saveParams()
+{
+	const std::filesystem::path path = std::filesystem::path(__FILE__).parent_path() / "LPVParams.md";
+	std::ofstream               file(path, std::ios::trunc);
+	if (!file)
+	{
+		LOGE("LPV: cannot write %s\n", path.string().c_str());
+		return;
+	}
+
+	file << "# LPV renderer parameters\n";
+	file << "# key = value, one entry per line. The 'Load params' button reads this file back.\n\n";
+	file << "cascadeCount = " << cascadeCount << "\n";
+	file << "baseResolution = " << baseResolution << "\n";
+	file << "gridResolution = " << baseResolution << "\n";
+	file << "rsmResolution = " << rsmResolution << "\n";
+	file << "iterationCount = " << iterationCount << "\n";
+	file << "cascadeBlendCells = " << cascadeBlendCells << "\n";
+	file << "baseCellSize = " << baseCellSize << "\n\n";
+	file << "useOcclusion = " << int(useOcclusion) << "\n";
+	file << "gatherOcclusion = " << gatherOcclusion << "\n";
+	file << "gatherOcclusionEnabled = " << int(gatherOcclusionEnabled) << "\n";
+	file << "useDampening = " << int(useDampening) << "\n";
+	file << "showDirectLight = " << int(showDirectLight) << "\n";
+	file << "useTrilinearSample = " << int(useTrilinearSample) << "\n\n";
+	file << "showGrid = " << int(showGrid) << "\n";
+	file << "showSH = " << int(showSH) << "\n";
+	file << "showGBuffer = " << int(showGBuffer) << "\n";
+	file << "showRSM = " << int(showRSM) << "\n\n";
+	file << "gridDataType = " << debugPushConstant.gridDataType << "\n";
+	file << "cascadeIndex = " << debugPushConstant.cascadeIndex << "\n";
+	file << "showGridVoxelRangeMin = " << debugPushConstant.showGridVoxelRangeMin.x << " " << debugPushConstant.showGridVoxelRangeMin.y
+	     << " " << debugPushConstant.showGridVoxelRangeMin.z << "\n";
+	file << "showGridVoxelRangeMax = " << debugPushConstant.showGridVoxelRangeMax.x << " " << debugPushConstant.showGridVoxelRangeMax.y
+	     << " " << debugPushConstant.showGridVoxelRangeMax.z << "\n";
+	file << "GBufferIndex = " << debugPushConstant.GBufferIndex << "\n";
+	file << "lightIndex = " << debugPushConstant.lightIndex << "\n";
+	file << "gvSource = " << debugPushConstant.gvSource << "\n";
+	file << "showSHType = " << debugPushConstant.showSHType << "\n";
+
+	LOGI("LPV: parameters saved to %s\n", path.string().c_str());
+}
+void LPVRenderer::loadParams()
+{
+	const std::filesystem::path path = std::filesystem::path(__FILE__).parent_path() / "LPVParams.md";
+	std::ifstream               file(path);
+	if (!file)
+	{
+		LOGE("LPV: cannot read %s\n", path.string().c_str());
+		return;
+	}
+
+	const int oldCascadeCount   = cascadeCount;
+	const int oldBaseResolution = baseResolution;
+	const int oldRsmResolution  = rsmResolution;
+
+	auto toBool = [](const std::string& text) { return !(text == "0" || text == "false" || text == "False" || text == "off"); };
+
+	std::string line;
+	while (std::getline(file, line))
+	{
+		const size_t comment = line.find('#');
+		if (comment != std::string::npos)
+			line = line.substr(0, comment);
+		const size_t separator = line.find('=');
+		if (separator == std::string::npos)
+			continue;
+
+		const std::string key   = lpvTrim(line.substr(0, separator));
+		const std::string value = lpvTrim(line.substr(separator + 1));
+		if (key.empty() || value.empty())
+			continue;
+
+		try
+		{
+			if (key == "cascadeCount")
+				cascadeCount = std::clamp(std::stoi(value), 1, LPV_MAX_CASCADES);
+			else if (key == "baseResolution")
+				baseResolution = std::clamp(std::stoi(value), 8, 64);
+			else if (key == "gridResolution")
+				baseResolution = std::clamp(std::stoi(value), 8, 64);
+			else if (key == "rsmResolution")
+				rsmResolution = std::clamp(std::stoi(value), 16, LPV_MAX_RSM_RESOLUTION);
+			else if (key == "iterationCount")
+				iterationCount = std::clamp(std::stoi(value), 0, LPV_MAX_ITERATIONS);
+			else if (key == "cascadeBlendCells")
+				cascadeBlendCells = std::clamp(std::stoi(value), 1, 8);
+			else if (key == "baseCellSize")
+				baseCellSize = std::clamp(std::stof(value), 0.0f, 1024.0f);
+			else if (key == "useOcclusion")
+				useOcclusion = toBool(value);
+			else if (key == "gatherOcclusion")
+				gatherOcclusion = std::clamp(std::stof(value), 0.0f, 1.0f);
+			else if (key == "gatherOcclusionEnabled")
+				gatherOcclusionEnabled = toBool(value);
+			else if (key == "useDampening")
+				useDampening = toBool(value);
+			else if (key == "showDirectLight")
+				showDirectLight = toBool(value);
+			else if (key == "useTrilinearSample")
+				useTrilinearSample = toBool(value);
+			else if (key == "showGrid")
+				showGrid = toBool(value);
+			else if (key == "showSH")
+				showSH = toBool(value);
+			else if (key == "showGBuffer")
+				showGBuffer = toBool(value);
+			else if (key == "showRSM")
+				showRSM = toBool(value);
+			else if (key == "gridDataType")
+				debugPushConstant.gridDataType = std::clamp(std::stoi(value), 0, 2);
+			else if (key == "cascadeIndex")
+				debugPushConstant.cascadeIndex = std::stoi(value);
+			else if (key == "GBufferIndex")
+				debugPushConstant.GBufferIndex = std::clamp(std::stoi(value), 0, 3);
+			else if (key == "lightIndex")
+				debugPushConstant.lightIndex = std::max(std::stoi(value), 0);
+			else if (key == "gvSource")
+				debugPushConstant.gvSource = std::clamp(std::stoi(value), 0, 2);
+			else if (key == "showSHType")
+				debugPushConstant.showSHType = std::clamp(std::stoi(value), 0, 4);
+			else if (key == "showGridVoxelRangeMin" || key == "showGridVoxelRangeMax")
+			{
+				std::istringstream stream(value);
+				shaderio::int3     range{};
+				stream >> range.x >> range.y >> range.z;
+				if (!stream.fail())
+				{
+					shaderio::int3& target = (key == "showGridVoxelRangeMin") ? debugPushConstant.showGridVoxelRangeMin :
+					                                                            debugPushConstant.showGridVoxelRangeMax;
+					target = shaderio::clamp(range, shaderio::int3(0), shaderio::int3(std::max(debugGridResolution() - 1, 0)));
+				}
+			}
+			else
+				LOGW("LPV: unknown parameter \"%s\" in %s\n", key.c_str(), path.string().c_str());
+		}
+		catch (const std::exception&)
+		{
+			LOGW("LPV: invalid value \"%s\" for \"%s\", keeping the current one\n", value.c_str(), key.c_str());
+		}
+	}
+
+	baseResolution = std::max(LPV_VOXEL_THREADGROUP, (baseResolution / LPV_VOXEL_THREADGROUP) * LPV_VOXEL_THREADGROUP);
+	rsmResolution  = std::max(16, (rsmResolution / 16) * 16);
+	updateCascadeLayout();
+	debugPushConstant.cascadeIndex = std::clamp(debugPushConstant.cascadeIndex, 0, std::max(cascadeCount - 1, 0));
+	debugPushConstant.showGridVoxelRangeMin =
+	    shaderio::clamp(debugPushConstant.showGridVoxelRangeMin, shaderio::int3(0), shaderio::int3(gridResolution - 1));
+	debugPushConstant.showGridVoxelRangeMax =
+	    shaderio::clamp(debugPushConstant.showGridVoxelRangeMax, shaderio::int3(0), shaderio::int3(gridResolution - 1));
+
+	if (cascadeCount != oldCascadeCount || baseResolution != oldBaseResolution || rsmResolution != oldRsmResolution)
+	{
+		LOGI("LPV: the grid layout changed, rebuilding the volumes\n");
+		rebuildVolumes();
+	}
+	else
+	{
+		resetFrame();
+	}
+
+	LOGI("LPV: parameters loaded from %s\n", path.string().c_str());
+}
 //--------------------------------------UI--------------------------------------
 void LPVRenderer::uiRender(){
 	bool uiModified = Application::UIModified;
@@ -826,168 +1146,140 @@ void LPVRenderer::uiRender(){
 	if (ImGui::Begin("LPVSettings")){
 		ImGui::SeparatorText("Light Propagation Volumes");
 		ImGui::TextDisabled("Frame: %d", Application::frameIndex);
-		ImGui::TextDisabled("Cascades: %d x %d^3 = %d voxels", cascadeCount, gridResolution, cascadeCount * gridResolution * gridResolution * gridResolution);
-		ImGui::TextDisabled("Iterations: %d (0 = injection only, no propagation), virtual RSM: %d^2 per light", iterationCount, rsmResolution);
 
-		if (ImGui::CollapsingHeader("GBuffers")) {
-			std::vector<std::string> gBufferIndexNames = { "normal", "albedo", "specular", "directColor" };
-			std::vector<const char*> gBufferIndexNames_pointers;
-			for (const auto& gBufferIndexName : gBufferIndexNames) gBufferIndexNames_pointers.push_back(gBufferIndexName.c_str());
-			ImGui::Combo("normal", &debugPushConstant.GBufferIndex, gBufferIndexNames_pointers.data(), static_cast<int>(gBufferIndexNames_pointers.size()));
+		ImGui::Dummy(ImVec2(0.0f, ImGui::GetTextLineHeightWithSpacing()));
+		{
+			ImGui::TextDisabled("Cascades: %d x %d^3 = %d voxels", cascadeCount, gridResolution, cascadeCount * gridResolution * gridResolution * gridResolution);
+			ImGui::TextDisabled("Iterations: %d (0 = injection only, no propagation), virtual RSM: %d^2 per light", iterationCount, rsmResolution);
 
-			uiModified |= ImGui::Checkbox("show GBuffers", &showGBuffer);
+			uiModified |= ImGui::Checkbox("Fuzzy occlusion", &useOcclusion);
+			uiModified |= ImGui::Checkbox("Gather occlusion", &gatherOcclusionEnabled);
+			if (gatherOcclusionEnabled)
+				uiModified |= ImGui::SliderFloat("Gather strength", &gatherOcclusion, 0.0f, 1.0f, "%.2f");
+			uiModified |= ImGui::Checkbox("Fuzzy occlusion Two Face", (bool*)&pushConstant.occTwoFace);
+			uiModified |= ImGui::Checkbox("Derivative dampening", &useDampening);
+			uiModified |= ImGui::Checkbox("Show Directional Light", &showDirectLight);
+			uiModified |= ImGui::Checkbox("Trilinear gather", &useTrilinearSample);
 
-			ImGui::SeparatorText("Show GBuffer Injection SH Result");
-			ImGui::SliderInt("cascade:", &cascadeIndex_showSH_Gv, 0, cascadeCount);
-			ImGui::SliderInt3("voxelIndex", (int*)&voxelIndex_showSH_Gv, 0, gridResolution - 1);
-			if (ImGui::Checkbox("show Gv SH", &showSH_Gv)) debugPushConstant.showGvSH = 1;
+			ImGui::TextDisabled("Everything else (half cell offsets, 5 exit faces, cascade blend) follows the paper.");
 		}
+		{
+			const int oldCascadeCount   = cascadeCount;
+			const int oldBaseResolution = baseResolution;
 
-		if (ImGui::CollapsingHeader("Cascade")) {
-			ImGui::SliderInt("Cascade count", &cascadeCount, 1, LPV_MAX_CASCADES);
-			ImGui::SliderInt("Grid resolution", &gridResolution, 8, 96);
-			gridResolution = std::max(LPV_VOXEL_THREADGROUP, (gridResolution / LPV_VOXEL_THREADGROUP) * LPV_VOXEL_THREADGROUP);
+			uiModified |= ImGui::SliderInt("Cascade count", &cascadeCount, 1, LPV_MAX_CASCADES);
+			uiModified |= ImGui::SliderInt("Base resolution", &baseResolution, 8, 64);
+			baseResolution = std::max(LPV_VOXEL_THREADGROUP, (baseResolution / LPV_VOXEL_THREADGROUP) * LPV_VOXEL_THREADGROUP);
 
-			std::vector<const char*> gridIndexNames_pointers;
-			for(int i = 0; i < cascadeCount; ++i) gridIndexNames_pointers.push_back(("cascade " + std::to_string(i)).c_str());
-			gridIndexNames_pointers.push_back("all");
-			ImGui::Combo("Cascade Grid", &debugPushConstant.gridIndex, gridIndexNames_pointers.data(), static_cast<int>(gridIndexNames_pointers.size()));
-
-			uiModified |= ImGui::Checkbox("show Grid", &showGBuffer);
+			if (cascadeCount != oldCascadeCount || baseResolution != oldBaseResolution)
+			{
+				rebuildVolumes();
+				uiModified = true;
+			}
+			for (int cascade = 0; cascade < cascadeCount; ++cascade)
+				ImGui::TextDisabled("cascade %d: %d^3, cell %.3f m, reach %.2f m", cascade, cascadeResolution[cascade],
+				                    double(cascades[cascade].cellSize), double(iterationCount * cascades[cascade].cellSize));
 		}
-
-		if (ImGui::CollapsingHeader("RSM")) {
+		{
 			ImGui::SliderInt("RSM resolution", &rsmResolution, 32, 1024);
 			rsmResolution = std::max(16, (rsmResolution / 16) * 16);
-
-			ImGui::SliderInt("Light Index", &debugPushConstant.lightIndex, 0, Application::sceneResource.sceneInfo.numLights);
-			uiModified |= ImGui::Checkbox("show RSM", &showRSM);
-
-			ImGui::SeparatorText("Show RSM Injection SH Result");
-			ImGui::SliderInt("cascade:", &cascadeIndex_showSH_RSM, 0, cascadeCount);
-			ImGui::SliderInt3("voxelIndex", (int*)&voxelIndex_showSH_RSM, 0, gridResolution - 1);
-			if(ImGui::Checkbox("show RSM SH", &showSH_RSM)) debugPushConstant.showGvSH = 0;
-			if (ImGui::Checkbox("show RSM Gv SH", &showSH_RSM)) debugPushConstant.showGvSH = 1;
 		}
-
-		if (ImGui::CollapsingHeader("Propagate")) {
+		{
 			uiModified |= ImGui::SliderInt("Propagation iterations", &iterationCount, 0, 16);
-
-			ImGui::SeparatorText("Show RSM Injection SH Result");
-			ImGui::SliderInt("cascade:", &cascadeIndex_showSH_Propagate, 0, cascadeCount);
-			ImGui::SliderInt3("voxelIndex", (int*)&voxelIndex_showSH_Propagate, 0, gridResolution - 1);
-			if (ImGui::Checkbox("show Propagate SH", &showSH_Propagate)) debugPushConstant.showGvSH = 0;
+			if (cascadeCount > 1)
+				uiModified |= ImGui::SliderInt("Cascade blend", &cascadeBlendCells, 1, 8);
 		}
 
-		ImGui::SeparatorText("Indirect lighting");
-		uiModified |= ImGui::Checkbox("Fuzzy occlusion", &useOcclusion);
-		uiModified |= ImGui::Checkbox("Derivative dampening", &useDampening);
-		uiModified |= ImGui::Checkbox("Show Directional Light", &showDirectLight);
-		if (ImGui::Combo("Debug view", &debugMode, "Off\0Cascades\0Direct only\0Indirect only\0Reference GI\0RSM\0")) uiModified = true;
-		
-		ImGui::TextDisabled("Everything else (half cell offsets, 5 exit faces, cascade blend) follows the paper.");
+		if (ImGui::Button("Rebuild volumes")) rebuildVolumes();
 
-		bool rebuild = ImGui::Button("Rebuild volumes");
-		if (rebuild){
-			vkDeviceWaitIdle(Application::app->getDevice());
-			destroyResources();
-			createResources();
-			createDescriptorSet();
-			updateCascadeLayout();
-			pushConstant.cascadeCount   = cascadeCount;
-			pushConstant.gridResolution = gridResolution;
-			pushConstant.rsmResolution  = rsmResolution;
-			resetFrame();
-		}
-
-		if (ImGui::Button("Save snapshot"))
-			saveFrame = Application::frameIndex + 2;
+		if (ImGui::Button("Save snapshot")) saveFrame = Application::frameIndex + 2;
+		if (ImGui::Button("Save params")) saveParams();
+		if (ImGui::Button("Load params")) loadParams();
 
 		ImGui::SeparatorText("Diagnostics");
 		ImGui::TextDisabled("Buffers: volumes %.1f MB, geometry %.1f MB",
 		                    double(2 * volumeFloatCount() * sizeof(float)) / (1024.0 * 1024.0),
-		                    double(3 * VkDeviceSize(cascadeCount) * VkDeviceSize(gridResolution) * gridResolution * gridResolution *
-		                           LPV_GV_FLOATS * sizeof(float)) /
-		                        (1024.0 * 1024.0));
+		                    double(3 * VkDeviceSize(cascadeCount) * VkDeviceSize(gridResolution) * gridResolution * gridResolution * LPV_GV_FLOATS * sizeof(float)) / (1024.0 * 1024.0));
+	}
+	ImGui::End();
+
+	if (ImGui::Begin("Debug")) {
+		if (ImGui::CollapsingHeader("Show Grid")) {
+			static const char* const hasDataTypeNames[] = { "gBuffer", "RSM radiance", "Propagate SH radiance" };
+			ImGui::Combo("Grid Type", &debugPushConstant.gridDataType, hasDataTypeNames, IM_ARRAYSIZE(hasDataTypeNames));
+			uiModified |= ImGui::IsItemEdited();
+
+			if (cascadeLabelPtrs.size() != size_t(cascadeCount)) {
+				cascadeLabels.clear();
+				cascadeLabelPtrs.clear();
+				for (int i = 0; i < cascadeCount; ++i) cascadeLabels.push_back("cascade " + std::to_string(i));
+				for (const auto& label : cascadeLabels) cascadeLabelPtrs.push_back(label.c_str());
+			}
+			ImGui::Combo("Cascade Index", &debugPushConstant.cascadeIndex, cascadeLabelPtrs.data(), static_cast<int>(cascadeLabelPtrs.size()));
+			uiModified |= ImGui::IsItemEdited();
+
+			ImGui::DragInt3("Show Voxel Min ", (int*)&debugPushConstant.showGridVoxelRangeMin, 1, 0, debugGridResolution() - 1);
+			ImGui::DragInt3("Show Voxel max ", (int*)&debugPushConstant.showGridVoxelRangeMax, 1, 0, debugGridResolution() - 1);
+			uiModified |= ImGui::Checkbox("show Grid", &showGrid);
+		}
+		if (ImGui::CollapsingHeader("SH")) {
+			static const char* const hasDataTypeNames[] = { "gBuffer Gv", "RSM Gv", "Gv Merge", "Propagate Radiance", "Propagate Acc Radiance" };
+			ImGui::Combo("SH Type", &debugPushConstant.showSHType, hasDataTypeNames, IM_ARRAYSIZE(hasDataTypeNames));
+			uiModified |= ImGui::IsItemEdited();
+
+			uiModified |= ImGui::Checkbox("show SH Sphere", &showSH);
+			printSH = false;
+			printSH = ImGui::Button("print SH");
+		}
+		if (ImGui::CollapsingHeader("GBuffers")) {
+			static const char* const gBufferIndexNames[] = { "normal", "albedo", "specular", "directColor" };
+			ImGui::Combo("normal", &debugPushConstant.GBufferIndex, gBufferIndexNames, IM_ARRAYSIZE(gBufferIndexNames));
+
+			uiModified |= ImGui::Checkbox("show GBuffers", &showGBuffer);
+		}
+		if (ImGui::CollapsingHeader("RSM")) {
+			ImGui::SliderInt("Light Index", &debugPushConstant.lightIndex, 0,
+				std::max(int(Application::sceneResource.sceneInfo.numLights) - 1, 0));
+			uiModified |= ImGui::Checkbox("show RSM", &showRSM);
+		}
 	}
 	ImGui::End();
 
 	if (uiModified) resetFrame();
 }
 //--------------------------------------Debug--------------------------------------
+void LPVRenderer::createDeptImage(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
+
+	VkClearDepthStencilValue clearValue = DEFAULT_VkClearDepthStencilValue;
+	VkImageSubresourceRange range = {};
+	range.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+	range.baseMipLevel = 0;
+	range.levelCount = 1;
+	range.baseArrayLayer = 0;
+	range.layerCount = 1;
+	vkCmdClearDepthStencilImage(cmd, gBuffers.getDepthImage(), VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &range);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+
+	pushInfo.pValues = &debugPushConstant;
+	vkCmdPushConstants2(cmd, &pushInfo);
+
+	const uint32_t groupCountX = (currentResolution.width + 15) / 16;
+	const uint32_t groupCountY = (currentResolution.height + 15) / 16;
+	dispatchCompute(cmd, shaderCreateDepthImage, groupCountX, groupCountY, 1);
+}
 void LPVRenderer::showGBufferResult(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
-	
+
+	if (shaderShowGBuffer == VK_NULL_HANDLE)
+		LOGE("LPV: showGBufferMain was not created, the G-buffer debug view stays empty\n");
+
 	pushInfo.pValues = &debugPushConstant;
 	vkCmdPushConstants2(cmd, &pushInfo);
 
 	const uint32_t groupCountX = (currentResolution.width + 15) / 16;
 	const uint32_t groupCountY = (currentResolution.height + 15) / 16;
 	dispatchCompute(cmd, shaderShowGBuffer, groupCountX, groupCountY, 1);
-}
-void LPVRenderer::showGridResult(VkCommandBuffer cmd) {
-	NVVK_DBG_SCOPE(cmd);
-
-	pushInfo.pValues = &debugPushConstant;
-	vkCmdPushConstants2(cmd, &pushInfo);
-
-	shaderio::TriangleMesh triMesh;
-	{
-		nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(uint32_t(ImageType_LPV::eImgRendered)), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
-		nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getDepthImage(), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
-
-		VkRenderingAttachmentInfo colorAttachment = DEFAULT_VkRenderingAttachmentInfo;
-		colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-		colorAttachment.imageView = gBuffers.getColorImageView(uint32_t(ImageType_LPV::eImgRendered));
-		colorAttachment.clearValue = { .color = {Application::sceneResource.sceneInfo.backgroundColor.x,
-												Application::sceneResource.sceneInfo.backgroundColor.y,
-												Application::sceneResource.sceneInfo.backgroundColor.z, 1.0f} };
-
-		VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
-		depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-		depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
-		depthAttachment.imageView = gBuffers.getDepthImageView();
-
-		VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
-		renderingInfo.renderArea = { {0, 0}, gBuffers.getSize() };
-		renderingInfo.colorAttachmentCount = 1;
-		renderingInfo.pColorAttachments = &colorAttachment;
-		renderingInfo.pDepthAttachment = &depthAttachment;
-
-		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, staticDescPack.getSetPtr(), 0, nullptr);
-
-		vkCmdBeginRendering(cmd, &renderingInfo);
-
-		graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
-		graphicsDynamicPipeline.inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
-		graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;
-		graphicsDynamicPipeline.rasterizationState.lineWidth = 2.0f;
-		graphicsDynamicPipeline.rasterizationState.polygonMode = VK_POLYGON_MODE_LINE;
-		graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_FALSE;
-		graphicsDynamicPipeline.depthStencilState.depthWriteEnable = VK_FALSE;
-
-		graphicsDynamicPipeline.cmdApplyAllStates(cmd);
-		// depth bounds is a dynamic state: it has to be set explicitly before drawing with shader objects
-		vkCmdSetDepthBoundsTestEnable(cmd, VK_FALSE);
-		graphicsDynamicPipeline.cmdSetViewportAndScissor(cmd, gBuffers.getSize());
-		graphicsDynamicPipeline.cmdBindShaders(cmd, { .vertex = shaderShowGrid_vertex, .fragment = shaderShowGrid_fragment });
-
-		VkVertexInputBindingDescription2EXT bindingDescription{};
-		VkVertexInputAttributeDescription2EXT attributeDescription = {};
-		vkCmdSetVertexInputEXT(cmd, 0, nullptr, 0, nullptr);
-
-		bool useWireframe = true;
-		uint32_t meshIndex = useWireframe ? 0 : 1;
-		const shaderio::Mesh& mesh = scene.meshes[meshIndex];
-		triMesh = mesh.triMesh;
-
-		uint32_t bufferIndex = scene.getMeshBufferIndex(meshIndex);
-		const nvvk::Buffer& v = scene.bDatas[bufferIndex];
-
-		vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(mesh.indexType));
-	}
-
-	vkCmdDrawIndexed(cmd, triMesh.indices.count, debugPushConstant.debugVoxelCount, 0, 0, 0);
 }
 void LPVRenderer::showRSMResult(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
@@ -1002,24 +1294,27 @@ void LPVRenderer::showRSMResult(VkCommandBuffer cmd) {
 void LPVRenderer::showSHResult(VkCommandBuffer cmd) {
 	NVVK_DBG_SCOPE(cmd);
 
+	// Bail out before anything is recorded, so that no dynamic rendering instance is left open.
+	if (shaderShowSH_vertex == VK_NULL_HANDLE || shaderShowSH_fragment == VK_NULL_HANDLE){
+		LOGE("LPV: the SH probe shaders were not created, skipping the probe\n");
+		return;
+	}
+
 	pushInfo.pValues = &debugPushConstant;
 	vkCmdPushConstants2(cmd, &pushInfo);
 
-	shaderio::TriangleMesh triMesh;
 	{
 		nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(uint32_t(ImageType_LPV::eImgRendered)), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
 		nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getDepthImage(), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
 
 		VkRenderingAttachmentInfo colorAttachment = DEFAULT_VkRenderingAttachmentInfo;
-		colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
 		colorAttachment.imageView = gBuffers.getColorImageView(uint32_t(ImageType_LPV::eImgRendered));
-		colorAttachment.clearValue = { .color = {Application::sceneResource.sceneInfo.backgroundColor.x,
-												Application::sceneResource.sceneInfo.backgroundColor.y,
-												Application::sceneResource.sceneInfo.backgroundColor.z, 1.0f} };
 
 		VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
 		depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 		depthAttachment.clearValue = { .depthStencil = DEFAULT_VkClearDepthStencilValue };
+		//colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
 		depthAttachment.imageView = gBuffers.getDepthImageView();
 
 		VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
@@ -1033,7 +1328,9 @@ void LPVRenderer::showSHResult(VkCommandBuffer cmd) {
 		vkCmdBeginRendering(cmd, &renderingInfo);
 
 		graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
-		graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
+		// A debug overlay is drawn regardless of the winding convention of the project's projection
+		// matrix; culling back faces here silently removed the whole probe.
+		graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;
 		graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_TRUE;
 		graphicsDynamicPipeline.depthStencilState.depthWriteEnable = VK_TRUE;
 		graphicsDynamicPipeline.depthStencilState.depthBoundsTestEnable = VK_FALSE;
@@ -1046,15 +1343,92 @@ void LPVRenderer::showSHResult(VkCommandBuffer cmd) {
 		VkVertexInputAttributeDescription2EXT attributeDescription = {};
 		vkCmdSetVertexInputEXT(cmd, 0, nullptr, 0, nullptr);
 
-		uint32_t meshIndex = 2;
-		const shaderio::Mesh& mesh = scene.meshes[meshIndex];
-		triMesh = mesh.triMesh;
-
-		uint32_t bufferIndex = scene.getMeshBufferIndex(meshIndex);
-		const nvvk::Buffer& v = scene.bDatas[bufferIndex];
-
-		vkCmdBindIndexBuffer(cmd, v.buffer, triMesh.indices.offset, VkIndexType(mesh.indexType));
 	}
 
-	vkCmdDrawIndexed(cmd, triMesh.indices.count, 1, 0, 0, 0);
+	constexpr uint32_t kProbeVertexCount = 8u * 4u * 2u * 3u;
+	vkCmdDraw(cmd, kProbeVertexCount, debugVoxelCount(), 0, 0);
+
+	vkCmdEndRendering(cmd);
+
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(uint32_t(ImageType_LPV::eImgRendered)), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getDepthImage(), VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
+}
+void LPVRenderer::printSHResult(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
+
+	pushInfo.pValues = &debugPushConstant;
+	vkCmdPushConstants2(cmd, &pushInfo);
+
+	const uint32_t groupCountX = (debugVoxelCount() + 1023) / 1024;
+	dispatchCompute(cmd, shaderPrintSH, groupCountX, 1, 1);
+}
+void LPVRenderer::showGridResult(VkCommandBuffer cmd) {
+	NVVK_DBG_SCOPE(cmd);
+
+	pushInfo.pValues = &debugPushConstant;
+	vkCmdPushConstants2(cmd, &pushInfo);
+
+	vkCmdFillBuffer(cmd, gridDataBuffer.buffer, 0, gridDataBuffer.bufferSize, 0);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+
+	logDebugViewCounts();
+	int threadGroupCount = 0;
+	if (debugPushConstant.gridDataType == 0) threadGroupCount = currentResolution.width * currentResolution.height;
+	else if (debugPushConstant.gridDataType == 1) threadGroupCount = rsmResolution * rsmResolution;
+	else if (debugPushConstant.gridDataType == 2) threadGroupCount = debugVoxelCount();
+	threadGroupCount = (threadGroupCount + 1023) / 1024;
+	dispatchCompute(cmd, shaderInjectGrid, threadGroupCount, 1, 1);
+	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+
+	{
+		nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(uint32_t(ImageType_LPV::eImgRendered)), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
+		nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getDepthImage(), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
+
+		VkRenderingAttachmentInfo colorAttachment = DEFAULT_VkRenderingAttachmentInfo;
+		colorAttachment.imageView = gBuffers.getColorImageView(uint32_t(ImageType_LPV::eImgRendered));
+		colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+
+		VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
+		depthAttachment.imageView = gBuffers.getDepthImageView();
+		depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+
+		VkRenderingInfo renderingInfo = DEFAULT_VkRenderingInfo;
+		renderingInfo.renderArea = { {0, 0}, gBuffers.getSize() };
+		renderingInfo.colorAttachmentCount = 1;
+		renderingInfo.pColorAttachments = &colorAttachment;
+		renderingInfo.pDepthAttachment = &depthAttachment;
+
+		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, staticDescPack.getSetPtr(), 0, nullptr);
+
+		vkCmdBeginRendering(cmd, &renderingInfo);
+
+		graphicsDynamicPipeline = nvvk::GraphicsPipelineState();
+		graphicsDynamicPipeline.inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+		graphicsDynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;
+		// No polygonMode = LINE / lineWidth = 2: those need fillModeNonSolid / wideLines, which this
+		// renderer does not request. The topology already draws the box edges as lines.
+		graphicsDynamicPipeline.depthStencilState.depthTestEnable = VK_TRUE;
+		graphicsDynamicPipeline.depthStencilState.depthWriteEnable = VK_TRUE;
+
+		graphicsDynamicPipeline.cmdApplyAllStates(cmd);
+		// depth bounds is a dynamic state: it has to be set explicitly before drawing with shader objects
+		vkCmdSetDepthBoundsTestEnable(cmd, VK_FALSE);
+		graphicsDynamicPipeline.cmdSetViewportAndScissor(cmd, gBuffers.getSize());
+		graphicsDynamicPipeline.cmdBindShaders(cmd, { .vertex = shaderShowGrid_vertex, .fragment = shaderShowGrid_fragment });
+
+		VkVertexInputBindingDescription2EXT bindingDescription{};
+		VkVertexInputAttributeDescription2EXT attributeDescription = {};
+		vkCmdSetVertexInputEXT(cmd, 0, nullptr, 0, nullptr);
+
+		// The box edges are generated in the vertex shader from SV_VertexID (12 edges, 24 vertices):
+		// no mesh, no index buffer, no scene lookup.
+	}
+
+	// 12 edges x 2 vertices, see ShowGrid.slang.
+	vkCmdDraw(cmd, 24, debugVoxelCount(), 0, 0);
+
+	vkCmdEndRendering(cmd);
+
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getColorImage(uint32_t(ImageType_LPV::eImgRendered)), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL });
+	nvvk::cmdImageMemoryBarrier(cmd, { gBuffers.getDepthImage(), VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS} });
 }

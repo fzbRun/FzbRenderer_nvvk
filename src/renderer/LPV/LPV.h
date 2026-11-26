@@ -4,6 +4,7 @@
 #include "renderer/PathTracingRenderer/hard/PathTracingRenderer.h"
 
 #include <array>
+#include <string>
 #include <vector>
 
 #ifndef FZBRENDERER_LPV_H
@@ -63,6 +64,9 @@ private:
 	void destroyResources();
 	void clearVolumes(VkCommandBuffer cmd);
 	VkDeviceSize volumeFloatCount() const;
+	int          debugGridResolution() const;
+	uint32_t     debugVoxelCount() const;
+	void         logDebugViewCounts() const;
 
 	// passes
 	void runGBufferPass(VkCommandBuffer cmd);
@@ -70,21 +74,30 @@ private:
 	void runGvMergePass(VkCommandBuffer cmd);
 	void runPropagationPasses(VkCommandBuffer cmd);
 	void runGatherPass(VkCommandBuffer cmd);
+	void tonemapping(VkCommandBuffer cmd);
 
 	// settings. Everything the paper specifies is fixed; only the grid/cascade sizes and the
 	// iteration count are parameters (paper 3.3: "the number of required iterations depends on the
 	// resolution of the grid", and paper 4 lets the cascade layout be chosen).
-	int   cascadeCount = 3;
-	int   gridResolution = 32;     // N, cubic resolution of every cascade
+	int   cascadeCount = 2;
+	int   baseResolution = 16;     // N of the coarsest cascade, doubled per cascade
+	int   cascadeResolution[LPV_MAX_CASCADES] = {};
+	int   gridResolution = 32;     // derived: finest cascade resolution (debug views, UI ranges)
 	int   rsmResolution = 256;     // virtual RSM resolution per light
 	int   iterationCount = 8;      // propagation iterations, 0 = injection only (no propagation)
+	int   cascadeBlendCells = 4;
 	// (the 5 exit-face decomposition of paper 3.3 is not a parameter: it is the scheme)
 	float baseCellSize = 0.25f;    // world size of a cell of the finest cascade, <= 0 selects it
 	bool  useOcclusion = true;
+	bool  gatherOcclusionEnabled = true;
+	float gatherOcclusion = 1.0f;
 	bool  useDampening = true;
 	bool  showDirectLight = true;    // comparison toggle: off drops the direct term from the image
-	int   debugMode = 0;             // LPVDebugView
+	bool  useTrilinearSample = true; // gather: trilinear lookup of the accumulated volume, off = nearest cell
 	bool  skipDirectShadow = false;  // debug: LPV_NO_SHADOW=1 disables the direct shadow ray
+	bool  debugCascadeId = false;    // debug: LPV_DEBUG_CASCADE=1 tints the image by cascade index
+	bool  debugTransmittance = false;  // debug: LPV_DEBUG_TRANSMIT=1 shows the gather transmittance
+	bool  debugSH = false;             // debug: LPV_DEBUG_SH=1 shows the gathered SH magnitude
 	int   saveFrame = -1;            // frame index at which the tonemapped image is written
 
 	VkPushConstantsInfo pushInfo{};
@@ -94,16 +107,22 @@ private:
 
 	// GPU resources
 	nvvk::Buffer pixelDataBuffer{};
-	nvvk::Buffer lpvVolumesBuffer{};
-	nvvk::Buffer lpvAccumBuffer{};
-	nvvk::Buffer gvMergedBuffer{};
-	nvvk::Buffer gvCameraBuffer{};
-	nvvk::Buffer gvRsmBuffer{};
+	std::array<nvvk::Buffer, LPV_MAX_CASCADES> lpvVolumesBuffer{};
+	std::array<nvvk::Buffer, LPV_MAX_CASCADES> lpvAccumBuffer{};
+	std::array<nvvk::Buffer, LPV_MAX_CASCADES> gvMergedBuffer{};
+	std::array<nvvk::Buffer, LPV_MAX_CASCADES> gvCameraBuffer{};
+	std::array<nvvk::Buffer, LPV_MAX_CASCADES> gvRsmBuffer{};
 	nvvk::Buffer frameInfoBuffer{};
 	nvvk::Buffer instanceSizeBuffer{};  // paper 4.1: world space bounding box size per instance
 
 	// per instance bounding box size, uploaded every frame (see LPV_ObjectSize in the shaders)
 	std::vector<float> instanceSizes;
+	bool   sceneBoundsValid        = false;
+	size_t sceneBoundsInstanceCount = 0;
+	bool   tlasBuilt         = false;
+	size_t tlasInstanceCount = 0;
+	std::vector<std::string> cascadeLabels;
+	std::vector<const char*> cascadeLabelPtrs;
 
 	// shader objects
 	VkShaderEXT shaderGBuffer{};
@@ -119,43 +138,46 @@ private:
 	VkExtent2D                                  currentResolution{ 0, 0 };
 	std::array<CascadeLayout, LPV_MAX_CASCADES> cascades{};
 	shaderio::float3                            sceneBoundsMin{ 0.0f };
-	shaderio::float3                            sceneBoundsMax{ 0.0f };
 	shaderio::float3                            sceneCenter{ 0.0f };
 	shaderio::float3                            cameraForward{ 0.0f, 0.0f, -1.0f };
 	float                                       sceneRadius = 1.0f;
+	float                                       sceneHalfDiagonal = 1.0f;
 	uint32_t                                    activeLightCount = 0;
 
 	//-------------------------------------------------------------------
 	shaderio::LPVDebugPushConstant debugPushConstant{};
 
-	bool showGBuffer = false;
-	VkShaderEXT shaderShowGBuffer{};
-	void showGBufferResult(VkCommandBuffer cmd);
+	VkShaderEXT shaderCreateDepthImage{};
+	void createDeptImage(VkCommandBuffer cmd);
 
+	bool showGrid = false;
+	nvvk::Buffer gridDataBuffer;
+	VkShaderEXT shaderInjectGrid{};
 	VkShaderEXT shaderShowGrid_vertex{};
 	VkShaderEXT shaderShowGrid_fragment{};
 	void showGridResult(VkCommandBuffer cmd);
+
+	bool showSH = false;
+	VkShaderEXT shaderShowSH_vertex{};
+	VkShaderEXT shaderShowSH_fragment{};
+	void showSHResult(VkCommandBuffer cmd);
+
+	bool showGBuffer = false;
+	VkShaderEXT shaderShowGBuffer{};
+	void showGBufferResult(VkCommandBuffer cmd);
 
 	bool showRSM = false;
 	VkShaderEXT shaderShowRSM{};
 	void showRSMResult(VkCommandBuffer cmd);
 
-	bool showSH_Gv = false;
-	int cascadeIndex_showSH_Gv;
-	shaderio::int3 voxelIndex_showSH_Gv;
+	bool printSH = false;
+	VkShaderEXT shaderPrintSH{};
+	void printSHResult(VkCommandBuffer cmd);
 
-	bool showSH_RSM = false;
-	int cascadeIndex_showSH_RSM;
-	shaderio::int3 voxelIndex_showSH_RSM;
-
-	bool showSH_Propagate = false;
-	int cascadeIndex_showSH_Propagate;
-	shaderio::int3 voxelIndex_showSH_Propagate;
-
-	VkShaderEXT shaderShowSH_vertex{};
-	VkShaderEXT shaderShowSH_fragment{};
-	void showSHResult(VkCommandBuffer cmd);
-
+	// Parameter presets: LPVParams.md next to this renderer's sources.
+	void saveParams();
+	void loadParams();
+	void rebuildVolumes();
 };
 
 }  // namespace FzbRenderer
